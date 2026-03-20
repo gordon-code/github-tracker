@@ -11,6 +11,7 @@ import {
   type WorkflowRun,
   type ApiError,
 } from "./api";
+import { detectNewItems, dispatchNotifications } from "../lib/notifications";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,8 +100,10 @@ export function createPollCoordinator(
     if (destroyed) return;
     setIsRefreshing(true);
     try {
-      await fetchAll();
+      const data = await fetchAll();
       setLastRefreshAt(new Date());
+      const newItems = detectNewItems(data);
+      dispatchNotifications(newItems, config);
     } finally {
       setIsRefreshing(false);
     }
