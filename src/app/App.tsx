@@ -9,15 +9,7 @@ import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import DashboardPage from "./components/dashboard/DashboardPage";
 import OnboardingWizard from "./components/onboarding/OnboardingWizard";
-
-function SettingsPlaceholder() {
-  return (
-    <div class="p-8 text-gray-900 dark:text-gray-100">
-      <h1 class="text-2xl font-bold">Settings</h1>
-      <p class="mt-2 text-gray-500">Settings page coming soon (Task 17).</p>
-    </div>
-  );
-}
+import SettingsPage from "./components/settings/SettingsPage";
 
 // Root route: redirect based on auth + onboarding state
 function RootRedirect() {
@@ -93,7 +85,7 @@ export default function App() {
       <Route path="/oauth/callback" component={OAuthCallback} />
       <Route path="/onboarding" component={OnboardingWizard} />
       <Route path="/dashboard" component={DashboardPage} />
-      <Route path="/settings" component={SettingsPlaceholder} />
+      <Route path="/settings" component={SettingsPage} />
     </Router>
   );
 }
