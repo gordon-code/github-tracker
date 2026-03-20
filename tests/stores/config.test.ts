@@ -1,0 +1,187 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { ConfigSchema, loadConfig } from "../../src/app/stores/config";
+import { createRoot } from "solid-js";
+import { createStore } from "solid-js/store";
+import { produce } from "solid-js/store";
+
+// Mock localStorage
+const localStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      store = {};
+    },
+  };
+})();
+
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  writable: true,
+});
+
+const STORAGE_KEY = "github-tracker:config";
+
+describe("ConfigSchema", () => {
+  it("returns full defaults when given empty object", () => {
+    const result = ConfigSchema.parse({});
+    expect(result.selectedOrgs).toEqual([]);
+    expect(result.selectedRepos).toEqual([]);
+    expect(result.refreshInterval).toBe(300);
+    expect(result.maxWorkflowsPerRepo).toBe(5);
+    expect(result.maxRunsPerWorkflow).toBe(3);
+    expect(result.notifications.enabled).toBe(false);
+    expect(result.notifications.issues).toBe(true);
+    expect(result.notifications.pullRequests).toBe(true);
+    expect(result.notifications.workflowRuns).toBe(true);
+    expect(result.theme).toBe("system");
+    expect(result.viewDensity).toBe("comfortable");
+    expect(result.itemsPerPage).toBe(25);
+    expect(result.defaultTab).toBe("issues");
+    expect(result.rememberLastTab).toBe(true);
+    expect(result.onboardingComplete).toBe(false);
+  });
+
+  it("fills missing fields from defaults when partial input given", () => {
+    const result = ConfigSchema.parse({ refreshInterval: 600 });
+    expect(result.refreshInterval).toBe(600);
+    expect(result.maxWorkflowsPerRepo).toBe(5);
+    expect(result.theme).toBe("system");
+  });
+
+  it("throws on invalid refreshInterval (below min)", () => {
+    expect(() => ConfigSchema.parse({ refreshInterval: -1 })).toThrow();
+  });
+
+  it("throws on invalid refreshInterval (above max)", () => {
+    expect(() => ConfigSchema.parse({ refreshInterval: 9999 })).toThrow();
+  });
+
+  it("throws on invalid theme value", () => {
+    expect(() => ConfigSchema.parse({ theme: "invalid" })).toThrow();
+  });
+
+  it("throws on invalid itemsPerPage (below min)", () => {
+    expect(() => ConfigSchema.parse({ itemsPerPage: 5 })).toThrow();
+  });
+
+  it("throws on invalid itemsPerPage (above max)", () => {
+    expect(() => ConfigSchema.parse({ itemsPerPage: 999 })).toThrow();
+  });
+
+  it("allows refreshInterval of 0 (disabled)", () => {
+    const result = ConfigSchema.parse({ refreshInterval: 0 });
+    expect(result.refreshInterval).toBe(0);
+  });
+});
+
+describe("loadConfig", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("returns defaults when localStorage is empty", () => {
+    const cfg = loadConfig();
+    expect(cfg.refreshInterval).toBe(300);
+    expect(cfg.theme).toBe("system");
+  });
+
+  it("returns stored config when valid data exists", () => {
+    const stored = ConfigSchema.parse({ refreshInterval: 120, theme: "dark" });
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(stored));
+    const cfg = loadConfig();
+    expect(cfg.refreshInterval).toBe(120);
+    expect(cfg.theme).toBe("dark");
+  });
+
+  it("falls back to defaults when localStorage contains corrupted JSON", () => {
+    localStorageMock.setItem(STORAGE_KEY, "not valid json {{{{");
+    const cfg = loadConfig();
+    expect(cfg.refreshInterval).toBe(300);
+  });
+
+  it("falls back to defaults when localStorage contains invalid schema values", () => {
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ refreshInterval: -999, theme: "ultraviolet" })
+    );
+    const cfg = loadConfig();
+    expect(cfg.refreshInterval).toBe(300);
+    expect(cfg.theme).toBe("system");
+  });
+});
+
+// Each updateConfig test creates its own isolated store to avoid shared state
+describe("updateConfig", () => {
+  function makeStore() {
+    const [cfg, setCfg] = createStore(ConfigSchema.parse({}));
+    const update = (partial: Partial<ReturnType<typeof ConfigSchema.parse>>) => {
+      setCfg(produce((draft) => {
+        Object.assign(draft, partial);
+      }));
+    };
+    return { cfg, update };
+  }
+
+  it("merges top-level fields correctly", () => {
+    createRoot((dispose) => {
+      const { cfg, update } = makeStore();
+      update({ refreshInterval: 600 });
+      expect(cfg.refreshInterval).toBe(600);
+      expect(cfg.theme).toBe("system");
+      expect(cfg.maxWorkflowsPerRepo).toBe(5);
+      dispose();
+    });
+  });
+
+  it("merges nested notifications object correctly when spread", () => {
+    createRoot((dispose) => {
+      const { cfg, update } = makeStore();
+      update({
+        notifications: {
+          ...cfg.notifications,
+          enabled: true,
+        },
+      });
+      expect(cfg.notifications.enabled).toBe(true);
+      expect(cfg.notifications.issues).toBe(true);
+      expect(cfg.notifications.pullRequests).toBe(true);
+      dispose();
+    });
+  });
+
+  it("preserves existing fields when updating a single field", () => {
+    createRoot((dispose) => {
+      const { cfg, update } = makeStore();
+      update({ theme: "dark" });
+      expect(cfg.theme).toBe("dark");
+      expect(cfg.refreshInterval).toBe(300);
+      expect(cfg.onboardingComplete).toBe(false);
+      dispose();
+    });
+  });
+
+  it("can update selectedOrgs", () => {
+    createRoot((dispose) => {
+      const { cfg, update } = makeStore();
+      update({ selectedOrgs: ["myorg", "anotherorg"] });
+      expect(cfg.selectedOrgs).toEqual(["myorg", "anotherorg"]);
+      dispose();
+    });
+  });
+
+  it("can update onboardingComplete", () => {
+    createRoot((dispose) => {
+      const { cfg, update } = makeStore();
+      update({ onboardingComplete: true });
+      expect(cfg.onboardingComplete).toBe(true);
+      dispose();
+    });
+  });
+});
