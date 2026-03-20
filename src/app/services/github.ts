@@ -80,7 +80,8 @@ export async function cachedRequest(
   octokit: GitHubOctokitInstance,
   cacheKey: string,
   route: string,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  maxAge?: number
 ): Promise<{ data: unknown; fromCache: boolean }> {
   return cachedFetch(cacheKey, async (etag) => {
     const requestParams: Record<string, unknown> = {
@@ -115,7 +116,7 @@ export async function cachedRequest(
       }
       throw err;
     }
-  });
+  }, maxAge);
 }
 
 // ── Client singleton ─────────────────────────────────────────────────────────
