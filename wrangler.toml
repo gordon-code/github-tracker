@@ -1,0 +1,18 @@
+name = "github-tracker"
+main = "src/worker/index.ts"
+compatibility_date = "2026-03-01"
+
+[assets]
+# Do NOT set `directory` here — the Cloudflare Vite plugin auto-configures the output directory.
+not_found_handling = "single-page-application"
+
+[[routes]]
+pattern = "gh.gordoncode.dev"
+custom_domain = true
+
+[env.preview]
+name = "github-tracker-preview"
+
+[env.preview.assets]
+# Assets config is non-inheritable — must be redeclared for preview environment
+not_found_handling = "single-page-application"
