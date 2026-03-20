@@ -8,16 +8,7 @@ import { initClientWatcher } from "./services/github";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import DashboardPage from "./components/dashboard/DashboardPage";
-
-// Lazy placeholder pages — filled in by later tasks
-function OnboardingPlaceholder() {
-  return (
-    <div class="p-8 text-gray-900 dark:text-gray-100">
-      <h1 class="text-2xl font-bold">Onboarding</h1>
-      <p class="mt-2 text-gray-500">Onboarding wizard coming soon (Task 8).</p>
-    </div>
-  );
-}
+import OnboardingWizard from "./components/onboarding/OnboardingWizard";
 
 function SettingsPlaceholder() {
   return (
@@ -100,7 +91,7 @@ export default function App() {
       <Route path="/" component={RootRedirect} />
       <Route path="/login" component={LoginPage} />
       <Route path="/oauth/callback" component={OAuthCallback} />
-      <Route path="/onboarding" component={OnboardingPlaceholder} />
+      <Route path="/onboarding" component={OnboardingWizard} />
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/settings" component={SettingsPlaceholder} />
     </Router>
