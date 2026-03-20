@@ -1,6 +1,8 @@
 import { createSignal, Show } from "solid-js";
 import { config, updateConfig } from "../../stores/config";
+import { RepoRef } from "../../services/api";
 import OrgSelector from "./OrgSelector";
+import RepoSelector from "./RepoSelector";
 
 const STEPS = ["Select Organizations", "Select Repositories"] as const;
 
@@ -9,15 +11,23 @@ export default function OnboardingWizard() {
   const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(
     config.selectedOrgs.length > 0 ? [...config.selectedOrgs] : []
   );
+  const [selectedRepos, setSelectedRepos] = createSignal<RepoRef[]>(
+    config.selectedRepos.length > 0 ? [...config.selectedRepos] : []
+  );
 
   function handleNext() {
     if (step() === 0) {
       updateConfig({ selectedOrgs: selectedOrgs() });
       setStep(1);
-    } else {
-      updateConfig({ onboardingComplete: true });
-      window.location.replace("/dashboard");
     }
+  }
+
+  function handleFinish() {
+    updateConfig({
+      selectedRepos: selectedRepos(),
+      onboardingComplete: true,
+    });
+    window.location.replace("/dashboard");
   }
 
   function handleBack() {
@@ -26,7 +36,7 @@ export default function OnboardingWizard() {
 
   const canProceed = () => {
     if (step() === 0) return selectedOrgs().length > 0;
-    return true;
+    return selectedRepos().length > 0;
   };
 
   return (
@@ -120,10 +130,11 @@ export default function OnboardingWizard() {
                 organizations.
               </p>
             </div>
-            {/* RepoSelector comes in Task 9 */}
-            <div class="rounded-md border border-dashed border-gray-300 p-8 text-center text-sm text-gray-400 dark:border-gray-600 dark:text-gray-500">
-              Repository selection — coming in Task 9
-            </div>
+            <RepoSelector
+              selectedOrgs={selectedOrgs()}
+              selected={selectedRepos()}
+              onChange={setSelectedRepos}
+            />
           </Show>
         </div>
 
@@ -142,14 +153,30 @@ export default function OnboardingWizard() {
             </button>
           </Show>
 
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={!canProceed()}
-            class="ml-auto rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+          <Show
+            when={step() === STEPS.length - 1}
+            fallback={
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!canProceed()}
+                class="ml-auto rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+              >
+                Next
+              </button>
+            }
           >
-            {step() === STEPS.length - 1 ? "Finish" : "Next"}
-          </button>
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={selectedRepos().length === 0}
+              class="ml-auto rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+            >
+              {selectedRepos().length === 0
+                ? "Finish Setup"
+                : `Finish Setup (${selectedRepos().length} ${selectedRepos().length === 1 ? "repo" : "repos"})`}
+            </button>
+          </Show>
         </div>
       </div>
     </div>
