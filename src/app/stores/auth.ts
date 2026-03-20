@@ -88,9 +88,12 @@ export function setAuth(response: TokenExchangeResponse): void {
 
 export function clearAuth(): void {
   removeStoredTokens();
+  // Clear config and view state to prevent data leakage between users (SDR-016)
+  localStorage.removeItem("github-tracker:config");
+  localStorage.removeItem("github-tracker:view");
   _setToken(null);
   setUser(null);
-  // Clear cache to prevent data leakage between users (SDR-016)
+  // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
   clearCache().catch(() => {
     // Non-fatal — cache clear failure should not block logout
   });
