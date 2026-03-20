@@ -1,0 +1,50 @@
+[
+  {
+    "id": 1296269,
+    "name": "Hello-World",
+    "full_name": "octocat/Hello-World",
+    "owner": {
+      "login": "octocat",
+      "id": 1,
+      "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+      "type": "User"
+    },
+    "private": false,
+    "description": "This your first repo!",
+    "default_branch": "main",
+    "updated_at": "2011-01-26T19:14:43Z",
+    "pushed_at": "2011-01-26T19:06:43Z"
+  },
+  {
+    "id": 1296270,
+    "name": "Spoon-Knife",
+    "full_name": "octocat/Spoon-Knife",
+    "owner": {
+      "login": "octocat",
+      "id": 1,
+      "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+      "type": "User"
+    },
+    "private": false,
+    "description": "This repo is for demonstration purposes only.",
+    "default_branch": "main",
+    "updated_at": "2014-02-05T14:20:19Z",
+    "pushed_at": "2014-02-05T14:19:33Z"
+  },
+  {
+    "id": 9876543,
+    "name": "acme-api",
+    "full_name": "acme-corp/acme-api",
+    "owner": {
+      "login": "acme-corp",
+      "id": 12345,
+      "avatar_url": "https://avatars.githubusercontent.com/u/12345?v=4",
+      "type": "Organization"
+    },
+    "private": true,
+    "description": "Internal API service",
+    "default_branch": "main",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "pushed_at": "2024-01-15T09:55:00Z"
+  }
+]
