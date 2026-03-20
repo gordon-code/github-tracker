@@ -3,7 +3,9 @@ main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
 
 [assets]
-# Do NOT set `directory` here — the Cloudflare Vite plugin auto-configures the output directory.
+# The Cloudflare Vite plugin overrides this directory at build time.
+# The `public/` value is needed for wrangler dev and vitest-pool-workers (which parse wrangler.toml directly).
+directory = "public"
 not_found_handling = "single-page-application"
 
 [[routes]]
