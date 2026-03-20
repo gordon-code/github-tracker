@@ -4,19 +4,12 @@ import { token, isAuthenticated, validateToken } from "./stores/auth";
 import { config, initConfigPersistence } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
+import { initClientWatcher } from "./services/github";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
+import DashboardPage from "./components/dashboard/DashboardPage";
 
 // Lazy placeholder pages — filled in by later tasks
-function DashboardPlaceholder() {
-  return (
-    <div class="p-8 text-gray-900 dark:text-gray-100">
-      <h1 class="text-2xl font-bold">Dashboard</h1>
-      <p class="mt-2 text-gray-500">Dashboard coming soon (Task 10).</p>
-    </div>
-  );
-}
-
 function OnboardingPlaceholder() {
   return (
     <div class="p-8 text-gray-900 dark:text-gray-100">
@@ -96,6 +89,7 @@ export default function App() {
     // All reactive init functions must be called inside the component tree
     initConfigPersistence();
     initViewPersistence();
+    initClientWatcher();
     evictStaleEntries(24 * 60 * 60 * 1000).catch(() => {
       // Non-fatal — stale eviction failure is acceptable
     });
@@ -107,7 +101,7 @@ export default function App() {
       <Route path="/login" component={LoginPage} />
       <Route path="/oauth/callback" component={OAuthCallback} />
       <Route path="/onboarding" component={OnboardingPlaceholder} />
-      <Route path="/dashboard" component={DashboardPlaceholder} />
+      <Route path="/dashboard" component={DashboardPage} />
       <Route path="/settings" component={SettingsPlaceholder} />
     </Router>
   );
