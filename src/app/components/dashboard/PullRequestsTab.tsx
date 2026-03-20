@@ -1,9 +1,10 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem } from "../../stores/view";
 import type { PullRequest, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
+import IgnoreBadge from "./IgnoreBadge";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -183,7 +184,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           )}
         </For>
         <div class="flex-1" />
-        <div data-ignore-badge-slot />
+        <IgnoreBadge
+          items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
+          onUnignore={unignoreItem}
+        />
       </div>
 
       {/* Loading state */}

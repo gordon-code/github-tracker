@@ -1,8 +1,9 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem } from "../../stores/view";
 import type { Issue, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
+import IgnoreBadge from "./IgnoreBadge";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -166,9 +167,11 @@ export default function IssuesTab(props: IssuesTabProps) {
           )}
         </For>
 
-        {/* Ignored badge placeholder — Task 14 will render IgnoreBadge here */}
         <div class="flex-1" />
-        <div data-ignore-badge-slot />
+        <IgnoreBadge
+          items={viewState.ignoredItems.filter((i) => i.type === "issue")}
+          onUnignore={unignoreItem}
+        />
       </div>
 
       {/* Loading state */}

@@ -1,8 +1,9 @@
 import { createSignal, For, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, ignoreItem } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
+import IgnoreBadge from "./IgnoreBadge";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -126,6 +127,11 @@ export default function ActionsTab(props: ActionsTabProps) {
           />
           Show PR runs
         </label>
+        <div class="flex-1" />
+        <IgnoreBadge
+          items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
+          onUnignore={unignoreItem}
+        />
       </div>
 
       {/* Loading */}
