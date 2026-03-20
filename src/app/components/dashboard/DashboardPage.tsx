@@ -1,5 +1,6 @@
 import { createSignal, createMemo, Switch, Match, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
+import { useNavigate } from "@solidjs/router";
 import Header from "../layout/Header";
 import TabBar from "../layout/TabBar";
 import { TabId } from "../layout/TabBar";
@@ -8,8 +9,8 @@ import ActionsTab from "./ActionsTab";
 import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
-import { fetchIssues, fetchPullRequests, fetchWorkflowRuns } from "../../services/api";
-import { getClient } from "../../services/github";
+import { createPollCoordinator, fetchAllData } from "../../services/poll";
+import { refreshAccessToken, clearAuth } from "../../stores/auth";
 
 // ── Shared dashboard store ──────────────────────────────────────────────────
 
@@ -53,6 +54,8 @@ function PullRequestsPlaceholder() {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
+
   const [dashboardData, setDashboardData] = createStore<DashboardData>({
     issues: [],
     pullRequests: [],
@@ -62,7 +65,8 @@ export default function DashboardPage() {
     lastRefreshedAt: null,
   });
 
-  const [isRefreshing, setIsRefreshing] = createSignal(false);
+  // Stores previous snapshot for notification diffing (Task 16)
+  const [_previousData, setPreviousData] = createSignal<DashboardData | null>(null);
 
   const initialTab = createMemo<TabId>(() => {
     if (config.rememberLastTab) {
@@ -78,51 +82,56 @@ export default function DashboardPage() {
     updateViewState({ lastActiveTab: tab });
   }
 
-  async function loadData() {
-    const octokit = getClient();
-    if (!octokit) return;
-
-    setIsRefreshing(true);
+  async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
     setDashboardData("loading", true);
-
     try {
-      const repos = config.selectedRepos;
-
-      // Fetch user login from auth store is not directly available here,
-      // so we derive it from the octokit instance by calling /user lazily.
-      // For now pass empty string — fetchIssues/fetchPullRequests handle it.
-      const userLogin = "";
-
-      const [issueResults, prResults, runResults] = await Promise.allSettled([
-        fetchIssues(octokit, repos, userLogin),
-        fetchPullRequests(octokit, repos, userLogin),
-        fetchWorkflowRuns(
-          octokit,
-          repos,
-          config.maxWorkflowsPerRepo,
-          config.maxRunsPerWorkflow
-        ),
-      ]);
-
+      const data = await fetchAllData();
+      // Save previous snapshot before updating (for Task 16 notification diffing)
+      setPreviousData({
+        issues: dashboardData.issues,
+        pullRequests: dashboardData.pullRequests,
+        workflowRuns: dashboardData.workflowRuns,
+        errors: dashboardData.errors,
+        loading: dashboardData.loading,
+        lastRefreshedAt: dashboardData.lastRefreshedAt,
+      });
       setDashboardData({
-        issues: issueResults.status === "fulfilled" ? issueResults.value : [],
-        pullRequests:
-          prResults.status === "fulfilled" ? prResults.value : [],
-        workflowRuns:
-          runResults.status === "fulfilled" ? runResults.value : [],
-        errors: [],
+        issues: data.issues,
+        pullRequests: data.pullRequests,
+        workflowRuns: data.workflowRuns,
+        errors: data.errors,
         loading: false,
         lastRefreshedAt: new Date(),
       });
-    } catch {
+      return data;
+    } catch (err) {
+      // Handle 401 auth errors
+      const status =
+        typeof err === "object" &&
+        err !== null &&
+        typeof (err as Record<string, unknown>)["status"] === "number"
+          ? (err as Record<string, unknown>)["status"]
+          : null;
+
+      if (status === 401) {
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) {
+          clearAuth();
+          navigate("/login");
+        }
+        // If refreshed, the token signal will update the client — let the next poll pick it up
+      }
       setDashboardData("loading", false);
-    } finally {
-      setIsRefreshing(false);
+      throw err;
     }
   }
 
+  const [coordinator, setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
+
   onMount(() => {
-    void loadData();
+    setCoordinator(
+      createPollCoordinator(() => config.refreshInterval, pollFetch)
+    );
   });
 
   const tabCounts = createMemo(() => ({
@@ -144,9 +153,9 @@ export default function DashboardPage() {
         />
 
         <FilterBar
-          isRefreshing={isRefreshing()}
-          lastRefreshedAt={dashboardData.lastRefreshedAt}
-          onRefresh={() => void loadData()}
+          isRefreshing={coordinator()?.isRefreshing() ?? dashboardData.loading}
+          lastRefreshedAt={coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+          onRefresh={() => coordinator()?.manualRefresh()}
         />
 
         <main class="flex-1 overflow-auto">
