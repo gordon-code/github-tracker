@@ -1,0 +1,20 @@
+[
+  {
+    "login": "octocat",
+    "id": 1,
+    "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+    "type": "User"
+  },
+  {
+    "login": "github",
+    "id": 9919,
+    "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+    "type": "Organization"
+  },
+  {
+    "login": "acme-corp",
+    "id": 12345,
+    "avatar_url": "https://avatars.githubusercontent.com/u/12345?v=4",
+    "type": "Organization"
+  }
+]
