@@ -40,6 +40,15 @@ describe("OAuthCallback", () => {
         href: `http://localhost/oauth/callback${search}`,
         search,
         origin: "http://localhost",
+        pathname: "/oauth/callback",
+        hash: "",
+        hostname: "localhost",
+        port: "",
+        protocol: "http:",
+        host: "localhost",
+        assign: vi.fn(),
+        replace: vi.fn(),
+        reload: vi.fn(),
       },
     });
   }
@@ -100,6 +109,29 @@ describe("OAuthCallback", () => {
     await waitFor(() => {
       expect(authStore.setAuth).toHaveBeenCalledWith({ access_token: "tok123" });
       expect(authStore.validateToken).toHaveBeenCalled();
+    });
+  });
+
+  it("passes full token response (including refresh_token, expires_in) to setAuth", async () => {
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+
+    const fullResponse = {
+      access_token: "tok123",
+      refresh_token: "ref456",
+      expires_in: 28800,
+      token_type: "bearer",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => fullResponse })
+    );
+    vi.mocked(authStore.validateToken).mockResolvedValue(true);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.setAuth).toHaveBeenCalledWith(fullResponse);
     });
   });
 
@@ -198,6 +230,27 @@ describe("OAuthCallback", () => {
     // onMount runs asynchronously — wait for the key to be cleared
     await waitFor(() => {
       expect(sessionStorage.getItem("github-tracker:oauth-state")).toBeNull();
+    });
+  });
+
+  it("clears CSRF state BEFORE calling the token exchange fetch", async () => {
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+
+    // The fetch mock checks that sessionStorage was already cleared when it's called.
+    // If the code clears state AFTER fetch, this assertion fails.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        expect(sessionStorage.getItem("github-tracker:oauth-state")).toBeNull();
+        return new Promise(() => {}); // keep pending
+      })
+    );
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
     });
   });
 

@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import FilterInput from "../../../src/app/components/shared/FilterInput";
 
 describe("FilterInput", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 
@@ -19,7 +24,6 @@ describe("FilterInput", () => {
   });
 
   it("onFilter is NOT called synchronously after input (debounced)", () => {
-    vi.useFakeTimers();
     const onFilter = vi.fn();
     render(() => <FilterInput onFilter={onFilter} />);
     const input = screen.getByPlaceholderText("Filter...");
@@ -28,7 +32,6 @@ describe("FilterInput", () => {
   });
 
   it("onFilter IS called after default debounce of 150ms", () => {
-    vi.useFakeTimers();
     const onFilter = vi.fn();
     render(() => <FilterInput onFilter={onFilter} />);
     const input = screen.getByPlaceholderText("Filter...");
@@ -38,7 +41,6 @@ describe("FilterInput", () => {
   });
 
   it("clear button appears when input has value and calls onFilter('') immediately", () => {
-    vi.useFakeTimers();
     const onFilter = vi.fn();
     render(() => <FilterInput onFilter={onFilter} />);
     const input = screen.getByPlaceholderText("Filter...");
@@ -57,7 +59,6 @@ describe("FilterInput", () => {
   });
 
   it("custom debounceMs prop changes timing", () => {
-    vi.useFakeTimers();
     const onFilter = vi.fn();
     render(() => <FilterInput onFilter={onFilter} debounceMs={300} />);
     const input = screen.getByPlaceholderText("Filter...");

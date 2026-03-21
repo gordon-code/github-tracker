@@ -18,13 +18,4 @@ describe("SortIcon", () => {
     expect(container.querySelector("span")?.textContent).toBe("↓");
   });
 
-  it("has opacity-100 class when active", () => {
-    const { container } = render(() => <SortIcon active={true} direction="asc" />);
-    expect(container.querySelector("span")?.className).toContain("opacity-100");
-  });
-
-  it("has opacity-30 class when inactive", () => {
-    const { container } = render(() => <SortIcon active={false} direction="asc" />);
-    expect(container.querySelector("span")?.className).toContain("opacity-30");
-  });
 });

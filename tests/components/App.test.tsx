@@ -7,6 +7,9 @@ let mockIsAuthenticated = false;
 // validateToken mock fn — replaced per-test
 let mockValidateToken: () => Promise<boolean> = async () => false;
 
+// token/isAuthenticated are plain functions (not SolidJS signals) because
+// RootRedirect reads them in onMount (one-shot), not in createEffect.
+// Reactive tracking is not needed for these tests.
 vi.mock("../../src/app/stores/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
   return {
