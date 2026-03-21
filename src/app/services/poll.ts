@@ -36,6 +36,12 @@ export interface PollCoordinator {
 
 let _notifLastModified: string | null = null;
 
+/** Resets module-level poll state. Call on logout to prevent stale state leaking across sessions. */
+export function resetPollState(): void {
+  _notifLastModified = null;
+  _lastSuccessfulFetch = null;
+}
+
 /**
  * Checks if anything changed since last poll using the Notifications API.
  * Returns true if there are new notifications (or first check), false if unchanged.
@@ -145,8 +151,13 @@ export async function fetchAllData(): Promise<DashboardData> {
     ...(runData?.errors ?? []),
   ];
 
-  // Track timestamp for next incremental fetch
-  _lastSuccessfulFetch = new Date();
+  // Only activate the notifications gate if at least one fetch succeeded.
+  // If all three failed (e.g., network outage), we don't want the gate to
+  // suppress retries on the next poll cycle.
+  const anySucceeded = issueData !== null || prData !== null || runData !== null;
+  if (anySucceeded) {
+    _lastSuccessfulFetch = new Date();
+  }
 
   return {
     issues: issueData?.issues ?? [],

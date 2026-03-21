@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
+import { resetPollState } from "../services/poll";
 
 const AUTH_STORAGE_KEY = "github-tracker:auth";
 
@@ -97,6 +98,8 @@ export function clearAuth(): void {
   clearCache().catch(() => {
     // Non-fatal — cache clear failure should not block logout
   });
+  // Reset poll state to prevent notifications gate stale state leaking across sessions
+  resetPollState();
   console.info("[auth] auth cleared");
 }
 
