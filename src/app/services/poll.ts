@@ -1,6 +1,7 @@
 import { createSignal, createEffect, onCleanup } from "solid-js";
 import { getClient } from "./github";
 import { config } from "../stores/config";
+import { user } from "../stores/auth";
 import {
   fetchIssues,
   fetchPullRequests,
@@ -37,7 +38,7 @@ export async function fetchAllData(): Promise<DashboardData> {
   }
 
   const repos = config.selectedRepos;
-  const userLogin = "";
+  const userLogin = user()?.login ?? "";
 
   const [issueResult, prResult, runResult] = await Promise.allSettled([
     fetchIssues(octokit, repos, userLogin),

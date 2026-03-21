@@ -129,15 +129,30 @@ export async function refreshAccessToken(): Promise<boolean> {
       return false;
     }
 
-    setAuth(data);
+    // Validate the new token BEFORE committing to storage (SDR-013)
+    const validationResp = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${data.access_token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
 
-    // Validate the new token before committing (SDR-013)
-    const valid = await validateToken();
-    if (!valid) {
+    if (!validationResp.ok) {
       console.info("[auth] new token failed validation — clearing auth");
       clearAuth();
       return false;
     }
+
+    // Token is valid — now store it
+    setAuth(data);
+
+    // Populate user signal from validation response
+    const userData = (await validationResp.json()) as {
+      login: string;
+      avatar_url: string;
+      name: string | null;
+    };
+    setUser(userData);
 
     console.info("[auth] token refresh succeeded");
     return true;
