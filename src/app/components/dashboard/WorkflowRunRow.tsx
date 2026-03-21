@@ -1,6 +1,8 @@
 import { Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import type { Config } from "../../stores/config";
+import { isSafeGitHubUrl } from "../../lib/url";
+import { relativeTime } from "../../lib/format";
 
 interface WorkflowRunRowProps {
   run: WorkflowRun;
@@ -130,18 +132,6 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
   );
 }
 
-function formatRelativeTime(dateStr: string): string {
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
-}
-
 export default function WorkflowRunRow(props: WorkflowRunRowProps) {
   const paddingClass = () =>
     props.density === "compact" ? "py-1.5 px-3" : "py-2.5 px-4";
@@ -153,7 +143,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 
       <a
-        href={props.run.htmlUrl}
+        href={isSafeGitHubUrl(props.run.htmlUrl) ? props.run.htmlUrl : undefined}
         target="_blank"
         rel="noopener noreferrer"
         class="flex-1 min-w-0 flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate"
@@ -172,7 +162,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       </span>
 
       <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
-        {formatRelativeTime(props.run.createdAt)}
+        {relativeTime(props.run.createdAt)}
       </span>
 
       <button

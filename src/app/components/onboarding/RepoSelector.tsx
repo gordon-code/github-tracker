@@ -7,7 +7,6 @@ import {
 } from "solid-js";
 import { fetchOrgs, fetchRepos, OrgEntry, RepoRef } from "../../services/api";
 import { getClient } from "../../services/github";
-import { config } from "../../stores/config";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 
@@ -329,10 +328,6 @@ export default function RepoSelector(props: RepoSelectorProps) {
                   <ul class="divide-y divide-gray-100 dark:divide-gray-700">
                     <Index each={visible()}>
                       {(repo) => {
-                        const preChecked = config.selectedRepos.some(
-                          (r) => r.fullName === repo().fullName
-                        );
-                        void preChecked;
                         return (
                           <li>
                             <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">

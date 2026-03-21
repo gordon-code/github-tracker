@@ -84,10 +84,6 @@ export function unignoreItem(id: string): void {
   );
 }
 
-export function isItemIgnored(id: string): boolean {
-  return viewState.ignoredItems.some((i) => i.id === id);
-}
-
 export function setSortPreference(
   tabId: string,
   field: string,
