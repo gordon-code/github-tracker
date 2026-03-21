@@ -1,6 +1,5 @@
 import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
-import { resetPollState } from "../services/poll";
 
 const AUTH_STORAGE_KEY = "github-tracker:auth";
 
@@ -87,6 +86,13 @@ export function setAuth(response: TokenExchangeResponse): void {
   console.info("[auth] tokens stored");
 }
 
+const _onClearCallbacks: (() => void)[] = [];
+
+/** Register a callback to run when auth is cleared. Avoids circular imports. */
+export function onAuthCleared(cb: () => void): void {
+  _onClearCallbacks.push(cb);
+}
+
 export function clearAuth(): void {
   removeStoredTokens();
   // Clear config and view state to prevent data leakage between users (SDR-016)
@@ -98,8 +104,8 @@ export function clearAuth(): void {
   clearCache().catch(() => {
     // Non-fatal — cache clear failure should not block logout
   });
-  // Reset poll state to prevent notifications gate stale state leaking across sessions
-  resetPollState();
+  // Run registered cleanup callbacks (e.g., poll state reset)
+  for (const cb of _onClearCallbacks) cb();
   console.info("[auth] auth cleared");
 }
 

@@ -1,7 +1,7 @@
 import { createSignal, createEffect, onCleanup } from "solid-js";
 import { getClient } from "./github";
 import { config } from "../stores/config";
-import { user } from "../stores/auth";
+import { user, onAuthCleared } from "../stores/auth";
 import {
   fetchIssues,
   fetchPullRequests,
@@ -37,12 +37,14 @@ export interface PollCoordinator {
 let _notifLastModified: string | null = null;
 let _notifGateDisabled = false; // Disabled after 403 (missing notifications permission)
 
-/** Resets module-level poll state. Call on logout to prevent stale state leaking across sessions. */
-export function resetPollState(): void {
+function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
   _notifGateDisabled = false;
 }
+
+// Auto-reset poll state on logout (avoids circular dep with auth.ts)
+onAuthCleared(resetPollState);
 
 /**
  * Checks if anything changed since last poll using the Notifications API.
