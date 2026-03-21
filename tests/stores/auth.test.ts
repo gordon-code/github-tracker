@@ -240,4 +240,32 @@ describe("refreshAccessToken", () => {
     expect(result).toBe(false);
     expect(localStorageMock.getItem(AUTH_KEY)).toBeNull();
   });
+
+  it("clears auth when refresh succeeds but validation fails (SDR-013)", async () => {
+    // Refresh endpoint returns new tokens, but GET /user validation returns 401
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          access_token: "ghs_unvalidated",
+          refresh_token: "ghr_unvalidated",
+          expires_in: 28800,
+        }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+    );
+
+    localStorageMock.clear();
+    localStorageMock.setItem(
+      AUTH_KEY,
+      JSON.stringify({ accessToken: "ghs_old", refreshToken: "ghr_old", expiresAt: null })
+    );
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/auth");
+
+    const result = await mod.refreshAccessToken();
+    expect(result).toBe(false);
+    // Unvalidated token must NOT be stored (SDR-013)
+    expect(localStorageMock.getItem(AUTH_KEY)).toBeNull();
+  });
 });
