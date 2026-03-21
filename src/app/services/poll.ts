@@ -100,10 +100,10 @@ export async function fetchAllData(): Promise<DashboardData> {
   const repos = config.selectedRepos;
   const userLogin = user()?.login ?? "";
 
-  // Pass created-since for workflow runs (safe: ETag-cached per page, reduces payloads)
-  // Note: NOT using updated:>= on issue/PR search — that would drop unchanged items
-  // from results and break the dashboard's full-replacement pattern.
-  const createdSince = _lastSuccessfulFetch ?? undefined;
+  // Note: NOT using updated:>= or created:>= filters on any endpoint because
+  // the dashboard uses full-replacement — each poll replaces all data. Date filters
+  // would cause unchanged items to vanish from the display. ETag caching already
+  // handles the "nothing changed" case for workflow runs (304 = free).
 
   const [issueResult, prResult, runResult] = await Promise.allSettled([
     fetchIssues(octokit, repos, userLogin),
@@ -112,8 +112,7 @@ export async function fetchAllData(): Promise<DashboardData> {
       octokit,
       repos,
       config.maxWorkflowsPerRepo,
-      config.maxRunsPerWorkflow,
-      createdSince
+      config.maxRunsPerWorkflow
     ),
   ]);
 
@@ -185,6 +184,8 @@ export function createPollCoordinator(
     setIsRefreshing(true);
     try {
       const data = await fetchAll();
+      // When notifications gate determined nothing changed, skip all processing
+      if (data.skipped) return;
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally
       clearErrors();

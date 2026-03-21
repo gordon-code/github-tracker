@@ -83,7 +83,9 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     },
     retry: {
       retries: 2,
-      doNotRetry: [429],
+      // Extend the plugin's default doNotRetry list [400,401,403,404,410,422,451]
+      // with 429 to prevent double-handling with plugin-throttling
+      doNotRetry: [400, 401, 403, 404, 410, 422, 429, 451],
     },
   });
 }
