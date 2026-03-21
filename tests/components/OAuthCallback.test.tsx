@@ -55,7 +55,7 @@ describe("OAuthCallback", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
 
     renderCallback();
-    expect(screen.getByText(/Completing sign in/i)).toBeDefined();
+    screen.getByText(/Completing sign in/i);
   });
 
   it("calls Worker OAuth endpoint with code on success", async () => {
@@ -118,7 +118,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to complete sign in/i)).toBeDefined();
+      screen.getByText(/Failed to complete sign in/i);
     });
   });
 
@@ -137,7 +137,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Return to sign in/i)).toBeDefined();
+      screen.getByText(/Return to sign in/i);
     });
   });
 
@@ -150,7 +150,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/network error/i)).toBeDefined();
+      screen.getByText(/network error/i);
     });
   });
 
@@ -161,7 +161,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Invalid OAuth state/i)).toBeDefined();
+      screen.getByText(/Invalid OAuth state/i);
     });
   });
 
@@ -172,7 +172,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Invalid OAuth state/i)).toBeDefined();
+      screen.getByText(/Invalid OAuth state/i);
     });
   });
 
@@ -182,7 +182,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Invalid OAuth state/i)).toBeDefined();
+      screen.getByText(/Invalid OAuth state/i);
     });
   });
 
@@ -208,7 +208,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/No authorization code/i)).toBeDefined();
+      screen.getByText(/No authorization code/i);
     });
   });
 
@@ -228,7 +228,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to verify your GitHub account/i)).toBeDefined();
+      screen.getByText(/Failed to verify your GitHub account/i);
     });
   });
 });

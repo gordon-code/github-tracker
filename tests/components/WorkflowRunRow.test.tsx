@@ -9,7 +9,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByText("CI Build")).toBeDefined();
+    screen.getByText("CI Build");
   });
 
   it("renders branch name", () => {
@@ -17,7 +17,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByText("feature/my-branch")).toBeDefined();
+    screen.getByText("feature/my-branch");
   });
 
   it("shows relative time", () => {
@@ -36,7 +36,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByLabelText("Success")).toBeDefined();
+    screen.getByLabelText("Success");
   });
 
   it("renders status indicator for failure conclusion", () => {
@@ -44,7 +44,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByLabelText("Failure")).toBeDefined();
+    screen.getByLabelText("Failure");
   });
 
   it("renders status indicator for cancelled conclusion", () => {
@@ -52,7 +52,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByLabelText("Cancelled")).toBeDefined();
+    screen.getByLabelText("Cancelled");
   });
 
   it("renders status indicator for in_progress status", () => {
@@ -60,7 +60,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByLabelText("In progress")).toBeDefined();
+    screen.getByLabelText("In progress");
   });
 
   it("renders status indicator for queued status", () => {
@@ -68,7 +68,7 @@ describe("WorkflowRunRow", () => {
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    expect(screen.getByLabelText("Queued")).toBeDefined();
+    screen.getByLabelText("Queued");
   });
 
   it("calls onIgnore when ignore button clicked", () => {

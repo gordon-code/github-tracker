@@ -44,7 +44,7 @@ describe("RepoSelector", () => {
     ));
     // Loading indicator should appear
     await waitFor(() => {
-      expect(screen.getByText(/Loading repos/i)).toBeDefined();
+      screen.getByText(/Loading repos/i);
     });
   });
 
@@ -59,14 +59,14 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
-      expect(screen.getByText("repo-b")).toBeDefined();
-      expect(screen.getByText("repo-c")).toBeDefined();
+      screen.getByText("repo-a");
+      screen.getByText("repo-b");
+      screen.getByText("repo-c");
     });
 
     // Org headers shown
-    expect(screen.getByText("myorg")).toBeDefined();
-    expect(screen.getByText("otherog")).toBeDefined();
+    screen.getByText("myorg");
+    screen.getByText("otherog");
   });
 
   it("onChange called when repo toggled", async () => {
@@ -78,7 +78,7 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
     });
 
     const checkboxes = screen.getAllByRole("checkbox");
@@ -99,14 +99,14 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
     });
 
     const filterInput = screen.getByPlaceholderText(/Filter repos/i);
     fireEvent.input(filterInput, { target: { value: "repo-a" } });
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
       expect(screen.queryByText("repo-b")).toBeNull();
     });
   });
@@ -120,7 +120,7 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
     });
 
     // "Select All" button in the org header (there may be multiple — use the first one)
@@ -143,7 +143,7 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
     });
 
     const deselectAllBtns = screen.getAllByText("Deselect All");
@@ -163,8 +163,8 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText(/Network error/i)).toBeDefined();
-      expect(screen.getByText("Retry")).toBeDefined();
+      screen.getByText(/Network error/i);
+      screen.getByText("Retry");
     });
   });
 
@@ -178,13 +178,13 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText("Retry")).toBeDefined();
+      screen.getByText("Retry");
     });
 
     fireEvent.click(screen.getByText("Retry"));
 
     await waitFor(() => {
-      expect(screen.getByText("repo-a")).toBeDefined();
+      screen.getByText("repo-a");
     });
   });
 
@@ -196,7 +196,7 @@ describe("RepoSelector", () => {
     ));
 
     await waitFor(() => {
-      expect(screen.getByText(/2 repos selected/i)).toBeDefined();
+      screen.getByText(/2 repos selected/i);
     });
   });
 });

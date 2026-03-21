@@ -126,7 +126,7 @@ afterEach(() => {
 describe("SettingsPage — rendering", () => {
   it("renders the Settings page heading", () => {
     renderSettings();
-    expect(screen.getByText("Settings")).toBeDefined();
+    screen.getByText("Settings");
   });
 
   it("renders a back to dashboard link", () => {
@@ -138,44 +138,44 @@ describe("SettingsPage — rendering", () => {
 
   it("renders Organizations & Repositories section", () => {
     renderSettings();
-    expect(screen.getByText("Organizations & Repositories")).toBeDefined();
+    screen.getByText("Organizations & Repositories");
   });
 
   it("renders Refresh section", () => {
     renderSettings();
-    expect(screen.getByText("Refresh")).toBeDefined();
+    screen.getByText("Refresh");
   });
 
   it("renders GitHub Actions section", () => {
     renderSettings();
     // "GitHub Actions" appears in section heading and tab option — use heading query
-    expect(screen.getByRole("heading", { name: "GitHub Actions" })).toBeDefined();
+    screen.getByRole("heading", { name: "GitHub Actions" });
   });
 
   it("renders Notifications section", () => {
     renderSettings();
-    expect(screen.getByText("Notifications")).toBeDefined();
+    screen.getByText("Notifications");
   });
 
   it("renders Appearance section", () => {
     renderSettings();
-    expect(screen.getByText("Appearance")).toBeDefined();
+    screen.getByText("Appearance");
   });
 
   it("renders Tabs section", () => {
     renderSettings();
-    expect(screen.getByText("Tabs")).toBeDefined();
+    screen.getByText("Tabs");
   });
 
   it("renders Data section", () => {
     renderSettings();
-    expect(screen.getByText("Data")).toBeDefined();
+    screen.getByText("Data");
   });
 
   it("renders Manage Organizations and Manage Repositories buttons", () => {
     renderSettings();
-    expect(screen.getByText("Manage Organizations")).toBeDefined();
-    expect(screen.getByText("Manage Repositories")).toBeDefined();
+    screen.getByText("Manage Organizations");
+    screen.getByText("Manage Repositories");
   });
 });
 
@@ -197,7 +197,7 @@ describe("SettingsPage — Refresh interval", () => {
 describe("SettingsPage — Appearance", () => {
   it("shows current theme value", () => {
     renderSettings();
-    expect(screen.getByDisplayValue("System")).toBeDefined();
+    screen.getByDisplayValue("System");
   });
 
   it("changing theme updates config", () => {
@@ -209,7 +209,7 @@ describe("SettingsPage — Appearance", () => {
 
   it("shows current view density value", () => {
     renderSettings();
-    expect(screen.getByDisplayValue("Comfortable")).toBeDefined();
+    screen.getByDisplayValue("Comfortable");
   });
 
   it("changing view density updates config", () => {
@@ -221,7 +221,7 @@ describe("SettingsPage — Appearance", () => {
 
   it("shows current items per page value", () => {
     renderSettings();
-    expect(screen.getByDisplayValue("25")).toBeDefined();
+    screen.getByDisplayValue("25");
   });
 
   it("changing items per page updates config", () => {
@@ -235,7 +235,7 @@ describe("SettingsPage — Appearance", () => {
 describe("SettingsPage — Tabs", () => {
   it("shows current default tab value", () => {
     renderSettings();
-    expect(screen.getByDisplayValue("Issues")).toBeDefined();
+    screen.getByDisplayValue("Issues");
   });
 
   it("changing default tab updates config", () => {
@@ -317,13 +317,13 @@ describe("SettingsPage — Notifications", () => {
       value: { permission: "denied", requestPermission: vi.fn() },
     });
     renderSettings();
-    expect(screen.getByText(/permission denied in browser/i)).toBeDefined();
+    screen.getByText(/permission denied in browser/i);
   });
 
   it("shows Grant permission button when permission not yet granted", () => {
     renderSettings();
     // Permission is "default" (from beforeEach), notifications disabled
-    expect(screen.getByText(/grant permission/i)).toBeDefined();
+    screen.getByText(/grant permission/i);
   });
 
   it("notification sub-toggles are disabled when notifications disabled", () => {
@@ -351,16 +351,16 @@ describe("SettingsPage — Data: Clear cache", () => {
   it("shows Clear cache button initially", () => {
     renderSettings();
     // The section has a <p> heading and a <button> both with text "Clear cache"
-    expect(screen.getByRole("button", { name: "Clear cache" })).toBeDefined();
+    screen.getByRole("button", { name: "Clear cache" });
   });
 
   it("first click shows confirmation dialog", () => {
     renderSettings();
     const clearBtn = screen.getByRole("button", { name: "Clear cache" });
     fireEvent.click(clearBtn);
-    expect(screen.getByText("Are you sure?")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Yes, clear" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDefined();
+    screen.getByText("Are you sure?");
+    screen.getByRole("button", { name: "Yes, clear" });
+    screen.getByRole("button", { name: "Cancel" });
   });
 
   it("second click (confirm) calls clearCache", async () => {
@@ -378,12 +378,12 @@ describe("SettingsPage — Data: Clear cache", () => {
     renderSettings();
     const clearBtn = screen.getByRole("button", { name: "Clear cache" });
     fireEvent.click(clearBtn);
-    expect(screen.getByText("Are you sure?")).toBeDefined();
+    screen.getByText("Are you sure?");
 
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     fireEvent.click(cancelBtn);
     expect(screen.queryByText("Are you sure?")).toBeNull();
-    expect(screen.getByRole("button", { name: "Clear cache" })).toBeDefined();
+    screen.getByRole("button", { name: "Clear cache" });
   });
 });
 
@@ -416,15 +416,15 @@ describe("SettingsPage — Data: Export settings", () => {
 describe("SettingsPage — Data: Reset all", () => {
   it("shows Reset all button initially", () => {
     renderSettings();
-    expect(screen.getByRole("button", { name: "Reset all" })).toBeDefined();
+    screen.getByRole("button", { name: "Reset all" });
   });
 
   it("first click shows confirmation dialog", () => {
     renderSettings();
     const resetBtn = screen.getByRole("button", { name: "Reset all" });
     fireEvent.click(resetBtn);
-    expect(screen.getByText("Are you sure?")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Yes, reset" })).toBeDefined();
+    screen.getByText("Are you sure?");
+    screen.getByRole("button", { name: "Yes, reset" });
   });
 
   it("cancelling reset returns to initial state", () => {
@@ -434,7 +434,7 @@ describe("SettingsPage — Data: Reset all", () => {
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     fireEvent.click(cancelBtn);
     expect(screen.queryByRole("button", { name: "Yes, reset" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Reset all" })).toBeDefined();
+    screen.getByRole("button", { name: "Reset all" });
   });
 
   it("confirming reset clears localStorage keys and calls reload", async () => {

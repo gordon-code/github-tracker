@@ -21,17 +21,17 @@ describe("LoginPage", () => {
 
   it("renders the app title", () => {
     render(() => <LoginPage />);
-    expect(screen.getByText("GitHub Tracker")).toBeDefined();
+    screen.getByText("GitHub Tracker");
   });
 
   it("renders the sign in button", () => {
     render(() => <LoginPage />);
-    expect(screen.getByText("Sign in with GitHub")).toBeDefined();
+    screen.getByText("Sign in with GitHub");
   });
 
   it("shows app branding description", () => {
     render(() => <LoginPage />);
-    expect(screen.getByText(/Track issues, pull requests/i)).toBeDefined();
+    screen.getByText(/Track issues, pull requests/i);
   });
 
   it("clicking login sets window.location.href to GitHub OAuth URL", () => {

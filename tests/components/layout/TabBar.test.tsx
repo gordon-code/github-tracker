@@ -9,9 +9,9 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
-    expect(screen.getByText("Issues")).toBeDefined();
-    expect(screen.getByText("Pull Requests")).toBeDefined();
-    expect(screen.getByText("Actions")).toBeDefined();
+    screen.getByText("Issues");
+    screen.getByText("Pull Requests");
+    screen.getByText("Actions");
   });
 
   it("highlights active tab with aria-current='page'", () => {
@@ -76,9 +76,9 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} counts={counts} />
     ));
-    expect(screen.getByText("5")).toBeDefined();
-    expect(screen.getByText("12")).toBeDefined();
-    expect(screen.getByText("3")).toBeDefined();
+    screen.getByText("5");
+    screen.getByText("12");
+    screen.getByText("3");
   });
 
   it("does not show count badges when counts prop is not provided", () => {
@@ -96,7 +96,7 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} counts={counts} />
     ));
-    expect(screen.getByText("7")).toBeDefined();
+    screen.getByText("7");
     // PR and Actions counts should not appear
     expect(screen.queryByText("0")).toBeNull();
   });

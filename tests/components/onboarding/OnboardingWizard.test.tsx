@@ -56,13 +56,13 @@ describe("OnboardingWizard", () => {
 
   it("renders wizard with step indicator", () => {
     render(() => <OnboardingWizard />);
-    expect(screen.getByText("GitHub Tracker Setup")).toBeDefined();
-    expect(screen.getByText(/Step 1 of 2/i)).toBeDefined();
+    screen.getByText("GitHub Tracker Setup");
+    screen.getByText(/Step 1 of 2/i);
   });
 
   it("first step shows OrgSelector", () => {
     render(() => <OnboardingWizard />);
-    expect(screen.getByTestId("org-selector")).toBeDefined();
+    screen.getByTestId("org-selector");
   });
 
   it("shows Select Organizations step label in progress indicator", () => {
@@ -99,8 +99,8 @@ describe("OnboardingWizard", () => {
     fireEvent.click(screen.getByText("Next"));
 
     await waitFor(() => {
-      expect(screen.getByText(/Step 2 of 2/i)).toBeDefined();
-      expect(screen.getByTestId("repo-selector")).toBeDefined();
+      screen.getByText(/Step 2 of 2/i);
+      screen.getByTestId("repo-selector");
     });
   });
 
@@ -130,7 +130,7 @@ describe("OnboardingWizard", () => {
     fireEvent.click(screen.getByText("Next"));
 
     await waitFor(() => {
-      expect(screen.getByText("Back")).toBeDefined();
+      screen.getByText("Back");
     });
   });
 
@@ -145,14 +145,14 @@ describe("OnboardingWizard", () => {
     fireEvent.click(screen.getByText("Next"));
 
     await waitFor(() => {
-      expect(screen.getByText("Back")).toBeDefined();
+      screen.getByText("Back");
     });
 
     fireEvent.click(screen.getByText("Back"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("org-selector")).toBeDefined();
-      expect(screen.getByText(/Step 1 of 2/i)).toBeDefined();
+      screen.getByTestId("org-selector");
+      screen.getByText(/Step 1 of 2/i);
     });
   });
 
@@ -184,7 +184,7 @@ describe("OnboardingWizard", () => {
 
     // Step 2: select repo, finish
     await waitFor(() => {
-      expect(screen.getByTestId("repo-selector")).toBeDefined();
+      screen.getByTestId("repo-selector");
     });
     fireEvent.click(screen.getByText("Select Repo"));
 
