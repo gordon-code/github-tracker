@@ -29,6 +29,7 @@
     "@playwright/test": "^1.58.2",
     "@solidjs/testing-library": "^0.8.10",
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/user-event": "^14.6.1",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.8.4",
     "tailwindcss": "^4.2.2",

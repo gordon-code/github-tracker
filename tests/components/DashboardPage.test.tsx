@@ -251,7 +251,7 @@ describe("DashboardPage — auth error handling", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalled();
+      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
     });
   });
 
@@ -262,7 +262,7 @@ describe("DashboardPage — auth error handling", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(authStore.clearAuth).toHaveBeenCalled();
+      expect(authStore.clearAuth).toHaveBeenCalledOnce();
       expect(mockNavigate).toHaveBeenCalledWith("/login");
     });
   });
@@ -274,7 +274,7 @@ describe("DashboardPage — auth error handling", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalled();
+      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
     });
     expect(authStore.clearAuth).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalledWith("/login");

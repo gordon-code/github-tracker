@@ -98,10 +98,9 @@ test("changing theme to dark adds dark class to html element", async ({
   await setupAuth(page);
   await page.goto("/settings");
 
-  // Select the theme dropdown within the Appearance section.
-  // The Select component renders a <select> whose current value matches config.theme.
-  // We select "dark" to trigger applyTheme('dark') which adds class="dark" to <html>.
-  const themeSelect = page.locator("select").filter({ hasText: /system|light|dark/i }).first();
+  // Locate the Theme setting row by its label text, then find its <select> child.
+  const themeRow = page.locator("div").filter({ hasText: /^Theme$/ }).first();
+  const themeSelect = themeRow.locator("select");
   await themeSelect.selectOption("dark");
 
   const htmlElement = page.locator("html");

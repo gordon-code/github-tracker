@@ -4,9 +4,11 @@ import { updateViewState } from "../../src/app/stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../src/app/services/api";
 import type { JSX } from "solid-js";
 
+let nextId = 1;
+
 export function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: Math.floor(Math.random() * 100000),
+    id: nextId++,
     number: 1,
     title: "Test issue",
     state: "open",
@@ -24,7 +26,7 @@ export function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 export function makePullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
   return {
-    id: Math.floor(Math.random() * 100000),
+    id: nextId++,
     number: 1,
     title: "Test pull request",
     state: "open",
@@ -47,7 +49,7 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
 
 export function makeWorkflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
   return {
-    id: Math.floor(Math.random() * 100000),
+    id: nextId++,
     name: "CI",
     status: "completed",
     conclusion: "success",
