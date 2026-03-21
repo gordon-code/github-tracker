@@ -112,7 +112,6 @@ interface RawPullRequest {
   requested_reviewers: { login: string }[];
 }
 
-
 interface RawWorkflowRun {
   id: number;
   name: string;
@@ -155,7 +154,6 @@ interface RawSearchItem {
 
 // Batch repos into chunks for search queries (keeps URL length manageable)
 const SEARCH_REPO_BATCH_SIZE = 30;
-
 
 // ── Search helpers ───────────────────────────────────────────────────────────
 
@@ -477,19 +475,19 @@ export async function fetchPullRequests(
 
   // Merge and deduplicate by ID
   const seen = new Set<number>();
-  const uniqueItems: { item: RawSearchItem }[] = [];
+  const uniqueItems: RawSearchItem[] = [];
 
   for (const result of [involvedItems, reviewItems]) {
     if (result.status !== "fulfilled") continue;
     for (const item of result.value) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
-      uniqueItems.push({ item });
+      uniqueItems.push(item);
     }
   }
 
   // Fetch full PR details for each (head SHA, branch info, reviewers)
-  const prDetailTasks = uniqueItems.map(async ({ item }) => {
+  const prDetailTasks = uniqueItems.map(async (item) => {
     const repoFullName = item.repository.full_name;
     const [owner, name] = repoFullName.split("/");
 
