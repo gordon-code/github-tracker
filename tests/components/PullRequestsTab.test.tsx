@@ -20,13 +20,13 @@ describe("PullRequestsTab", () => {
       makePullRequest({ number: 2, title: "Second PR" }),
     ];
     render(() => <PullRequestsTab pullRequests={prs} />);
-    expect(screen.getByText("First PR")).toBeDefined();
-    expect(screen.getByText("Second PR")).toBeDefined();
+    screen.getByText("First PR");
+    screen.getByText("Second PR");
   });
 
   it("shows empty state when pull requests array is empty", () => {
     render(() => <PullRequestsTab pullRequests={[]} />);
-    expect(screen.getByText(/No open pull requests involving you/i)).toBeDefined();
+    screen.getByText(/No open pull requests involving you/i);
   });
 
   it("shows loading skeleton when loading=true", () => {
@@ -42,8 +42,8 @@ describe("PullRequestsTab", () => {
       { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
     ];
     render(() => <PullRequestsTab pullRequests={[]} errors={errors} />);
-    expect(screen.getByText(/Server error/i)).toBeDefined();
-    expect(screen.getByText(/Forbidden/i)).toBeDefined();
+    screen.getByText(/Server error/i);
+    screen.getByText(/Forbidden/i);
   });
 
   it("shows '(will retry)' for retryable errors", () => {
@@ -51,7 +51,7 @@ describe("PullRequestsTab", () => {
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
     ];
     render(() => <PullRequestsTab pullRequests={[]} errors={errors} />);
-    expect(screen.getByText(/will retry/i)).toBeDefined();
+    screen.getByText(/will retry/i);
   });
 
   it("filters out ignored PRs", () => {
@@ -65,7 +65,7 @@ describe("PullRequestsTab", () => {
     });
     render(() => <PullRequestsTab pullRequests={[pr]} />);
     expect(screen.queryByText("Should be hidden")).toBeNull();
-    expect(screen.getByText(/No open pull requests/i)).toBeDefined();
+    screen.getByText(/No open pull requests/i);
   });
 
   it("filters by globalFilter.repo", () => {
@@ -75,7 +75,7 @@ describe("PullRequestsTab", () => {
     ];
     viewStore.setGlobalFilter(null, "owner/target");
     render(() => <PullRequestsTab pullRequests={prs} />);
-    expect(screen.getByText("In target repo")).toBeDefined();
+    screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
   });
 
@@ -86,7 +86,7 @@ describe("PullRequestsTab", () => {
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <PullRequestsTab pullRequests={prs} />);
-    expect(screen.getByText("In org")).toBeDefined();
+    screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
   });
 
@@ -117,12 +117,12 @@ describe("PullRequestsTab", () => {
 
   it("renders column headers for all sortable fields", () => {
     render(() => <PullRequestsTab pullRequests={[]} />);
-    expect(screen.getByLabelText("Sort by Repo")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Title")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Author")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Checks")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Created")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Updated")).toBeDefined();
+    screen.getByLabelText("Sort by Repo");
+    screen.getByLabelText("Sort by Title");
+    screen.getByLabelText("Sort by Author");
+    screen.getByLabelText("Sort by Checks");
+    screen.getByLabelText("Sort by Created");
+    screen.getByLabelText("Sort by Updated");
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -138,13 +138,13 @@ describe("PullRequestsTab", () => {
     ];
     render(() => <PullRequestsTab pullRequests={prs} />);
     // StatusDot renders a <span> with aria-label matching the check status label
-    expect(screen.getByLabelText("All checks passed")).toBeDefined();
+    screen.getByLabelText("All checks passed");
   });
 
   it("shows Draft badge for draft PRs", () => {
     const pr = makePullRequest({ title: "Draft PR", draft: true });
     render(() => <PullRequestsTab pullRequests={[pr]} />);
-    expect(screen.getByText("Draft")).toBeDefined();
+    screen.getByText("Draft");
   });
 
   it("does not show Draft badge for non-draft PRs", () => {
@@ -159,9 +159,9 @@ describe("PullRequestsTab", () => {
       reviewerLogins: ["alice", "bob"],
     });
     render(() => <PullRequestsTab pullRequests={[pr]} />);
-    expect(screen.getByText(/Reviewers:/i)).toBeDefined();
-    expect(screen.getByText(/alice/)).toBeDefined();
-    expect(screen.getByText(/bob/)).toBeDefined();
+    screen.getByText(/Reviewers:/i);
+    screen.getByText(/alice/);
+    screen.getByText(/bob/);
   });
 
   it("does not show reviewers section when reviewerLogins is empty", () => {

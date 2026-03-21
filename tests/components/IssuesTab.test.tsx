@@ -21,13 +21,13 @@ describe("IssuesTab", () => {
       makeIssue({ number: 2, title: "Second issue" }),
     ];
     render(() => <IssuesTab issues={issues} />);
-    expect(screen.getByText("First issue")).toBeDefined();
-    expect(screen.getByText("Second issue")).toBeDefined();
+    screen.getByText("First issue");
+    screen.getByText("Second issue");
   });
 
   it("shows empty state when issues array is empty", () => {
     render(() => <IssuesTab issues={[]} />);
-    expect(screen.getByText(/No open issues involving you/i)).toBeDefined();
+    screen.getByText(/No open issues involving you/i);
   });
 
   it("shows loading skeleton when loading=true", () => {
@@ -44,8 +44,8 @@ describe("IssuesTab", () => {
       { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
     ];
     render(() => <IssuesTab issues={[]} errors={errors} />);
-    expect(screen.getByText(/Server error/i)).toBeDefined();
-    expect(screen.getByText(/Forbidden/i)).toBeDefined();
+    screen.getByText(/Server error/i);
+    screen.getByText(/Forbidden/i);
   });
 
   it("shows '(will retry)' for retryable errors", () => {
@@ -53,7 +53,7 @@ describe("IssuesTab", () => {
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
     ];
     render(() => <IssuesTab issues={[]} errors={errors} />);
-    expect(screen.getByText(/will retry/i)).toBeDefined();
+    screen.getByText(/will retry/i);
   });
 
   it("filters out ignored issues", () => {
@@ -67,7 +67,7 @@ describe("IssuesTab", () => {
     });
     render(() => <IssuesTab issues={[issue]} />);
     expect(screen.queryByText("Should be hidden")).toBeNull();
-    expect(screen.getByText(/No open issues/i)).toBeDefined();
+    screen.getByText(/No open issues/i);
   });
 
   it("filters by globalFilter.repo", () => {
@@ -77,7 +77,7 @@ describe("IssuesTab", () => {
     ];
     viewStore.setGlobalFilter(null, "owner/target");
     render(() => <IssuesTab issues={issues} />);
-    expect(screen.getByText("In target repo")).toBeDefined();
+    screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
   });
 
@@ -88,7 +88,7 @@ describe("IssuesTab", () => {
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <IssuesTab issues={issues} />);
-    expect(screen.getByText("In org")).toBeDefined();
+    screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
   });
 
@@ -142,10 +142,10 @@ describe("IssuesTab", () => {
 
   it("renders column headers for all sortable fields", () => {
     render(() => <IssuesTab issues={[]} />);
-    expect(screen.getByLabelText("Sort by Repo")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Title")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Author")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Created")).toBeDefined();
-    expect(screen.getByLabelText("Sort by Updated")).toBeDefined();
+    screen.getByLabelText("Sort by Repo");
+    screen.getByLabelText("Sort by Title");
+    screen.getByLabelText("Sort by Author");
+    screen.getByLabelText("Sort by Created");
+    screen.getByLabelText("Sort by Updated");
   });
 });

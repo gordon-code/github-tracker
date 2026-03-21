@@ -25,7 +25,7 @@ describe("IgnoreBadge", () => {
   it("shows count of ignored items in badge", () => {
     const items = [makeIgnoredItem(), makeIgnoredItem(), makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    expect(screen.getByText("3 ignored")).toBeDefined();
+    screen.getByText("3 ignored");
   });
 
   it("clicking badge toggles popover open (aria-expanded)", () => {
@@ -61,10 +61,10 @@ describe("IgnoreBadge", () => {
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
     fireEvent.click(screen.getByText("2 ignored"));
 
-    expect(screen.getByText("Issue Alpha")).toBeDefined();
-    expect(screen.getByText("Issue Beta")).toBeDefined();
-    expect(screen.getByText("owner/repo-a")).toBeDefined();
-    expect(screen.getByText("owner/repo-b")).toBeDefined();
+    screen.getByText("Issue Alpha");
+    screen.getByText("Issue Beta");
+    screen.getByText("owner/repo-a");
+    screen.getByText("owner/repo-b");
   });
 
   it("individual unignore button calls onUnignore with correct id", () => {

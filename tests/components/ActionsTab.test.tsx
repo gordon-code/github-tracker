@@ -16,12 +16,12 @@ beforeEach(() => {
 describe("ActionsTab", () => {
   it("shows empty state when no workflow runs", () => {
     render(() => <ActionsTab workflowRuns={[]} />);
-    expect(screen.getByText("No workflow runs found.")).toBeDefined();
+    screen.getByText("No workflow runs found.");
   });
 
   it("shows loading state when loading=true", () => {
     render(() => <ActionsTab workflowRuns={[]} loading={true} />);
-    expect(screen.getByText(/Loading workflow runs/i)).toBeDefined();
+    screen.getByText(/Loading workflow runs/i);
     expect(screen.queryByText("No workflow runs found.")).toBeNull();
   });
 
@@ -30,7 +30,7 @@ describe("ActionsTab", () => {
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: false },
     ];
     render(() => <ActionsTab workflowRuns={[]} errors={errors} />);
-    expect(screen.getByText(/Server error/i)).toBeDefined();
+    screen.getByText(/Server error/i);
   });
 
   it("groups runs by repository", () => {
@@ -39,8 +39,8 @@ describe("ActionsTab", () => {
       makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    expect(screen.getByText("owner/repo-a")).toBeDefined();
-    expect(screen.getByText("owner/repo-b")).toBeDefined();
+    screen.getByText("owner/repo-a");
+    screen.getByText("owner/repo-b");
   });
 
   it("groups runs by workflow within each repo", () => {
@@ -76,7 +76,7 @@ describe("ActionsTab", () => {
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
     // Branch name is only rendered inside run rows (not in headers)
-    expect(screen.getByText("main")).toBeDefined();
+    screen.getByText("main");
 
     // Click the repo header button to collapse it
     const repoHeader = screen.getByText("owner/repo");
@@ -95,7 +95,7 @@ describe("ActionsTab", () => {
     });
     render(() => <ActionsTab workflowRuns={[run]} />);
     // The run's branch name is only in the run row
-    expect(screen.getByText("feature/wf-branch")).toBeDefined();
+    screen.getByText("feature/wf-branch");
 
     // Find the workflow header button (the button containing "MyWorkflow" text)
     const buttons = screen.getAllByRole("button");
@@ -118,7 +118,7 @@ describe("ActionsTab", () => {
     });
     render(() => <ActionsTab workflowRuns={[run]} />);
     expect(screen.queryByText("Ignored Run")).toBeNull();
-    expect(screen.getByText("No workflow runs found.")).toBeDefined();
+    screen.getByText("No workflow runs found.");
   });
 
   it("filters by globalFilter.org", () => {
@@ -128,7 +128,7 @@ describe("ActionsTab", () => {
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <ActionsTab workflowRuns={runs} />);
-    expect(screen.getByText("myorg/repo")).toBeDefined();
+    screen.getByText("myorg/repo");
     expect(screen.queryByText("otherorg/repo")).toBeNull();
   });
 
@@ -139,7 +139,7 @@ describe("ActionsTab", () => {
     ];
     viewStore.setGlobalFilter(null, "owner/target");
     render(() => <ActionsTab workflowRuns={runs} />);
-    expect(screen.getByText("owner/target")).toBeDefined();
+    screen.getByText("owner/target");
     expect(screen.queryByText("owner/other")).toBeNull();
   });
 
@@ -152,7 +152,7 @@ describe("ActionsTab", () => {
     // PR run's branch is hidden
     expect(screen.queryByText("pr-branch")).toBeNull();
     // Push run's branch is visible
-    expect(screen.getByText("push-branch")).toBeDefined();
+    screen.getByText("push-branch");
   });
 
   it("shows PR runs when 'Show PR runs' checkbox is checked", () => {
@@ -168,6 +168,6 @@ describe("ActionsTab", () => {
     fireEvent.click(checkbox);
 
     // Now the PR run's branch should be visible
-    expect(screen.getByText("pr-branch")).toBeDefined();
+    screen.getByText("pr-branch");
   });
 });
