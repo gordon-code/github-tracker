@@ -96,21 +96,6 @@ interface RawRepo {
   full_name: string;
 }
 
-interface RawIssue {
-  id: number;
-  number: number;
-  title: string;
-  state: string;
-  html_url: string;
-  created_at: string;
-  updated_at: string;
-  user: { login: string; avatar_url: string } | null;
-  labels: { name: string; color: string }[];
-  assignees: { login: string }[];
-  repository_url: string;
-  pull_request?: unknown;
-}
-
 interface RawPullRequest {
   id: number;
   number: number;
@@ -143,12 +128,6 @@ interface RawCheckRuns {
   check_runs: RawCheckRun[];
 }
 
-interface RawWorkflow {
-  id: number;
-  name: string;
-  updated_at: string;
-}
-
 interface RawWorkflowRun {
   id: number;
   name: string;
@@ -162,6 +141,124 @@ interface RawWorkflowRun {
   html_url: string;
   created_at: string;
   updated_at: string;
+}
+
+// ── Search API types ─────────────────────────────────────────────────────────
+
+interface RawSearchResponse {
+  total_count: number;
+  incomplete_results: boolean;
+  items: RawSearchItem[];
+}
+
+interface RawSearchItem {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+  user: { login: string; avatar_url: string } | null;
+  labels: { name: string; color: string }[];
+  assignees: { login: string }[];
+  repository: { full_name: string };
+  pull_request?: unknown;
+}
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+// Batch repos into chunks for search queries (keeps URL length manageable)
+const SEARCH_REPO_BATCH_SIZE = 30;
+
+// Cache check-status per SHA for 2 minutes — completed checks rarely change
+const CHECK_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+
+// ── Search helpers ───────────────────────────────────────────────────────────
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Paginated search. Returns up to 1000 items per query.
+ * Search API has its own rate limit: 30 req/min (separate from core 5000/hr).
+ * Does NOT use IDB caching — search results are volatile and the poll interval
+ * already gates how often we call.
+ */
+async function searchAllPages(
+  octokit: NonNullable<ReturnType<typeof getClient>>,
+  query: string
+): Promise<RawSearchItem[]> {
+  const items: RawSearchItem[] = [];
+  let page = 1;
+  const perPage = 100;
+
+  while (true) {
+    const response = await octokit.request("GET /search/issues", {
+      q: query,
+      per_page: perPage,
+      page,
+      sort: "updated",
+      order: "desc",
+    });
+
+    const data = response.data as unknown as RawSearchResponse;
+    items.push(...data.items);
+
+    if (
+      items.length >= data.total_count ||
+      items.length >= 1000 ||
+      data.items.length < perPage
+    ) {
+      if (data.incomplete_results) {
+        console.warn(
+          `[api] Search results incomplete for: ${query.slice(0, 80)}…`
+        );
+      }
+      break;
+    }
+    page++;
+  }
+
+  return items;
+}
+
+/**
+ * Runs a search query across batched repo qualifiers, deduplicating results.
+ * Splits repos into chunks of SEARCH_REPO_BATCH_SIZE to keep query length safe.
+ */
+async function batchedSearch(
+  octokit: NonNullable<ReturnType<typeof getClient>>,
+  baseQuery: string,
+  repos: RepoRef[]
+): Promise<RawSearchItem[]> {
+  if (repos.length === 0) return [];
+
+  const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
+  const tasks = chunks.map((chunk) => {
+    const repoQualifiers = chunk.map((r) => `repo:${r.fullName}`).join(" ");
+    return searchAllPages(octokit, `${baseQuery} ${repoQualifiers}`);
+  });
+
+  const results = await Promise.allSettled(tasks);
+  const seen = new Set<number>();
+  const items: RawSearchItem[] = [];
+
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    for (const item of result.value) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
+
+  return items;
 }
 
 // ── Step 1: fetchOrgs ────────────────────────────────────────────────────────
@@ -236,41 +333,14 @@ export async function fetchRepos(
   return repos;
 }
 
-// ── Step 3: fetchIssues ──────────────────────────────────────────────────────
-
-type IssueInvolvement = "creator" | "assignee" | "mentioned";
-
-async function fetchIssuesForRepo(
-  octokit: NonNullable<ReturnType<typeof getClient>>,
-  repo: RepoRef,
-  involvement: IssueInvolvement,
-  userLogin: string
-): Promise<RawIssue[]> {
-  const [owner, name] = [repo.owner, repo.name];
-  const cacheKey = `issues:${involvement}:${owner}/${name}`;
-
-  let qualifier: Record<string, string>;
-  if (involvement === "creator") {
-    qualifier = { creator: userLogin };
-  } else if (involvement === "assignee") {
-    qualifier = { assignee: userLogin };
-  } else {
-    qualifier = { mentioned: userLogin };
-  }
-
-  const result = await cachedRequest(
-    octokit,
-    cacheKey,
-    "GET /repos/{owner}/{repo}/issues",
-    { owner, repo: name, state: "open", per_page: 100, ...qualifier }
-  );
-
-  return result.data as RawIssue[];
-}
+// ── Step 3: fetchIssues (Search API) ─────────────────────────────────────────
 
 /**
- * Fetches open issues across repos where the user is creator, assignee, or mentioned.
- * Deduplicates by issue ID and filters out PRs.
+ * Fetches open issues across repos where the user is involved (author, assignee,
+ * mentioned, or commenter) using the GitHub Search API.
+ *
+ * Before: 3 API calls per repo (creator/assignee/mentioned) = 225 calls for 75 repos.
+ * After:  ~3 search calls total (batched in chunks of 30 repos).
  */
 export async function fetchIssues(
   octokit: ReturnType<typeof getClient>,
@@ -278,56 +348,138 @@ export async function fetchIssues(
   userLogin: string
 ): Promise<Issue[]> {
   if (!octokit) throw new Error("No GitHub client available");
+  if (repos.length === 0) return [];
 
-  const involvements: IssueInvolvement[] = ["creator", "assignee", "mentioned"];
-
-  const tasks = repos.flatMap((repo) =>
-    involvements.map((inv) => fetchIssuesForRepo(octokit, repo, inv, userLogin))
+  const items = await batchedSearch(
+    octokit,
+    `is:issue is:open involves:${userLogin}`,
+    repos
   );
 
-  const results = await Promise.allSettled(tasks);
+  return items
+    .filter((item) => item.pull_request === undefined)
+    .map((item) => ({
+      id: item.id,
+      number: item.number,
+      title: item.title,
+      state: item.state,
+      htmlUrl: item.html_url,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+      userLogin: item.user?.login ?? "",
+      userAvatarUrl: item.user?.avatar_url ?? "",
+      labels: item.labels.map((l) => ({ name: l.name, color: l.color })),
+      assigneeLogins: item.assignees.map((a) => a.login),
+      repoFullName: item.repository.full_name,
+    }));
+}
 
+// ── Step 4: fetchPullRequests (Search API + individual PR detail) ─────────────
+
+/**
+ * Fetches open PRs involving the user using the GitHub Search API.
+ * Two search queries cover all involvement types:
+ * - `involves:user` → author, assignee, mentioned, commenter
+ * - `review-requested:user` → requested reviewer (not covered by `involves`)
+ *
+ * For each found PR, fetches full PR details (head SHA, reviewers) and check status.
+ *
+ * Before: 1 API call per repo (list all PRs) + 2 per involved PR = 75+2N for 75 repos.
+ * After:  ~6 search calls + N PR detail + 2N check status = 6+3N.
+ */
+export async function fetchPullRequests(
+  octokit: ReturnType<typeof getClient>,
+  repos: RepoRef[],
+  userLogin: string
+): Promise<PullRequest[]> {
+  if (!octokit) throw new Error("No GitHub client available");
+  if (repos.length === 0) return [];
+
+  // Two searches: involves (author/assignee/mentioned/commenter) + review-requested
+  const [involvedItems, reviewItems] = await Promise.allSettled([
+    batchedSearch(octokit, `is:pr is:open involves:${userLogin}`, repos),
+    batchedSearch(
+      octokit,
+      `is:pr is:open review-requested:${userLogin}`,
+      repos
+    ),
+  ]);
+
+  // Merge and deduplicate by ID
   const seen = new Set<number>();
-  const issues: Issue[] = [];
+  const uniqueItems: { item: RawSearchItem }[] = [];
 
-  for (const result of results) {
+  for (const result of [involvedItems, reviewItems]) {
     if (result.status !== "fulfilled") continue;
-    for (const raw of result.value) {
-      // Filter out PRs
-      if (raw.pull_request !== undefined) continue;
-      if (seen.has(raw.id)) continue;
-      seen.add(raw.id);
-
-      // Derive repo full name from repository_url
-      const repoFullName = raw.repository_url.replace(
-        "https://api.github.com/repos/",
-        ""
-      );
-
-      issues.push({
-        id: raw.id,
-        number: raw.number,
-        title: raw.title,
-        state: raw.state,
-        htmlUrl: raw.html_url,
-        createdAt: raw.created_at,
-        updatedAt: raw.updated_at,
-        userLogin: raw.user?.login ?? "",
-        userAvatarUrl: raw.user?.avatar_url ?? "",
-        labels: raw.labels.map((l) => ({ name: l.name, color: l.color })),
-        assigneeLogins: raw.assignees.map((a) => a.login),
-        repoFullName,
-      });
+    for (const item of result.value) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      uniqueItems.push({ item });
     }
   }
 
-  return issues;
+  // Fetch full PR details for each (head SHA, branch info, reviewers)
+  const prDetailTasks = uniqueItems.map(async ({ item }) => {
+    const repoFullName = item.repository.full_name;
+    const [owner, name] = repoFullName.split("/");
+
+    const result = await cachedRequest(
+      octokit,
+      `pr-detail:${repoFullName}:${item.number}`,
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      { owner, repo: name, pull_number: item.number }
+    );
+
+    return { pr: result.data as RawPullRequest, repoFullName };
+  });
+
+  const prDetails = await Promise.allSettled(prDetailTasks);
+
+  // For each PR, fetch check status and build result
+  const pullRequests = await Promise.all(
+    prDetails
+      .filter(
+        (r): r is PromiseFulfilledResult<{
+          pr: RawPullRequest;
+          repoFullName: string;
+        }> => r.status === "fulfilled"
+      )
+      .map(async ({ value: { pr, repoFullName } }) => {
+        const [owner, repo] = repoFullName.split("/");
+
+        const checkStatus = await fetchCheckStatus(
+          octokit,
+          owner,
+          repo,
+          pr.head.sha
+        ).catch(() => null as CheckStatus["status"]);
+
+        return {
+          id: pr.id,
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          draft: pr.draft,
+          htmlUrl: pr.html_url,
+          createdAt: pr.created_at,
+          updatedAt: pr.updated_at,
+          userLogin: pr.user?.login ?? "",
+          userAvatarUrl: pr.user?.avatar_url ?? "",
+          headSha: pr.head.sha,
+          headRef: pr.head.ref,
+          baseRef: pr.base.ref,
+          assigneeLogins: pr.assignees.map((a) => a.login),
+          reviewerLogins: pr.requested_reviewers.map((r) => r.login),
+          repoFullName,
+          checkStatus,
+        } satisfies PullRequest;
+      })
+  );
+
+  return pullRequests;
 }
 
-// ── Step 4: fetchPullRequests ────────────────────────────────────────────────
-
-// Cache check-status per SHA for 2 minutes — completed checks rarely change
-const CHECK_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+// ── Check status (used by fetchPullRequests) ─────────────────────────────────
 
 async function fetchCheckStatus(
   octokit: NonNullable<ReturnType<typeof getClient>>,
@@ -397,85 +549,16 @@ async function fetchCheckStatus(
   return null;
 }
 
-/**
- * Fetches open PRs for each repo and filters to user-involved ones.
- * Attaches combined check status from legacy status API + GHA check-runs.
- */
-export async function fetchPullRequests(
-  octokit: ReturnType<typeof getClient>,
-  repos: RepoRef[],
-  userLogin: string
-): Promise<PullRequest[]> {
-  if (!octokit) throw new Error("No GitHub client available");
-
-  const prTasks = repos.map(async (repo) => {
-    const result = await cachedRequest(
-      octokit,
-      `prs:${repo.fullName}`,
-      "GET /repos/{owner}/{repo}/pulls",
-      { owner: repo.owner, repo: repo.name, state: "open", per_page: 100 }
-    );
-    return { repo, prs: result.data as RawPullRequest[] };
-  });
-
-  const prResults = await Promise.allSettled(prTasks);
-
-  const involvedPrs: { repo: RepoRef; pr: RawPullRequest }[] = [];
-
-  for (const result of prResults) {
-    if (result.status !== "fulfilled") continue;
-    const { repo, prs } = result.value;
-    for (const pr of prs) {
-      const isInvolved =
-        pr.user?.login === userLogin ||
-        pr.assignees.some((a) => a.login === userLogin) ||
-        pr.requested_reviewers.some((r) => r.login === userLogin);
-      if (isInvolved) {
-        involvedPrs.push({ repo, pr });
-      }
-    }
-  }
-
-  const pullRequests = await Promise.all(
-    involvedPrs.map(async ({ repo, pr }) => {
-      const checkStatus = await fetchCheckStatus(
-        octokit,
-        repo.owner,
-        repo.name,
-        pr.head.sha
-      ).catch(() => null as CheckStatus["status"]);
-
-      return {
-        id: pr.id,
-        number: pr.number,
-        title: pr.title,
-        state: pr.state,
-        draft: pr.draft,
-        htmlUrl: pr.html_url,
-        createdAt: pr.created_at,
-        updatedAt: pr.updated_at,
-        userLogin: pr.user?.login ?? "",
-        userAvatarUrl: pr.user?.avatar_url ?? "",
-        headSha: pr.head.sha,
-        headRef: pr.head.ref,
-        baseRef: pr.base.ref,
-        assigneeLogins: pr.assignees.map((a) => a.login),
-        reviewerLogins: pr.requested_reviewers.map((r) => r.login),
-        repoFullName: pr.head.repo?.full_name ?? repo.fullName,
-        checkStatus,
-      } satisfies PullRequest;
-    })
-  );
-
-  return pullRequests;
-}
-
-// ── Step 5: fetchWorkflowRuns ────────────────────────────────────────────────
-
-const WORKFLOW_LIST_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+// ── Step 5: fetchWorkflowRuns (single endpoint per repo) ─────────────────────
 
 /**
- * Fetches top N workflows (by most recent run) and their latest M runs per repo.
+ * Fetches recent workflow runs per repo using a single API call per repo
+ * instead of listing workflows first then fetching runs per workflow.
+ *
+ * Before: 1 call (workflow list) + N calls (runs per workflow) = 1+N per repo.
+ * After:  1 call per repo (GET /repos/{owner}/{repo}/actions/runs).
+ *
+ * Groups runs by workflow_id client-side and applies maxWorkflows/maxRuns limits.
  */
 export async function fetchWorkflowRuns(
   octokit: ReturnType<typeof getClient>,
@@ -488,50 +571,43 @@ export async function fetchWorkflowRuns(
   const allRuns: WorkflowRun[] = [];
 
   const repoTasks = repos.map(async (repo) => {
-    // Fetch workflow list with 30-min TTL
-    const workflowsResult = await cachedRequest(
+    const result = await cachedRequest(
       octokit,
-      `workflows:${repo.fullName}`,
-      "GET /repos/{owner}/{repo}/actions/workflows",
-      { owner: repo.owner, repo: repo.name, per_page: 100 },
-      WORKFLOW_LIST_MAX_AGE_MS
+      `runs:${repo.fullName}`,
+      "GET /repos/{owner}/{repo}/actions/runs",
+      { owner: repo.owner, repo: repo.name, per_page: 100 }
     );
 
-    const workflowsData = workflowsResult.data as {
-      workflows: RawWorkflow[];
+    const data = result.data as {
+      workflow_runs: RawWorkflowRun[];
       total_count: number;
     };
-    const workflows = workflowsData.workflows ?? [];
+    const runs = data.workflow_runs ?? [];
 
-    // Sort by most-recently-updated, take top N
-    const topWorkflows = [...workflows]
-      .sort(
-        (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-      )
+    // Group by workflow_id
+    const byWorkflow = new Map<number, RawWorkflowRun[]>();
+    for (const run of runs) {
+      let group = byWorkflow.get(run.workflow_id);
+      if (!group) {
+        group = [];
+        byWorkflow.set(run.workflow_id, group);
+      }
+      group.push(run);
+    }
+
+    // Sort workflows by most recent run, take top N
+    const topWorkflows = [...byWorkflow.entries()]
+      .sort(([, a], [, b]) => {
+        const latestA = new Date(a[0].updated_at).getTime();
+        const latestB = new Date(b[0].updated_at).getTime();
+        return latestB - latestA;
+      })
       .slice(0, maxWorkflows);
 
-    // Fetch runs for each workflow
-    const runTasks = topWorkflows.map(async (wf) => {
-      const runsResult = await cachedRequest(
-        octokit,
-        `runs:${repo.fullName}:${wf.id}`,
-        "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
-        {
-          owner: repo.owner,
-          repo: repo.name,
-          workflow_id: wf.id,
-          per_page: maxRuns,
-        }
-      );
-
-      const runsData = runsResult.data as {
-        workflow_runs: RawWorkflowRun[];
-      };
-      const runs = runsData.workflow_runs ?? [];
-
-      return runs.slice(0, maxRuns).map(
-        (run): WorkflowRun => ({
+    // Take top M runs per workflow
+    for (const [, workflowRuns] of topWorkflows) {
+      for (const run of workflowRuns.slice(0, maxRuns)) {
+        allRuns.push({
           id: run.id,
           name: run.name,
           status: run.status,
@@ -546,14 +622,7 @@ export async function fetchWorkflowRuns(
           updatedAt: run.updated_at,
           repoFullName: repo.fullName,
           isPrRun: run.event === "pull_request",
-        })
-      );
-    });
-
-    const runResults = await Promise.allSettled(runTasks);
-    for (const r of runResults) {
-      if (r.status === "fulfilled") {
-        allRuns.push(...r.value);
+        });
       }
     }
   });
