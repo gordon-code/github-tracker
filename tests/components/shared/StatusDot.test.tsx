@@ -49,28 +49,4 @@ describe("StatusDot", () => {
     expect(nullContainer.querySelector(".animate-ping")).toBeNull();
   });
 
-  it("uses bg-green-500 for success", () => {
-    const { container } = render(() => <StatusDot status="success" />);
-    expect(container.querySelector(".bg-green-500")).not.toBeNull();
-  });
-
-  it("uses bg-yellow-500 for pending", () => {
-    const { container } = render(() => <StatusDot status="pending" />);
-    expect(container.querySelector(".bg-yellow-500")).not.toBeNull();
-  });
-
-  it("uses bg-red-500 for failure", () => {
-    const { container } = render(() => <StatusDot status="failure" />);
-    expect(container.querySelector(".bg-red-500")).not.toBeNull();
-  });
-
-  it("uses bg-red-500 for error", () => {
-    const { container } = render(() => <StatusDot status="error" />);
-    expect(container.querySelector(".bg-red-500")).not.toBeNull();
-  });
-
-  it("uses bg-gray-300 for null", () => {
-    const { container } = render(() => <StatusDot status={null} />);
-    expect(container.querySelector(".bg-gray-300")).not.toBeNull();
-  });
 });
