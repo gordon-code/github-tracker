@@ -74,11 +74,15 @@ async function evictOldestPercent(percent: number): Promise<void> {
   const db = await getDb();
   const tx = db.transaction("cache", "readwrite");
   const index = tx.store.index("fetchedAt");
-  const allKeys = await index.getAllKeys();
-  const countToDelete = Math.ceil((allKeys.length * percent) / 100);
-  // allKeys from fetchedAt index are already sorted ascending (oldest first)
-  for (let i = 0; i < countToDelete; i++) {
-    await tx.store.delete(allKeys[i] as string);
+  // Use cursor to get primary keys (not index keys) sorted by fetchedAt ascending
+  let cursor = await index.openCursor();
+  const totalCount = await tx.store.count();
+  const countToDelete = Math.ceil((totalCount * percent) / 100);
+  let deleted = 0;
+  while (cursor && deleted < countToDelete) {
+    await cursor.delete();
+    deleted++;
+    cursor = await cursor.continue();
   }
   await tx.done;
 }

@@ -37,9 +37,6 @@ export default function DashboardPage() {
     lastRefreshedAt: null,
   });
 
-  // Stores previous snapshot for notification diffing (Task 16)
-  const [_previousData, setPreviousData] = createSignal<DashboardData | null>(null);
-
   const initialTab = createMemo<TabId>(() => {
     if (config.rememberLastTab) {
       return viewState.lastActiveTab;
@@ -58,15 +55,6 @@ export default function DashboardPage() {
     setDashboardData("loading", true);
     try {
       const data = await fetchAllData();
-      // Save previous snapshot before updating (for Task 16 notification diffing)
-      setPreviousData({
-        issues: dashboardData.issues,
-        pullRequests: dashboardData.pullRequests,
-        workflowRuns: dashboardData.workflowRuns,
-        errors: dashboardData.errors,
-        loading: dashboardData.loading,
-        lastRefreshedAt: dashboardData.lastRefreshedAt,
-      });
       setDashboardData({
         issues: data.issues,
         pullRequests: data.pullRequests,
