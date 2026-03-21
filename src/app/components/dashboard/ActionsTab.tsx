@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import type { WorkflowRun } from "../../services/api";
+import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, ignoreItem, unignoreItem } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
@@ -8,7 +8,7 @@ import IgnoreBadge from "./IgnoreBadge";
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
-  error?: string | null;
+  errors?: ApiError[];
 }
 
 interface WorkflowGroup {
@@ -163,16 +163,18 @@ export default function ActionsTab(props: ActionsTabProps) {
       </Show>
 
       {/* Error */}
-      <Show when={!props.loading && props.error}>
+      <Show when={!props.loading && props.errors && props.errors.length > 0}>
         <div class="p-8 text-center">
-          <p class="text-sm text-red-600 dark:text-red-400">{props.error}</p>
+          <p class="text-sm text-red-600 dark:text-red-400">
+            {props.errors!.map((e) => `${e.repo}: ${e.message}`).join(", ")}
+          </p>
         </div>
       </Show>
 
       {/* Empty */}
       <Show
         when={
-          !props.loading && !props.error && repoGroups().length === 0
+          !props.loading && (!props.errors || props.errors.length === 0) && repoGroups().length === 0
         }
       >
         <div class="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -181,7 +183,7 @@ export default function ActionsTab(props: ActionsTabProps) {
       </Show>
 
       {/* Repo groups */}
-      <Show when={!props.loading && !props.error && repoGroups().length > 0}>
+      <Show when={!props.loading && repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isRepoCollapsed = () =>

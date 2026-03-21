@@ -6,6 +6,8 @@ import TabBar from "../layout/TabBar";
 import { TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
+import IssuesTab from "./IssuesTab";
+import PullRequestsTab from "./PullRequestsTab";
 import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
@@ -21,36 +23,6 @@ interface DashboardData {
   errors: ApiError[];
   loading: boolean;
   lastRefreshedAt: Date | null;
-}
-
-// IssuesTab is implemented by Task 11 (parallel). Use lazy import so this
-// compiles even if the file doesn't exist yet.
-let IssuesTabComponent: (() => import("solid-js").JSX.Element) | null = null;
-try {
-  // Dynamic require so TypeScript won't error on a missing module path
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = (await import("./IssuesTab")) as any;
-  IssuesTabComponent = mod.default as () => import("solid-js").JSX.Element;
-} catch {
-  // Task 11 not yet landed — fall through to placeholder
-}
-
-function IssuesPlaceholder() {
-  return (
-    <div class="p-8 text-center text-gray-500 dark:text-gray-400">
-      <p class="text-lg font-medium">Issues</p>
-      <p class="text-sm mt-1">Issues tab coming soon (Task 11).</p>
-    </div>
-  );
-}
-
-function PullRequestsPlaceholder() {
-  return (
-    <div class="p-8 text-center text-gray-500 dark:text-gray-400">
-      <p class="text-lg font-medium">Pull Requests</p>
-      <p class="text-sm mt-1">Pull Requests tab coming soon (Task 12).</p>
-    </div>
-  );
 }
 
 export default function DashboardPage() {
@@ -161,19 +133,24 @@ export default function DashboardPage() {
         <main class="flex-1 overflow-auto">
           <Switch>
             <Match when={activeTab() === "issues"}>
-              {IssuesTabComponent ? (
-                <IssuesTabComponent />
-              ) : (
-                <IssuesPlaceholder />
-              )}
+              <IssuesTab
+                issues={dashboardData.issues}
+                loading={dashboardData.loading}
+                errors={dashboardData.errors}
+              />
             </Match>
             <Match when={activeTab() === "pullRequests"}>
-              <PullRequestsPlaceholder />
+              <PullRequestsTab
+                pullRequests={dashboardData.pullRequests}
+                loading={dashboardData.loading}
+                errors={dashboardData.errors}
+              />
             </Match>
             <Match when={activeTab() === "actions"}>
               <ActionsTab
                 workflowRuns={dashboardData.workflowRuns}
                 loading={dashboardData.loading}
+                errors={dashboardData.errors}
               />
             </Match>
           </Switch>
