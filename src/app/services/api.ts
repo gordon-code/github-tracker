@@ -204,6 +204,11 @@ async function searchAllPages(
           `[api] Search results incomplete for: ${query.slice(0, 80)}…`
         );
       }
+      if (items.length >= 1000 && data.total_count > 1000) {
+        console.warn(
+          `[api] Search results capped at 1000 (${data.total_count} total) for: ${query.slice(0, 80)}…`
+        );
+      }
       break;
     }
     page++;
