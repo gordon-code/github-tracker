@@ -1,6 +1,7 @@
 import type { Config } from "../stores/config";
 import type { DashboardData } from "../services/poll";
 import type { Issue, PullRequest, WorkflowRun } from "../services/api";
+import { isSafeGitHubUrl } from "./url";
 
 // ── Permission management ─────────────────────────────────────────────────────
 
@@ -79,12 +80,6 @@ export function _resetNotificationState(): void {
   seenPrIds.clear();
   seenRunIds.clear();
   initialized = false;
-}
-
-// ── Safe URL validation (SDR-012) ─────────────────────────────────────────────
-
-function isSafeGitHubUrl(url: string): boolean {
-  return url.startsWith("https://github.com/");
 }
 
 // ── Notification dispatch ─────────────────────────────────────────────────────

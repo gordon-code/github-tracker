@@ -13,6 +13,7 @@ import {
   type ApiError,
 } from "./api";
 import { detectNewItems, dispatchNotifications } from "../lib/notifications";
+import { pushError, clearErrors } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,8 +104,16 @@ export function createPollCoordinator(
     try {
       const data = await fetchAll();
       setLastRefreshAt(new Date());
+      // Surface per-repo API errors globally
+      clearErrors();
+      for (const err of data.errors) {
+        pushError(err.repo, err.message, err.retryable);
+      }
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error during data fetch";
+      pushError("poll", message, true);
     } finally {
       setIsRefreshing(false);
     }

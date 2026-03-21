@@ -5,6 +5,9 @@ import type { PullRequest, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
+import SortIcon from "../shared/SortIcon";
+import ErrorBannerList from "../shared/ErrorBannerList";
+import PaginationControls from "../shared/PaginationControls";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -25,17 +28,6 @@ function checkStatusOrder(status: PullRequest["checkStatus"]): number {
     default:
       return 3;
   }
-}
-
-function SortIcon(props: { active: boolean; direction: "asc" | "desc" }) {
-  return (
-    <span
-      class={`inline-block ml-1 transition-opacity ${props.active ? "opacity-100" : "opacity-30"}`}
-      aria-hidden="true"
-    >
-      {props.direction === "asc" || !props.active ? "↑" : "↓"}
-    </span>
-  );
 }
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
@@ -132,36 +124,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Error banners */}
-      <Show when={props.errors && props.errors.length > 0}>
-        <div class="px-4 pt-3 space-y-1">
-          <For each={props.errors}>
-            {(err) => (
-              <div
-                role="alert"
-                class="flex items-center gap-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300"
-              >
-                <svg
-                  class="h-4 w-4 shrink-0"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                  aria-hidden="true"
-                >
-                  <path
-                    fill-rule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-                <span>
-                  <strong>{err.repo}:</strong> {err.message}
-                  {err.retryable && " (will retry)"}
-                </span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
+      <ErrorBannerList errors={props.errors} />
 
       {/* Column headers */}
       <div
@@ -268,41 +231,15 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         </Show>
       </Show>
 
-      {/* Pagination */}
-      <Show when={!props.loading && pageCount() > 1}>
-        <div class="flex items-center justify-between px-4 py-2 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-600 dark:text-gray-400">
-          <span>
-            Page {Math.min(page(), pageCount() - 1) + 1} of {pageCount()}
-            {" · "}
-            {filteredSorted().length} pull request{filteredSorted().length !== 1 ? "s" : ""}
-          </span>
-          <div class="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page() === 0}
-              class="px-3 py-1 rounded-md border border-gray-300 dark:border-gray-600
-                bg-white dark:bg-gray-800
-                hover:bg-gray-50 dark:hover:bg-gray-700
-                disabled:opacity-40 disabled:cursor-not-allowed
-                transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Previous page"
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(pageCount() - 1, p + 1))}
-              disabled={page() >= pageCount() - 1}
-              class="px-3 py-1 rounded-md border border-gray-300 dark:border-gray-600
-                bg-white dark:bg-gray-800
-                hover:bg-gray-50 dark:hover:bg-gray-700
-                disabled:opacity-40 disabled:cursor-not-allowed
-                transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-              aria-label="Next page"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+      <Show when={!props.loading}>
+        <PaginationControls
+          page={page()}
+          pageCount={pageCount()}
+          totalItems={filteredSorted().length}
+          itemLabel="pull request"
+          onPrev={() => setPage((p) => Math.max(0, p - 1))}
+          onNext={() => setPage((p) => Math.min(pageCount() - 1, p + 1))}
+        />
       </Show>
     </div>
   );

@@ -1,7 +1,6 @@
 import { createSignal, createResource, For, Show } from "solid-js";
 import { fetchOrgs, OrgEntry } from "../../services/api";
 import { getClient } from "../../services/github";
-import { config } from "../../stores/config";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 
@@ -104,11 +103,6 @@ export default function OrgSelector(props: OrgSelectorProps) {
           <ul class="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
             <For each={filteredOrgs()}>
               {(org) => {
-                const preChecked =
-                  config.selectedOrgs.length === 0
-                    ? false
-                    : config.selectedOrgs.includes(org.login);
-                void preChecked;
                 return (
                   <li>
                     <label class="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">

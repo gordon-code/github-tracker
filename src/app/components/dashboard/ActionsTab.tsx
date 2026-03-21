@@ -1,9 +1,10 @@
-import { createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, ignoreItem, unignoreItem } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
+import ErrorBannerList from "../shared/ErrorBannerList";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -99,7 +100,7 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   }
 
-  const filteredRuns = () => {
+  const filteredRuns = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
     const ignoredIds = new Set(viewState.ignoredItems.map((i) => i.id));
 
@@ -110,9 +111,9 @@ export default function ActionsTab(props: ActionsTabProps) {
       if (repo && run.repoFullName !== repo) return false;
       return true;
     });
-  };
+  });
 
-  const repoGroups = () => groupRuns(filteredRuns());
+  const repoGroups = createMemo(() => groupRuns(filteredRuns()));
 
   return (
     <div class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -163,12 +164,8 @@ export default function ActionsTab(props: ActionsTabProps) {
       </Show>
 
       {/* Error */}
-      <Show when={!props.loading && props.errors && props.errors.length > 0}>
-        <div class="p-8 text-center">
-          <p class="text-sm text-red-600 dark:text-red-400">
-            {props.errors!.map((e) => `${e.repo}: ${e.message}`).join(", ")}
-          </p>
-        </div>
+      <Show when={!props.loading}>
+        <ErrorBannerList errors={props.errors} />
       </Show>
 
       {/* Empty */}

@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { createStore } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 import { createEffect } from "solid-js";
-import { produce } from "solid-js/store";
 
 const STORAGE_KEY = "github-tracker:config";
 

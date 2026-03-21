@@ -1,4 +1,6 @@
-import { JSX, Show } from "solid-js";
+import { For, JSX, Show } from "solid-js";
+import { openGitHubUrl } from "../../lib/url";
+import { relativeTime, labelTextColor } from "../../lib/format";
 
 export interface ItemRowProps {
   repo: string;
@@ -13,42 +15,13 @@ export interface ItemRowProps {
   density: "compact" | "comfortable";
 }
 
-function relativeTime(isoString: string): string {
-  const now = Date.now();
-  const then = new Date(isoString).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-  if (diffSec < 60) return rtf.format(-diffSec, "second");
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return rtf.format(-diffMin, "minute");
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return rtf.format(-diffHr, "hour");
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return rtf.format(-diffDay, "day");
-  const diffMonth = Math.floor(diffDay / 30);
-  if (diffMonth < 12) return rtf.format(-diffMonth, "month");
-  return rtf.format(-Math.floor(diffMonth / 12), "year");
-}
-
-function labelTextColor(hexColor: string): string {
-  const r = parseInt(hexColor.slice(0, 2), 16);
-  const g = parseInt(hexColor.slice(2, 4), 16);
-  const b = parseInt(hexColor.slice(4, 6), 16);
-  // Perceived luminance
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.5 ? "#000000" : "#ffffff";
-}
-
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
 
   function handleRowClick(e: MouseEvent) {
     // Only open if click was not on the ignore button
     if ((e.target as HTMLElement).closest("[data-ignore-btn]")) return;
-    window.open(props.url, "_blank", "noopener,noreferrer");
+    openGitHubUrl(props.url);
   }
 
   return (
@@ -59,7 +32,7 @@ export default function ItemRow(props: ItemRowProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          window.open(props.url, "_blank", "noopener,noreferrer");
+          openGitHubUrl(props.url);
         }
       }}
       class={`group relative flex items-start gap-3 cursor-pointer
@@ -92,18 +65,20 @@ export default function ItemRow(props: ItemRowProps) {
         {/* Labels row */}
         <Show when={props.labels.length > 0}>
           <div class={`flex flex-wrap gap-1 ${isCompact() ? "mt-0.5" : "mt-1"}`}>
-            {props.labels.map((label) => {
-              const bg = `#${label.color}`;
-              const fg = labelTextColor(label.color);
-              return (
-                <span
-                  class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium"
-                  style={{ "background-color": bg, color: fg }}
-                >
-                  {label.name}
-                </span>
-              );
-            })}
+            <For each={props.labels}>
+              {(label) => {
+                const bg = `#${label.color}`;
+                const fg = labelTextColor(label.color);
+                return (
+                  <span
+                    class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium"
+                    style={{ "background-color": bg, color: fg }}
+                  >
+                    {label.name}
+                  </span>
+                );
+              }}
+            </For>
           </div>
         </Show>
 

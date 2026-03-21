@@ -326,6 +326,9 @@ export async function fetchIssues(
 
 // ── Step 4: fetchPullRequests ────────────────────────────────────────────────
 
+// Cache check-status per SHA for 2 minutes — completed checks rarely change
+const CHECK_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
+
 async function fetchCheckStatus(
   octokit: NonNullable<ReturnType<typeof getClient>>,
   owner: string,
@@ -339,13 +342,15 @@ async function fetchCheckStatus(
       octokit,
       `${cacheKey}:status`,
       "GET /repos/{owner}/{repo}/commits/{ref}/status",
-      { owner, repo, ref: sha }
+      { owner, repo, ref: sha },
+      CHECK_STATUS_MAX_AGE_MS
     ),
     cachedRequest(
       octokit,
       `${cacheKey}:check-runs`,
       "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-      { owner, repo, ref: sha, per_page: 100 }
+      { owner, repo, ref: sha, per_page: 100 },
+      CHECK_STATUS_MAX_AGE_MS
     ),
   ]);
 

@@ -1,4 +1,4 @@
-import { createMemo, For } from "solid-js";
+import { createMemo, createSignal, For, onCleanup } from "solid-js";
 import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
 
@@ -9,6 +9,10 @@ interface FilterBarProps {
 }
 
 export default function FilterBar(props: FilterBarProps) {
+  const [tick, setTick] = createSignal(0);
+  const tickTimer = setInterval(() => setTick((t) => t + 1), 30_000);
+  onCleanup(() => clearInterval(tickTimer));
+
   const orgs = createMemo(() => config.selectedOrgs);
 
   const repos = createMemo(() => {
@@ -31,6 +35,7 @@ export default function FilterBar(props: FilterBarProps) {
   }
 
   const updatedLabel = createMemo(() => {
+    tick(); // Force recompute every 30s
     if (props.isRefreshing) return "Refreshing...";
     if (!props.lastRefreshedAt) return null;
     const diffMs = Date.now() - props.lastRefreshedAt.getTime();
