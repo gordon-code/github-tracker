@@ -25,6 +25,9 @@ async function setupAuth(page: Page) {
   await page.route("https://api.github.com/notifications*", (route) =>
     route.fulfill({ status: 200, json: [] })
   );
+  await page.route("https://api.github.com/graphql", (route) =>
+    route.fulfill({ status: 200, json: { data: {} } })
+  );
 
   await page.addInitScript(() => {
     localStorage.setItem(

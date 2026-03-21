@@ -34,6 +34,9 @@ async function setupAuth(page: Page) {
   await page.route("https://api.github.com/notifications*", (route) =>
     route.fulfill({ status: 200, json: [] })
   );
+  await page.route("https://api.github.com/graphql", (route) =>
+    route.fulfill({ status: 200, json: { data: {} } })
+  );
 
   // Inject auth token + config into localStorage before page load.
   // This runs before the app initialises, so readStoredTokens() will find the token.
