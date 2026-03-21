@@ -1,0 +1,35 @@
+{
+  "total_count": 1,
+  "incomplete_results": false,
+  "items": [
+    {
+      "id": 1001,
+      "number": 10,
+      "title": "Fix: resolve null pointer on startup",
+      "state": "open",
+      "html_url": "https://github.com/octocat/Hello-World/pull/10",
+      "created_at": "2024-01-08T10:00:00Z",
+      "updated_at": "2024-01-09T12:00:00Z",
+      "user": {
+        "login": "octocat",
+        "id": 1,
+        "avatar_url": "https://github.com/images/error/octocat_happy.gif"
+      },
+      "labels": [],
+      "assignees": [
+        { "login": "octocat", "id": 1 }
+      ],
+      "repository": {
+        "full_name": "octocat/Hello-World"
+      },
+      "pull_request": {
+        "url": "https://api.github.com/repos/octocat/Hello-World/pulls/10",
+        "html_url": "https://github.com/octocat/Hello-World/pull/10",
+        "diff_url": "https://github.com/octocat/Hello-World/pull/10.diff",
+        "patch_url": "https://github.com/octocat/Hello-World/pull/10.patch",
+        "merged_at": null
+      },
+      "draft": false
+    }
+  ]
+}

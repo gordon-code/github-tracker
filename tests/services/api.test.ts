@@ -13,7 +13,8 @@ import { clearCache } from "../../src/app/stores/cache";
 
 import orgsFixture from "../fixtures/github-orgs.json";
 import reposFixture from "../fixtures/github-repos.json";
-import issuesFixture from "../fixtures/github-issues.json";
+import searchIssuesFixture from "../fixtures/github-search-issues.json";
+import searchPrsFixture from "../fixtures/github-search-prs.json";
 import prsFixture from "../fixtures/github-prs.json";
 import runsFixture from "../fixtures/github-runs.json";
 
@@ -129,19 +130,84 @@ describe("fetchRepos", () => {
   });
 });
 
-// ── fetchIssues ───────────────────────────────────────────────────────────────
+// ── fetchIssues (Search API) ─────────────────────────────────────────────────
 
 describe("fetchIssues", () => {
-  it("deduplicates issues across involvement types", async () => {
-    // Return the same issue fixture from all 3 involvement calls
-    const singleIssue = [issuesFixture[0]];
-    const octokit = {
-      request: vi.fn().mockResolvedValue({
-        data: singleIssue,
-        headers: { etag: "etag-issues" },
+  function makeSearchOctokit(searchData?: unknown) {
+    return {
+      request: vi.fn(async (route: string) => {
+        if (route === "GET /search/issues") {
+          return {
+            data: searchData ?? searchIssuesFixture,
+            headers: {},
+          };
+        }
+        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
       }),
       paginate: { iterator: vi.fn() },
     };
+  }
+
+  it("returns issues from search results", async () => {
+    const octokit = makeSearchOctokit();
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(result.length).toBe(searchIssuesFixture.items.length);
+    expect(result[0].id).toBe(searchIssuesFixture.items[0].id);
+  });
+
+  it("uses the Search API with involves qualifier", async () => {
+    const octokit = makeSearchOctokit();
+    await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(octokit.request).toHaveBeenCalledWith(
+      "GET /search/issues",
+      expect.objectContaining({
+        q: expect.stringContaining("involves:octocat"),
+      })
+    );
+    expect(octokit.request).toHaveBeenCalledWith(
+      "GET /search/issues",
+      expect.objectContaining({
+        q: expect.stringContaining("is:issue"),
+      })
+    );
+  });
+
+  it("includes repo qualifiers in search query", async () => {
+    const octokit = makeSearchOctokit();
+    await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(octokit.request).toHaveBeenCalledWith(
+      "GET /search/issues",
+      expect.objectContaining({
+        q: expect.stringContaining("repo:octocat/Hello-World"),
+      })
+    );
+  });
+
+  it("filters out items with pull_request field", async () => {
+    const withPR = {
+      total_count: 2,
+      incomplete_results: false,
+      items: [
+        searchIssuesFixture.items[0],
+        { ...searchIssuesFixture.items[1], pull_request: { url: "https://..." } },
+      ],
+    };
+    const octokit = makeSearchOctokit(withPR);
 
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -149,44 +215,12 @@ describe("fetchIssues", () => {
       "octocat"
     );
 
-    // Even though called 3 times (creator/assignee/mentioned), only 1 unique issue
     expect(result.length).toBe(1);
-    expect(result[0].id).toBe(issuesFixture[0].id);
+    expect(result[0].id).toBe(searchIssuesFixture.items[0].id);
   });
 
-  it("filters out pull requests (items with pull_request property)", async () => {
-    const mixedData = [
-      issuesFixture[0],
-      { ...issuesFixture[1], pull_request: { url: "https://..." } },
-    ];
-    const octokit = {
-      request: vi.fn().mockResolvedValue({
-        data: mixedData,
-        headers: { etag: "etag-mixed" },
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(result.every((i) => !("pull_request" in i))).toBe(true);
-    // Only the non-PR item should be in results
-    expect(result.find((i) => i.id === issuesFixture[1].id)).toBeUndefined();
-  });
-
-  it("maps raw fields to camelCase issue shape", async () => {
-    const octokit = {
-      request: vi.fn().mockResolvedValue({
-        data: [issuesFixture[0]],
-        headers: { etag: "etag-shape" },
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
+  it("maps search result fields to camelCase issue shape", async () => {
+    const octokit = makeSearchOctokit();
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
@@ -200,28 +234,64 @@ describe("fetchIssues", () => {
     expect(issue.userLogin).toBeDefined();
     expect(issue.userAvatarUrl).toBeDefined();
     expect(issue.assigneeLogins).toBeDefined();
-    expect(issue.repoFullName).toBeDefined();
+    expect(issue.repoFullName).toBe("octocat/Hello-World");
   });
 
-  it("uses Promise.allSettled — partial failures do not throw", async () => {
-    const octokit = {
-      request: vi
-        .fn()
-        .mockRejectedValueOnce(Object.assign(new Error("500"), { status: 500 }))
-        .mockResolvedValue({
-          data: [issuesFixture[0]],
-          headers: { etag: "etag-partial" },
-        }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    // Should not throw even if some calls fail
+  it("returns empty array when repos is empty", async () => {
+    const octokit = makeSearchOctokit();
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
+      [],
       "octocat"
     );
-    expect(Array.isArray(result)).toBe(true);
+
+    expect(result).toEqual([]);
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it("batches repos into chunks of 30", async () => {
+    // Create 35 repos to force 2 batches
+    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+
+    const octokit = makeSearchOctokit();
+    await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      repos,
+      "octocat"
+    );
+
+    // Should make 2 search calls (30 + 5)
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates issues across batches", async () => {
+    // Same item returned by both batch calls
+    const sameItem = searchIssuesFixture.items[0];
+    const searchData = {
+      total_count: 1,
+      incomplete_results: false,
+      items: [sameItem],
+    };
+
+    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+
+    const octokit = makeSearchOctokit(searchData);
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      repos,
+      "octocat"
+    );
+
+    // Should deduplicate: only 1 issue even though returned by 2 batches
+    expect(result.length).toBe(1);
   });
 
   it("throws when octokit is null", async () => {
@@ -231,13 +301,16 @@ describe("fetchIssues", () => {
   });
 });
 
-// ── fetchPullRequests ─────────────────────────────────────────────────────────
+// ── fetchPullRequests (Search API + individual PR detail) ────────────────────
 
 describe("fetchPullRequests", () => {
   function makeOctokitForPRs() {
     const request = vi.fn(async (route: string) => {
-      if (route === "GET /repos/{owner}/{repo}/pulls") {
-        return { data: prsFixture, headers: { etag: "etag-prs" } };
+      if (route === "GET /search/issues") {
+        return { data: searchPrsFixture, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
       }
       if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
         return {
@@ -251,24 +324,44 @@ describe("fetchPullRequests", () => {
           headers: { etag: "etag-checks" },
         };
       }
-      return { data: [], headers: {} };
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
     });
     return { request, paginate: { iterator: vi.fn() } };
   }
 
-  it("returns only PRs involving the user", async () => {
+  it("uses search API with involves and review-requested qualifiers", async () => {
     const octokit = makeOctokitForPRs();
 
-    const result = await fetchPullRequests(
+    await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    // PR #10 is by octocat, so it should be included
-    expect(result.some((pr) => pr.number === 10)).toBe(true);
-    // PR #11 is by devuser (not octocat), not assigned, not reviewer → excluded
-    expect(result.some((pr) => pr.number === 11)).toBe(false);
+    // Should make 2 search calls: involves + review-requested
+    const searchCalls = octokit.request.mock.calls.filter(
+      (c) => c[0] === "GET /search/issues"
+    );
+    expect(searchCalls.length).toBe(2);
+
+    const queries = searchCalls.map((c) => ((c as unknown[])[1] as { q: string }).q);
+    expect(queries.some((q) => q.includes("involves:octocat"))).toBe(true);
+    expect(queries.some((q) => q.includes("review-requested:octocat"))).toBe(true);
+  });
+
+  it("fetches full PR details for each search result", async () => {
+    const octokit = makeOctokitForPRs();
+
+    await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    const prDetailCalls = octokit.request.mock.calls.filter(
+      (c) => c[0] === "GET /repos/{owner}/{repo}/pulls/{pull_number}"
+    );
+    expect(prDetailCalls.length).toBe(1); // 1 unique PR in fixture
   });
 
   it("attaches check status to each PR", async () => {
@@ -286,7 +379,7 @@ describe("fetchPullRequests", () => {
     }
   });
 
-  it("maps raw PR fields to camelCase shape", async () => {
+  it("maps PR detail fields to camelCase shape", async () => {
     const octokit = makeOctokitForPRs();
 
     const result = await fetchPullRequests(
@@ -313,6 +406,30 @@ describe("fetchPullRequests", () => {
     });
   });
 
+  it("deduplicates PRs found by both involves and review-requested", async () => {
+    // Both search queries return the same PR
+    const octokit = makeOctokitForPRs();
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Only 1 PR despite being found by potentially both search queries
+    expect(result.length).toBe(1);
+  });
+
+  it("returns empty array when repos is empty", async () => {
+    const octokit = makeOctokitForPRs();
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [],
+      "octocat"
+    );
+    expect(result).toEqual([]);
+  });
+
   it("throws when octokit is null", async () => {
     await expect(
       fetchPullRequests(null, [testRepo], "octocat")
@@ -320,24 +437,12 @@ describe("fetchPullRequests", () => {
   });
 });
 
-// ── fetchWorkflowRuns ─────────────────────────────────────────────────────────
+// ── fetchWorkflowRuns (single endpoint per repo) ────────────────────────────
 
 describe("fetchWorkflowRuns", () => {
   function makeOctokitForRuns() {
     const request = vi.fn(async (route: string) => {
-      if (route === "GET /repos/{owner}/{repo}/actions/workflows") {
-        return {
-          data: {
-            workflows: runsFixture.workflows,
-            total_count: runsFixture.workflows.length,
-          },
-          headers: { etag: "etag-workflows" },
-        };
-      }
-      if (
-        route ===
-        "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
-      ) {
+      if (route === "GET /repos/{owner}/{repo}/actions/runs") {
         return {
           data: {
             workflow_runs: runsFixture.runs,
@@ -351,7 +456,7 @@ describe("fetchWorkflowRuns", () => {
     return { request, paginate: { iterator: vi.fn() } };
   }
 
-  it("returns runs for each repo and workflow", async () => {
+  it("returns runs grouped by workflow", async () => {
     const octokit = makeOctokitForRuns();
 
     const result = await fetchWorkflowRuns(
@@ -365,11 +470,33 @@ describe("fetchWorkflowRuns", () => {
     expect(result.length).toBeGreaterThan(0);
   });
 
+  it("uses single actions/runs endpoint per repo", async () => {
+    const octokit = makeOctokitForRuns();
+
+    await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      5,
+      3
+    );
+
+    // Should make exactly 1 API call (not separate workflows + per-workflow runs)
+    expect(octokit.request).toHaveBeenCalledTimes(1);
+    expect(octokit.request).toHaveBeenCalledWith(
+      "GET /repos/{owner}/{repo}/actions/runs",
+      expect.objectContaining({
+        owner: "octocat",
+        repo: "Hello-World",
+        per_page: 100,
+      })
+    );
+  });
+
   it("respects maxRuns per workflow", async () => {
     const octokit = makeOctokitForRuns();
 
     const maxWorkflows = 3;
-    const maxRuns = 2;
+    const maxRuns = 1;
     const result = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
@@ -377,8 +504,30 @@ describe("fetchWorkflowRuns", () => {
       maxRuns
     );
 
-    // Total runs should be at most maxWorkflows * maxRuns
-    expect(result.length).toBeLessThanOrEqual(maxWorkflows * maxRuns);
+    // Group result by workflowId and check each has at most maxRuns
+    const byWorkflow = new Map<number, number>();
+    for (const run of result) {
+      byWorkflow.set(run.workflowId, (byWorkflow.get(run.workflowId) ?? 0) + 1);
+    }
+    for (const count of byWorkflow.values()) {
+      expect(count).toBeLessThanOrEqual(maxRuns);
+    }
+  });
+
+  it("respects maxWorkflows limit", async () => {
+    const octokit = makeOctokitForRuns();
+
+    const maxWorkflows = 1;
+    const result = await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      maxWorkflows,
+      10
+    );
+
+    // All runs should be from a single workflow
+    const workflowIds = new Set(result.map((r) => r.workflowId));
+    expect(workflowIds.size).toBeLessThanOrEqual(maxWorkflows);
   });
 
   it("tags PR-triggered runs with isPrRun=true", async () => {
