@@ -609,15 +609,13 @@ describe("fetchWorkflowRuns", () => {
 
     // Run 9003 has event: "pull_request"
     const prRun = result.find((r) => r.id === 9003);
-    if (prRun) {
-      expect(prRun.isPrRun).toBe(true);
-    }
+    expect(prRun).toBeDefined();
+    expect(prRun!.isPrRun).toBe(true);
 
     // Run 9001 has event: "push"
     const pushRun = result.find((r) => r.id === 9001);
-    if (pushRun) {
-      expect(pushRun.isPrRun).toBe(false);
-    }
+    expect(pushRun).toBeDefined();
+    expect(pushRun!.isPrRun).toBe(false);
   });
 
   it("maps raw run fields to camelCase shape", async () => {

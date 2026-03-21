@@ -155,6 +155,9 @@ interface RawSearchItem {
 // Batch repos into chunks for search queries (keeps URL length manageable)
 const SEARCH_REPO_BATCH_SIZE = 30;
 
+// Max PRs per GraphQL batch (keeps query complexity low)
+const GRAPHQL_CHECK_BATCH_SIZE = 50;
+
 // ── Search helpers ───────────────────────────────────────────────────────────
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -231,7 +234,10 @@ async function batchedSearch(
   const items: RawSearchItem[] = [];
 
   for (const result of results) {
-    if (result.status !== "fulfilled") continue;
+    if (result.status !== "fulfilled") {
+      console.warn("[api] Search batch chunk failed:", result.reason);
+      continue;
+    }
     for (const item of result.value) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
@@ -357,9 +363,6 @@ export async function fetchIssues(
 
 // ── Step 4: fetchPullRequests (Search API + GraphQL check status) ─────────────
 
-// Max PRs per GraphQL batch (keeps query complexity low)
-const GRAPHQL_CHECK_BATCH_SIZE = 50;
-
 /**
  * Batches check status lookups into a single GraphQL call using
  * `statusCheckRollup.state`, which combines both legacy commit status API
@@ -376,10 +379,10 @@ async function batchFetchCheckStatuses(
 
   const results = new Map<string, CheckStatus["status"]>();
 
-  // Batch into chunks to stay within GraphQL complexity limits
+  // Batch into chunks and run in parallel
   const chunks = chunkArray(prs, GRAPHQL_CHECK_BATCH_SIZE);
 
-  for (const chunk of chunks) {
+  const chunkTasks = chunks.map(async (chunk) => {
     const varDefs: string[] = [];
     const variables: Record<string, string> = {};
     const fragments: string[] = [];
@@ -421,24 +424,27 @@ async function batchFetchCheckStatuses(
       for (let i = 0; i < chunk.length; i++) {
         const data = response[`pr${i}`];
         const state = data?.object?.statusCheckRollup?.state ?? null;
+        const key = `${chunk[i].owner}/${chunk[i].repo}:${chunk[i].sha}`;
 
         if (state === "FAILURE" || state === "ERROR") {
-          results.set(chunk[i].sha, "failure");
+          results.set(key, "failure");
         } else if (state === "PENDING" || state === "EXPECTED") {
-          results.set(chunk[i].sha, "pending");
+          results.set(key, "pending");
         } else if (state === "SUCCESS") {
-          results.set(chunk[i].sha, "success");
+          results.set(key, "success");
         } else {
-          results.set(chunk[i].sha, null);
+          results.set(key, null);
         }
       }
-    } catch {
-      // GraphQL failure — fall back to null for all PRs in this batch
+    } catch (err) {
+      console.warn("[api] GraphQL check status batch failed:", err);
       for (const pr of chunk) {
-        results.set(pr.sha, null);
+        results.set(`${pr.owner}/${pr.repo}:${pr.sha}`, null);
       }
     }
-  }
+  });
+
+  await Promise.allSettled(chunkTasks);
 
   return results;
 }
@@ -487,7 +493,9 @@ export async function fetchPullRequests(
   }
 
   // Fetch full PR details for each (head SHA, branch info, reviewers)
-  const prDetailTasks = uniqueItems.map(async (item) => {
+  const prDetailTasks = uniqueItems
+    .filter((item) => item.repository.full_name.includes("/"))
+    .map(async (item) => {
     const repoFullName = item.repository.full_name;
     const [owner, name] = repoFullName.split("/");
 
@@ -538,7 +546,7 @@ export async function fetchPullRequests(
     assigneeLogins: pr.assignees.map((a) => a.login),
     reviewerLogins: pr.requested_reviewers.map((r) => r.login),
     repoFullName,
-    checkStatus: checkStatuses.get(pr.head.sha) ?? null,
+    checkStatus: checkStatuses.get(`${repoFullName}:${pr.head.sha}`) ?? null,
   }));
 }
 
@@ -591,8 +599,8 @@ export async function fetchWorkflowRuns(
     // Sort workflows by most recent run, take top N
     const topWorkflows = [...byWorkflow.entries()]
       .sort(([, a], [, b]) => {
-        const latestA = new Date(a[0].updated_at).getTime();
-        const latestB = new Date(b[0].updated_at).getTime();
+        const latestA = Math.max(...a.map((r) => new Date(r.updated_at).getTime()));
+        const latestB = Math.max(...b.map((r) => new Date(r.updated_at).getTime()));
         return latestB - latestA;
       })
       .slice(0, maxWorkflows);
