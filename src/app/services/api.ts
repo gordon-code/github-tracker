@@ -112,21 +112,6 @@ interface RawPullRequest {
   requested_reviewers: { login: string }[];
 }
 
-interface RawCommitStatus {
-  state: string;
-  statuses: { state: string }[];
-  total_count: number;
-}
-
-interface RawCheckRun {
-  status: string;
-  conclusion: string | null;
-}
-
-interface RawCheckRuns {
-  total_count: number;
-  check_runs: RawCheckRun[];
-}
 
 interface RawWorkflowRun {
   id: number;
@@ -171,8 +156,6 @@ interface RawSearchItem {
 // Batch repos into chunks for search queries (keeps URL length manageable)
 const SEARCH_REPO_BATCH_SIZE = 30;
 
-// Cache check-status per SHA for 2 minutes — completed checks rarely change
-const CHECK_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
 
 // ── Search helpers ───────────────────────────────────────────────────────────
 
@@ -374,7 +357,93 @@ export async function fetchIssues(
     }));
 }
 
-// ── Step 4: fetchPullRequests (Search API + individual PR detail) ─────────────
+// ── Step 4: fetchPullRequests (Search API + GraphQL check status) ─────────────
+
+// Max PRs per GraphQL batch (keeps query complexity low)
+const GRAPHQL_CHECK_BATCH_SIZE = 50;
+
+/**
+ * Batches check status lookups into a single GraphQL call using
+ * `statusCheckRollup.state`, which combines both legacy commit status API
+ * and modern check runs into one field.
+ *
+ * Replaces 2N REST calls (commit status + check runs) with 1 GraphQL call.
+ * Uses parameterized variables to prevent injection.
+ */
+async function batchFetchCheckStatuses(
+  octokit: NonNullable<ReturnType<typeof getClient>>,
+  prs: { owner: string; repo: string; sha: string }[]
+): Promise<Map<string, CheckStatus["status"]>> {
+  if (prs.length === 0) return new Map();
+
+  const results = new Map<string, CheckStatus["status"]>();
+
+  // Batch into chunks to stay within GraphQL complexity limits
+  const chunks = chunkArray(prs, GRAPHQL_CHECK_BATCH_SIZE);
+
+  for (const chunk of chunks) {
+    const varDefs: string[] = [];
+    const variables: Record<string, string> = {};
+    const fragments: string[] = [];
+
+    for (let i = 0; i < chunk.length; i++) {
+      varDefs.push(
+        `$owner${i}: String!`,
+        `$repo${i}: String!`,
+        `$sha${i}: String!`
+      );
+      variables[`owner${i}`] = chunk[i].owner;
+      variables[`repo${i}`] = chunk[i].repo;
+      variables[`sha${i}`] = chunk[i].sha;
+      fragments.push(
+        `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
+          object(expression: $sha${i}) {
+            ... on Commit {
+              statusCheckRollup {
+                state
+              }
+            }
+          }
+        }`
+      );
+    }
+
+    const query = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\n}`;
+
+    try {
+      const response = (await octokit.graphql(query, variables)) as Record<
+        string,
+        {
+          object: {
+            statusCheckRollup: { state: string } | null;
+          } | null;
+        } | null
+      >;
+
+      for (let i = 0; i < chunk.length; i++) {
+        const data = response[`pr${i}`];
+        const state = data?.object?.statusCheckRollup?.state ?? null;
+
+        if (state === "FAILURE" || state === "ERROR") {
+          results.set(chunk[i].sha, "failure");
+        } else if (state === "PENDING" || state === "EXPECTED") {
+          results.set(chunk[i].sha, "pending");
+        } else if (state === "SUCCESS") {
+          results.set(chunk[i].sha, "success");
+        } else {
+          results.set(chunk[i].sha, null);
+        }
+      }
+    } catch {
+      // GraphQL failure — fall back to null for all PRs in this batch
+      for (const pr of chunk) {
+        results.set(pr.sha, null);
+      }
+    }
+  }
+
+  return results;
+}
 
 /**
  * Fetches open PRs involving the user using the GitHub Search API.
@@ -382,10 +451,11 @@ export async function fetchIssues(
  * - `involves:user` → author, assignee, mentioned, commenter
  * - `review-requested:user` → requested reviewer (not covered by `involves`)
  *
- * For each found PR, fetches full PR details (head SHA, reviewers) and check status.
+ * For each found PR, fetches full PR details (head SHA, reviewers) via REST,
+ * then batches ALL check statuses into a single GraphQL call.
  *
  * Before: 1 API call per repo (list all PRs) + 2 per involved PR = 75+2N for 75 repos.
- * After:  ~6 search calls + N PR detail + 2N check status = 6+3N.
+ * After:  ~6 search + N PR detail + 1 GraphQL = 7+N.
  */
 export async function fetchPullRequests(
   octokit: ReturnType<typeof getClient>,
@@ -435,118 +505,43 @@ export async function fetchPullRequests(
 
   const prDetails = await Promise.allSettled(prDetailTasks);
 
-  // For each PR, fetch check status and build result
-  const pullRequests = await Promise.all(
-    prDetails
-      .filter(
-        (r): r is PromiseFulfilledResult<{
-          pr: RawPullRequest;
-          repoFullName: string;
-        }> => r.status === "fulfilled"
-      )
-      .map(async ({ value: { pr, repoFullName } }) => {
-        const [owner, repo] = repoFullName.split("/");
+  const successfulPRs = prDetails
+    .filter(
+      (r): r is PromiseFulfilledResult<{
+        pr: RawPullRequest;
+        repoFullName: string;
+      }> => r.status === "fulfilled"
+    )
+    .map((r) => r.value);
 
-        const checkStatus = await fetchCheckStatus(
-          octokit,
-          owner,
-          repo,
-          pr.head.sha
-        ).catch(() => null as CheckStatus["status"]);
+  // Batch ALL check statuses into a single GraphQL call
+  const checkInputs = successfulPRs.map(({ pr, repoFullName }) => {
+    const [owner, repo] = repoFullName.split("/");
+    return { owner, repo, sha: pr.head.sha };
+  });
 
-        return {
-          id: pr.id,
-          number: pr.number,
-          title: pr.title,
-          state: pr.state,
-          draft: pr.draft,
-          htmlUrl: pr.html_url,
-          createdAt: pr.created_at,
-          updatedAt: pr.updated_at,
-          userLogin: pr.user?.login ?? "",
-          userAvatarUrl: pr.user?.avatar_url ?? "",
-          headSha: pr.head.sha,
-          headRef: pr.head.ref,
-          baseRef: pr.base.ref,
-          assigneeLogins: pr.assignees.map((a) => a.login),
-          reviewerLogins: pr.requested_reviewers.map((r) => r.login),
-          repoFullName,
-          checkStatus,
-        } satisfies PullRequest;
-      })
-  );
+  const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);
 
-  return pullRequests;
-}
-
-// ── Check status (used by fetchPullRequests) ─────────────────────────────────
-
-async function fetchCheckStatus(
-  octokit: NonNullable<ReturnType<typeof getClient>>,
-  owner: string,
-  repo: string,
-  sha: string
-): Promise<CheckStatus["status"]> {
-  const cacheKey = `check-status:${owner}/${repo}:${sha}`;
-
-  const [statusResult, checkRunsResult] = await Promise.allSettled([
-    cachedRequest(
-      octokit,
-      `${cacheKey}:status`,
-      "GET /repos/{owner}/{repo}/commits/{ref}/status",
-      { owner, repo, ref: sha },
-      CHECK_STATUS_MAX_AGE_MS
-    ),
-    cachedRequest(
-      octokit,
-      `${cacheKey}:check-runs`,
-      "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-      { owner, repo, ref: sha, per_page: 100 },
-      CHECK_STATUS_MAX_AGE_MS
-    ),
-  ]);
-
-  let hasFailure = false;
-  let hasPending = false;
-  let hasSuccess = false;
-
-  // Legacy commit status
-  if (statusResult.status === "fulfilled") {
-    const status = statusResult.value.data as RawCommitStatus;
-    if (status.total_count > 0) {
-      if (status.state === "failure" || status.state === "error") {
-        hasFailure = true;
-      } else if (status.state === "pending") {
-        hasPending = true;
-      } else if (status.state === "success") {
-        hasSuccess = true;
-      }
-    }
-  }
-
-  // Modern GHA check runs
-  if (checkRunsResult.status === "fulfilled") {
-    const checks = checkRunsResult.value.data as RawCheckRuns;
-    for (const run of checks.check_runs) {
-      if (run.status !== "completed") {
-        hasPending = true;
-      } else if (
-        run.conclusion === "failure" ||
-        run.conclusion === "timed_out" ||
-        run.conclusion === "cancelled" ||
-        run.conclusion === "action_required"
-      ) {
-        hasFailure = true;
-      } else if (run.conclusion === "success") {
-        hasSuccess = true;
-      }
-    }
-  }
-
-  if (hasFailure) return "failure";
-  if (hasPending) return "pending";
-  if (hasSuccess) return "success";
-  return null;
+  // Build final PR objects
+  return successfulPRs.map(({ pr, repoFullName }) => ({
+    id: pr.id,
+    number: pr.number,
+    title: pr.title,
+    state: pr.state,
+    draft: pr.draft,
+    htmlUrl: pr.html_url,
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    userLogin: pr.user?.login ?? "",
+    userAvatarUrl: pr.user?.avatar_url ?? "",
+    headSha: pr.head.sha,
+    headRef: pr.head.ref,
+    baseRef: pr.base.ref,
+    assigneeLogins: pr.assignees.map((a) => a.login),
+    reviewerLogins: pr.requested_reviewers.map((r) => r.login),
+    repoFullName,
+    checkStatus: checkStatuses.get(pr.head.sha) ?? null,
+  }));
 }
 
 // ── Step 5: fetchWorkflowRuns (single endpoint per repo) ─────────────────────

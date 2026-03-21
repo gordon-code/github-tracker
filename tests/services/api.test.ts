@@ -312,21 +312,16 @@ describe("fetchPullRequests", () => {
       if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
         return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
       }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
-        return {
-          data: runsFixture.commit_status,
-          headers: { etag: "etag-status" },
-        };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
-        return {
-          data: runsFixture.check_runs,
-          headers: { etag: "etag-checks" },
-        };
-      }
       return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
     });
-    return { request, paginate: { iterator: vi.fn() } };
+    const graphql = vi.fn(async () => ({
+      pr0: {
+        object: {
+          statusCheckRollup: { state: "SUCCESS" },
+        },
+      },
+    }));
+    return { request, graphql, paginate: { iterator: vi.fn() } };
   }
 
   it("uses search API with involves and review-requested qualifiers", async () => {
@@ -364,7 +359,7 @@ describe("fetchPullRequests", () => {
     expect(prDetailCalls.length).toBe(1); // 1 unique PR in fixture
   });
 
-  it("attaches check status to each PR", async () => {
+  it("fetches check status via GraphQL batch call", async () => {
     const octokit = makeOctokitForPRs();
 
     const result = await fetchPullRequests(
@@ -373,10 +368,82 @@ describe("fetchPullRequests", () => {
       "octocat"
     );
 
+    // Should use GraphQL for check status, not REST
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    const graphqlQuery = (octokit.graphql.mock.calls as unknown[][])[0][0] as string;
+    expect(graphqlQuery).toContain("statusCheckRollup");
+
+    // No REST check status calls should be made
+    const restCheckCalls = octokit.request.mock.calls.filter(
+      (c) =>
+        c[0] === "GET /repos/{owner}/{repo}/commits/{ref}/status" ||
+        c[0] === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs"
+    );
+    expect(restCheckCalls.length).toBe(0);
+
+    // Check status should be mapped from GraphQL response
     for (const pr of result) {
-      // checkStatus is one of "success" | "failure" | "pending" | null
       expect(["success", "failure", "pending", null]).toContain(pr.checkStatus);
     }
+  });
+
+  it("maps GraphQL statusCheckRollup states correctly", async () => {
+    // Test FAILURE state
+    const octokitFailure = makeOctokitForPRs();
+    (octokitFailure as Record<string, unknown>).graphql = vi.fn(async () => ({
+      pr0: { object: { statusCheckRollup: { state: "FAILURE" } } },
+    }));
+    const failures = await fetchPullRequests(
+      octokitFailure as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+    expect(failures[0].checkStatus).toBe("failure");
+
+    await clearCache();
+
+    // Test PENDING state
+    const octokitPending = makeOctokitForPRs();
+    (octokitPending as Record<string, unknown>).graphql = vi.fn(async () => ({
+      pr0: { object: { statusCheckRollup: { state: "PENDING" } } },
+    }));
+    const pending = await fetchPullRequests(
+      octokitPending as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+    expect(pending[0].checkStatus).toBe("pending");
+
+    await clearCache();
+
+    // Test null (no checks)
+    const octokitNull = makeOctokitForPRs();
+    (octokitNull as Record<string, unknown>).graphql = vi.fn(async () => ({
+      pr0: { object: null },
+    }));
+    const nullChecks = await fetchPullRequests(
+      octokitNull as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+    expect(nullChecks[0].checkStatus).toBeNull();
+  });
+
+  it("falls back to null check status on GraphQL error", async () => {
+    const octokit = makeOctokitForPRs();
+    (octokit as Record<string, unknown>).graphql = vi.fn(async () => {
+      throw new Error("GraphQL error");
+    });
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Should still return PRs, just with null check status
+    expect(result.length).toBe(1);
+    expect(result[0].checkStatus).toBeNull();
   });
 
   it("maps PR detail fields to camelCase shape", async () => {
