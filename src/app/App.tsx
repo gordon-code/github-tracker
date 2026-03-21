@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show } from "solid-js";
-import { Router, Route } from "@solidjs/router";
+import { Router, Route, Navigate } from "@solidjs/router";
 import { token, isAuthenticated, validateToken } from "./stores/auth";
 import { config, initConfigPersistence } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
@@ -51,18 +51,13 @@ function RootRedirect() {
         </div>
       }
     >
-      {(() => {
-        if (!isAuthenticated()) {
-          window.location.replace("/login");
-          return null;
-        }
-        if (!config.onboardingComplete) {
-          window.location.replace("/onboarding");
-          return null;
-        }
-        window.location.replace("/dashboard");
-        return null;
-      })()}
+      {!isAuthenticated() ? (
+        <Navigate href="/login" />
+      ) : !config.onboardingComplete ? (
+        <Navigate href="/onboarding" />
+      ) : (
+        <Navigate href="/dashboard" />
+      )}
     </Show>
   );
 }

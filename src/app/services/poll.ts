@@ -98,7 +98,7 @@ export function createPollCoordinator(
   let destroyed = false;
 
   async function doFetch(): Promise<void> {
-    if (destroyed) return;
+    if (destroyed || isRefreshing()) return;
     setIsRefreshing(true);
     try {
       const data = await fetchAll();
