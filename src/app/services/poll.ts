@@ -80,6 +80,11 @@ async function hasNotificationChanges(): Promise<boolean> {
 
 let _lastSuccessfulFetch: Date | null = null;
 
+// Force a full fetch if the notifications gate has been skipping for too long.
+// Notifications don't cover all change types (e.g., workflow runs on unwatched
+// repos, label changes without notification), so we cap staleness.
+const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
+
 // ── fetchAllData orchestrator ─────────────────────────────────────────────────
 
 export async function fetchAllData(): Promise<DashboardData> {
@@ -90,11 +95,15 @@ export async function fetchAllData(): Promise<DashboardData> {
 
   // On subsequent polls, check notifications first (free when 304)
   if (_lastSuccessfulFetch) {
-    const changed = await hasNotificationChanges();
-    if (!changed) {
-      console.info("[poll] No notification changes — skipping full fetch");
-      return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
+    const staleness = Date.now() - _lastSuccessfulFetch.getTime();
+    if (staleness < MAX_GATE_STALENESS_MS) {
+      const changed = await hasNotificationChanges();
+      if (!changed) {
+        console.info("[poll] No notification changes — skipping full fetch");
+        return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
+      }
     }
+    // If staleness >= MAX_GATE_STALENESS_MS, skip the gate and force a full fetch
   }
 
   const repos = config.selectedRepos;
