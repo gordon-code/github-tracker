@@ -40,17 +40,6 @@ function updateRateLimitFromHeaders(
   }
 }
 
-export function updateRateLimitFromGraphQL(
-  rateLimit: { remaining: number; resetAt: string } | null
-): void {
-  if (rateLimit) {
-    _setRateLimit({
-      remaining: rateLimit.remaining,
-      resetAt: new Date(rateLimit.resetAt),
-    });
-  }
-}
-
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(token: string): GitHubOctokitInstance {
@@ -104,7 +93,7 @@ export async function cachedRequest(
     if (cached.etag) {
       conditionalHeaders["If-None-Match"] = cached.etag;
     } else if (cached.lastModified) {
-      // Fall back to If-Modified-Since when no ETag (survives token refresh)
+      // Fall back to If-Modified-Since when no ETag is available
       conditionalHeaders["If-Modified-Since"] = cached.lastModified;
     }
 

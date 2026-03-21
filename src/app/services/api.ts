@@ -1,4 +1,4 @@
-import { getClient, cachedRequest, updateRateLimitFromGraphQL } from "./github";
+import { getClient, cachedRequest } from "./github";
 import { evictByPrefix } from "../stores/cache";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -454,8 +454,10 @@ async function batchFetchCheckStatuses(
       const response = (await octokit.graphql(query, variables)) as
         Record<string, GraphQLRepoResult | null> & { rateLimit?: GraphQLRateLimit };
 
+      // Log GraphQL rate limit for debugging but don't overwrite the REST
+      // rate limit signal — they're separate pools and REST is the bottleneck
       if (response.rateLimit) {
-        updateRateLimitFromGraphQL(response.rateLimit);
+        console.debug("[api] GraphQL rate limit remaining:", response.rateLimit.remaining);
       }
 
       for (let i = 0; i < chunk.length; i++) {
