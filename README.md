@@ -1,6 +1,19 @@
 # GitHub Tracker
 
-Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple repos/orgs.
+Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple repos/orgs. Built with SolidJS on Cloudflare Workers.
+
+## Features
+
+- **Issues Tab** — Open issues where you're the creator, assignee, or mentioned. Sortable, filterable, paginated.
+- **Pull Requests Tab** — Open PRs with CI check status indicators (green/yellow/red dots). Draft badges, reviewer names.
+- **Actions Tab** — GHA workflow runs grouped by repo and workflow. Accordion collapse, PR run toggle.
+- **Onboarding Wizard** — Two-step org/repo selection with search filtering and bulk select.
+- **Settings Page** — Refresh interval, notification preferences, theme (light/dark/system), density, GitHub Actions limits.
+- **Desktop Notifications** — New item alerts with per-type toggles and batching.
+- **Ignore System** — Hide specific items with an "N ignored" badge and unignore popover.
+- **Dark Mode** — System-aware with flash prevention via inline script + CSP SHA-256 hash.
+- **ETag Caching** — Conditional requests (304s are free against GitHub's rate limit).
+- **Auto-refresh** — Visibility-aware polling that pauses when tab is hidden.
 
 ## Tech Stack
 
@@ -17,9 +30,9 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 ```sh
 pnpm install
 pnpm run dev        # Start Vite dev server
-pnpm test           # Run browser tests
+pnpm test           # Run browser tests (130 tests)
 pnpm run typecheck  # TypeScript check
-pnpm run build      # Production build
+pnpm run build      # Production build (~241KB JS, ~31KB CSS)
 ```
 
 ## Project Structure
@@ -28,31 +41,41 @@ pnpm run build      # Production build
 src/
   app/
     components/
-      dashboard/    # DashboardPage, IssuesTab, ActionsTab, ItemRow, WorkflowRunRow
+      dashboard/    # DashboardPage, IssuesTab, PullRequestsTab, ActionsTab, ItemRow, WorkflowRunRow, IgnoreBadge
       layout/       # Header, TabBar, FilterBar
       onboarding/   # OnboardingWizard, OrgSelector, RepoSelector
-      settings/     # SettingsPage (pending)
+      settings/     # SettingsPage (7 config sections + data management)
       shared/       # FilterInput, LoadingSpinner, StatusDot
     pages/          # LoginPage, OAuthCallback
     services/
       api.ts        # GitHub API methods (fetchOrgs, fetchRepos, fetchIssues, fetchPRs, fetchWorkflowRuns)
       github.ts     # Octokit client factory with ETag caching and rate limit tracking
-      poll.ts       # Poll coordinator (pending)
+      poll.ts       # Poll coordinator with visibility-aware auto-refresh
     stores/
-      auth.ts       # OAuth token management with refresh
-      cache.ts      # IndexedDB cache with TTL eviction
-      config.ts     # Zod-validated config with localStorage persistence
+      auth.ts       # OAuth token management with auto-refresh
+      cache.ts      # IndexedDB cache with TTL eviction and ETag support
+      config.ts     # Zod v4-validated config with localStorage persistence
       view.ts       # View state (tabs, sorting, ignored items, filters)
     lib/
-      notifications.ts  # Desktop notifications (pending)
+      notifications.ts  # Desktop notification permission, detection, and dispatch
   worker/
     index.ts        # OAuth token exchange/refresh endpoint, CORS, security headers
 tests/
-  fixtures/         # GitHub API response fixtures
-  services/         # API and Octokit client tests
-  stores/           # Config and cache tests
+  fixtures/         # GitHub API response fixtures (orgs, repos, issues, PRs, runs)
+  services/         # API service, Octokit client, and poll coordinator tests
+  stores/           # Config and cache store tests
+  components/       # ItemRow and IssuesTab component tests
+  lib/              # Notification tests
   worker/           # Worker OAuth endpoint tests
 ```
+
+## Security
+
+- Strict CSP: `script-src 'self'` (SHA-256 exception for dark mode script only)
+- OAuth CSRF protection via `crypto.getRandomValues` state parameter
+- CORS locked to exact origin (strict equality, no substring matching)
+- Tokens in localStorage defended by CSP — auto-refresh on 401
+- All GitHub API strings auto-escaped by SolidJS JSX (no innerHTML)
 
 ## Deployment
 
