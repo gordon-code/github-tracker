@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
-import type { Issue, ApiError } from "../../src/app/services/api";
+import type { ApiError } from "../../src/app/services/api";
+import { makeIssue } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 
 // Reset view state between tests
@@ -12,24 +13,6 @@ beforeEach(() => {
     ignoredItems: [],
   });
 });
-
-function makeIssue(overrides: Partial<Issue> = {}): Issue {
-  return {
-    id: Math.floor(Math.random() * 100000),
-    number: 1,
-    title: "Test issue",
-    state: "open",
-    htmlUrl: "https://github.com/owner/repo/issues/1",
-    createdAt: "2024-01-10T08:00:00Z",
-    updatedAt: "2024-01-12T14:30:00Z",
-    userLogin: "octocat",
-    userAvatarUrl: "https://github.com/images/error/octocat_happy.gif",
-    labels: [],
-    assigneeLogins: [],
-    repoFullName: "owner/repo",
-    ...overrides,
-  };
-}
 
 describe("IssuesTab", () => {
   it("renders a list of issues", () => {
