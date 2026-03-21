@@ -359,20 +359,14 @@ export interface FetchIssuesResult {
 export async function fetchIssues(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
-  userLogin: string,
-  updatedSince?: Date
+  userLogin: string
 ): Promise<FetchIssuesResult> {
   if (!octokit) throw new Error("No GitHub client available");
   if (repos.length === 0 || !userLogin) return { issues: [], errors: [] };
 
-  let query = `is:issue is:open involves:${userLogin}`;
-  if (updatedSince) {
-    query += ` updated:>=${updatedSince.toISOString()}`;
-  }
-
   const { items, errors } = await batchedSearch(
     octokit,
-    query,
+    `is:issue is:open involves:${userLogin}`,
     repos
   );
 
@@ -512,26 +506,21 @@ export interface FetchPullRequestsResult {
 export async function fetchPullRequests(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
-  userLogin: string,
-  updatedSince?: Date
+  userLogin: string
 ): Promise<FetchPullRequestsResult> {
   if (!octokit) throw new Error("No GitHub client available");
   if (repos.length === 0 || !userLogin) return { pullRequests: [], errors: [] };
 
   const allErrors: ApiError[] = [];
 
-  let involvedQuery = `is:pr is:open involves:${userLogin}`;
-  let reviewQuery = `is:pr is:open review-requested:${userLogin}`;
-  if (updatedSince) {
-    const ts = ` updated:>=${updatedSince.toISOString()}`;
-    involvedQuery += ts;
-    reviewQuery += ts;
-  }
-
   // Two searches: involves (author/assignee/mentioned/commenter) + review-requested
   const [involvedResult, reviewResult] = await Promise.allSettled([
-    batchedSearch(octokit, involvedQuery, repos),
-    batchedSearch(octokit, reviewQuery, repos),
+    batchedSearch(octokit, `is:pr is:open involves:${userLogin}`, repos),
+    batchedSearch(
+      octokit,
+      `is:pr is:open review-requested:${userLogin}`,
+      repos
+    ),
   ]);
 
   // Merge and deduplicate by ID, collect search errors
@@ -649,8 +638,7 @@ export async function fetchWorkflowRuns(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   maxWorkflows: number,
-  maxRuns: number,
-  createdSince?: Date
+  maxRuns: number
 ): Promise<FetchWorkflowRunsResult> {
   if (!octokit) throw new Error("No GitHub client available");
 
@@ -667,22 +655,11 @@ export async function fetchWorkflowRuns(
 
     // Paginate until we have enough runs or exhaust results
     while (rawRuns.length < targetRunsPerRepo) {
-      const params: Record<string, unknown> = {
-        owner: repo.owner,
-        repo: repo.name,
-        per_page: 100,
-        page,
-      };
-      // Server-side date filter reduces payload on subsequent polls
-      if (createdSince) {
-        params.created = `>=${createdSince.toISOString()}`;
-      }
-
       const result = await cachedRequest(
         octokit,
         `runs:${repo.fullName}:p${page}`,
         "GET /repos/{owner}/{repo}/actions/runs",
-        params
+        { owner: repo.owner, repo: repo.name, per_page: 100, page }
       );
 
       const data = result.data as {
