@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
 import type { ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
@@ -70,7 +71,8 @@ describe("ActionsTab", () => {
     expect(wfButtons.length).toBe(2);
   });
 
-  it("toggles repo collapse when repo header clicked", () => {
+  it("toggles repo collapse when repo header clicked", async () => {
+    const user = userEvent.setup();
     const runs = [
       makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", headBranch: "main" }),
     ];
@@ -80,13 +82,14 @@ describe("ActionsTab", () => {
 
     // Click the repo header button to collapse it
     const repoHeader = screen.getByText("owner/repo");
-    fireEvent.click(repoHeader);
+    await user.click(repoHeader);
 
     // Run row content should be hidden after repo collapse
     expect(screen.queryByText("main")).toBeNull();
   });
 
-  it("toggles workflow collapse when workflow header clicked", () => {
+  it("toggles workflow collapse when workflow header clicked", async () => {
+    const user = userEvent.setup();
     const run = makeWorkflowRun({
       repoFullName: "owner/repo",
       workflowId: 1,
@@ -101,7 +104,7 @@ describe("ActionsTab", () => {
     const buttons = screen.getAllByRole("button");
     const wfHeader = buttons.find((b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo"));
     expect(wfHeader).toBeDefined();
-    fireEvent.click(wfHeader!);
+    await user.click(wfHeader!);
 
     // Branch name should be hidden after workflow collapse
     expect(screen.queryByText("feature/wf-branch")).toBeNull();
@@ -155,7 +158,8 @@ describe("ActionsTab", () => {
     screen.getByText("push-branch");
   });
 
-  it("shows PR runs when 'Show PR runs' checkbox is checked", () => {
+  it("shows PR runs when 'Show PR runs' checkbox is checked", async () => {
+    const user = userEvent.setup();
     const runs = [
       makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, headBranch: "pr-branch" }),
     ];
@@ -165,7 +169,7 @@ describe("ActionsTab", () => {
 
     // Check the checkbox to show PR runs
     const checkbox = screen.getByRole("checkbox");
-    fireEvent.click(checkbox);
+    await user.click(checkbox);
 
     // Now the PR run's branch should be visible
     screen.getByText("pr-branch");

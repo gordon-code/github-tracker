@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
 
 const defaultProps = {
@@ -58,13 +59,14 @@ describe("ItemRow", () => {
     expect(screen.queryByTestId("child-slot")).toBeNull();
   });
 
-  it("opens url in new tab when row is clicked", () => {
+  it("opens url in new tab when row is clicked", async () => {
+    const user = userEvent.setup();
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     render(() => <ItemRow {...defaultProps} />);
 
     // Click on the title text to trigger row click
     const titleEl = screen.getByText("Fix a bug");
-    fireEvent.click(titleEl);
+    await user.click(titleEl);
 
     expect(openSpy).toHaveBeenCalledWith(
       defaultProps.url,
@@ -74,23 +76,25 @@ describe("ItemRow", () => {
     openSpy.mockRestore();
   });
 
-  it("calls onIgnore when ignore button is clicked", () => {
+  it("calls onIgnore when ignore button is clicked", async () => {
+    const user = userEvent.setup();
     const onIgnore = vi.fn();
     render(() => <ItemRow {...defaultProps} onIgnore={onIgnore} />);
 
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    fireEvent.click(ignoreBtn);
+    await user.click(ignoreBtn);
 
     expect(onIgnore).toHaveBeenCalledOnce();
   });
 
-  it("does not open URL when ignore button is clicked", () => {
+  it("does not open URL when ignore button is clicked", async () => {
+    const user = userEvent.setup();
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const onIgnore = vi.fn();
     render(() => <ItemRow {...defaultProps} onIgnore={onIgnore} />);
 
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    fireEvent.click(ignoreBtn);
+    await user.click(ignoreBtn);
 
     expect(openSpy).not.toHaveBeenCalled();
     openSpy.mockRestore();

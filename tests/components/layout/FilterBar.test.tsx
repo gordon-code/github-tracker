@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import FilterBar from "../../../src/app/components/layout/FilterBar";
 
 // Mock view store
@@ -85,10 +86,11 @@ describe("FilterBar", () => {
     expect(screen.queryByText(/Updated/)).toBeNull();
   });
 
-  it("calls onRefresh when refresh button clicked", () => {
+  it("calls onRefresh when refresh button clicked", async () => {
+    const user = userEvent.setup({ delay: null });
     const onRefresh = vi.fn();
     render(() => <FilterBar onRefresh={onRefresh} />);
-    fireEvent.click(screen.getByLabelText("Refresh data"));
+    await user.click(screen.getByLabelText("Refresh data"));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
@@ -109,10 +111,11 @@ describe("FilterBar", () => {
     expect(options).toContain("otherorg/repo-c");
   });
 
-  it("changing org filter calls setGlobalFilter and resets repo", () => {
+  it("changing org filter calls setGlobalFilter and resets repo", async () => {
+    const user = userEvent.setup({ delay: null });
     render(() => <FilterBar />);
     const orgSelect = screen.getByLabelText("Filter by organization");
-    fireEvent.change(orgSelect, { target: { value: "myorg" } });
+    await user.selectOptions(orgSelect, "myorg");
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith("myorg", null);
   });
 
@@ -130,17 +133,19 @@ describe("FilterBar", () => {
     expect(options).not.toContain("otherorg/repo-c");
   });
 
-  it("changing repo filter calls setGlobalFilter with current org and new repo", () => {
+  it("changing repo filter calls setGlobalFilter with current org and new repo", async () => {
+    const user = userEvent.setup({ delay: null });
     render(() => <FilterBar />);
     const repoSelect = screen.getByLabelText("Filter by repository");
-    fireEvent.change(repoSelect, { target: { value: "myorg/repo-a" } });
+    await user.selectOptions(repoSelect, "myorg/repo-a");
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, "myorg/repo-a");
   });
 
-  it("changing org to empty string calls setGlobalFilter with null org", () => {
+  it("changing org to empty string calls setGlobalFilter with null org", async () => {
+    const user = userEvent.setup({ delay: null });
     render(() => <FilterBar />);
     const orgSelect = screen.getByLabelText("Filter by organization");
-    fireEvent.change(orgSelect, { target: { value: "" } });
+    await user.selectOptions(orgSelect, "");
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, null);
   });
 });

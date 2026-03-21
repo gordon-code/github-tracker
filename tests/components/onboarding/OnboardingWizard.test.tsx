@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import type { RepoRef } from "../../../src/app/services/api";
 
 // Mock OrgSelector and RepoSelector to avoid their internal fetching
@@ -79,8 +80,9 @@ describe("OnboardingWizard", () => {
   });
 
   it("Next button enables after org selection", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       const nextButton = screen.getByText("Next");
@@ -89,14 +91,15 @@ describe("OnboardingWizard", () => {
   });
 
   it("clicking Next advances to step 2", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     await waitFor(() => {
       screen.getByText(/Step 2 of 2/i);
@@ -105,14 +108,15 @@ describe("OnboardingWizard", () => {
   });
 
   it("calls updateConfig with selected orgs on Next", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     expect(vi.mocked(configStore.updateConfig)).toHaveBeenCalledWith(
       expect.objectContaining({ selectedOrgs: ["myorg"] })
@@ -120,14 +124,15 @@ describe("OnboardingWizard", () => {
   });
 
   it("Back button visible on step 2", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     await waitFor(() => {
       screen.getByText("Back");
@@ -135,20 +140,21 @@ describe("OnboardingWizard", () => {
   });
 
   it("clicking Back returns to step 1", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     await waitFor(() => {
       screen.getByText("Back");
     });
 
-    fireEvent.click(screen.getByText("Back"));
+    await user.click(screen.getByText("Back"));
 
     await waitFor(() => {
       screen.getByTestId("org-selector");
@@ -157,14 +163,15 @@ describe("OnboardingWizard", () => {
   });
 
   it("Finish Setup button disabled when no repos selected", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
 
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     await waitFor(() => {
       const finishButton = screen.getByText("Finish Setup");
@@ -173,20 +180,21 @@ describe("OnboardingWizard", () => {
   });
 
   it("completing final step calls updateConfig and window.location.replace", async () => {
+    const user = userEvent.setup();
     render(() => <OnboardingWizard />);
 
     // Step 1: select org, advance
-    fireEvent.click(screen.getByText("Select Org"));
+    await user.click(screen.getByText("Select Org"));
     await waitFor(() => {
       expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
     });
-    fireEvent.click(screen.getByText("Next"));
+    await user.click(screen.getByText("Next"));
 
     // Step 2: select repo, finish
     await waitFor(() => {
       screen.getByTestId("repo-selector");
     });
-    fireEvent.click(screen.getByText("Select Repo"));
+    await user.click(screen.getByText("Select Repo"));
 
     await waitFor(() => {
       const finishBtn = screen.queryByText(/Finish Setup \(1 repo\)/);
@@ -194,7 +202,7 @@ describe("OnboardingWizard", () => {
       expect(finishBtn?.hasAttribute("disabled")).toBe(false);
     });
 
-    fireEvent.click(screen.getByText(/Finish Setup \(1 repo\)/));
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
 
     expect(vi.mocked(configStore.updateConfig)).toHaveBeenLastCalledWith(
       expect.objectContaining({
