@@ -43,7 +43,7 @@ beforeEach(() => {
 describe("Header", () => {
   it("renders app title", () => {
     render(() => <Header />);
-    expect(screen.getByText("GitHub Tracker")).toBeDefined();
+    screen.getByText("GitHub Tracker");
   });
 
   it("renders settings link", () => {
@@ -57,7 +57,7 @@ describe("Header", () => {
 
   it("shows user name when authenticated with name", () => {
     render(() => <Header />);
-    expect(screen.getByText("The Octocat")).toBeDefined();
+    screen.getByText("The Octocat");
   });
 
   it("shows user login when name is null", () => {
@@ -67,7 +67,7 @@ describe("Header", () => {
       name: null,
     });
     render(() => <Header />);
-    expect(screen.getByText("octocat")).toBeDefined();
+    screen.getByText("octocat");
     vi.mocked(authStore.user).mockRestore();
   });
 
@@ -77,7 +77,7 @@ describe("Header", () => {
       resetAt: new Date("2024-01-10T09:00:00Z"),
     });
     render(() => <Header />);
-    expect(screen.getByText("4567 req remaining")).toBeDefined();
+    screen.getByText("4567 req remaining");
     vi.mocked(githubService.getRateLimit).mockRestore();
   });
 
@@ -95,6 +95,6 @@ describe("Header", () => {
 
   it("renders logout button with correct aria-label", () => {
     render(() => <Header />);
-    expect(screen.getByLabelText("Sign out")).toBeDefined();
+    screen.getByLabelText("Sign out");
   });
 });

@@ -51,7 +51,7 @@ describe("OrgSelector", () => {
   it("shows loading state while fetching", async () => {
     vi.mocked(api.fetchOrgs).mockReturnValue(new Promise(() => {}));
     render(() => <OrgSelector selected={[]} onChange={vi.fn()} />);
-    expect(screen.getByText(/Loading organizations/i)).toBeDefined();
+    screen.getByText(/Loading organizations/i);
   });
 
   it("renders org list after load", async () => {
@@ -59,9 +59,9 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
-      expect(screen.getByText("anotheorg")).toBeDefined();
-      expect(screen.getByText("personaluser")).toBeDefined();
+      screen.getByText("myorg");
+      screen.getByText("anotheorg");
+      screen.getByText("personaluser");
     });
   });
 
@@ -70,7 +70,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to load organizations/i)).toBeDefined();
+      screen.getByText(/Failed to load organizations/i);
     });
   });
 
@@ -79,7 +79,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={["myorg"]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
 
     const checkboxes = screen.getAllByRole("checkbox");
@@ -98,7 +98,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={onChange} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
 
     const checkboxes = screen.getAllByRole("checkbox");
@@ -116,7 +116,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
 
     const filterInput = screen.getByPlaceholderText(/Filter orgs/i);
@@ -124,7 +124,7 @@ describe("OrgSelector", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("anotheorg")).toBeNull();
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
   });
 
@@ -134,7 +134,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={onChange} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
 
     fireEvent.click(screen.getByText("Select All"));
@@ -151,7 +151,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={["myorg", "anotheorg"]} onChange={onChange} />);
 
     await waitFor(() => {
-      expect(screen.getByText("myorg")).toBeDefined();
+      screen.getByText("myorg");
     });
 
     fireEvent.click(screen.getByText("Deselect All"));
@@ -166,7 +166,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={[]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Personal")).toBeDefined();
+      screen.getByText("Personal");
     });
   });
 
@@ -175,7 +175,7 @@ describe("OrgSelector", () => {
     render(() => <OrgSelector selected={["myorg"]} onChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/1 of 3 selected/i)).toBeDefined();
+      screen.getByText(/1 of 3 selected/i);
     });
   });
 });

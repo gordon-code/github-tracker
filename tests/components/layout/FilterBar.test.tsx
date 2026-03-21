@@ -40,13 +40,13 @@ afterEach(() => {
 describe("FilterBar", () => {
   it("renders org and repo filter dropdowns", () => {
     render(() => <FilterBar />);
-    expect(screen.getByLabelText("Filter by organization")).toBeDefined();
-    expect(screen.getByLabelText("Filter by repository")).toBeDefined();
+    screen.getByLabelText("Filter by organization");
+    screen.getByLabelText("Filter by repository");
   });
 
   it("renders refresh button", () => {
     render(() => <FilterBar />);
-    expect(screen.getByLabelText("Refresh data")).toBeDefined();
+    screen.getByLabelText("Refresh data");
   });
 
   it("refresh button is enabled by default", () => {
@@ -63,20 +63,20 @@ describe("FilterBar", () => {
 
   it("shows 'Refreshing...' when isRefreshing=true", () => {
     render(() => <FilterBar isRefreshing={true} />);
-    expect(screen.getByText("Refreshing...")).toBeDefined();
+    screen.getByText("Refreshing...");
   });
 
   it("shows last refreshed time when lastRefreshedAt provided", () => {
     const now = new Date();
     const tenSecondsAgo = new Date(now.getTime() - 10_000);
     render(() => <FilterBar lastRefreshedAt={tenSecondsAgo} />);
-    expect(screen.getByText("Updated 10s ago")).toBeDefined();
+    screen.getByText("Updated 10s ago");
   });
 
   it("shows minutes when lastRefreshedAt is more than 60s ago", () => {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
     render(() => <FilterBar lastRefreshedAt={twoMinutesAgo} />);
-    expect(screen.getByText("Updated 2m ago")).toBeDefined();
+    screen.getByText("Updated 2m ago");
   });
 
   it("does not show updated label when lastRefreshedAt is null", () => {

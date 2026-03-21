@@ -17,23 +17,23 @@ const defaultProps = {
 describe("ItemRow", () => {
   it("renders repo badge", () => {
     render(() => <ItemRow {...defaultProps} />);
-    expect(screen.getByText("octocat/Hello-World")).toBeDefined();
+    screen.getByText("octocat/Hello-World");
   });
 
   it("renders issue number and title", () => {
     render(() => <ItemRow {...defaultProps} />);
-    expect(screen.getByText("#42")).toBeDefined();
-    expect(screen.getByText("Fix a bug")).toBeDefined();
+    screen.getByText("#42");
+    screen.getByText("Fix a bug");
   });
 
   it("renders author", () => {
     render(() => <ItemRow {...defaultProps} />);
-    expect(screen.getByText("octocat")).toBeDefined();
+    screen.getByText("octocat");
   });
 
   it("renders label chip with correct name", () => {
     render(() => <ItemRow {...defaultProps} />);
-    expect(screen.getByText("bug")).toBeDefined();
+    screen.getByText("bug");
   });
 
   it("renders relative time for createdAt", () => {
@@ -50,7 +50,7 @@ describe("ItemRow", () => {
         <span data-testid="child-slot">extra content</span>
       </ItemRow>
     ));
-    expect(screen.getByTestId("child-slot")).toBeDefined();
+    screen.getByTestId("child-slot");
   });
 
   it("does not render children slot when not provided", () => {

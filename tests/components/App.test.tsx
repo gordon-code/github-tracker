@@ -92,7 +92,7 @@ describe("App", () => {
     vi.mocked(authStore.validateToken).mockReturnValue(new Promise(() => {}));
 
     render(() => <App />);
-    expect(screen.getByLabelText("Loading")).toBeDefined();
+    screen.getByLabelText("Loading");
   });
 
   it("redirects to /login when not authenticated", async () => {
@@ -103,7 +103,7 @@ describe("App", () => {
     render(() => <App />);
 
     await waitFor(() => {
-      expect(screen.getByText("Sign in with GitHub")).toBeDefined();
+      screen.getByText("Sign in with GitHub");
     });
   });
 
@@ -117,7 +117,7 @@ describe("App", () => {
     render(() => <App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("onboarding-wizard")).toBeDefined();
+      screen.getByTestId("onboarding-wizard");
     });
   });
 
@@ -131,7 +131,7 @@ describe("App", () => {
     render(() => <App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("dashboard-page")).toBeDefined();
+      screen.getByTestId("dashboard-page");
     });
   });
 

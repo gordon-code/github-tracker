@@ -104,14 +104,14 @@ describe("DashboardPage — tab switching", () => {
   it("renders IssuesTab by default", () => {
     render(() => <DashboardPage />);
     // IssuesTab column headers are always rendered (even while loading)
-    expect(screen.getByLabelText("Sort by Title")).toBeDefined();
+    screen.getByLabelText("Sort by Title");
   });
 
   it("switches to PullRequestsTab when Pull Requests tab is clicked", () => {
     render(() => <DashboardPage />);
     fireEvent.click(screen.getByText("Pull Requests"));
     // PullRequestsTab renders its own "Sort by Title" column header
-    expect(screen.getByLabelText("Sort by Title")).toBeDefined();
+    screen.getByLabelText("Sort by Title");
     // The PR tab button is now active
     const prButton = screen.getByText("Pull Requests").closest("button");
     expect(prButton?.getAttribute("aria-current")).toBe("page");
@@ -121,7 +121,7 @@ describe("DashboardPage — tab switching", () => {
     render(() => <DashboardPage />);
     fireEvent.click(screen.getByText("Actions"));
     // ActionsTab renders a "Show PR runs" checkbox — unique to that tab
-    expect(screen.getByText("Show PR runs")).toBeDefined();
+    screen.getByText("Show PR runs");
     const actionsButton = screen.getByText("Actions").closest("button");
     expect(actionsButton?.getAttribute("aria-current")).toBe("page");
   });
@@ -155,8 +155,8 @@ describe("DashboardPage — data flow", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(screen.getByText("Fetched issue alpha")).toBeDefined();
-      expect(screen.getByText("Fetched issue beta")).toBeDefined();
+      screen.getByText("Fetched issue alpha");
+      screen.getByText("Fetched issue beta");
     });
   });
 
@@ -175,8 +175,8 @@ describe("DashboardPage — data flow", () => {
     render(() => <DashboardPage />);
     fireEvent.click(screen.getByText("Pull Requests"));
     await waitFor(() => {
-      expect(screen.getByText("Fetched PR one")).toBeDefined();
-      expect(screen.getByText("Fetched PR two")).toBeDefined();
+      screen.getByText("Fetched PR one");
+      screen.getByText("Fetched PR two");
     });
   });
 
@@ -213,7 +213,7 @@ describe("DashboardPage — data flow", () => {
 
     render(() => <DashboardPage />);
     // IssuesTab loading skeleton uses role="status"
-    expect(screen.getByRole("status")).toBeDefined();
+    screen.getByRole("status");
   });
 
   it("skipped fetch (notifications gate) keeps existing data", async () => {
@@ -225,12 +225,12 @@ describe("DashboardPage — data flow", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(screen.getByText("Existing issue")).toBeDefined();
+      screen.getByText("Existing issue");
     });
 
     // Trigger a second fetch via the captured callback — skipped result should not erase data
     await capturedFetchAll?.();
-    expect(screen.getByText("Existing issue")).toBeDefined();
+    screen.getByText("Existing issue");
   });
 });
 
