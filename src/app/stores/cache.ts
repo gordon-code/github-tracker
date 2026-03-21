@@ -4,6 +4,7 @@ export interface CacheEntry {
   key: string;
   data: unknown;
   etag: string | null;
+  lastModified: string | null;
   fetchedAt: number;
   maxAge: number | null;
 }
@@ -41,12 +42,14 @@ export async function setCacheEntry(
   key: string,
   data: unknown,
   etag: string | null,
-  maxAge?: number
+  maxAge?: number,
+  lastModified?: string | null
 ): Promise<void> {
   const entry: CacheEntry = {
     key,
     data,
     etag,
+    lastModified: lastModified ?? null,
     fetchedAt: Date.now(),
     maxAge: maxAge ?? null,
   };
@@ -142,17 +145,23 @@ export async function evictStaleEntries(maxAgeMs: number): Promise<number> {
 export interface FetchResult {
   data: unknown;
   etag: string | null;
+  lastModified: string | null;
   status: number;
+}
+
+export interface ConditionalHeaders {
+  etag: string | null;
+  lastModified: string | null;
 }
 
 export async function cachedFetch(
   key: string,
-  fetchFn: (etag: string | null) => Promise<FetchResult>,
+  fetchFn: (headers: ConditionalHeaders) => Promise<FetchResult>,
   maxAge?: number
 ): Promise<{ data: unknown; fromCache: boolean }> {
   const existing = await getCacheEntry(key);
 
-  let etagToSend: string | null = null;
+  let conditionalHeaders: ConditionalHeaders = { etag: null, lastModified: null };
 
   if (existing) {
     // Check per-entry maxAge expiry
@@ -160,15 +169,21 @@ export async function cachedFetch(
     if (entryMaxAge !== null) {
       const expired = Date.now() - existing.fetchedAt > entryMaxAge;
       if (!expired) {
-        etagToSend = existing.etag;
+        conditionalHeaders = {
+          etag: existing.etag,
+          lastModified: existing.lastModified ?? null,
+        };
       }
-      // If expired, etagToSend stays null — treat as cache miss
+      // If expired, treat as cache miss
     } else {
-      etagToSend = existing.etag;
+      conditionalHeaders = {
+        etag: existing.etag,
+        lastModified: existing.lastModified ?? null,
+      };
     }
   }
 
-  const result = await fetchFn(etagToSend);
+  const result = await fetchFn(conditionalHeaders);
 
   if (result.status === 304) {
     // Cache hit — return stored data
@@ -176,7 +191,7 @@ export async function cachedFetch(
   }
 
   if (result.status === 200) {
-    await setCacheEntry(key, result.data, result.etag, maxAge);
+    await setCacheEntry(key, result.data, result.etag, maxAge, result.lastModified);
     return { data: result.data, fromCache: false };
   }
 

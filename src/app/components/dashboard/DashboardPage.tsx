@@ -55,14 +55,19 @@ export default function DashboardPage() {
     setDashboardData("loading", true);
     try {
       const data = await fetchAllData();
-      setDashboardData({
-        issues: data.issues,
-        pullRequests: data.pullRequests,
-        workflowRuns: data.workflowRuns,
-        errors: data.errors,
-        loading: false,
-        lastRefreshedAt: new Date(),
-      });
+      // When notifications gate says nothing changed, keep existing data
+      if (!data.skipped) {
+        setDashboardData({
+          issues: data.issues,
+          pullRequests: data.pullRequests,
+          workflowRuns: data.workflowRuns,
+          errors: data.errors,
+          loading: false,
+          lastRefreshedAt: new Date(),
+        });
+      } else {
+        setDashboardData("loading", false);
+      }
       return data;
     } catch (err) {
       // Handle 401 auth errors

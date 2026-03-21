@@ -137,16 +137,17 @@ describe("evictStaleEntries", () => {
 });
 
 describe("cachedFetch", () => {
-  it("calls fetchFn with null etag when no cache entry exists", async () => {
+  it("calls fetchFn with null headers when no cache entry exists", async () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: { result: "fresh" },
       etag: "new-etag",
+      lastModified: null,
       status: 200,
     });
 
     const result = await cachedFetch("no:cache", fetchFn);
 
-    expect(fetchFn).toHaveBeenCalledWith(null);
+    expect(fetchFn).toHaveBeenCalledWith({ etag: null, lastModified: null });
     expect(result.data).toEqual({ result: "fresh" });
     expect(result.fromCache).toBe(false);
   });
@@ -157,12 +158,13 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: { cached: true },
       etag: "stored-etag",
+      lastModified: null,
       status: 304,
     });
 
     await cachedFetch("etag:test", fetchFn);
 
-    expect(fetchFn).toHaveBeenCalledWith("stored-etag");
+    expect(fetchFn).toHaveBeenCalledWith({ etag: "stored-etag", lastModified: null });
   });
 
   it("returns cached data on 304 response", async () => {
@@ -171,6 +173,7 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: null,
       etag: null,
+      lastModified: null,
       status: 304,
     });
 
@@ -186,6 +189,7 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: { new: "data" },
       etag: "new-etag",
+      lastModified: "Thu, 20 Mar 2026 12:00:00 GMT",
       status: 200,
     });
 
@@ -197,6 +201,25 @@ describe("cachedFetch", () => {
     const stored = await getCacheEntry("cache:200");
     expect(stored!.data).toEqual({ new: "data" });
     expect(stored!.etag).toBe("new-etag");
+    expect(stored!.lastModified).toBe("Thu, 20 Mar 2026 12:00:00 GMT");
+  });
+
+  it("passes lastModified from cache when etag is null", async () => {
+    await setCacheEntry("lm:test", { data: 1 }, null, undefined, "Thu, 20 Mar 2026 12:00:00 GMT");
+
+    const fetchFn = vi.fn().mockResolvedValue({
+      data: { data: 1 },
+      etag: null,
+      lastModified: "Thu, 20 Mar 2026 12:00:00 GMT",
+      status: 304,
+    });
+
+    await cachedFetch("lm:test", fetchFn);
+
+    expect(fetchFn).toHaveBeenCalledWith({
+      etag: null,
+      lastModified: "Thu, 20 Mar 2026 12:00:00 GMT",
+    });
   });
 
   it("respects per-entry maxAge — expired entry treated as cache miss", async () => {
@@ -208,6 +231,7 @@ describe("cachedFetch", () => {
       key: "maxage:expired",
       data: { old: true },
       etag: "old-etag",
+      lastModified: null,
       fetchedAt: expiredTime,
       maxAge: 60 * 1000, // 1 minute
     });
@@ -215,13 +239,14 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: { fresh: true },
       etag: "fresh-etag",
+      lastModified: null,
       status: 200,
     });
 
     await cachedFetch("maxage:expired", fetchFn);
 
-    // Should have been called with null (cache miss due to expiry)
-    expect(fetchFn).toHaveBeenCalledWith(null);
+    // Should have been called with nulls (cache miss due to expiry)
+    expect(fetchFn).toHaveBeenCalledWith({ etag: null, lastModified: null });
   });
 
   it("uses cached etag when per-entry maxAge has not expired", async () => {
@@ -233,6 +258,7 @@ describe("cachedFetch", () => {
       key: "maxage:fresh",
       data: { cached: true },
       etag: "valid-etag",
+      lastModified: null,
       fetchedAt: recentTime,
       maxAge: 5 * 60 * 1000, // 5 minutes
     });
@@ -240,12 +266,13 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: { cached: true },
       etag: "valid-etag",
+      lastModified: null,
       status: 304,
     });
 
     const result = await cachedFetch("maxage:fresh", fetchFn);
 
-    expect(fetchFn).toHaveBeenCalledWith("valid-etag");
+    expect(fetchFn).toHaveBeenCalledWith({ etag: "valid-etag", lastModified: null });
     expect(result.fromCache).toBe(true);
   });
 
@@ -260,6 +287,7 @@ describe("cachedFetch", () => {
     const fetchFn = vi.fn().mockResolvedValue({
       data: null,
       etag: null,
+      lastModified: null,
       status: 500,
     });
     await expect(cachedFetch("bad:status", fetchFn)).rejects.toThrow(

@@ -22,6 +22,8 @@ export interface DashboardData {
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
   errors: ApiError[];
+  /** True when notifications gate determined nothing changed — consumer should keep existing data */
+  skipped?: boolean;
 }
 
 export interface PollCoordinator {
@@ -29,6 +31,54 @@ export interface PollCoordinator {
   lastRefreshAt: () => Date | null;
   manualRefresh: () => void;
 }
+
+// ── Notifications gate ───────────────────────────────────────────────────────
+
+let _notifLastModified: string | null = null;
+
+/**
+ * Checks if anything changed since last poll using the Notifications API.
+ * Returns true if there are new notifications (or first check), false if unchanged.
+ * Uses If-Modified-Since for zero-cost 304 checks (doesn't count against rate limit).
+ */
+async function hasNotificationChanges(): Promise<boolean> {
+  const octokit = getClient();
+  if (!octokit) return true; // Can't check — assume changes
+
+  try {
+    const headers: Record<string, string> = {};
+    if (_notifLastModified) {
+      headers["If-Modified-Since"] = _notifLastModified;
+    }
+
+    const response = await octokit.request("GET /notifications", {
+      per_page: 1,
+      headers,
+    });
+
+    // Store Last-Modified for next conditional request
+    const lastMod = (response.headers as Record<string, string>)["last-modified"];
+    if (lastMod) {
+      _notifLastModified = lastMod;
+    }
+
+    return true; // 200 = something changed
+  } catch (err) {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { status?: number }).status === 304
+    ) {
+      return false; // Nothing changed since last check
+    }
+    // Error checking notifications — proceed with full fetch anyway
+    return true;
+  }
+}
+
+// ── Incremental fetch timestamps ─────────────────────────────────────────────
+
+let _lastSuccessfulFetch: Date | null = null;
 
 // ── fetchAllData orchestrator ─────────────────────────────────────────────────
 
@@ -38,8 +88,22 @@ export async function fetchAllData(): Promise<DashboardData> {
     return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
   }
 
+  // On subsequent polls, check notifications first (free when 304)
+  if (_lastSuccessfulFetch) {
+    const changed = await hasNotificationChanges();
+    if (!changed) {
+      console.info("[poll] No notification changes — skipping full fetch");
+      return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
+    }
+  }
+
   const repos = config.selectedRepos;
   const userLogin = user()?.login ?? "";
+
+  // Pass created-since for workflow runs (safe: ETag-cached per page, reduces payloads)
+  // Note: NOT using updated:>= on issue/PR search — that would drop unchanged items
+  // from results and break the dashboard's full-replacement pattern.
+  const createdSince = _lastSuccessfulFetch ?? undefined;
 
   const [issueResult, prResult, runResult] = await Promise.allSettled([
     fetchIssues(octokit, repos, userLogin),
@@ -48,7 +112,8 @@ export async function fetchAllData(): Promise<DashboardData> {
       octokit,
       repos,
       config.maxWorkflowsPerRepo,
-      config.maxRunsPerWorkflow
+      config.maxRunsPerWorkflow,
+      createdSince
     ),
   ]);
 
@@ -71,6 +136,9 @@ export async function fetchAllData(): Promise<DashboardData> {
     ...(prData?.errors ?? []),
     ...(runData?.errors ?? []),
   ];
+
+  // Track timestamp for next incremental fetch
+  _lastSuccessfulFetch = new Date();
 
   return {
     issues: issueData?.issues ?? [],

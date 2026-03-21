@@ -3,7 +3,7 @@ import { Octokit } from "@octokit/core";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
-import { cachedFetch } from "../stores/cache";
+import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
@@ -40,6 +40,17 @@ function updateRateLimitFromHeaders(
   }
 }
 
+export function updateRateLimitFromGraphQL(
+  rateLimit: { remaining: number; resetAt: string } | null
+): void {
+  if (rateLimit) {
+    _setRateLimit({
+      remaining: rateLimit.remaining,
+      resetAt: new Date(rateLimit.resetAt),
+    });
+  }
+}
+
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(token: string): GitHubOctokitInstance {
@@ -60,16 +71,19 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       },
       onSecondaryRateLimit: (
         retryAfter: number,
-        options: { method: string; url: string }
+        options: { method: string; url: string },
+        _octokit: GitHubOctokitInstance,
+        retryCount: number
       ) => {
         console.warn(
           `[github] Secondary rate limit for ${options.method} ${options.url}. Retry after ${retryAfter}s.`
         );
-        return true;
+        return retryCount < 1;
       },
     },
     retry: {
       retries: 2,
+      doNotRetry: [429],
     },
   });
 }
@@ -83,26 +97,30 @@ export async function cachedRequest(
   params?: Record<string, unknown>,
   maxAge?: number
 ): Promise<{ data: unknown; fromCache: boolean }> {
-  return cachedFetch(cacheKey, async (etag) => {
+  return cachedFetch(cacheKey, async (cached: ConditionalHeaders) => {
+    const conditionalHeaders: Record<string, string> = {};
+    if (cached.etag) {
+      conditionalHeaders["If-None-Match"] = cached.etag;
+    } else if (cached.lastModified) {
+      // Fall back to If-Modified-Since when no ETag (survives token refresh)
+      conditionalHeaders["If-Modified-Since"] = cached.lastModified;
+    }
+
     const requestParams: Record<string, unknown> = {
       ...params,
-      headers: {
-        ...(etag ? { "If-None-Match": etag } : {}),
-      },
+      headers: conditionalHeaders,
     };
 
     try {
       const response = await octokit.request(route, requestParams);
-      const responseEtag =
-        (response.headers as Record<string, string>)["etag"] ?? null;
+      const headers = response.headers as Record<string, string>;
 
-      updateRateLimitFromHeaders(
-        response.headers as Record<string, string>
-      );
+      updateRateLimitFromHeaders(headers);
 
       return {
         data: response.data as unknown,
-        etag: responseEtag,
+        etag: headers["etag"] ?? null,
+        lastModified: headers["last-modified"] ?? null,
         status: 200,
       };
     } catch (err) {
@@ -112,7 +130,7 @@ export async function cachedRequest(
         err !== null &&
         (err as { status?: number }).status === 304
       ) {
-        return { data: null, etag: null, status: 304 };
+        return { data: null, etag: null, lastModified: null, status: 304 };
       }
       throw err;
     }
