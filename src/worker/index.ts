@@ -45,6 +45,7 @@ function getCorsHeaders(
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST",
       "Access-Control-Allow-Headers": "Content-Type",
+      "Vary": "Origin",
     };
   }
   return {};
@@ -52,6 +53,9 @@ function getCorsHeaders(
 
 // GitHub OAuth code format validation (SDR-005): 20-char lowercase hex
 const VALID_CODE_RE = /^[0-9a-f]{20}$/;
+
+// GitHub App refresh token format validation (SEC-003): ghr_ prefix + alphanumeric/underscore
+const VALID_REFRESH_TOKEN_RE = /^ghr_[A-Za-z0-9_]{20,255}$/;
 
 async function handleTokenExchange(
   request: Request,
@@ -171,7 +175,7 @@ async function handleRefreshToken(
     "refresh_token"
   ] as string;
 
-  if (refreshToken.length === 0) {
+  if (!VALID_REFRESH_TOKEN_RE.test(refreshToken)) {
     return errorResponse("invalid_request", 400, cors);
   }
 
@@ -232,7 +236,7 @@ export default {
     if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
       return new Response(null, {
         status: 204,
-        headers: { ...cors, ...securityHeaders() },
+        headers: { ...cors, "Access-Control-Max-Age": "86400", ...securityHeaders() },
       });
     }
 
