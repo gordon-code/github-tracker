@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, onMount } from "solid-js";
+import { createSignal, createEffect, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
@@ -173,7 +173,7 @@ export default function SettingsPage() {
       }
     };
     mq.addEventListener("change", handler);
-    // Cleanup handled by solid's onCleanup — not needed here since this is a page-level mount
+    onCleanup(() => mq.removeEventListener("change", handler));
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
