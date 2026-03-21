@@ -1,4 +1,5 @@
 import { getClient, cachedRequest } from "./github";
+import { evictByPrefix } from "../stores/cache";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -221,12 +222,17 @@ async function searchAllPages(
  * Runs a search query across batched repo qualifiers, deduplicating results.
  * Splits repos into chunks of SEARCH_REPO_BATCH_SIZE to keep query length safe.
  */
+interface BatchSearchResult {
+  items: RawSearchItem[];
+  errors: ApiError[];
+}
+
 async function batchedSearch(
   octokit: NonNullable<ReturnType<typeof getClient>>,
   baseQuery: string,
   repos: RepoRef[]
-): Promise<RawSearchItem[]> {
-  if (repos.length === 0) return [];
+): Promise<BatchSearchResult> {
+  if (repos.length === 0) return { items: [], errors: [] };
 
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
   const tasks = chunks.map((chunk) => {
@@ -237,10 +243,21 @@ async function batchedSearch(
   const results = await Promise.allSettled(tasks);
   const seen = new Set<number>();
   const items: RawSearchItem[] = [];
+  const errors: ApiError[] = [];
 
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
     if (result.status !== "fulfilled") {
-      console.warn("[api] Search batch chunk failed:", result.reason);
+      const reason = result.reason as { status?: number; message?: string } | Error;
+      const statusCode = typeof reason === "object" && "status" in reason
+        ? (reason.status as number) ?? null : null;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      errors.push({
+        repo: `search-batch-${i + 1}/${chunks.length}`,
+        statusCode,
+        message,
+        retryable: statusCode === null || statusCode >= 500,
+      });
       continue;
     }
     for (const item of result.value) {
@@ -250,7 +267,7 @@ async function batchedSearch(
     }
   }
 
-  return items;
+  return { items, errors };
 }
 
 // ── Step 1: fetchOrgs ────────────────────────────────────────────────────────
@@ -334,21 +351,26 @@ export async function fetchRepos(
  * Before: 3 API calls per repo (creator/assignee/mentioned) = 225 calls for 75 repos.
  * After:  ~3 search calls total (batched in chunks of 30 repos).
  */
+export interface FetchIssuesResult {
+  issues: Issue[];
+  errors: ApiError[];
+}
+
 export async function fetchIssues(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   userLogin: string
-): Promise<Issue[]> {
+): Promise<FetchIssuesResult> {
   if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0 || !userLogin) return [];
+  if (repos.length === 0 || !userLogin) return { issues: [], errors: [] };
 
-  const items = await batchedSearch(
+  const { items, errors } = await batchedSearch(
     octokit,
     `is:issue is:open involves:${userLogin}`,
     repos
   );
 
-  return items
+  const issues = items
     .filter((item) => item.pull_request === undefined)
     .map((item) => ({
       id: item.id,
@@ -364,6 +386,8 @@ export async function fetchIssues(
       assigneeLogins: item.assignees.map((a) => a.login),
       repoFullName: item.repository.full_name,
     }));
+
+  return { issues, errors };
 }
 
 // ── Step 4: fetchPullRequests (Search API + GraphQL check status) ─────────────
@@ -466,16 +490,23 @@ async function batchFetchCheckStatuses(
  * Before: 1 API call per repo (list all PRs) + 2 per involved PR = 75+2N for 75 repos.
  * After:  ~6 search + N PR detail + 1 GraphQL = 7+N.
  */
+export interface FetchPullRequestsResult {
+  pullRequests: PullRequest[];
+  errors: ApiError[];
+}
+
 export async function fetchPullRequests(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   userLogin: string
-): Promise<PullRequest[]> {
+): Promise<FetchPullRequestsResult> {
   if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0 || !userLogin) return [];
+  if (repos.length === 0 || !userLogin) return { pullRequests: [], errors: [] };
+
+  const allErrors: ApiError[] = [];
 
   // Two searches: involves (author/assignee/mentioned/commenter) + review-requested
-  const [involvedItems, reviewItems] = await Promise.allSettled([
+  const [involvedResult, reviewResult] = await Promise.allSettled([
     batchedSearch(octokit, `is:pr is:open involves:${userLogin}`, repos),
     batchedSearch(
       octokit,
@@ -484,13 +515,14 @@ export async function fetchPullRequests(
     ),
   ]);
 
-  // Merge and deduplicate by ID
+  // Merge and deduplicate by ID, collect search errors
   const seen = new Set<number>();
   const uniqueItems: RawSearchItem[] = [];
 
-  for (const result of [involvedItems, reviewItems]) {
+  for (const result of [involvedResult, reviewResult]) {
     if (result.status !== "fulfilled") continue;
-    for (const item of result.value) {
+    allErrors.push(...result.value.errors);
+    for (const item of result.value.items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
       uniqueItems.push(item);
@@ -499,32 +531,33 @@ export async function fetchPullRequests(
 
   // Fetch full PR details for each (head SHA, branch info, reviewers)
   const prDetailTasks = uniqueItems
-    .filter((item) => {
-      if (!item.repository.full_name.includes("/")) {
-        console.warn("[api] Skipping PR with malformed full_name:", item.repository.full_name);
-        return false;
-      }
-      return true;
-    })
+    .filter((item) => item.repository.full_name.includes("/"))
     .map(async (item) => {
-    const repoFullName = item.repository.full_name;
-    const [owner, name] = repoFullName.split("/");
+      const repoFullName = item.repository.full_name;
+      const [owner, name] = repoFullName.split("/");
 
-    const result = await cachedRequest(
-      octokit,
-      `pr-detail:${repoFullName}:${item.number}`,
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-      { owner, repo: name, pull_number: item.number }
-    );
+      const result = await cachedRequest(
+        octokit,
+        `pr-detail:${repoFullName}:${item.number}`,
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+        { owner, repo: name, pull_number: item.number }
+      );
 
-    return { pr: result.data as RawPullRequest, repoFullName };
-  });
+      return { pr: result.data as RawPullRequest, repoFullName };
+    });
 
   const prDetails = await Promise.allSettled(prDetailTasks);
 
   for (const result of prDetails) {
     if (result.status === "rejected") {
-      console.warn("[api] PR detail fetch failed:", result.reason);
+      const reason = result.reason as { status?: number; message?: string } | Error;
+      allErrors.push({
+        repo: "pr-detail",
+        statusCode: typeof reason === "object" && "status" in reason
+          ? (reason.status as number) ?? null : null,
+        message: reason instanceof Error ? reason.message : String(reason),
+        retryable: true,
+      });
     }
   }
 
@@ -546,7 +579,7 @@ export async function fetchPullRequests(
   const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);
 
   // Build final PR objects
-  return successfulPRs.map(({ pr, repoFullName }) => ({
+  const pullRequests = successfulPRs.map(({ pr, repoFullName }) => ({
     id: pr.id,
     number: pr.number,
     title: pr.title,
@@ -565,6 +598,16 @@ export async function fetchPullRequests(
     repoFullName,
     checkStatus: checkStatuses.get(`${repoFullName}:${pr.head.sha}`) ?? null,
   }));
+
+  // Evict stale PR detail cache entries for PRs no longer in the active set
+  const activeKeys = new Set(
+    uniqueItems.map((item) => `pr-detail:${item.repository.full_name}:${item.number}`)
+  );
+  evictByPrefix("pr-detail:", activeKeys).catch(() => {
+    // Non-fatal — eviction failure shouldn't block the result
+  });
+
+  return { pullRequests, errors: allErrors };
 }
 
 // ── Step 5: fetchWorkflowRuns (single endpoint per repo) ─────────────────────
@@ -578,33 +621,54 @@ export async function fetchPullRequests(
  *
  * Groups runs by workflow_id client-side and applies maxWorkflows/maxRuns limits.
  */
+export interface FetchWorkflowRunsResult {
+  workflowRuns: WorkflowRun[];
+  errors: ApiError[];
+}
+
 export async function fetchWorkflowRuns(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   maxWorkflows: number,
   maxRuns: number
-): Promise<WorkflowRun[]> {
+): Promise<FetchWorkflowRunsResult> {
   if (!octokit) throw new Error("No GitHub client available");
 
   const allRuns: WorkflowRun[] = [];
+  const allErrors: ApiError[] = [];
+
+  // We need enough runs to cover maxWorkflows × maxRuns per repo.
+  // Paginate if the first page isn't enough.
+  const targetRunsPerRepo = maxWorkflows * maxRuns;
 
   const repoTasks = repos.map(async (repo) => {
-    const result = await cachedRequest(
-      octokit,
-      `runs:${repo.fullName}`,
-      "GET /repos/{owner}/{repo}/actions/runs",
-      { owner: repo.owner, repo: repo.name, per_page: 100 }
-    );
+    const rawRuns: RawWorkflowRun[] = [];
+    let page = 1;
 
-    const data = result.data as {
-      workflow_runs: RawWorkflowRun[];
-      total_count: number;
-    };
-    const runs = data.workflow_runs ?? [];
+    // Paginate until we have enough runs or exhaust results
+    while (rawRuns.length < targetRunsPerRepo) {
+      const result = await cachedRequest(
+        octokit,
+        `runs:${repo.fullName}:p${page}`,
+        "GET /repos/{owner}/{repo}/actions/runs",
+        { owner: repo.owner, repo: repo.name, per_page: 100, page }
+      );
+
+      const data = result.data as {
+        workflow_runs: RawWorkflowRun[];
+        total_count: number;
+      };
+      const runs = data.workflow_runs ?? [];
+      rawRuns.push(...runs);
+
+      // Stop if we got all runs or this page was short
+      if (rawRuns.length >= data.total_count || runs.length < 100) break;
+      page++;
+    }
 
     // Group by workflow_id
     const byWorkflow = new Map<number, RawWorkflowRun[]>();
-    for (const run of runs) {
+    for (const run of rawRuns) {
       let group = byWorkflow.get(run.workflow_id);
       if (!group) {
         group = [];
@@ -651,11 +715,18 @@ export async function fetchWorkflowRuns(
   const repoResults = await Promise.allSettled(repoTasks);
   for (const result of repoResults) {
     if (result.status === "rejected") {
-      console.warn("[api] Workflow runs fetch failed for repo:", result.reason);
+      const reason = result.reason as { status?: number; message?: string } | Error;
+      allErrors.push({
+        repo: "workflow-runs",
+        statusCode: typeof reason === "object" && "status" in reason
+          ? (reason.status as number) ?? null : null,
+        message: reason instanceof Error ? reason.message : String(reason),
+        retryable: true,
+      });
     }
   }
 
-  return allRuns;
+  return { workflowRuns: allRuns, errors: allErrors };
 }
 
 // ── Step 6: aggregateErrors ──────────────────────────────────────────────────

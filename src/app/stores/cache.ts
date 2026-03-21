@@ -97,6 +97,30 @@ export async function clearCache(): Promise<void> {
   await db.clear("cache");
 }
 
+/**
+ * Evicts cache entries whose key starts with `prefix` but is NOT in `keepKeys`.
+ * Used to clean up per-PR cache entries for PRs no longer in the active set.
+ */
+export async function evictByPrefix(
+  prefix: string,
+  keepKeys: Set<string>
+): Promise<number> {
+  const db = await getDb();
+  const tx = db.transaction("cache", "readwrite");
+  let cursor = await tx.store.openCursor();
+  let count = 0;
+  while (cursor) {
+    const key = cursor.key as string;
+    if (key.startsWith(prefix) && !keepKeys.has(key)) {
+      await cursor.delete();
+      count++;
+    }
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+  return count;
+}
+
 export async function evictStaleEntries(maxAgeMs: number): Promise<number> {
   const db = await getDb();
   const tx = db.transaction("cache", "readwrite");

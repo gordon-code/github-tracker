@@ -156,8 +156,9 @@ describe("fetchIssues", () => {
       "octocat"
     );
 
-    expect(result.length).toBe(searchIssuesFixture.items.length);
-    expect(result[0].id).toBe(searchIssuesFixture.items[0].id);
+    expect(result.issues.length).toBe(searchIssuesFixture.items.length);
+    expect(result.issues[0].id).toBe(searchIssuesFixture.items[0].id);
+    expect(result.errors).toEqual([]);
   });
 
   it("uses the Search API with involves qualifier", async () => {
@@ -209,25 +210,25 @@ describe("fetchIssues", () => {
     };
     const octokit = makeSearchOctokit(withPR);
 
-    const result = await fetchIssues(
+    const { issues } = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    expect(result.length).toBe(1);
-    expect(result[0].id).toBe(searchIssuesFixture.items[0].id);
+    expect(issues.length).toBe(1);
+    expect(issues[0].id).toBe(searchIssuesFixture.items[0].id);
   });
 
   it("maps search result fields to camelCase issue shape", async () => {
     const octokit = makeSearchOctokit();
-    const result = await fetchIssues(
+    const { issues } = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    const issue = result[0];
+    const issue = issues[0];
     expect(issue.htmlUrl).toBeDefined();
     expect(issue.createdAt).toBeDefined();
     expect(issue.updatedAt).toBeDefined();
@@ -237,7 +238,7 @@ describe("fetchIssues", () => {
     expect(issue.repoFullName).toBe("octocat/Hello-World");
   });
 
-  it("returns empty array when repos is empty", async () => {
+  it("returns empty result when repos is empty", async () => {
     const octokit = makeSearchOctokit();
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -245,7 +246,8 @@ describe("fetchIssues", () => {
       "octocat"
     );
 
-    expect(result).toEqual([]);
+    expect(result.issues).toEqual([]);
+    expect(result.errors).toEqual([]);
     expect(octokit.request).not.toHaveBeenCalled();
   });
 
@@ -291,7 +293,7 @@ describe("fetchIssues", () => {
     );
 
     // Should deduplicate: only 1 issue even though returned by 2 batches
-    expect(result.length).toBe(1);
+    expect(result.issues.length).toBe(1);
   });
 
   it("throws when octokit is null", async () => {
@@ -362,7 +364,7 @@ describe("fetchPullRequests", () => {
   it("fetches check status via GraphQL batch call", async () => {
     const octokit = makeOctokitForPRs();
 
-    const result = await fetchPullRequests(
+    const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
@@ -382,7 +384,7 @@ describe("fetchPullRequests", () => {
     expect(restCheckCalls.length).toBe(0);
 
     // Check status should be mapped from GraphQL response
-    for (const pr of result) {
+    for (const pr of pullRequests) {
       expect(["success", "failure", "pending", null]).toContain(pr.checkStatus);
     }
   });
@@ -393,12 +395,12 @@ describe("fetchPullRequests", () => {
     (octokitFailure as Record<string, unknown>).graphql = vi.fn(async () => ({
       pr0: { object: { statusCheckRollup: { state: "FAILURE" } } },
     }));
-    const failures = await fetchPullRequests(
+    const failResult = await fetchPullRequests(
       octokitFailure as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
-    expect(failures[0].checkStatus).toBe("failure");
+    expect(failResult.pullRequests[0].checkStatus).toBe("failure");
 
     await clearCache();
 
@@ -407,12 +409,12 @@ describe("fetchPullRequests", () => {
     (octokitPending as Record<string, unknown>).graphql = vi.fn(async () => ({
       pr0: { object: { statusCheckRollup: { state: "PENDING" } } },
     }));
-    const pending = await fetchPullRequests(
+    const pendResult = await fetchPullRequests(
       octokitPending as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
-    expect(pending[0].checkStatus).toBe("pending");
+    expect(pendResult.pullRequests[0].checkStatus).toBe("pending");
 
     await clearCache();
 
@@ -421,12 +423,12 @@ describe("fetchPullRequests", () => {
     (octokitNull as Record<string, unknown>).graphql = vi.fn(async () => ({
       pr0: { object: null },
     }));
-    const nullChecks = await fetchPullRequests(
+    const nullResult = await fetchPullRequests(
       octokitNull as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
-    expect(nullChecks[0].checkStatus).toBeNull();
+    expect(nullResult.pullRequests[0].checkStatus).toBeNull();
   });
 
   it("falls back to null check status on GraphQL error", async () => {
@@ -435,27 +437,27 @@ describe("fetchPullRequests", () => {
       throw new Error("GraphQL error");
     });
 
-    const result = await fetchPullRequests(
+    const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
     // Should still return PRs, just with null check status
-    expect(result.length).toBe(1);
-    expect(result[0].checkStatus).toBeNull();
+    expect(pullRequests.length).toBe(1);
+    expect(pullRequests[0].checkStatus).toBeNull();
   });
 
   it("maps PR detail fields to camelCase shape", async () => {
     const octokit = makeOctokitForPRs();
 
-    const result = await fetchPullRequests(
+    const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    const pr = result[0];
+    const pr = pullRequests[0];
     expect(pr).toMatchObject({
       id: expect.any(Number),
       number: expect.any(Number),
@@ -477,24 +479,25 @@ describe("fetchPullRequests", () => {
     // Both search queries return the same PR
     const octokit = makeOctokitForPRs();
 
-    const result = await fetchPullRequests(
+    const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
     // Only 1 PR despite being found by potentially both search queries
-    expect(result.length).toBe(1);
+    expect(pullRequests.length).toBe(1);
   });
 
-  it("returns empty array when repos is empty", async () => {
+  it("returns empty result when repos is empty", async () => {
     const octokit = makeOctokitForPRs();
     const result = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [],
       "octocat"
     );
-    expect(result).toEqual([]);
+    expect(result.pullRequests).toEqual([]);
+    expect(result.errors).toEqual([]);
   });
 
   it("throws when octokit is null", async () => {
@@ -526,15 +529,15 @@ describe("fetchWorkflowRuns", () => {
   it("returns runs grouped by workflow", async () => {
     const octokit = makeOctokitForRuns();
 
-    const result = await fetchWorkflowRuns(
+    const { workflowRuns } = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       5,
       3
     );
 
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
+    expect(Array.isArray(workflowRuns)).toBe(true);
+    expect(workflowRuns.length).toBeGreaterThan(0);
   });
 
   it("uses single actions/runs endpoint per repo", async () => {
@@ -564,7 +567,7 @@ describe("fetchWorkflowRuns", () => {
 
     const maxWorkflows = 3;
     const maxRuns = 1;
-    const result = await fetchWorkflowRuns(
+    const { workflowRuns } = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       maxWorkflows,
@@ -573,7 +576,7 @@ describe("fetchWorkflowRuns", () => {
 
     // Group result by workflowId and check each has at most maxRuns
     const byWorkflow = new Map<number, number>();
-    for (const run of result) {
+    for (const run of workflowRuns) {
       byWorkflow.set(run.workflowId, (byWorkflow.get(run.workflowId) ?? 0) + 1);
     }
     for (const count of byWorkflow.values()) {
@@ -585,7 +588,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const maxWorkflows = 1;
-    const result = await fetchWorkflowRuns(
+    const { workflowRuns } = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       maxWorkflows,
@@ -593,14 +596,14 @@ describe("fetchWorkflowRuns", () => {
     );
 
     // All runs should be from a single workflow
-    const workflowIds = new Set(result.map((r) => r.workflowId));
+    const workflowIds = new Set(workflowRuns.map((r) => r.workflowId));
     expect(workflowIds.size).toBeLessThanOrEqual(maxWorkflows);
   });
 
   it("tags PR-triggered runs with isPrRun=true", async () => {
     const octokit = makeOctokitForRuns();
 
-    const result = await fetchWorkflowRuns(
+    const { workflowRuns } = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       5,
@@ -608,12 +611,12 @@ describe("fetchWorkflowRuns", () => {
     );
 
     // Run 9003 has event: "pull_request"
-    const prRun = result.find((r) => r.id === 9003);
+    const prRun = workflowRuns.find((r) => r.id === 9003);
     expect(prRun).toBeDefined();
     expect(prRun!.isPrRun).toBe(true);
 
     // Run 9001 has event: "push"
-    const pushRun = result.find((r) => r.id === 9001);
+    const pushRun = workflowRuns.find((r) => r.id === 9001);
     expect(pushRun).toBeDefined();
     expect(pushRun!.isPrRun).toBe(false);
   });
@@ -621,14 +624,14 @@ describe("fetchWorkflowRuns", () => {
   it("maps raw run fields to camelCase shape", async () => {
     const octokit = makeOctokitForRuns();
 
-    const result = await fetchWorkflowRuns(
+    const { workflowRuns } = await fetchWorkflowRuns(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       5,
       3
     );
 
-    const run = result[0];
+    const run = workflowRuns[0];
     expect(run).toMatchObject({
       id: expect.any(Number),
       name: expect.any(String),

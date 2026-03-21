@@ -52,16 +52,30 @@ export async function fetchAllData(): Promise<DashboardData> {
     ),
   ]);
 
-  const errors = aggregateErrors([
+  // Collect top-level errors (total function failures)
+  const topLevelErrors = aggregateErrors([
     [issueResult, "issues"],
     [prResult, "pull-requests"],
     [runResult, "workflow-runs"],
   ]);
 
+  // Extract data and per-batch errors from successful results
+  const issueData = issueResult.status === "fulfilled" ? issueResult.value : null;
+  const prData = prResult.status === "fulfilled" ? prResult.value : null;
+  const runData = runResult.status === "fulfilled" ? runResult.value : null;
+
+  // Merge all error sources: top-level failures + per-batch partial failures
+  const errors = [
+    ...topLevelErrors,
+    ...(issueData?.errors ?? []),
+    ...(prData?.errors ?? []),
+    ...(runData?.errors ?? []),
+  ];
+
   return {
-    issues: issueResult.status === "fulfilled" ? issueResult.value : [],
-    pullRequests: prResult.status === "fulfilled" ? prResult.value : [],
-    workflowRuns: runResult.status === "fulfilled" ? runResult.value : [],
+    issues: issueData?.issues ?? [],
+    pullRequests: prData?.pullRequests ?? [],
+    workflowRuns: runData?.workflowRuns ?? [],
     errors,
   };
 }
