@@ -340,7 +340,7 @@ export async function fetchIssues(
   userLogin: string
 ): Promise<Issue[]> {
   if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0) return [];
+  if (repos.length === 0 || !userLogin) return [];
 
   const items = await batchedSearch(
     octokit,
@@ -472,7 +472,7 @@ export async function fetchPullRequests(
   userLogin: string
 ): Promise<PullRequest[]> {
   if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0) return [];
+  if (repos.length === 0 || !userLogin) return [];
 
   // Two searches: involves (author/assignee/mentioned/commenter) + review-requested
   const [involvedItems, reviewItems] = await Promise.allSettled([
@@ -499,7 +499,13 @@ export async function fetchPullRequests(
 
   // Fetch full PR details for each (head SHA, branch info, reviewers)
   const prDetailTasks = uniqueItems
-    .filter((item) => item.repository.full_name.includes("/"))
+    .filter((item) => {
+      if (!item.repository.full_name.includes("/")) {
+        console.warn("[api] Skipping PR with malformed full_name:", item.repository.full_name);
+        return false;
+      }
+      return true;
+    })
     .map(async (item) => {
     const repoFullName = item.repository.full_name;
     const [owner, name] = repoFullName.split("/");
@@ -515,6 +521,12 @@ export async function fetchPullRequests(
   });
 
   const prDetails = await Promise.allSettled(prDetailTasks);
+
+  for (const result of prDetails) {
+    if (result.status === "rejected") {
+      console.warn("[api] PR detail fetch failed:", result.reason);
+    }
+  }
 
   const successfulPRs = prDetails
     .filter(
@@ -610,9 +622,12 @@ export async function fetchWorkflowRuns(
       })
       .slice(0, maxWorkflows);
 
-    // Take top M runs per workflow
+    // Take most recent M runs per workflow
     for (const [, workflowRuns] of topWorkflows) {
-      for (const run of workflowRuns.slice(0, maxRuns)) {
+      const sorted = workflowRuns.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      for (const run of sorted.slice(0, maxRuns)) {
         allRuns.push({
           id: run.id,
           name: run.name,
@@ -633,7 +648,12 @@ export async function fetchWorkflowRuns(
     }
   });
 
-  await Promise.allSettled(repoTasks);
+  const repoResults = await Promise.allSettled(repoTasks);
+  for (const result of repoResults) {
+    if (result.status === "rejected") {
+      console.warn("[api] Workflow runs fetch failed for repo:", result.reason);
+    }
+  }
 
   return allRuns;
 }
