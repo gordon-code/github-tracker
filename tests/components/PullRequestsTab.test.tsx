@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
 import type { ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
@@ -103,13 +104,14 @@ describe("PullRequestsTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("changes sort when column header clicked", () => {
+  it("changes sort when column header clicked", async () => {
+    const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const prs = [makePullRequest({ title: "PR A" })];
     render(() => <PullRequestsTab pullRequests={prs} />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    fireEvent.click(titleHeader);
+    await user.click(titleHeader);
 
     expect(setSortSpy).toHaveBeenCalledWith("pullRequests", "title", "desc");
     setSortSpy.mockRestore();

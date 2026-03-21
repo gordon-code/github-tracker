@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import PaginationControls from "../../../src/app/components/shared/PaginationControls";
 
 describe("PaginationControls", () => {
@@ -108,7 +109,8 @@ describe("PaginationControls", () => {
     expect(nextBtn.disabled).toBe(true);
   });
 
-  it("clicking Prev calls onPrev", () => {
+  it("clicking Prev calls onPrev", async () => {
+    const user = userEvent.setup();
     const onPrev = vi.fn();
     render(() => (
       <PaginationControls
@@ -120,11 +122,12 @@ describe("PaginationControls", () => {
         onNext={vi.fn()}
       />
     ));
-    fireEvent.click(screen.getByLabelText("Previous page"));
+    await user.click(screen.getByLabelText("Previous page"));
     expect(onPrev).toHaveBeenCalledOnce();
   });
 
-  it("clicking Next calls onNext", () => {
+  it("clicking Next calls onNext", async () => {
+    const user = userEvent.setup();
     const onNext = vi.fn();
     render(() => (
       <PaginationControls
@@ -136,7 +139,7 @@ describe("PaginationControls", () => {
         onNext={onNext}
       />
     ));
-    fireEvent.click(screen.getByLabelText("Next page"));
+    await user.click(screen.getByLabelText("Next page"));
     expect(onNext).toHaveBeenCalledOnce();
   });
 });

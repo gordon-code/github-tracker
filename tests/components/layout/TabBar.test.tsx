@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import TabBar from "../../../src/app/components/layout/TabBar";
 import type { TabCounts } from "../../../src/app/components/layout/TabBar";
 
@@ -37,36 +38,39 @@ describe("TabBar", () => {
     expect(actionsButton!.getAttribute("aria-current")).toBeNull();
   });
 
-  it("calls onTabChange with 'issues' when Issues tab clicked", () => {
+  it("calls onTabChange with 'issues' when Issues tab clicked", async () => {
+    const user = userEvent.setup();
     const onTabChange = vi.fn();
     render(() => (
       <TabBar activeTab="pullRequests" onTabChange={onTabChange} />
     ));
     const buttons = screen.getAllByRole("button");
     const issuesButton = buttons.find((b) => b.textContent?.includes("Issues"));
-    fireEvent.click(issuesButton!);
+    await user.click(issuesButton!);
     expect(onTabChange).toHaveBeenCalledWith("issues");
   });
 
-  it("calls onTabChange with 'pullRequests' when Pull Requests tab clicked", () => {
+  it("calls onTabChange with 'pullRequests' when Pull Requests tab clicked", async () => {
+    const user = userEvent.setup();
     const onTabChange = vi.fn();
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
     const buttons = screen.getAllByRole("button");
     const prButton = buttons.find((b) => b.textContent?.includes("Pull Requests"));
-    fireEvent.click(prButton!);
+    await user.click(prButton!);
     expect(onTabChange).toHaveBeenCalledWith("pullRequests");
   });
 
-  it("calls onTabChange with 'actions' when Actions tab clicked", () => {
+  it("calls onTabChange with 'actions' when Actions tab clicked", async () => {
+    const user = userEvent.setup();
     const onTabChange = vi.fn();
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
     const buttons = screen.getAllByRole("button");
     const actionsButton = buttons.find((b) => b.textContent?.includes("Actions"));
-    fireEvent.click(actionsButton!);
+    await user.click(actionsButton!);
     expect(onTabChange).toHaveBeenCalledWith("actions");
   });
 

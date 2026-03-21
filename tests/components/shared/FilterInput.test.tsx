@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import FilterInput from "../../../src/app/components/shared/FilterInput";
 
 describe("FilterInput", () => {
@@ -40,7 +41,7 @@ describe("FilterInput", () => {
     expect(onFilter).toHaveBeenCalledWith("hello");
   });
 
-  it("clear button appears when input has value and calls onFilter('') immediately", () => {
+  it("clear button appears when input has value and calls onFilter('') immediately", async () => {
     const onFilter = vi.fn();
     render(() => <FilterInput onFilter={onFilter} />);
     const input = screen.getByPlaceholderText("Filter...");
@@ -52,7 +53,8 @@ describe("FilterInput", () => {
     expect(clearBtn).toBeTruthy();
     onFilter.mockClear();
 
-    fireEvent.click(clearBtn);
+    const user = userEvent.setup({ delay: null });
+    await user.click(clearBtn);
     // Called immediately, not after debounce
     expect(onFilter).toHaveBeenCalledWith("");
     expect(onFilter).toHaveBeenCalledOnce();

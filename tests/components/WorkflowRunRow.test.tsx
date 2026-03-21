@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import WorkflowRunRow from "../../src/app/components/dashboard/WorkflowRunRow";
 import { makeWorkflowRun } from "../helpers/index";
 
@@ -71,13 +72,14 @@ describe("WorkflowRunRow", () => {
     screen.getByLabelText("Queued");
   });
 
-  it("calls onIgnore when ignore button clicked", () => {
+  it("calls onIgnore when ignore button clicked", async () => {
+    const user = userEvent.setup();
     const onIgnore = vi.fn();
     const run = makeWorkflowRun({ name: "Test Run" });
     render(() => (
       <WorkflowRunRow run={run} onIgnore={onIgnore} density="comfortable" />
     ));
-    fireEvent.click(screen.getByLabelText("Ignore run Test Run"));
+    await user.click(screen.getByLabelText("Ignore run Test Run"));
     expect(onIgnore).toHaveBeenCalledWith(run);
   });
 

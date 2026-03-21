@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
 import type { ApiError } from "../../src/app/services/api";
 import { makeIssue } from "../helpers/index";
@@ -105,29 +106,31 @@ describe("IssuesTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("changes sort order when a column header is clicked", () => {
+  it("changes sort order when a column header is clicked", async () => {
+    const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    fireEvent.click(titleHeader);
+    await user.click(titleHeader);
 
     expect(setSortSpy).toHaveBeenCalledWith("issues", "title", "desc");
     setSortSpy.mockRestore();
   });
 
-  it("toggles sort direction on second click of same column", () => {
+  it("toggles sort direction on second click of same column", async () => {
+    const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
     // First click: sets desc
-    fireEvent.click(titleHeader);
+    await user.click(titleHeader);
     // Simulate sort pref being updated to title/desc (spy already called)
     // Second click should toggle to asc
-    fireEvent.click(titleHeader);
+    await user.click(titleHeader);
 
     expect(setSortSpy).toHaveBeenCalledTimes(2);
     setSortSpy.mockRestore();
