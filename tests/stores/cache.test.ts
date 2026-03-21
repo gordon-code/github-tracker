@@ -87,6 +87,7 @@ describe("evictStaleEntries", () => {
       key: "old:entry",
       data: { old: true },
       etag: null,
+      lastModified: null,
       fetchedAt: now - 25 * hoursMs,
       maxAge: null,
     });
@@ -96,6 +97,7 @@ describe("evictStaleEntries", () => {
       key: "fresh:entry",
       data: { fresh: true },
       etag: null,
+      lastModified: null,
       fetchedAt: now - 1 * hoursMs,
       maxAge: null,
     });
@@ -120,6 +122,7 @@ describe("evictStaleEntries", () => {
       key: "stale:1",
       data: {},
       etag: null,
+      lastModified: null,
       fetchedAt: oldTime,
       maxAge: null,
     });
@@ -127,6 +130,7 @@ describe("evictStaleEntries", () => {
       key: "stale:2",
       data: {},
       etag: null,
+      lastModified: null,
       fetchedAt: oldTime,
       maxAge: null,
     });

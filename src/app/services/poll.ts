@@ -35,21 +35,28 @@ export interface PollCoordinator {
 // ── Notifications gate ───────────────────────────────────────────────────────
 
 let _notifLastModified: string | null = null;
+let _notifGateDisabled = false; // Disabled after 403 (missing notifications permission)
 
 /** Resets module-level poll state. Call on logout to prevent stale state leaking across sessions. */
 export function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
+  _notifGateDisabled = false;
 }
 
 /**
  * Checks if anything changed since last poll using the Notifications API.
  * Returns true if there are new notifications (or first check), false if unchanged.
  * Uses If-Modified-Since for zero-cost 304 checks (doesn't count against rate limit).
+ *
+ * Auto-disables after a 403 (missing notifications permission) to stop wasting
+ * rate limit tokens on requests that will always fail.
  */
 async function hasNotificationChanges(): Promise<boolean> {
+  if (_notifGateDisabled) return true;
+
   const octokit = getClient();
-  if (!octokit) return true; // Can't check — assume changes
+  if (!octokit) return true;
 
   try {
     const headers: Record<string, string> = {};
@@ -77,7 +84,16 @@ async function hasNotificationChanges(): Promise<boolean> {
     ) {
       return false; // Nothing changed since last check
     }
-    // Error checking notifications — proceed with full fetch anyway
+    // 403 = missing notifications permission — disable gate permanently
+    // to stop burning rate limit tokens on every poll cycle
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { status?: number }).status === 403
+    ) {
+      console.warn("[poll] Notifications API returned 403 — disabling gate");
+      _notifGateDisabled = true;
+    }
     return true;
   }
 }
