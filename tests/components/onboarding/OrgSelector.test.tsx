@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import type { OrgEntry } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
@@ -93,6 +94,7 @@ describe("OrgSelector", () => {
   });
 
   it("onChange called when checkbox toggled", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
     const onChange = vi.fn();
     render(() => <OrgSelector selected={[]} onChange={onChange} />);
@@ -107,7 +109,7 @@ describe("OrgSelector", () => {
       return label?.textContent?.includes("myorg");
     });
 
-    fireEvent.click(myorgCheckbox!);
+    await user.click(myorgCheckbox!);
     expect(onChange).toHaveBeenCalledWith(["myorg"]);
   });
 
@@ -129,6 +131,7 @@ describe("OrgSelector", () => {
   });
 
   it("Select All selects all visible orgs", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
     const onChange = vi.fn();
     render(() => <OrgSelector selected={[]} onChange={onChange} />);
@@ -137,7 +140,7 @@ describe("OrgSelector", () => {
       screen.getByText("myorg");
     });
 
-    fireEvent.click(screen.getByText("Select All"));
+    await user.click(screen.getByText("Select All"));
     expect(onChange).toHaveBeenCalled();
     const called = onChange.mock.calls[0][0] as string[];
     expect(called).toContain("myorg");
@@ -146,6 +149,7 @@ describe("OrgSelector", () => {
   });
 
   it("Deselect All deselects visible orgs", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
     const onChange = vi.fn();
     render(() => <OrgSelector selected={["myorg", "anotheorg"]} onChange={onChange} />);
@@ -154,7 +158,7 @@ describe("OrgSelector", () => {
       screen.getByText("myorg");
     });
 
-    fireEvent.click(screen.getByText("Deselect All"));
+    await user.click(screen.getByText("Deselect All"));
     expect(onChange).toHaveBeenCalled();
     const result = onChange.mock.calls[0][0] as string[];
     expect(result).not.toContain("myorg");

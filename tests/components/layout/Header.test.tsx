@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent } from "@solidjs/testing-library";
+import { screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 
 
 const mockNavigate = vi.fn();
@@ -86,10 +87,11 @@ describe("Header", () => {
     expect(screen.queryByText(/req remaining/)).toBeNull();
   });
 
-  it("logout button calls clearAuth", () => {
+  it("logout button calls clearAuth", async () => {
+    const user = userEvent.setup();
     render(() => <Header />);
     const logoutButton = screen.getByLabelText("Sign out");
-    fireEvent.click(logoutButton);
+    await user.click(logoutButton);
     expect(authStore.clearAuth).toHaveBeenCalledOnce();
   });
 

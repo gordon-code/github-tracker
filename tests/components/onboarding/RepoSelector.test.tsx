@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import type { RepoRef } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
@@ -70,6 +71,7 @@ describe("RepoSelector", () => {
   });
 
   it("onChange called when repo toggled", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
     const onChange = vi.fn();
 
@@ -87,7 +89,7 @@ describe("RepoSelector", () => {
       return label?.textContent?.includes("repo-a");
     });
 
-    fireEvent.click(repoACheckbox!);
+    await user.click(repoACheckbox!);
     expect(onChange).toHaveBeenCalledWith([myorgRepos[0]]);
   });
 
@@ -112,6 +114,7 @@ describe("RepoSelector", () => {
   });
 
   it("per-org Select All selects all repos in that org", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
     const onChange = vi.fn();
 
@@ -126,7 +129,7 @@ describe("RepoSelector", () => {
     // "Select All" button in the org header (there may be multiple — use the first one)
     const selectAllBtns = screen.getAllByText("Select All");
     // The per-org one is inside the org group; for a single org there's only one
-    fireEvent.click(selectAllBtns[selectAllBtns.length - 1]);
+    await user.click(selectAllBtns[selectAllBtns.length - 1]);
 
     expect(onChange).toHaveBeenCalled();
     const result = onChange.mock.calls[0][0] as RepoRef[];
@@ -135,6 +138,7 @@ describe("RepoSelector", () => {
   });
 
   it("per-org Deselect All deselects all repos in that org", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
     const onChange = vi.fn();
 
@@ -147,7 +151,7 @@ describe("RepoSelector", () => {
     });
 
     const deselectAllBtns = screen.getAllByText("Deselect All");
-    fireEvent.click(deselectAllBtns[deselectAllBtns.length - 1]);
+    await user.click(deselectAllBtns[deselectAllBtns.length - 1]);
 
     expect(onChange).toHaveBeenCalled();
     const result = onChange.mock.calls[0][0] as RepoRef[];
@@ -169,6 +173,7 @@ describe("RepoSelector", () => {
   });
 
   it("clicking Retry re-fetches repos for that org", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchRepos)
       .mockRejectedValueOnce(new Error("Network error"))
       .mockResolvedValueOnce(myorgRepos);
@@ -181,7 +186,7 @@ describe("RepoSelector", () => {
       screen.getByText("Retry");
     });
 
-    fireEvent.click(screen.getByText("Retry"));
+    await user.click(screen.getByText("Retry"));
 
     await waitFor(() => {
       screen.getByText("repo-a");

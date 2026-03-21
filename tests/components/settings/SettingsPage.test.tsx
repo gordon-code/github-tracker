@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 
 // ── localStorage mock (happy-dom doesn't support .clear()/.removeItem()) ─────
 
@@ -186,10 +187,11 @@ describe("SettingsPage — Refresh interval", () => {
     expect(select).toBeDefined();
   });
 
-  it("changing refresh interval calls updateConfig", () => {
+  it("changing refresh interval calls updateConfig", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const select = screen.getByDisplayValue("5 minutes (default)");
-    fireEvent.change(select, { target: { value: "60" } });
+    await user.selectOptions(select, "60");
     expect(config.refreshInterval).toBe(60);
   });
 });
@@ -200,10 +202,11 @@ describe("SettingsPage — Appearance", () => {
     screen.getByDisplayValue("System");
   });
 
-  it("changing theme updates config", () => {
+  it("changing theme updates config", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const themeSelect = screen.getByDisplayValue("System");
-    fireEvent.change(themeSelect, { target: { value: "dark" } });
+    await user.selectOptions(themeSelect, "dark");
     expect(config.theme).toBe("dark");
   });
 
@@ -212,10 +215,11 @@ describe("SettingsPage — Appearance", () => {
     screen.getByDisplayValue("Comfortable");
   });
 
-  it("changing view density updates config", () => {
+  it("changing view density updates config", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const densitySelect = screen.getByDisplayValue("Comfortable");
-    fireEvent.change(densitySelect, { target: { value: "compact" } });
+    await user.selectOptions(densitySelect, "compact");
     expect(config.viewDensity).toBe("compact");
   });
 
@@ -224,10 +228,11 @@ describe("SettingsPage — Appearance", () => {
     screen.getByDisplayValue("25");
   });
 
-  it("changing items per page updates config", () => {
+  it("changing items per page updates config", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const ippSelect = screen.getByDisplayValue("25");
-    fireEvent.change(ippSelect, { target: { value: "50" } });
+    await user.selectOptions(ippSelect, "50");
     expect(config.itemsPerPage).toBe(50);
   });
 });
@@ -238,10 +243,11 @@ describe("SettingsPage — Tabs", () => {
     screen.getByDisplayValue("Issues");
   });
 
-  it("changing default tab updates config", () => {
+  it("changing default tab updates config", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const tabSelect = screen.getByDisplayValue("Issues");
-    fireEvent.change(tabSelect, { target: { value: "pullRequests" } });
+    await user.selectOptions(tabSelect, "pullRequests");
     expect(config.defaultTab).toBe("pullRequests");
   });
 
@@ -251,10 +257,11 @@ describe("SettingsPage — Tabs", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("clicking remember last tab toggle updates config", () => {
+  it("clicking remember last tab toggle updates config", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const toggle = screen.getByRole("switch", { name: /remember last tab/i });
-    fireEvent.click(toggle);
+    await user.click(toggle);
     expect(config.rememberLastTab).toBe(false);
   });
 });
@@ -333,7 +340,8 @@ describe("SettingsPage — Notifications", () => {
     expect(issuesToggle.hasAttribute("disabled")).toBe(true);
   });
 
-  it("toggling notifications when enabled updates config", () => {
+  it("toggling notifications when enabled updates config", async () => {
+    const user = userEvent.setup();
     // Enable notifications first
     updateConfig({ notifications: { enabled: true, issues: true, pullRequests: true, workflowRuns: true } });
     Object.defineProperty(window, "Notification", {
@@ -342,7 +350,7 @@ describe("SettingsPage — Notifications", () => {
     });
     renderSettings();
     const toggle = screen.getByRole("switch", { name: /enable notifications/i });
-    fireEvent.click(toggle);
+    await user.click(toggle);
     expect(config.notifications.enabled).toBe(false);
   });
 });
@@ -354,41 +362,44 @@ describe("SettingsPage — Data: Clear cache", () => {
     screen.getByRole("button", { name: "Clear cache" });
   });
 
-  it("first click shows confirmation dialog", () => {
+  it("first click shows confirmation dialog", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const clearBtn = screen.getByRole("button", { name: "Clear cache" });
-    fireEvent.click(clearBtn);
+    await user.click(clearBtn);
     screen.getByText("Are you sure?");
     screen.getByRole("button", { name: "Yes, clear" });
     screen.getByRole("button", { name: "Cancel" });
   });
 
   it("second click (confirm) calls clearCache", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const clearBtn = screen.getByRole("button", { name: "Clear cache" });
-    fireEvent.click(clearBtn);
+    await user.click(clearBtn);
     const confirmBtn = screen.getByRole("button", { name: "Yes, clear" });
-    fireEvent.click(confirmBtn);
+    await user.click(confirmBtn);
     await waitFor(() => {
       expect(cacheStore.clearCache).toHaveBeenCalledOnce();
     });
   });
 
-  it("clicking Cancel returns to initial state", () => {
+  it("clicking Cancel returns to initial state", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const clearBtn = screen.getByRole("button", { name: "Clear cache" });
-    fireEvent.click(clearBtn);
+    await user.click(clearBtn);
     screen.getByText("Are you sure?");
 
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
-    fireEvent.click(cancelBtn);
+    await user.click(cancelBtn);
     expect(screen.queryByText("Are you sure?")).toBeNull();
     screen.getByRole("button", { name: "Clear cache" });
   });
 });
 
 describe("SettingsPage — Data: Export settings", () => {
-  it("clicking Export triggers download", () => {
+  it("clicking Export triggers download", async () => {
     const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake-url");
     const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
@@ -405,7 +416,8 @@ describe("SettingsPage — Data: Export settings", () => {
 
     renderSettings();
     const exportBtn = screen.getByText("Export");
-    fireEvent.click(exportBtn);
+    const user = userEvent.setup();
+    await user.click(exportBtn);
 
     expect(createObjectURLSpy).toHaveBeenCalledOnce();
     expect(clickSpy).toHaveBeenCalledOnce();
@@ -419,34 +431,37 @@ describe("SettingsPage — Data: Reset all", () => {
     screen.getByRole("button", { name: "Reset all" });
   });
 
-  it("first click shows confirmation dialog", () => {
+  it("first click shows confirmation dialog", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const resetBtn = screen.getByRole("button", { name: "Reset all" });
-    fireEvent.click(resetBtn);
+    await user.click(resetBtn);
     screen.getByText("Are you sure?");
     screen.getByRole("button", { name: "Yes, reset" });
   });
 
-  it("cancelling reset returns to initial state", () => {
+  it("cancelling reset returns to initial state", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const resetBtn = screen.getByRole("button", { name: "Reset all" });
-    fireEvent.click(resetBtn);
+    await user.click(resetBtn);
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
-    fireEvent.click(cancelBtn);
+    await user.click(cancelBtn);
     expect(screen.queryByRole("button", { name: "Yes, reset" })).toBeNull();
     screen.getByRole("button", { name: "Reset all" });
   });
 
   it("confirming reset clears localStorage keys and calls reload", async () => {
+    const user = userEvent.setup();
     localStorageMock.setItem("github-tracker:config", '{"test":1}');
     localStorageMock.setItem("github-tracker:view", '{"test":1}');
     localStorageMock.setItem("github-tracker:auth", '{"test":1}');
 
     renderSettings();
     const resetBtn = screen.getByRole("button", { name: "Reset all" });
-    fireEvent.click(resetBtn);
+    await user.click(resetBtn);
     const confirmBtn = screen.getByRole("button", { name: "Yes, reset" });
-    fireEvent.click(confirmBtn);
+    await user.click(confirmBtn);
 
     await waitFor(() => {
       expect(window.location.reload).toHaveBeenCalledOnce();
@@ -458,17 +473,19 @@ describe("SettingsPage — Data: Reset all", () => {
 });
 
 describe("SettingsPage — Data: Sign out", () => {
-  it("clicking Sign out calls clearAuth", () => {
+  it("clicking Sign out calls clearAuth", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const signOutBtn = screen.getByRole("button", { name: "Sign out" });
-    fireEvent.click(signOutBtn);
+    await user.click(signOutBtn);
     expect(authStore.clearAuth).toHaveBeenCalledOnce();
   });
 
   it("clicking Sign out navigates to /login", async () => {
+    const user = userEvent.setup();
     renderSettings();
     const signOutBtn = screen.getByRole("button", { name: "Sign out" });
-    fireEvent.click(signOutBtn);
+    await user.click(signOutBtn);
     // Navigation is handled by MemoryRouter — we just verify clearAuth was called
     // and no error was thrown
     expect(authStore.clearAuth).toHaveBeenCalled();

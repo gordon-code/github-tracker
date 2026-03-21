@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 import type { DashboardData } from "../../src/app/services/poll";
@@ -107,9 +108,10 @@ describe("DashboardPage — tab switching", () => {
     screen.getByLabelText("Sort by Title");
   });
 
-  it("switches to PullRequestsTab when Pull Requests tab is clicked", () => {
+  it("switches to PullRequestsTab when Pull Requests tab is clicked", async () => {
+    const user = userEvent.setup();
     render(() => <DashboardPage />);
-    fireEvent.click(screen.getByText("Pull Requests"));
+    await user.click(screen.getByText("Pull Requests"));
     // PullRequestsTab renders its own "Sort by Title" column header
     screen.getByLabelText("Sort by Title");
     // The PR tab button is now active
@@ -117,9 +119,10 @@ describe("DashboardPage — tab switching", () => {
     expect(prButton?.getAttribute("aria-current")).toBe("page");
   });
 
-  it("switches to ActionsTab when Actions tab is clicked", () => {
+  it("switches to ActionsTab when Actions tab is clicked", async () => {
+    const user = userEvent.setup();
     render(() => <DashboardPage />);
-    fireEvent.click(screen.getByText("Actions"));
+    await user.click(screen.getByText("Actions"));
     // ActionsTab renders a "Show PR runs" checkbox — unique to that tab
     screen.getByText("Show PR runs");
     const actionsButton = screen.getByText("Actions").closest("button");
@@ -132,9 +135,10 @@ describe("DashboardPage — tab switching", () => {
     expect(issuesButton?.getAttribute("aria-current")).toBe("page");
   });
 
-  it("clicking a tab removes aria-current from previous tab", () => {
+  it("clicking a tab removes aria-current from previous tab", async () => {
+    const user = userEvent.setup();
     render(() => <DashboardPage />);
-    fireEvent.click(screen.getByText("Pull Requests"));
+    await user.click(screen.getByText("Pull Requests"));
     const issuesButton = screen.getByText("Issues").closest("button");
     expect(issuesButton?.getAttribute("aria-current")).toBeNull();
   });
@@ -161,6 +165,7 @@ describe("DashboardPage — data flow", () => {
   });
 
   it("passes fetched pull requests to PullRequestsTab", async () => {
+    const user = userEvent.setup();
     const pullRequests = [
       makePullRequest({ id: 10, title: "Fetched PR one" }),
       makePullRequest({ id: 11, title: "Fetched PR two" }),
@@ -173,7 +178,7 @@ describe("DashboardPage — data flow", () => {
     });
 
     render(() => <DashboardPage />);
-    fireEvent.click(screen.getByText("Pull Requests"));
+    await user.click(screen.getByText("Pull Requests"));
     await waitFor(() => {
       screen.getByText("Fetched PR one");
       screen.getByText("Fetched PR two");
@@ -181,6 +186,7 @@ describe("DashboardPage — data flow", () => {
   });
 
   it("passes fetched workflow runs to ActionsTab", async () => {
+    const user = userEvent.setup();
     const workflowRuns = [
       makeWorkflowRun({ id: 20, name: "CI pipeline", workflowId: 100 }),
       makeWorkflowRun({ id: 21, name: "Deploy job", workflowId: 101 }),
@@ -193,7 +199,7 @@ describe("DashboardPage — data flow", () => {
     });
 
     render(() => <DashboardPage />);
-    fireEvent.click(screen.getByText("Actions"));
+    await user.click(screen.getByText("Actions"));
     await waitFor(() => {
       // ActionsTab shows workflow names as group headers (may appear in header button + run row)
       expect(screen.getAllByText("CI pipeline").length).toBeGreaterThan(0);
