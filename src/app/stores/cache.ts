@@ -103,13 +103,16 @@ export async function evictStaleEntries(maxAgeMs: number): Promise<number> {
   const index = tx.store.index("fetchedAt");
   const cutoff = Date.now() - maxAgeMs;
 
-  // IDBKeyRange.upperBound(cutoff) gets all entries with fetchedAt <= cutoff
-  const staleKeys = await index.getAllKeys(IDBKeyRange.upperBound(cutoff));
-  for (const key of staleKeys) {
-    await tx.store.delete(key as string);
+  // Use cursor to delete by primary key (not index key)
+  let cursor = await index.openCursor(IDBKeyRange.upperBound(cutoff));
+  let count = 0;
+  while (cursor) {
+    await cursor.delete();
+    count++;
+    cursor = await cursor.continue();
   }
   await tx.done;
-  return staleKeys.length;
+  return count;
 }
 
 export interface FetchResult {
