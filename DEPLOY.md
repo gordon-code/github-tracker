@@ -30,8 +30,9 @@
 2. Fill in:
    - **App name**: your app name (e.g. `gh-tracker-yourname`)
    - **Homepage URL**: `https://gh.gordoncode.dev`
-   - **Callback URLs**: register BOTH:
+   - **Callback URLs**: register all three:
      - `https://gh.gordoncode.dev/oauth/callback` (production)
+     - `https://github-tracker.<account>.workers.dev/oauth/callback` (preview — GitHub's subdomain matching should allow per-branch preview aliases like `alias.github-tracker.<account>.workers.dev` to work; verify after first preview deploy)
      - `http://localhost:5173/oauth/callback` (local dev)
    - **Webhook**: disable (uncheck "Active")
    - **Permissions**: set to read-only as needed (Issues, Pull requests, Actions, Metadata)
@@ -54,17 +55,13 @@ wrangler secret put ALLOWED_ORIGIN
 - `GITHUB_CLIENT_SECRET`: the Client Secret from your GitHub App
 - `ALLOWED_ORIGIN`: `https://gh.gordoncode.dev`
 
-### Preview environment
+### Preview versions
 
-Secrets are non-inheritable — the preview environment needs its own set:
+Preview deployments use `wrangler versions upload` (not a separate environment), so they inherit production secrets automatically. No additional secret configuration is needed.
 
-```sh
-wrangler secret put GITHUB_CLIENT_ID --env preview
-wrangler secret put GITHUB_CLIENT_SECRET --env preview
-wrangler secret put ALLOWED_ORIGIN --env preview
-```
+CORS note: Preview URLs are same-origin (SPA and API share the same `*.workers.dev` host), so the `ALLOWED_ORIGIN` strict-equality check is irrelevant — browsers don't enforce CORS on same-origin requests.
 
-- `ALLOWED_ORIGIN` for preview: set to your Cloudflare Pages preview URL or `http://localhost:5173` for local testing
+**Migration note:** If you previously deployed with `wrangler deploy --env preview`, an orphaned `github-tracker-preview` worker may still exist. Delete it via `wrangler delete --name github-tracker-preview` or through the Cloudflare dashboard.
 
 ## Local Development
 
@@ -77,9 +74,9 @@ pnpm run build
 wrangler deploy
 ```
 
-For preview:
+For preview (uploads a version without promoting to production):
 
 ```sh
 pnpm run build
-wrangler deploy --env preview
+wrangler versions upload --preview-alias my-feature
 ```
