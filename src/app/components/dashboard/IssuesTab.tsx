@@ -1,20 +1,45 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem } from "../../stores/view";
+import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilters } from "../../stores/view";
+type IssueFilterField = keyof IssueFilters;
 import type { Issue, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
 import SortIcon from "../shared/SortIcon";
 import ErrorBannerList from "../shared/ErrorBannerList";
 import PaginationControls from "../shared/PaginationControls";
+import FilterChips from "../shared/FilterChips";
+import type { FilterChipGroupDef } from "../shared/FilterChips";
+import RoleBadge from "../shared/RoleBadge";
+import { deriveInvolvementRoles } from "../../lib/format";
 
 export interface IssuesTabProps {
   issues: Issue[];
   loading?: boolean;
   errors?: ApiError[];
+  userLogin: string;
 }
 
-type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt";
+type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
+
+const issueFilterGroups: FilterChipGroupDef[] = [
+  {
+    label: "Role",
+    field: "role",
+    options: [
+      { value: "author", label: "Author" },
+      { value: "assignee", label: "Assignee" },
+    ],
+  },
+  {
+    label: "Comments",
+    field: "comments",
+    options: [
+      { value: "has", label: "Has comments" },
+      { value: "none", label: "No comments" },
+    ],
+  },
+];
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
@@ -24,18 +49,38 @@ export default function IssuesTab(props: IssuesTabProps) {
     return pref ?? { field: "updatedAt", direction: "desc" as const };
   });
 
+  // Derived metadata stored in a Map — avoids object copies so <For> can
+  // reuse DOM nodes via referential identity on filter-only changes.
+  const issueMeta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
+
   const filteredSorted = createMemo(() => {
     const filter = viewState.globalFilter;
+    const tabFilter = viewState.tabFilters.issues;
     const ignored = new Set(
       viewState.ignoredItems
         .filter((i) => i.type === "issue")
         .map((i) => i.id)
     );
 
+    issueMeta.clear();
+
     let items = props.issues.filter((issue) => {
       if (ignored.has(String(issue.id))) return false;
       if (filter.repo && issue.repoFullName !== filter.repo) return false;
       if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
+
+      const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, []);
+
+      if (tabFilter.role !== "all") {
+        if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
+      }
+
+      if (tabFilter.comments !== "all") {
+        if (tabFilter.comments === "has" && issue.comments === 0) return false;
+        if (tabFilter.comments === "none" && issue.comments > 0) return false;
+      }
+
+      issueMeta.set(issue.id, { roles });
       return true;
     });
 
@@ -54,6 +99,9 @@ export default function IssuesTab(props: IssuesTabProps) {
           break;
         case "createdAt":
           cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case "comments":
+          cmp = a.comments - b.comments;
           break;
         case "updatedAt":
         default:
@@ -101,6 +149,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     { label: "Repo", field: "repo" },
     { label: "Title", field: "title" },
     { label: "Author", field: "author" },
+    { label: "Comments", field: "comments" },
     { label: "Created", field: "createdAt" },
     { label: "Updated", field: "updatedAt" },
   ];
@@ -134,6 +183,26 @@ export default function IssuesTab(props: IssuesTabProps) {
         <IgnoreBadge
           items={viewState.ignoredItems.filter((i) => i.type === "issue")}
           onUnignore={unignoreItem}
+        />
+      </div>
+
+      {/* Filter chips */}
+      <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <FilterChips
+          groups={issueFilterGroups}
+          values={viewState.tabFilters.issues}
+          onChange={(field, value) => {
+            setTabFilter("issues", field as IssueFilterField, value);
+            setPage(0);
+          }}
+          onReset={(field) => {
+            resetTabFilter("issues", field as IssueFilterField);
+            setPage(0);
+          }}
+          onResetAll={() => {
+            resetAllTabFilters("issues");
+            setPage(0);
+          }}
         />
       </div>
 
@@ -193,7 +262,10 @@ export default function IssuesTab(props: IssuesTabProps) {
                     labels={issue.labels}
                     onIgnore={() => handleIgnore(issue)}
                     density={config.viewDensity}
-                  />
+                    commentCount={issue.comments}
+                  >
+                    <RoleBadge roles={issueMeta.get(issue.id)?.roles ?? []} />
+                  </ItemRow>
                 </div>
               )}
             </For>

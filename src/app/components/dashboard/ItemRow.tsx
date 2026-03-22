@@ -1,6 +1,6 @@
 import { For, JSX, Show } from "solid-js";
 import { openGitHubUrl } from "../../lib/url";
-import { relativeTime, labelTextColor } from "../../lib/format";
+import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
 
 export interface ItemRowProps {
   repo: string;
@@ -13,6 +13,7 @@ export interface ItemRowProps {
   children?: JSX.Element;
   onIgnore: () => void;
   density: "compact" | "comfortable";
+  commentCount?: number;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -67,8 +68,9 @@ export default function ItemRow(props: ItemRowProps) {
           <div class={`flex flex-wrap gap-1 ${isCompact() ? "mt-0.5" : "mt-1"}`}>
             <For each={props.labels}>
               {(label) => {
-                const bg = `#${label.color}`;
-                const fg = labelTextColor(label.color);
+                const isValidHex = /^[0-9a-fA-F]{6}$/.test(label.color);
+                const bg = isValidHex ? `#${label.color}` : "#e5e7eb";
+                const fg = isValidHex ? labelTextColor(label.color) : "#374151";
                 return (
                   <span
                     class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium"
@@ -88,10 +90,28 @@ export default function ItemRow(props: ItemRowProps) {
         </Show>
       </div>
 
-      {/* Author + time */}
+      {/* Author + time + comment count */}
       <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-gray-500 dark:text-gray-400 ${isCompact() ? "" : "pt-0.5"}`}>
         <span>{props.author}</span>
         <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
+        <Show when={(props.commentCount ?? 0) > 0}>
+          <span class="flex items-center gap-0.5">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-3 w-3"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            {formatCount(props.commentCount!)}
+          </span>
+        </Show>
       </div>
 
       {/* Ignore button — visible on hover */}

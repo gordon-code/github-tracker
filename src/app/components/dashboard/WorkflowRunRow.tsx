@@ -2,7 +2,7 @@ import { Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import type { Config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { relativeTime } from "../../lib/format";
+import { relativeTime, formatDuration } from "../../lib/format";
 
 interface WorkflowRunRowProps {
   run: WorkflowRun;
@@ -132,6 +132,12 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
   );
 }
 
+function durationLabel(run: WorkflowRun): string {
+  if (run.status === "completed") return formatDuration(run.runStartedAt, run.completedAt ?? run.updatedAt);
+  if (run.status === "in_progress") return "running...";
+  return "--";
+}
+
 export default function WorkflowRunRow(props: WorkflowRunRowProps) {
   const paddingClass = () =>
     props.density === "compact" ? "py-1.5 px-3" : "py-2.5 px-4";
@@ -146,19 +152,34 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
         href={isSafeGitHubUrl(props.run.htmlUrl) ? props.run.htmlUrl : undefined}
         target="_blank"
         rel="noopener noreferrer"
-        class="flex-1 min-w-0 flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 truncate"
+        class="flex-1 min-w-0 flex flex-col gap-0.5 text-sm hover:text-blue-600 dark:hover:text-blue-400"
       >
-        <span class="truncate">{props.run.name}</span>
-
-        <Show when={props.run.isPrRun}>
-          <span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 flex-shrink-0">
-            PR
-          </span>
-        </Show>
+        <span class="truncate text-gray-900 dark:text-gray-100">
+          {props.run.displayTitle}
+        </span>
+        <span class="truncate text-xs text-gray-500 dark:text-gray-400">
+          {props.run.name}
+        </span>
       </a>
 
+      <Show when={props.run.isPrRun}>
+        <span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 flex-shrink-0">
+          PR
+        </span>
+      </Show>
+
+      <Show when={props.run.runAttempt > 1}>
+        <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 flex-shrink-0">
+          Attempt {props.run.runAttempt}
+        </span>
+      </Show>
+
       <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-        {props.run.headBranch}
+        {props.run.actorLogin}
+      </span>
+
+      <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+        {durationLabel(props.run)}
       </span>
 
       <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
