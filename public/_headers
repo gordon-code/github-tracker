@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-FD2vy04tC51phxvTNZPobQ99L2NwLanp++/VwrbUup8='; style-src 'self'; img-src 'self' https://avatars.githubusercontent.com data:; connect-src 'self' https://api.github.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-FD2vy04tC51phxvTNZPobQ99L2NwLanp++/VwrbUup8='; style-src 'self'; img-src 'self' https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()

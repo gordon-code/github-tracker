@@ -556,15 +556,12 @@ export default function SettingsPage() {
 
         {/* Section 7: Data */}
         <Section title="Data">
-          <div class="flex flex-col gap-3">
+          <div class="divide-y divide-gray-100 dark:divide-gray-700">
             {/* Clear cache */}
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Clear cache</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  Remove all cached API responses from IndexedDB
-                </p>
-              </div>
+            <SettingRow
+              label="Clear cache"
+              description="Remove all cached API responses from IndexedDB"
+            >
               <Show
                 when={!confirmClearCache()}
                 fallback={
@@ -596,16 +593,13 @@ export default function SettingsPage() {
                   Clear cache
                 </button>
               </Show>
-            </div>
+            </SettingRow>
 
             {/* Export settings */}
-            <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-3 dark:border-gray-700">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Export settings</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  Download your configuration as a JSON file
-                </p>
-              </div>
+            <SettingRow
+              label="Export settings"
+              description="Download your configuration as a JSON file"
+            >
               <button
                 type="button"
                 onClick={handleExportSettings}
@@ -613,16 +607,13 @@ export default function SettingsPage() {
               >
                 Export
               </button>
-            </div>
+            </SettingRow>
 
             {/* Reset all */}
-            <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-3 dark:border-gray-700">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Reset all</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  Clear all settings, cache, and auth — reloads the page
-                </p>
-              </div>
+            <SettingRow
+              label="Reset all"
+              description="Clear all settings, cache, and auth — reloads the page"
+            >
               <Show
                 when={!confirmReset()}
                 fallback={
@@ -653,16 +644,13 @@ export default function SettingsPage() {
                   Reset all
                 </button>
               </Show>
-            </div>
+            </SettingRow>
 
             {/* Sign out */}
-            <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-3 dark:border-gray-700">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Sign out</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  Clear auth tokens and return to login
-                </p>
-              </div>
+            <SettingRow
+              label="Sign out"
+              description="Clear auth tokens and return to login"
+            >
               <button
                 type="button"
                 onClick={handleSignOut}
@@ -670,7 +658,7 @@ export default function SettingsPage() {
               >
                 Sign out
               </button>
-            </div>
+            </SettingRow>
           </div>
         </Section>
       </div>

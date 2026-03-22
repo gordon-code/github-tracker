@@ -1,8 +1,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilters } from "../../stores/view";
-type ActionsFilterField = keyof ActionsFilters;
+import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
 import ErrorBannerList from "../shared/ErrorBannerList";

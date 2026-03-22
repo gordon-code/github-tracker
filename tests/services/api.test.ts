@@ -450,7 +450,10 @@ describe("fetchPullRequests", () => {
         return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
       }
       if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
-        return { data: { state: "success" }, headers: { etag: "etag-status" } };
+        return { data: { state: "success", total_count: 1 }, headers: { etag: "etag-status" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
+        return { data: { check_runs: [{ status: "completed", conclusion: "success" }] }, headers: { etag: "etag-check-runs" } };
       }
       if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
         return {
@@ -1108,6 +1111,192 @@ describe("batchFetchCheckStatuses with 51 PRs (2 GraphQL chunks)", () => {
     for (const pr of pullRequests) {
       expect(pr.checkStatus).toBe("success");
     }
+  });
+});
+
+// ── qa-9: REST fallback CHANGES_REQUESTED and REVIEW_REQUIRED branches ────────
+
+describe("REST fallback review decision (via fetchPullRequests)", () => {
+  function makeOctokitWithRestFallback(reviews: { user: { login: string } | null; state: string }[]) {
+    const request = vi.fn(async (route: string) => {
+      if (route === "GET /search/issues") {
+        return { data: searchPrsFixture, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return { data: { state: "success", total_count: 1 }, headers: { etag: "etag-status" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
+        // Return empty check runs so we don't interfere with review decision testing
+        return { data: { check_runs: [] }, headers: { etag: "etag-check-runs" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
+        return { data: reviews, headers: { etag: "etag-reviews" } };
+      }
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
+    });
+    // GraphQL always fails to force REST fallback
+    const graphql = vi.fn(async () => {
+      throw new Error("GraphQL unavailable");
+    });
+    return { request, graphql, paginate: { iterator: vi.fn() } };
+  }
+
+  it("REST fallback: single CHANGES_REQUESTED review → reviewDecision === CHANGES_REQUESTED", async () => {
+    await clearCache();
+    const reviews = [
+      { user: { login: "reviewer1" }, state: "CHANGES_REQUESTED" },
+    ];
+    const octokit = makeOctokitWithRestFallback(reviews);
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests[0].reviewDecision).toBe("CHANGES_REQUESTED");
+  });
+
+  it("REST fallback: CHANGES_REQUESTED wins over APPROVED from another reviewer", async () => {
+    await clearCache();
+    const reviews = [
+      { user: { login: "reviewer1" }, state: "APPROVED" },
+      { user: { login: "reviewer2" }, state: "CHANGES_REQUESTED" },
+    ];
+    const octokit = makeOctokitWithRestFallback(reviews);
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests[0].reviewDecision).toBe("CHANGES_REQUESTED");
+  });
+
+  it("REST fallback: mix of COMMENTED reviews (no APPROVED or CHANGES_REQUESTED) → REVIEW_REQUIRED", async () => {
+    await clearCache();
+    const reviews = [
+      { user: { login: "reviewer1" }, state: "COMMENTED" },
+      { user: { login: "reviewer2" }, state: "COMMENTED" },
+    ];
+    const octokit = makeOctokitWithRestFallback(reviews);
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests[0].reviewDecision).toBe("REVIEW_REQUIRED");
+  });
+
+  it("REST fallback: APPROVED from reviewer + COMMENTED from another → REVIEW_REQUIRED (not all approved)", async () => {
+    await clearCache();
+    const reviews = [
+      { user: { login: "reviewer1" }, state: "APPROVED" },
+      { user: { login: "reviewer2" }, state: "COMMENTED" },
+    ];
+    const octokit = makeOctokitWithRestFallback(reviews);
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests[0].reviewDecision).toBe("REVIEW_REQUIRED");
+  });
+
+  it("REST fallback: no reviews → reviewDecision === null", async () => {
+    await clearCache();
+    const octokit = makeOctokitWithRestFallback([]);
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests[0].reviewDecision).toBeNull();
+  });
+});
+
+// ── REST fallback: no CI configured → checkStatus null ────────────────────────
+
+describe("REST fallback no-CI detection (via fetchPullRequests)", () => {
+  it("REST fallback: no legacy statuses (total_count:0) and no check runs → checkStatus === null", async () => {
+    await clearCache();
+    const request = vi.fn(async (route: string) => {
+      if (route === "GET /search/issues") {
+        return { data: searchPrsFixture, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return { data: { state: "pending", total_count: 0 }, headers: { etag: "etag-status" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
+        return { data: { check_runs: [] }, headers: { etag: "etag-check-runs" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
+        return { data: [], headers: { etag: "etag-reviews" } };
+      }
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
+    });
+    const graphql = vi.fn(async () => { throw new Error("GraphQL unavailable"); });
+    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests.length).toBe(1);
+    expect(pullRequests[0].checkStatus).toBeNull();
+  });
+});
+
+// ── qa-10: Empty userLogin short-circuit ──────────────────────────────────────
+
+describe("empty userLogin short-circuit", () => {
+  it("fetchIssues returns empty result and makes no API calls when userLogin is empty string", async () => {
+    const octokit = {
+      request: vi.fn(),
+      paginate: { iterator: vi.fn() },
+    };
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "" // empty userLogin
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it("fetchPullRequests returns empty result and makes no API calls when userLogin is empty string", async () => {
+    const request = vi.fn();
+    const graphql = vi.fn();
+    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "" // empty userLogin
+    );
+
+    expect(result.pullRequests).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(request).not.toHaveBeenCalled();
+    expect(graphql).not.toHaveBeenCalled();
   });
 });
 

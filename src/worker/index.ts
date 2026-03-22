@@ -51,8 +51,10 @@ function getCorsHeaders(
   return {};
 }
 
-// GitHub OAuth code format validation (SDR-005): 20-char lowercase hex
-const VALID_CODE_RE = /^[0-9a-f]{20}$/;
+// GitHub OAuth code format validation (SDR-005): alphanumeric, 1-40 chars.
+// GitHub's code format is undocumented and has changed historically — validate
+// loosely here; GitHub's server validates the actual code.
+const VALID_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 
 // GitHub App refresh token format validation (SEC-003): ghr_ prefix + alphanumeric/underscore
 const VALID_REFRESH_TOKEN_RE = /^ghr_[A-Za-z0-9_]{20,255}$/;
