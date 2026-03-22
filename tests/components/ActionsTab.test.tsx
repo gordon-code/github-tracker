@@ -4,14 +4,10 @@ import userEvent from "@testing-library/user-event";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
 import type { ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
-import { makeWorkflowRun } from "../helpers/index";
+import { makeWorkflowRun, resetViewStore } from "../helpers/index";
 
 beforeEach(() => {
-  viewStore.updateViewState({
-    globalFilter: { org: null, repo: null },
-    sortPreferences: {},
-    ignoredItems: [],
-  });
+  resetViewStore();
 });
 
 describe("ActionsTab", () => {
@@ -74,18 +70,18 @@ describe("ActionsTab", () => {
   it("toggles repo collapse when repo header clicked", async () => {
     const user = userEvent.setup();
     const runs = [
-      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", headBranch: "main" }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "unique-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    // Branch name is only rendered inside run rows (not in headers)
-    screen.getByText("main");
+    // displayTitle is rendered inside run rows (not in headers)
+    screen.getByText("unique-run-title");
 
     // Click the repo header button to collapse it
     const repoHeader = screen.getByText("owner/repo");
     await user.click(repoHeader);
 
     // Run row content should be hidden after repo collapse
-    expect(screen.queryByText("main")).toBeNull();
+    expect(screen.queryByText("unique-run-title")).toBeNull();
   });
 
   it("toggles workflow collapse when workflow header clicked", async () => {
@@ -94,11 +90,11 @@ describe("ActionsTab", () => {
       repoFullName: "owner/repo",
       workflowId: 1,
       name: "MyWorkflow",
-      headBranch: "feature/wf-branch",
+      displayTitle: "unique-wf-run-title",
     });
     render(() => <ActionsTab workflowRuns={[run]} />);
-    // The run's branch name is only in the run row
-    screen.getByText("feature/wf-branch");
+    // The run's displayTitle is rendered in the run row
+    screen.getByText("unique-wf-run-title");
 
     // Find the workflow header button (the button containing "MyWorkflow" text)
     const buttons = screen.getAllByRole("button");
@@ -106,8 +102,8 @@ describe("ActionsTab", () => {
     expect(wfHeader).toBeDefined();
     await user.click(wfHeader!);
 
-    // Branch name should be hidden after workflow collapse
-    expect(screen.queryByText("feature/wf-branch")).toBeNull();
+    // displayTitle should be hidden after workflow collapse
+    expect(screen.queryByText("unique-wf-run-title")).toBeNull();
   });
 
   it("filters out ignored workflow runs", () => {
@@ -148,30 +144,52 @@ describe("ActionsTab", () => {
 
   it("hides PR runs by default (showPrRuns=false)", () => {
     const runs = [
-      makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, headBranch: "pr-branch" }),
-      makeWorkflowRun({ id: 2, name: "CI", repoFullName: "owner/repo", workflowId: 2, isPrRun: false, headBranch: "push-branch" }),
+      makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, displayTitle: "pr-run-title" }),
+      makeWorkflowRun({ id: 2, name: "CI", repoFullName: "owner/repo", workflowId: 2, isPrRun: false, displayTitle: "push-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    // PR run's branch is hidden
-    expect(screen.queryByText("pr-branch")).toBeNull();
-    // Push run's branch is visible
-    screen.getByText("push-branch");
+    // PR run's displayTitle is hidden
+    expect(screen.queryByText("pr-run-title")).toBeNull();
+    // Push run's displayTitle is visible
+    screen.getByText("push-run-title");
   });
 
   it("shows PR runs when 'Show PR runs' checkbox is checked", async () => {
     const user = userEvent.setup();
     const runs = [
-      makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, headBranch: "pr-branch" }),
+      makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, displayTitle: "pr-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
     // Initially hidden (isPrRun=true, showPrRuns=false)
-    expect(screen.queryByText("pr-branch")).toBeNull();
+    expect(screen.queryByText("pr-run-title")).toBeNull();
 
     // Check the checkbox to show PR runs
     const checkbox = screen.getByRole("checkbox");
     await user.click(checkbox);
 
-    // Now the PR run's branch should be visible
-    screen.getByText("pr-branch");
+    // Now the PR run's displayTitle should be visible
+    screen.getByText("pr-run-title");
+  });
+
+  it("filters by conclusion tab filter", () => {
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "success", displayTitle: "success-run" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "failure", displayTitle: "failure-run" }),
+    ];
+    viewStore.setTabFilter("actions", "conclusion", "success");
+    render(() => <ActionsTab workflowRuns={runs} />);
+    screen.getByText("success-run");
+    expect(screen.queryByText("failure-run")).toBeNull();
+  });
+
+  it("filters by event tab filter", () => {
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "CI", event: "push", displayTitle: "push-run" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 1, name: "CI", event: "schedule", displayTitle: "schedule-run" }),
+    ];
+    viewStore.setTabFilter("actions", "event", "push");
+    render(() => <ActionsTab workflowRuns={runs} />);
+    screen.getByText("push-run");
+    expect(screen.queryByText("schedule-run")).toBeNull();
   });
 });

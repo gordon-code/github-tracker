@@ -30,6 +30,14 @@
     ],
     "assignees": [
       { "login": "octocat", "id": 1 }
+    ],
+    "additions": 42,
+    "deletions": 10,
+    "changed_files": 5,
+    "comments": 3,
+    "review_comments": 2,
+    "labels": [
+      { "name": "bug", "color": "d73a4a" }
     ]
   },
   {
@@ -61,6 +69,12 @@
     "requested_reviewers": [],
     "assignees": [
       { "login": "devuser", "id": 8888 }
-    ]
+    ],
+    "additions": 150,
+    "deletions": 30,
+    "changed_files": 8,
+    "comments": 1,
+    "review_comments": 0,
+    "labels": []
   }
 ]

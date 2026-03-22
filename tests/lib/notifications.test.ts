@@ -49,6 +49,7 @@ function makeIssue(id: number): Issue {
     labels: [],
     assigneeLogins: [],
     repoFullName: "owner/repo",
+    comments: 0,
   };
 }
 
@@ -71,6 +72,14 @@ function makePr(id: number): PullRequest {
     reviewerLogins: [],
     repoFullName: "owner/repo",
     checkStatus: null,
+    additions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    comments: 0,
+    reviewComments: 0,
+    labels: [],
+    reviewDecision: null,
+    totalReviewCount: 0,
   };
 }
 
@@ -90,6 +99,11 @@ function makeRun(id: number): WorkflowRun {
     updatedAt: "2024-01-01T00:00:00Z",
     repoFullName: "owner/repo",
     isPrRun: false,
+    runStartedAt: "2024-01-01T00:00:00Z",
+    completedAt: "2024-01-01T00:05:00Z",
+    runAttempt: 1,
+    displayTitle: `Workflow ${id}`,
+    actorLogin: "user",
   };
 }
 

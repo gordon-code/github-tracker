@@ -321,6 +321,10 @@ describe("fetchPullRequests", () => {
         object: {
           statusCheckRollup: { state: "SUCCESS" },
         },
+        pullRequest: {
+          reviewDecision: "APPROVED",
+          latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
+        },
       },
     }));
     return { request, graphql, paginate: { iterator: vi.fn() } };
@@ -393,7 +397,7 @@ describe("fetchPullRequests", () => {
     // Test FAILURE state
     const octokitFailure = makeOctokitForPRs();
     (octokitFailure as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: { statusCheckRollup: { state: "FAILURE" } } },
+      pr0: { object: { statusCheckRollup: { state: "FAILURE" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     }));
     const failResult = await fetchPullRequests(
       octokitFailure as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -407,7 +411,7 @@ describe("fetchPullRequests", () => {
     // Test PENDING state
     const octokitPending = makeOctokitForPRs();
     (octokitPending as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: { statusCheckRollup: { state: "PENDING" } } },
+      pr0: { object: { statusCheckRollup: { state: "PENDING" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     }));
     const pendResult = await fetchPullRequests(
       octokitPending as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -421,7 +425,7 @@ describe("fetchPullRequests", () => {
     // Test null (no checks)
     const octokitNull = makeOctokitForPRs();
     (octokitNull as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: null },
+      pr0: { object: null, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     }));
     const nullResult = await fetchPullRequests(
       octokitNull as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -431,10 +435,32 @@ describe("fetchPullRequests", () => {
     expect(nullResult.pullRequests[0].checkStatus).toBeNull();
   });
 
-  it("falls back to null check status on GraphQL error", async () => {
+  it("falls back to REST when GraphQL fails", async () => {
     const octokit = makeOctokitForPRs();
     (octokit as Record<string, unknown>).graphql = vi.fn(async () => {
-      throw new Error("GraphQL error");
+      throw new Error("GraphQL rate limited");
+    });
+    // Mock REST fallback endpoints
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (octokit.request as any).mockImplementation(async (route: string) => {
+      if (route === "GET /search/issues") {
+        return { data: searchPrsFixture, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return { data: { state: "success" }, headers: { etag: "etag-status" } };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
+        return {
+          data: [
+            { user: { login: "reviewer1" }, state: "APPROVED" },
+          ],
+          headers: { etag: "etag-reviews" },
+        };
+      }
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
     });
 
     const { pullRequests } = await fetchPullRequests(
@@ -443,9 +469,13 @@ describe("fetchPullRequests", () => {
       "octocat"
     );
 
-    // Should still return PRs, just with null check status
     expect(pullRequests.length).toBe(1);
-    expect(pullRequests[0].checkStatus).toBeNull();
+    // REST fallback should provide check status from /commits/{sha}/status
+    expect(pullRequests[0].checkStatus).toBe("success");
+    // REST fallback should derive review decision from /pulls/{number}/reviews
+    expect(pullRequests[0].reviewDecision).toBe("APPROVED");
+    // REST fallback should provide reviewer logins
+    expect(pullRequests[0].reviewerLogins).toContain("reviewer1");
   });
 
   it("maps PR detail fields to camelCase shape", async () => {
@@ -472,6 +502,13 @@ describe("fetchPullRequests", () => {
       headRef: expect.any(String),
       baseRef: expect.any(String),
       repoFullName: expect.any(String),
+      additions: expect.any(Number),
+      deletions: expect.any(Number),
+      changedFiles: expect.any(Number),
+      comments: expect.any(Number),
+      reviewComments: expect.any(Number),
+      labels: expect.any(Array),
+      reviewDecision: "APPROVED",
     });
   });
 
@@ -897,7 +934,7 @@ describe("batchFetchCheckStatuses state mapping (via fetchPullRequests)", () => 
 
   it('maps state "ERROR" to "failure"', async () => {
     const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: { state: "ERROR" } } },
+      pr0: { object: { statusCheckRollup: { state: "ERROR" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     });
 
     const { pullRequests } = await fetchPullRequests(
@@ -912,7 +949,7 @@ describe("batchFetchCheckStatuses state mapping (via fetchPullRequests)", () => 
   it('maps state "EXPECTED" to "pending"', async () => {
     await clearCache();
     const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: { state: "EXPECTED" } } },
+      pr0: { object: { statusCheckRollup: { state: "EXPECTED" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     });
 
     const { pullRequests } = await fetchPullRequests(
@@ -927,7 +964,7 @@ describe("batchFetchCheckStatuses state mapping (via fetchPullRequests)", () => 
   it("maps statusCheckRollup: null (object exists but no rollup) to null", async () => {
     await clearCache();
     const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: null } },
+      pr0: { object: { statusCheckRollup: null }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
     });
 
     const { pullRequests } = await fetchPullRequests(
@@ -1050,7 +1087,7 @@ describe("batchFetchCheckStatuses with 51 PRs (2 GraphQL chunks)", () => {
           .filter((k) => k.startsWith("owner"))
           .map((k) => parseInt(k.replace("owner", ""), 10));
         for (const i of indices) {
-          response[`pr${i}`] = { object: { statusCheckRollup: { state: "SUCCESS" } } };
+          response[`pr${i}`] = { object: { statusCheckRollup: { state: "SUCCESS" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } };
         }
         return response;
       }),
@@ -1213,7 +1250,7 @@ describe("search query qualifiers", () => {
         return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
       }),
       graphql: vi.fn(async () => ({
-        pr0: { object: { statusCheckRollup: { state: "SUCCESS" } } },
+        pr0: { object: { statusCheckRollup: { state: "SUCCESS" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
       })),
       paginate: { iterator: vi.fn() },
     };

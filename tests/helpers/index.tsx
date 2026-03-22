@@ -20,6 +20,7 @@ export function makeIssue(overrides: Partial<Issue> = {}): Issue {
     labels: [],
     assigneeLogins: [],
     repoFullName: "owner/repo",
+    comments: 0,
     ...overrides,
   };
 }
@@ -43,6 +44,14 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
     reviewerLogins: [],
     repoFullName: "owner/repo",
     checkStatus: null,
+    additions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    comments: 0,
+    reviewComments: 0,
+    labels: [],
+    reviewDecision: null,
+    totalReviewCount: 0,
     ...overrides,
   };
 }
@@ -63,6 +72,11 @@ export function makeWorkflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowR
     updatedAt: "2024-01-12T14:30:00Z",
     repoFullName: "owner/repo",
     isPrRun: false,
+    runStartedAt: "2024-01-10T08:00:00Z",
+    completedAt: "2024-01-10T08:05:00Z",
+    runAttempt: 1,
+    displayTitle: "Workflow 1",
+    actorLogin: "user",
     ...overrides,
   };
 }
@@ -94,5 +108,11 @@ export function resetViewStore(): void {
     sortPreferences: {},
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
+    tabFilters: {
+      issues: { role: "all", comments: "all" },
+      pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" },
+      actions: { conclusion: "all", event: "all" },
+    },
+    showPrRuns: false,
   });
 }

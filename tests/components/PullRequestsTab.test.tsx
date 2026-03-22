@@ -4,14 +4,10 @@ import userEvent from "@testing-library/user-event";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
 import type { ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
-import { makePullRequest } from "../helpers/index";
+import { makePullRequest, resetViewStore } from "../helpers/index";
 
 beforeEach(() => {
-  viewStore.updateViewState({
-    globalFilter: { org: null, repo: null },
-    sortPreferences: {},
-    ignoredItems: [],
-  });
+  resetViewStore();
 });
 
 describe("PullRequestsTab", () => {
@@ -20,18 +16,18 @@ describe("PullRequestsTab", () => {
       makePullRequest({ number: 1, title: "First PR" }),
       makePullRequest({ number: 2, title: "Second PR" }),
     ];
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("First PR");
     screen.getByText("Second PR");
   });
 
   it("shows empty state when pull requests array is empty", () => {
-    render(() => <PullRequestsTab pullRequests={[]} />);
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
     screen.getByText(/No open pull requests involving you/i);
   });
 
   it("shows loading skeleton when loading=true", () => {
-    render(() => <PullRequestsTab pullRequests={[]} loading={true} />);
+    render(() => <PullRequestsTab pullRequests={[]} loading={true} userLogin="" />);
     const status = screen.getByRole("status");
     expect(status).toBeDefined();
     expect(screen.queryByText(/No open pull requests/i)).toBeNull();
@@ -42,7 +38,7 @@ describe("PullRequestsTab", () => {
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
       { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
     ];
-    render(() => <PullRequestsTab pullRequests={[]} errors={errors} />);
+    render(() => <PullRequestsTab pullRequests={[]} errors={errors} userLogin="" />);
     screen.getByText(/Server error/i);
     screen.getByText(/Forbidden/i);
   });
@@ -51,7 +47,7 @@ describe("PullRequestsTab", () => {
     const errors: ApiError[] = [
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
     ];
-    render(() => <PullRequestsTab pullRequests={[]} errors={errors} />);
+    render(() => <PullRequestsTab pullRequests={[]} errors={errors} userLogin="" />);
     screen.getByText(/will retry/i);
   });
 
@@ -64,7 +60,7 @@ describe("PullRequestsTab", () => {
       title: pr.title,
       ignoredAt: Date.now(),
     });
-    render(() => <PullRequestsTab pullRequests={[pr]} />);
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     expect(screen.queryByText("Should be hidden")).toBeNull();
     screen.getByText(/No open pull requests/i);
   });
@@ -75,7 +71,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ number: 2, title: "In other repo", repoFullName: "owner/other" }),
     ];
     viewStore.setGlobalFilter(null, "owner/target");
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
   });
@@ -86,7 +82,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
   });
@@ -96,7 +92,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 1, title: "Older PR", updatedAt: "2024-01-10T00:00:00Z" }),
       makePullRequest({ id: 2, title: "Newer PR", updatedAt: "2024-01-20T00:00:00Z" }),
     ];
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     const items = screen.getAllByRole("listitem");
     const texts = items.map((el) => el.textContent ?? "");
     const newerIdx = texts.findIndex((t) => t.includes("Newer PR"));
@@ -108,7 +104,7 @@ describe("PullRequestsTab", () => {
     const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const prs = [makePullRequest({ title: "PR A" })];
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
     await user.click(titleHeader);
@@ -118,18 +114,20 @@ describe("PullRequestsTab", () => {
   });
 
   it("renders column headers for all sortable fields", () => {
-    render(() => <PullRequestsTab pullRequests={[]} />);
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
     screen.getByLabelText("Sort by Repo");
     screen.getByLabelText("Sort by Title");
     screen.getByLabelText("Sort by Author");
     screen.getByLabelText("Sort by Checks");
+    screen.getByLabelText("Sort by Review");
+    screen.getByLabelText("Sort by Size");
     screen.getByLabelText("Sort by Created");
     screen.getByLabelText("Sort by Updated");
   });
 
   it("does not show pagination when there is only one page", () => {
     const prs = [makePullRequest({ title: "Single PR" })];
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     expect(screen.queryByLabelText("Previous page")).toBeNull();
     expect(screen.queryByLabelText("Next page")).toBeNull();
   });
@@ -138,37 +136,131 @@ describe("PullRequestsTab", () => {
     const prs = [
       makePullRequest({ id: 1, title: "PR with status", checkStatus: "success" }),
     ];
-    render(() => <PullRequestsTab pullRequests={prs} />);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     // StatusDot renders a <span> with aria-label matching the check status label
     screen.getByLabelText("All checks passed");
   });
 
   it("shows Draft badge for draft PRs", () => {
     const pr = makePullRequest({ title: "Draft PR", draft: true });
-    render(() => <PullRequestsTab pullRequests={[pr]} />);
-    screen.getByText("Draft");
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
+    // "Draft" appears in both the filter chip button and the PR badge
+    const draftEls = screen.getAllByText("Draft");
+    // At least one is a span (the badge), not a button (the chip)
+    const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeDefined();
   });
 
   it("does not show Draft badge for non-draft PRs", () => {
     const pr = makePullRequest({ title: "Normal PR", draft: false });
-    render(() => <PullRequestsTab pullRequests={[pr]} />);
-    expect(screen.queryByText("Draft")).toBeNull();
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
+    // "Draft" may appear as a filter chip button, but should NOT appear as a badge span
+    const draftEls = screen.queryAllByText("Draft");
+    const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeUndefined();
   });
 
-  it("shows reviewers when reviewerLogins non-empty", () => {
-    const pr = makePullRequest({
-      title: "PR with reviewers",
-      reviewerLogins: ["alice", "bob"],
-    });
-    render(() => <PullRequestsTab pullRequests={[pr]} />);
-    screen.getByText(/Reviewers:/i);
-    screen.getByText(/alice/);
-    screen.getByText(/bob/);
+  it("shows Author role badge when userLogin matches PR author", () => {
+    const pr = makePullRequest({ title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [] });
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
+    // "Author" appears in both the filter chip button and the role badge
+    const authorEls = screen.getAllByText("Author");
+    const badgeEl = authorEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeDefined();
   });
 
-  it("does not show reviewers section when reviewerLogins is empty", () => {
-    const pr = makePullRequest({ title: "PR no reviewers", reviewerLogins: [] });
-    render(() => <PullRequestsTab pullRequests={[pr]} />);
-    expect(screen.queryByText(/Reviewers:/i)).toBeNull();
+  it("shows Reviewer role badge when userLogin is a reviewer", () => {
+    const pr = makePullRequest({ title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [] });
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
+    // "Reviewer" appears in both the filter chip button and the role badge
+    const reviewerEls = screen.getAllByText("Reviewer");
+    const badgeEl = reviewerEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeDefined();
+  });
+
+  it("shows ReviewBadge for approved PRs", () => {
+    const pr = makePullRequest({ title: "Approved PR", reviewDecision: "APPROVED" });
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
+    // "Approved" appears in both the filter chip button and the review badge
+    const approvedEls = screen.getAllByText("Approved");
+    const badgeEl = approvedEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeDefined();
+  });
+
+  it("shows SizeBadge for each PR", () => {
+    const pr = makePullRequest({ title: "Big PR", additions: 300, deletions: 100 });
+    render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
+    // prSizeCategory(300, 100) = 400 total -> M
+    // "M" appears in both the filter chip button and the size badge
+    const mEls = screen.getAllByText("M");
+    const badgeEl = mEls.find((el) => el.tagName.toLowerCase() === "span");
+    expect(badgeEl).toBeDefined();
+  });
+
+  it("filters by tab role filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [] }),
+      makePullRequest({ id: 2, title: "Other PR", userLogin: "bob", reviewerLogins: [], assigneeLogins: [] }),
+    ];
+    viewStore.setTabFilter("pullRequests", "role", "author");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
+    screen.getByText("My PR");
+    expect(screen.queryByText("Other PR")).toBeNull();
+    viewStore.resetTabFilter("pullRequests", "role");
+  });
+
+  it("filters by reviewDecision tab filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED" }),
+      makePullRequest({ id: 2, title: "Pending PR", reviewDecision: null }),
+    ];
+    viewStore.setTabFilter("pullRequests", "reviewDecision", "APPROVED");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Approved PR");
+    expect(screen.queryByText("Pending PR")).toBeNull();
+  });
+
+  it("filters by draft tab filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Draft PR", draft: true }),
+      makePullRequest({ id: 2, title: "Ready PR", draft: false }),
+    ];
+    viewStore.setTabFilter("pullRequests", "draft", "draft");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Draft PR");
+    expect(screen.queryByText("Ready PR")).toBeNull();
+  });
+
+  it("filters by checkStatus tab filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Passing PR", checkStatus: "success" }),
+      makePullRequest({ id: 2, title: "Failing PR", checkStatus: "failure" }),
+    ];
+    viewStore.setTabFilter("pullRequests", "checkStatus", "success");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Passing PR");
+    expect(screen.queryByText("Failing PR")).toBeNull();
+  });
+
+  it("filters by checkStatus 'none' for PRs without CI", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "No CI PR", checkStatus: null }),
+      makePullRequest({ id: 2, title: "Has CI PR", checkStatus: "success" }),
+    ];
+    viewStore.setTabFilter("pullRequests", "checkStatus", "none");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("No CI PR");
+    expect(screen.queryByText("Has CI PR")).toBeNull();
+  });
+
+  it("filters by sizeCategory tab filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Small PR", additions: 5, deletions: 2 }),
+      makePullRequest({ id: 2, title: "Large PR", additions: 600, deletions: 200 }),
+    ];
+    viewStore.setTabFilter("pullRequests", "sizeCategory", "XS");
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Small PR");
+    expect(screen.queryByText("Large PR")).toBeNull();
   });
 });

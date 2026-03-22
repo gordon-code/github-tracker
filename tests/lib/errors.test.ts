@@ -79,12 +79,23 @@ describe("dismissError", () => {
   it("removes only the specified error by id", () => {
     createRoot((dispose) => {
       pushError("api", "Error A");
-      pushError("api", "Error B");
+      pushError("poll", "Error B");
       const [errA, errB] = getErrors();
       dismissError(errA.id);
       const remaining = getErrors();
       expect(remaining).toHaveLength(1);
       expect(remaining[0].id).toBe(errB.id);
+      dispose();
+    });
+  });
+
+  it("deduplicates errors by source — replaces message", () => {
+    createRoot((dispose) => {
+      pushError("api", "First error");
+      pushError("api", "Updated error");
+      const errs = getErrors();
+      expect(errs).toHaveLength(1);
+      expect(errs[0].message).toBe("Updated error");
       dispose();
     });
   });
