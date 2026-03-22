@@ -1,5 +1,6 @@
 import { getClient, cachedRequest } from "./github";
-import { evictByPrefix } from "../stores/cache";
+import { evictByPrefix, setCacheEntry } from "../stores/cache";
+import { pushError } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export interface Issue {
   labels: { name: string; color: string }[];
   assigneeLogins: string[];
   repoFullName: string;
+  comments: number;
 }
 
 export interface CheckStatus {
@@ -52,6 +54,14 @@ export interface PullRequest {
   reviewerLogins: string[];
   repoFullName: string;
   checkStatus: CheckStatus["status"];
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  comments: number;
+  reviewComments: number;
+  labels: { name: string; color: string }[];
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  totalReviewCount: number;
 }
 
 export interface WorkflowRun {
@@ -69,6 +79,11 @@ export interface WorkflowRun {
   updatedAt: string;
   repoFullName: string;
   isPrRun: boolean;
+  runStartedAt: string;
+  completedAt: string | null;
+  runAttempt: number;
+  displayTitle: string;
+  actorLogin: string;
 }
 
 export interface ApiError {
@@ -111,6 +126,12 @@ interface RawPullRequest {
   base: { ref: string };
   assignees: { login: string }[];
   requested_reviewers: { login: string }[];
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  comments: number;
+  review_comments: number;
+  labels: { name: string; color: string }[];
 }
 
 interface RawWorkflowRun {
@@ -126,6 +147,11 @@ interface RawWorkflowRun {
   html_url: string;
   created_at: string;
   updated_at: string;
+  run_started_at: string;
+  completed_at: string | null;
+  run_attempt: number;
+  display_title: string;
+  actor: { login: string } | null;
 }
 
 // ── Search API types ─────────────────────────────────────────────────────────
@@ -149,6 +175,7 @@ interface RawSearchItem {
   assignees: { login: string }[];
   repository: { full_name: string };
   pull_request?: unknown;
+  comments: number;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -156,7 +183,10 @@ interface RawSearchItem {
 // Batch repos into chunks for search queries (keeps URL length manageable)
 const SEARCH_REPO_BATCH_SIZE = 30;
 
-// Max PRs per GraphQL batch (keeps query complexity low)
+// Max PRs per GraphQL batch. Each alias fetches statusCheckRollup + pullRequest
+// (reviewDecision + latestReviews(first:15)). Cost: ~16 nodes/alias = ~800 pts/batch.
+// At 6 polls/hr (10min interval): ~4800 pts/hr against 5000/hr GraphQL budget.
+// Do not increase batch size or latestReviews.first without recalculating.
 const GRAPHQL_CHECK_BATCH_SIZE = 50;
 
 // ── Search helpers ───────────────────────────────────────────────────────────
@@ -204,11 +234,13 @@ async function searchAllPages(
         console.warn(
           `[api] Search results incomplete for: ${query.slice(0, 80)}…`
         );
+        pushError("search", "Search results may be incomplete — GitHub returned partial data", false);
       }
       if (items.length >= 1000 && data.total_count > 1000) {
         console.warn(
           `[api] Search results capped at 1000 (${data.total_count} total) for: ${query.slice(0, 80)}…`
         );
+        pushError("search", `Search results capped at 1,000 of ${data.total_count.toLocaleString()} total — some items are hidden`, false);
       }
       break;
     }
@@ -385,12 +417,101 @@ export async function fetchIssues(
       labels: item.labels.map((l) => ({ name: l.name, color: l.color })),
       assigneeLogins: item.assignees.map((a) => a.login),
       repoFullName: item.repository.full_name,
+      comments: item.comments,
     }));
 
   return { issues, errors };
 }
 
 // ── Step 4: fetchPullRequests (Search API + GraphQL check status) ─────────────
+
+interface CheckStatusResult {
+  checkStatus: CheckStatus["status"];
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  actualReviewerLogins: string[];
+  totalReviewCount: number;
+}
+
+type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
+
+/**
+ * REST fallback for check status + reviews when GraphQL is unavailable.
+ * Uses the core REST rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
+ * All requests go through cachedRequest for ETag-based caching.
+ *
+ * Limitation: GET /commits/{sha}/status only covers the legacy Status API.
+ * GitHub Actions workflows report via Check Runs, not Status API. For repos
+ * using only GitHub Actions, this endpoint may return "pending" when checks
+ * actually passed. GraphQL's statusCheckRollup combines both — this REST
+ * fallback is intentionally degraded.
+ */
+async function restFallbackCheckStatuses(
+  octokit: GitHubOctokit,
+  prs: { owner: string; repo: string; sha: string; prNumber: number }[],
+  results: Map<string, CheckStatusResult>
+): Promise<void> {
+  // Process in chunks of 10 to avoid overwhelming the browser's 6-connection limit
+  const REST_CONCURRENCY = 10;
+  const chunks = chunkArray(prs, REST_CONCURRENCY);
+  for (const chunk of chunks) {
+    const tasks = chunk.map(async (pr) => {
+    const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
+    try {
+      // Fetch combined commit status (covers Status API; check-runs report here too for most repos)
+      const statusResult = await cachedRequest(
+        octokit,
+        `rest-status:${key}`,
+        "GET /repos/{owner}/{repo}/commits/{ref}/status",
+        { owner: pr.owner, repo: pr.repo, ref: pr.sha }
+      );
+      const statusData = statusResult.data as { state: string };
+      let checkStatus: CheckStatus["status"];
+      if (statusData.state === "success") checkStatus = "success";
+      else if (statusData.state === "failure" || statusData.state === "error") checkStatus = "failure";
+      else if (statusData.state === "pending") checkStatus = "pending";
+      else checkStatus = null;
+
+      // Fetch PR reviews for review decision + reviewer logins
+      const reviewsResult = await cachedRequest(
+        octokit,
+        `rest-reviews:${pr.owner}/${pr.repo}:${pr.prNumber}`,
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        { owner: pr.owner, repo: pr.repo, pull_number: pr.prNumber }
+      );
+      const reviews = reviewsResult.data as { user: { login: string } | null; state: string }[];
+
+      // Derive review decision from latest review per author.
+      // Include COMMENTED to make REVIEW_REQUIRED reachable (comments without approval).
+      const latestByAuthor = new Map<string, string>();
+      for (const review of reviews) {
+        if (review.user?.login && (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED" || review.state === "COMMENTED")) {
+          latestByAuthor.set(review.user.login.toLowerCase(), review.state);
+        }
+      }
+      let reviewDecision: CheckStatusResult["reviewDecision"] = null;
+      if (latestByAuthor.size > 0) {
+        const states = [...latestByAuthor.values()];
+        if (states.some((s) => s === "CHANGES_REQUESTED")) reviewDecision = "CHANGES_REQUESTED";
+        else if (states.every((s) => s === "APPROVED")) reviewDecision = "APPROVED";
+        else reviewDecision = "REVIEW_REQUIRED";
+      }
+
+      const actualReviewerLogins = reviews
+        .filter((r) => r.user?.login)
+        .map((r) => r.user!.login);
+      // Deduplicate reviewer logins
+      const uniqueReviewers = [...new Set(actualReviewerLogins)];
+
+      results.set(key, { checkStatus, reviewDecision, actualReviewerLogins: uniqueReviewers, totalReviewCount: reviews.length });
+    } catch (err) {
+      console.warn(`[api] REST fallback failed for ${key}:`, err);
+      results.set(key, { checkStatus: null, reviewDecision: null, actualReviewerLogins: [], totalReviewCount: 0 });
+    }
+  });
+
+    await Promise.allSettled(tasks);
+  }
+}
 
 /**
  * Batches check status lookups into a single GraphQL call using
@@ -402,35 +523,50 @@ export async function fetchIssues(
  */
 async function batchFetchCheckStatuses(
   octokit: NonNullable<ReturnType<typeof getClient>>,
-  prs: { owner: string; repo: string; sha: string }[]
-): Promise<Map<string, CheckStatus["status"]>> {
+  prs: { owner: string; repo: string; sha: string; prNumber: number }[]
+): Promise<Map<string, CheckStatusResult>> {
   if (prs.length === 0) return new Map();
 
-  const results = new Map<string, CheckStatus["status"]>();
+  const results = new Map<string, CheckStatusResult>();
+  const failedKeys = new Set<string>();
+  const failedPrs: typeof prs = [];
 
   // Batch into chunks and run in parallel
   const chunks = chunkArray(prs, GRAPHQL_CHECK_BATCH_SIZE);
 
   const chunkTasks = chunks.map(async (chunk) => {
     const varDefs: string[] = [];
-    const variables: Record<string, string> = {};
+    const variables: Record<string, string | number> = {};
     const fragments: string[] = [];
 
     for (let i = 0; i < chunk.length; i++) {
       varDefs.push(
         `$owner${i}: String!`,
         `$repo${i}: String!`,
-        `$sha${i}: String!`
+        `$sha${i}: String!`,
+        `$prNum${i}: Int!`
       );
       variables[`owner${i}`] = chunk[i].owner;
       variables[`repo${i}`] = chunk[i].repo;
       variables[`sha${i}`] = chunk[i].sha;
+      variables[`prNum${i}`] = chunk[i].prNumber;
       fragments.push(
         `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
           object(expression: $sha${i}) {
             ... on Commit {
               statusCheckRollup {
                 state
+              }
+            }
+          }
+          pullRequest(number: $prNum${i}) {
+            reviewDecision
+            latestReviews(first: 15) {
+              totalCount
+              nodes {
+                author {
+                  login
+                }
               }
             }
           }
@@ -444,6 +580,13 @@ async function batchFetchCheckStatuses(
       interface GraphQLRepoResult {
         object: {
           statusCheckRollup: { state: string } | null;
+        } | null;
+        pullRequest: {
+          reviewDecision: string | null;
+          latestReviews: {
+            totalCount: number;
+            nodes: { author: { login: string } | null }[];
+          };
         } | null;
       }
       interface GraphQLRateLimit {
@@ -465,25 +608,58 @@ async function batchFetchCheckStatuses(
         const state = data?.object?.statusCheckRollup?.state ?? null;
         const key = `${chunk[i].owner}/${chunk[i].repo}:${chunk[i].sha}`;
 
+        let checkStatus: CheckStatus["status"];
         if (state === "FAILURE" || state === "ERROR") {
-          results.set(key, "failure");
+          checkStatus = "failure";
         } else if (state === "PENDING" || state === "EXPECTED") {
-          results.set(key, "pending");
+          checkStatus = "pending";
         } else if (state === "SUCCESS") {
-          results.set(key, "success");
+          checkStatus = "success";
         } else {
-          results.set(key, null);
+          checkStatus = null;
         }
+
+        const rawReviewDecision = data?.pullRequest?.reviewDecision ?? null;
+        const reviewDecision =
+          rawReviewDecision === "APPROVED" ||
+          rawReviewDecision === "CHANGES_REQUESTED" ||
+          rawReviewDecision === "REVIEW_REQUIRED"
+            ? rawReviewDecision
+            : null;
+
+        const actualReviewerLogins = (data?.pullRequest?.latestReviews?.nodes ?? [])
+          .filter((n) => n.author?.login)
+          .map((n) => n.author!.login);
+        const totalReviewCount = data?.pullRequest?.latestReviews?.totalCount ?? 0;
+
+        results.set(key, { checkStatus, reviewDecision, actualReviewerLogins, totalReviewCount });
       }
     } catch (err) {
       console.warn("[api] GraphQL check status batch failed:", err);
+      // Track failed PRs for cache lookup / REST fallback
       for (const pr of chunk) {
-        results.set(`${pr.owner}/${pr.repo}:${pr.sha}`, null);
+        const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
+        failedKeys.add(key);
+        failedPrs.push(pr);
       }
     }
   });
 
   await Promise.allSettled(chunkTasks);
+
+  // Cache successful GraphQL results in IndexedDB (parallel writes)
+  const cacheWrites = [...results.entries()]
+    .filter(([key]) => !failedKeys.has(key))
+    .map(([key, value]) => setCacheEntry(`graphql-check:${key}`, value, null).catch(() => {}));
+  await Promise.all(cacheWrites);
+
+  // Tier 2: REST fallback for ALL failed PRs (not just cache misses).
+  // REST uses the core rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
+  // ETag caching via cachedRequest means unchanged PRs return 304 (free).
+  if (failedPrs.length > 0) {
+    pushError("graphql", `Fetching check/review data via REST for ${failedPrs.length} PR(s) — GraphQL rate limited`, true);
+    await restFallbackCheckStatuses(octokit, failedPrs, results);
+  }
 
   return results;
 }
@@ -583,31 +759,45 @@ export async function fetchPullRequests(
   // Batch ALL check statuses into a single GraphQL call
   const checkInputs = successfulPRs.map(({ pr, repoFullName }) => {
     const [owner, repo] = repoFullName.split("/");
-    return { owner, repo, sha: pr.head.sha };
+    return { owner, repo, sha: pr.head.sha, prNumber: pr.number };
   });
 
   const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);
 
   // Build final PR objects
-  const pullRequests = successfulPRs.map(({ pr, repoFullName }) => ({
-    id: pr.id,
-    number: pr.number,
-    title: pr.title,
-    state: pr.state,
-    draft: pr.draft,
-    htmlUrl: pr.html_url,
-    createdAt: pr.created_at,
-    updatedAt: pr.updated_at,
-    userLogin: pr.user?.login ?? "",
-    userAvatarUrl: pr.user?.avatar_url ?? "",
-    headSha: pr.head.sha,
-    headRef: pr.head.ref,
-    baseRef: pr.base.ref,
-    assigneeLogins: pr.assignees.map((a) => a.login),
-    reviewerLogins: pr.requested_reviewers.map((r) => r.login),
-    repoFullName,
-    checkStatus: checkStatuses.get(`${repoFullName}:${pr.head.sha}`) ?? null,
-  }));
+  const pullRequests = successfulPRs.map(({ pr, repoFullName }) => {
+    const result = checkStatuses.get(`${repoFullName}:${pr.head.sha}`);
+    const requestedReviewerLogins = pr.requested_reviewers.map((r) => r.login);
+    const actualReviewerLogins = result?.actualReviewerLogins ?? [];
+    const reviewerLogins = [...new Set([...requestedReviewerLogins, ...actualReviewerLogins])];
+    return {
+      id: pr.id,
+      number: pr.number,
+      title: pr.title,
+      state: pr.state,
+      draft: pr.draft,
+      htmlUrl: pr.html_url,
+      createdAt: pr.created_at,
+      updatedAt: pr.updated_at,
+      userLogin: pr.user?.login ?? "",
+      userAvatarUrl: pr.user?.avatar_url ?? "",
+      headSha: pr.head.sha,
+      headRef: pr.head.ref,
+      baseRef: pr.base.ref,
+      assigneeLogins: pr.assignees.map((a) => a.login),
+      reviewerLogins,
+      repoFullName,
+      checkStatus: result?.checkStatus ?? null,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changed_files,
+      comments: pr.comments,
+      reviewComments: pr.review_comments,
+      labels: pr.labels.map((l) => ({ name: l.name, color: l.color })),
+      reviewDecision: result?.reviewDecision ?? null,
+      totalReviewCount: result?.totalReviewCount ?? 0,
+    };
+  });
 
   // Evict stale PR detail cache entries for PRs no longer in the active set
   const activeKeys = new Set(
@@ -717,6 +907,11 @@ export async function fetchWorkflowRuns(
           updatedAt: run.updated_at,
           repoFullName: repo.fullName,
           isPrRun: run.event === "pull_request",
+          runStartedAt: run.run_started_at,
+          completedAt: run.completed_at ?? null,
+          runAttempt: run.run_attempt,
+          displayTitle: run.display_title,
+          actorLogin: run.actor?.login ?? "",
         });
       }
     }

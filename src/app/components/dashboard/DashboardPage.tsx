@@ -11,7 +11,7 @@ import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
 import { createPollCoordinator, fetchAllData } from "../../services/poll";
-import { refreshAccessToken, clearAuth } from "../../stores/auth";
+import { refreshAccessToken, clearAuth, user } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 
 // ── Shared dashboard store ──────────────────────────────────────────────────
@@ -105,6 +105,8 @@ export default function DashboardPage() {
     actions: dashboardData.workflowRuns.length,
   }));
 
+  const userLogin = createMemo(() => user()?.login ?? "");
+
   return (
     <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Header />
@@ -161,6 +163,7 @@ export default function DashboardPage() {
                 issues={dashboardData.issues}
                 loading={dashboardData.loading}
                 errors={dashboardData.errors}
+                userLogin={userLogin()}
               />
             </Match>
             <Match when={activeTab() === "pullRequests"}>
@@ -168,6 +171,7 @@ export default function DashboardPage() {
                 pullRequests={dashboardData.pullRequests}
                 loading={dashboardData.loading}
                 errors={dashboardData.errors}
+                userLogin={userLogin()}
               />
             </Match>
             <Match when={activeTab() === "actions"}>
