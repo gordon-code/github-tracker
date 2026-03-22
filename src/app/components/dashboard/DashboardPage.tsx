@@ -16,7 +16,7 @@ import { getErrors, dismissError } from "../../lib/errors";
 
 // ── Shared dashboard store ──────────────────────────────────────────────────
 
-interface DashboardData {
+interface DashboardStore {
   issues: Issue[];
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
@@ -28,7 +28,7 @@ interface DashboardData {
 export default function DashboardPage() {
   const navigate = useNavigate();
 
-  const [dashboardData, setDashboardData] = createStore<DashboardData>({
+  const [dashboardData, setDashboardData] = createStore<DashboardStore>({
     issues: [],
     pullRequests: [],
     workflowRuns: [],

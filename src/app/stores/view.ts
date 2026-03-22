@@ -23,8 +23,11 @@ const ActionsFiltersSchema = z.object({
 });
 
 export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
+export type IssueFilterField = keyof IssueFilters;
 export type PullRequestFilters = z.infer<typeof PullRequestFiltersSchema>;
+export type PullRequestFilterField = keyof PullRequestFilters;
 export type ActionsFilters = z.infer<typeof ActionsFiltersSchema>;
+export type ActionsFilterField = keyof ActionsFilters;
 
 export const ViewStateSchema = z.object({
   lastActiveTab: z

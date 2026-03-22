@@ -1,8 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilters } from "../../stores/view";
-
-type PullRequestFilterField = keyof PullRequestFilters;
+import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, ApiError } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ItemRow from "./ItemRow";
@@ -110,11 +108,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     return pref ?? { field: "updatedAt", direction: "desc" as const };
   });
 
-  // Derived metadata stored in a Map keyed by PR id — avoids object copies
-  // so <For> can reuse DOM nodes via referential identity on filter changes.
-  const prMeta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
-
-  const filteredSorted = createMemo(() => {
+  const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
     const tabFilters = viewState.tabFilters.pullRequests;
     const ignored = new Set(
@@ -123,7 +117,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         .map((i) => i.id)
     );
 
-    prMeta.clear();
+    const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
       if (ignored.has(String(pr.id))) return false;
@@ -155,7 +149,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (sizeCategory !== tabFilters.sizeCategory) return false;
       }
 
-      prMeta.set(pr.id, { roles, sizeCategory });
+      meta.set(pr.id, { roles, sizeCategory });
       return true;
     });
 
@@ -173,7 +167,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           cmp = a.userLogin.localeCompare(b.userLogin);
           break;
         case "createdAt":
-          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          cmp = a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
           break;
         case "checkStatus":
           cmp = checkStatusOrder(a.checkStatus) - checkStatusOrder(b.checkStatus);
@@ -186,14 +180,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           break;
         case "updatedAt":
         default:
-          cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+          cmp = a.updatedAt < b.updatedAt ? -1 : a.updatedAt > b.updatedAt ? 1 : 0;
           break;
       }
       return direction === "asc" ? cmp : -cmp;
     });
 
-    return items;
+    return { items, meta };
   });
+
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const pageSize = createMemo(() => config.itemsPerPage);
 
@@ -337,9 +334,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                     density={config.viewDensity}
                   >
                     <div class="flex items-center gap-2 flex-wrap">
-                      <RoleBadge roles={prMeta.get(pr.id)?.roles ?? []} />
+                      <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
                       <ReviewBadge decision={pr.reviewDecision} />
-                      <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta.get(pr.id)?.sizeCategory} />
+                      <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
                       <StatusDot status={pr.checkStatus} />
                       <Show when={pr.draft}>
                         <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 font-medium">

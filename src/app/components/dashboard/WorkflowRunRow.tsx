@@ -16,7 +16,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-green-500 flex-shrink-0"
+        class="h-4 w-4 text-green-500 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Success"
@@ -35,7 +35,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-red-500 flex-shrink-0"
+        class="h-4 w-4 text-red-500 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Failure"
@@ -54,7 +54,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-gray-400 flex-shrink-0"
+        class="h-4 w-4 text-gray-400 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Cancelled"
@@ -73,7 +73,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-yellow-500 animate-spin flex-shrink-0"
+        class="h-4 w-4 text-yellow-500 animate-spin shrink-0"
         fill="none"
         viewBox="0 0 24 24"
         aria-label="In progress"
@@ -100,7 +100,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-gray-400 flex-shrink-0"
+        class="h-4 w-4 text-gray-400 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Queued"
@@ -118,7 +118,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      class="h-4 w-4 text-gray-400 flex-shrink-0"
+      class="h-4 w-4 text-gray-400 shrink-0"
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-label="Unknown status"
@@ -163,32 +163,32 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       </a>
 
       <Show when={props.run.isPrRun}>
-        <span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 flex-shrink-0">
+        <span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 shrink-0">
           PR
         </span>
       </Show>
 
       <Show when={props.run.runAttempt > 1}>
-        <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 flex-shrink-0">
+        <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 shrink-0">
           Attempt {props.run.runAttempt}
         </span>
       </Show>
 
-      <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+      <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">
         {props.run.actorLogin}
       </span>
 
-      <span class="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+      <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">
         {durationLabel(props.run)}
       </span>
 
-      <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+      <span class="text-xs text-gray-400 dark:text-gray-500 shrink-0">
         {relativeTime(props.run.createdAt)}
       </span>
 
       <button
         onClick={() => props.onIgnore(props.run)}
-        class="opacity-0 group-hover:opacity-100 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity focus:opacity-100 flex-shrink-0"
+        class="opacity-0 group-hover:opacity-100 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity focus:opacity-100 shrink-0"
         aria-label={`Ignore run ${props.run.name}`}
       >
         Ignore

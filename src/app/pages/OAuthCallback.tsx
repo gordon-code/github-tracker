@@ -51,14 +51,27 @@ export default function OAuthCallback() {
         return;
       }
 
-      setAuth(data);
-      console.info("[auth] token exchange succeeded");
+      // Validate token BEFORE storing (SDR-013): pre-flight check against /user
+      // to avoid writing a bad token to localStorage. If validation fails, the
+      // token is never stored — no cleanup needed.
+      const preflightResp = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${data.access_token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
 
-      const valid = await validateToken();
-      if (!valid) {
+      if (!preflightResp.ok) {
+        console.info("[auth] token pre-flight validation failed:", preflightResp.status);
         setError("Failed to verify your GitHub account. Please try again.");
         return;
       }
+
+      // Token is valid — store it and populate user via validateToken
+      setAuth(data);
+      console.info("[auth] token exchange succeeded");
+      await validateToken();
 
       navigate("/", { replace: true });
     } catch {

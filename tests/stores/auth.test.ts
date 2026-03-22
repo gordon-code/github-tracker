@@ -179,6 +179,38 @@ describe("validateToken", () => {
     await mod.validateToken();
     expect(mod.token()).toBeNull();
   });
+
+  // ── qa-5: Non-200/non-401 response ─────────────────────────────────────────
+
+  it("returns false and leaves token unchanged on non-200/non-401 response (e.g., 503)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({}),
+    }));
+
+    mod.setAuth({ access_token: "ghs_healthy" });
+    const result = await mod.validateToken();
+
+    expect(result).toBe(false);
+    // Token must remain — 503 is not an auth failure
+    expect(mod.token()).toBe("ghs_healthy");
+    // user() should still be null (no successful GET /user)
+    expect(mod.user()).toBeNull();
+  });
+
+  // ── qa-6: Network exception ─────────────────────────────────────────────────
+
+  it("returns false and does not throw when fetch throws a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    mod.setAuth({ access_token: "ghs_network" });
+    const result = await mod.validateToken();
+
+    expect(result).toBe(false);
+    // Token should remain untouched — network error is not an auth failure
+    expect(mod.token()).toBe("ghs_network");
+  });
 });
 
 describe("refreshAccessToken", () => {

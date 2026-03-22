@@ -3,6 +3,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
 import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
 
+// Mock pushError so we can spy on it
+const mockPushError = vi.fn();
+vi.mock("../../src/app/lib/errors", () => ({
+  pushError: (...args: unknown[]) => mockPushError(...args),
+  clearErrors: vi.fn(),
+}));
+
+// Mock notifications so doFetch doesn't fail on detectNewItems
+vi.mock("../../src/app/lib/notifications", () => ({
+  detectNewItems: vi.fn(() => []),
+  dispatchNotifications: vi.fn(),
+}));
+
+// Mock config so doFetch doesn't fail when accessing config.selectedRepos
+vi.mock("../../src/app/stores/config", () => ({
+  config: {
+    selectedRepos: [],
+    maxWorkflowsPerRepo: 5,
+    maxRunsPerWorkflow: 3,
+  },
+}));
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const emptyData: DashboardData = {
@@ -265,5 +287,92 @@ describe("createPollCoordinator", () => {
       expect(refreshAt!.getTime()).toBeLessThanOrEqual(after + 10);
       dispose();
     });
+  });
+
+  // ── qa-3: fetchAll rejection pushes error and clears isRefreshing ────────────
+
+  it("pushes error to pushError and clears isRefreshing when fetchAll rejects", async () => {
+    mockPushError.mockClear();
+    const fetchAll = vi.fn().mockRejectedValue(new Error("fetch blew up"));
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      // isRefreshing should be true immediately (fetch in flight)
+      expect(coordinator.isRefreshing()).toBe(true);
+
+      // Let the rejection propagate through the catch block
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(coordinator.isRefreshing()).toBe(false);
+      expect(mockPushError).toHaveBeenCalledWith(
+        "poll",
+        "fetch blew up",
+        true
+      );
+      dispose();
+    });
+  });
+
+  // ── qa-4: Concurrent doFetch guard — second call while first is in-flight ───
+
+  it("concurrent doFetch guard: second manualRefresh while first is in-flight calls fetchAll only once", async () => {
+    let resolveFirst!: () => void;
+    const fetchAll = vi.fn(
+      () =>
+        new Promise<DashboardData>((resolve) => {
+          resolveFirst = () => resolve(emptyData);
+        })
+    );
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      // First fetch is in-flight (unresolved)
+      expect(coordinator.isRefreshing()).toBe(true);
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Trigger a second fetch while the first is still in-flight
+      coordinator.manualRefresh();
+      await Promise.resolve();
+
+      // Guard should prevent a second concurrent invocation
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Resolve the first fetch
+      resolveFirst();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(coordinator.isRefreshing()).toBe(false);
+      dispose();
+    });
+  });
+
+  // ── qa-11: Jitter test with fixed Math.random to make interval deterministic ──
+
+  it("fires at the configured interval with deterministic jitter (Math.random = 0)", async () => {
+    // Math.random() = 0 → jitter = (0 * 2 - 1) * 30_000 = -30_000
+    // withJitter(60_000) = max(60_000 + (-30_000), 1000) = 30_000ms
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      // Advance exactly past the deterministic 30s interval
+      vi.advanceTimersByTime(30_001);
+      await Promise.resolve();
+
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit + 1);
+      dispose();
+    });
+
+    randomSpy.mockRestore();
   });
 });
