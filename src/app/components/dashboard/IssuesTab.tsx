@@ -1,7 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilters } from "../../stores/view";
-type IssueFilterField = keyof IssueFilters;
+import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilterField } from "../../stores/view";
 import type { Issue, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
@@ -49,11 +48,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     return pref ?? { field: "updatedAt", direction: "desc" as const };
   });
 
-  // Derived metadata stored in a Map — avoids object copies so <For> can
-  // reuse DOM nodes via referential identity on filter-only changes.
-  const issueMeta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
-
-  const filteredSorted = createMemo(() => {
+  const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
     const tabFilter = viewState.tabFilters.issues;
     const ignored = new Set(
@@ -62,7 +57,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         .map((i) => i.id)
     );
 
-    issueMeta.clear();
+    const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
       if (ignored.has(String(issue.id))) return false;
@@ -80,7 +75,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
       }
 
-      issueMeta.set(issue.id, { roles });
+      meta.set(issue.id, { roles });
       return true;
     });
 
@@ -98,21 +93,24 @@ export default function IssuesTab(props: IssuesTabProps) {
           cmp = a.userLogin.localeCompare(b.userLogin);
           break;
         case "createdAt":
-          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          cmp = a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
           break;
         case "comments":
           cmp = a.comments - b.comments;
           break;
         case "updatedAt":
         default:
-          cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+          cmp = a.updatedAt < b.updatedAt ? -1 : a.updatedAt > b.updatedAt ? 1 : 0;
           break;
       }
       return direction === "asc" ? cmp : -cmp;
     });
 
-    return items;
+    return { items, meta };
   });
+
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const pageSize = createMemo(() => config.itemsPerPage);
 
@@ -264,7 +262,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                     density={config.viewDensity}
                     commentCount={issue.comments}
                   >
-                    <RoleBadge roles={issueMeta.get(issue.id)?.roles ?? []} />
+                    <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
                   </ItemRow>
                 </div>
               )}

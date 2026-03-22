@@ -110,11 +110,11 @@ export async function evictByPrefix(
 ): Promise<number> {
   const db = await getDb();
   const tx = db.transaction("cache", "readwrite");
-  let cursor = await tx.store.openCursor();
+  const range = IDBKeyRange.bound(prefix, prefix + "\uffff");
+  let cursor = await tx.store.openCursor(range);
   let count = 0;
   while (cursor) {
-    const key = cursor.key as string;
-    if (key.startsWith(prefix) && !keepKeys.has(key)) {
+    if (!keepKeys.has(cursor.key as string)) {
       await cursor.delete();
       count++;
     }
@@ -186,8 +186,10 @@ export async function cachedFetch(
   const result = await fetchFn(conditionalHeaders);
 
   if (result.status === 304) {
-    // Cache hit — return stored data
-    return { data: existing!.data, fromCache: true };
+    if (!existing) {
+      throw new Error(`Received 304 but no cache entry exists for key: ${key}`);
+    }
+    return { data: existing.data, fromCache: true };
   }
 
   if (result.status === 200) {

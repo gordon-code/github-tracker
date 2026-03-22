@@ -325,6 +325,91 @@ describe("Worker OAuth endpoint", () => {
     expect(res.status).toBe(204);
   });
 
+  // ── qa-7: Refresh endpoint parity tests ────────────────────────────────────
+
+  it("GET /api/oauth/refresh returns 405", async () => {
+    const req = makeRequest("GET", "/api/oauth/refresh");
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(405);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("method_not_allowed");
+  });
+
+  it("POST /api/oauth/refresh with invalid Content-Type returns 400", async () => {
+    const req = makeRequest("POST", "/api/oauth/refresh", {
+      body: { refresh_token: "ghr_" + "a".repeat(20) },
+      contentType: "text/plain",
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("POST /api/oauth/refresh when GitHub fetch fails returns generic error", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("network failure"));
+
+    const req = makeRequest("POST", "/api/oauth/refresh", {
+      body: { refresh_token: "ghr_" + "b".repeat(20) },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("token_exchange_failed");
+    // Stack trace must not be in response (SDR-006)
+    expect(JSON.stringify(json)).not.toContain("Error");
+  });
+
+  it("POST /api/oauth/refresh with invalid refresh_token format returns 400 (too short)", async () => {
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    // Too short: ghr_ prefix + fewer than 20 chars
+    const req = makeRequest("POST", "/api/oauth/refresh", {
+      body: { refresh_token: "ghr_tooshort" },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+
+    // Must not have called GitHub for invalid token
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/oauth/refresh with invalid refresh_token format returns 400 (invalid chars)", async () => {
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    // Invalid chars: refresh tokens must be ghr_ + alphanumeric/underscore
+    const req = makeRequest("POST", "/api/oauth/refresh", {
+      body: { refresh_token: "ghr_invalid-token-with-dashes!!" },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+
+    // Must not have called GitHub for invalid token
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/oauth/refresh with missing ghr_ prefix returns 400", async () => {
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    // Valid length/chars but missing ghr_ prefix
+    const req = makeRequest("POST", "/api/oauth/refresh", {
+      body: { refresh_token: "ghx_" + "a".repeat(20) },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   // ── Health and routing ──────────────────────────────────────────────────────
 
   it("GET /api/health returns 200 OK", async () => {

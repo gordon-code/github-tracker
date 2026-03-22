@@ -1,5 +1,5 @@
 import { getClient, cachedRequest } from "./github";
-import { evictByPrefix, setCacheEntry } from "../stores/cache";
+import { evictByPrefix } from "../stores/cache";
 import { pushError } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -189,7 +189,23 @@ const SEARCH_REPO_BATCH_SIZE = 30;
 // Do not increase batch size or latestReviews.first without recalculating.
 const GRAPHQL_CHECK_BATCH_SIZE = 50;
 
-// ── Search helpers ───────────────────────────────────────────────────────────
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Normalizes a Promise.allSettled rejection reason into a structured error shape.
+ * Handles both Octokit RequestError (has `.status`) and plain Error objects.
+ */
+function extractRejectionError(reason: unknown): { statusCode: number | null; message: string } {
+  const statusCode =
+    typeof reason === "object" &&
+    reason !== null &&
+    "status" in reason &&
+    typeof (reason as Record<string, unknown>)["status"] === "number"
+      ? ((reason as Record<string, unknown>)["status"] as number)
+      : null;
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return { statusCode, message };
+}
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -280,10 +296,7 @@ async function batchedSearch(
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.status !== "fulfilled") {
-      const reason = result.reason as { status?: number; message?: string } | Error;
-      const statusCode = typeof reason === "object" && "status" in reason
-        ? (reason.status as number) ?? null : null;
-      const message = reason instanceof Error ? reason.message : String(reason);
+      const { statusCode, message } = extractRejectionError(result.reason);
       errors.push({
         repo: `search-batch-${i + 1}/${chunks.length}`,
         statusCode,
@@ -439,11 +452,9 @@ type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
  * Uses the core REST rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
  * All requests go through cachedRequest for ETag-based caching.
  *
- * Limitation: GET /commits/{sha}/status only covers the legacy Status API.
- * GitHub Actions workflows report via Check Runs, not Status API. For repos
- * using only GitHub Actions, this endpoint may return "pending" when checks
- * actually passed. GraphQL's statusCheckRollup combines both — this REST
- * fallback is intentionally degraded.
+ * Fetches both the legacy Status API and the Check Runs API in parallel, then
+ * combines their results so GitHub Actions workflows (which use Check Runs) are
+ * correctly reflected. This makes REST a full-fidelity fallback for GraphQL.
  */
 async function restFallbackCheckStatuses(
   octokit: GitHubOctokit,
@@ -455,59 +466,99 @@ async function restFallbackCheckStatuses(
   const chunks = chunkArray(prs, REST_CONCURRENCY);
   for (const chunk of chunks) {
     const tasks = chunk.map(async (pr) => {
-    const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
-    try {
-      // Fetch combined commit status (covers Status API; check-runs report here too for most repos)
-      const statusResult = await cachedRequest(
-        octokit,
-        `rest-status:${key}`,
-        "GET /repos/{owner}/{repo}/commits/{ref}/status",
-        { owner: pr.owner, repo: pr.repo, ref: pr.sha }
-      );
-      const statusData = statusResult.data as { state: string };
-      let checkStatus: CheckStatus["status"];
-      if (statusData.state === "success") checkStatus = "success";
-      else if (statusData.state === "failure" || statusData.state === "error") checkStatus = "failure";
-      else if (statusData.state === "pending") checkStatus = "pending";
-      else checkStatus = null;
+      const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
+      try {
+        // Fetch legacy Status API, Check Runs API, and PR reviews in parallel
+        const [statusResult, checkRunsResult, reviewsResult] = await Promise.all([
+          cachedRequest(
+            octokit,
+            `rest-status:${key}`,
+            "GET /repos/{owner}/{repo}/commits/{ref}/status",
+            { owner: pr.owner, repo: pr.repo, ref: pr.sha }
+          ),
+          cachedRequest(
+            octokit,
+            `rest-check-runs:${key}`,
+            "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+            { owner: pr.owner, repo: pr.repo, ref: pr.sha }
+          ),
+          cachedRequest(
+            octokit,
+            `rest-reviews:${pr.owner}/${pr.repo}:${pr.prNumber}`,
+            "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+            { owner: pr.owner, repo: pr.repo, pull_number: pr.prNumber }
+          ),
+        ]);
 
-      // Fetch PR reviews for review decision + reviewer logins
-      const reviewsResult = await cachedRequest(
-        octokit,
-        `rest-reviews:${pr.owner}/${pr.repo}:${pr.prNumber}`,
-        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-        { owner: pr.owner, repo: pr.repo, pull_number: pr.prNumber }
-      );
-      const reviews = reviewsResult.data as { user: { login: string } | null; state: string }[];
+        const statusData = statusResult.data as { state: string; total_count: number };
+        const checkRunsData = checkRunsResult.data as {
+          check_runs: { status: string; conclusion: string | null }[];
+        };
+        const reviews = reviewsResult.data as { user: { login: string } | null; state: string }[];
 
-      // Derive review decision from latest review per author.
-      // Include COMMENTED to make REVIEW_REQUIRED reachable (comments without approval).
-      const latestByAuthor = new Map<string, string>();
-      for (const review of reviews) {
-        if (review.user?.login && (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED" || review.state === "COMMENTED")) {
-          latestByAuthor.set(review.user.login.toLowerCase(), review.state);
+        // Derive combined check status from both endpoints.
+        // Status API returns state:"pending" with total_count:0 when no statuses exist.
+        // Check Runs API returns an empty array when no check runs exist.
+        // If BOTH are empty → no CI configured → null.
+        const noLegacyStatuses = statusData.total_count === 0;
+        const noCheckRuns = checkRunsData.check_runs.length === 0;
+
+        let checkStatus: CheckStatus["status"];
+        if (noLegacyStatuses && noCheckRuns) {
+          checkStatus = null;
+        } else {
+          const legacyFailed =
+            statusData.state === "failure" || statusData.state === "error";
+          const checkRunFailed = checkRunsData.check_runs.some(
+            (cr) => cr.conclusion === "failure" || cr.conclusion === "timed_out" || cr.conclusion === "cancelled"
+          );
+
+          if (legacyFailed || checkRunFailed) {
+            checkStatus = "failure";
+          } else {
+            const legacySuccess = statusData.state === "success" || noLegacyStatuses;
+            const allCheckRunsComplete = noCheckRuns ||
+              checkRunsData.check_runs.every((cr) => cr.status === "completed");
+            const allCheckRunsSuccess = checkRunsData.check_runs.every(
+              (cr) => cr.conclusion === "success" || cr.conclusion === "skipped" || cr.conclusion === "neutral"
+            );
+
+            if (legacySuccess && allCheckRunsComplete && allCheckRunsSuccess) {
+              checkStatus = "success";
+            } else {
+              checkStatus = "pending";
+            }
+          }
         }
-      }
-      let reviewDecision: CheckStatusResult["reviewDecision"] = null;
-      if (latestByAuthor.size > 0) {
-        const states = [...latestByAuthor.values()];
-        if (states.some((s) => s === "CHANGES_REQUESTED")) reviewDecision = "CHANGES_REQUESTED";
-        else if (states.every((s) => s === "APPROVED")) reviewDecision = "APPROVED";
-        else reviewDecision = "REVIEW_REQUIRED";
-      }
 
-      const actualReviewerLogins = reviews
-        .filter((r) => r.user?.login)
-        .map((r) => r.user!.login);
-      // Deduplicate reviewer logins
-      const uniqueReviewers = [...new Set(actualReviewerLogins)];
+        // Derive review decision from latest review per author.
+        // Include COMMENTED to make REVIEW_REQUIRED reachable (comments without approval).
+        const latestByAuthor = new Map<string, string>();
+        for (const review of reviews) {
+          if (review.user?.login && (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED" || review.state === "COMMENTED")) {
+            latestByAuthor.set(review.user.login.toLowerCase(), review.state);
+          }
+        }
+        let reviewDecision: CheckStatusResult["reviewDecision"] = null;
+        if (latestByAuthor.size > 0) {
+          const states = [...latestByAuthor.values()];
+          if (states.some((s) => s === "CHANGES_REQUESTED")) reviewDecision = "CHANGES_REQUESTED";
+          else if (states.every((s) => s === "APPROVED")) reviewDecision = "APPROVED";
+          else reviewDecision = "REVIEW_REQUIRED";
+        }
 
-      results.set(key, { checkStatus, reviewDecision, actualReviewerLogins: uniqueReviewers, totalReviewCount: reviews.length });
-    } catch (err) {
-      console.warn(`[api] REST fallback failed for ${key}:`, err);
-      results.set(key, { checkStatus: null, reviewDecision: null, actualReviewerLogins: [], totalReviewCount: 0 });
-    }
-  });
+        const actualReviewerLogins = reviews
+          .filter((r) => r.user?.login)
+          .map((r) => r.user!.login);
+        // Deduplicate reviewer logins
+        const uniqueReviewers = [...new Set(actualReviewerLogins)];
+
+        results.set(key, { checkStatus, reviewDecision, actualReviewerLogins: uniqueReviewers, totalReviewCount: reviews.length });
+      } catch (err) {
+        console.warn(`[api] REST fallback failed for ${key}:`, err);
+        results.set(key, { checkStatus: null, reviewDecision: null, actualReviewerLogins: [], totalReviewCount: 0 });
+      }
+    });
 
     await Promise.allSettled(tasks);
   }
@@ -647,12 +698,6 @@ async function batchFetchCheckStatuses(
 
   await Promise.allSettled(chunkTasks);
 
-  // Cache successful GraphQL results in IndexedDB (parallel writes)
-  const cacheWrites = [...results.entries()]
-    .filter(([key]) => !failedKeys.has(key))
-    .map(([key, value]) => setCacheEntry(`graphql-check:${key}`, value, null).catch(() => {}));
-  await Promise.all(cacheWrites);
-
   // Tier 2: REST fallback for ALL failed PRs (not just cache misses).
   // REST uses the core rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
   // ETag caching via cachedRequest means unchanged PRs return 304 (free).
@@ -736,14 +781,8 @@ export async function fetchPullRequests(
 
   for (const result of prDetails) {
     if (result.status === "rejected") {
-      const reason = result.reason as { status?: number; message?: string } | Error;
-      allErrors.push({
-        repo: "pr-detail",
-        statusCode: typeof reason === "object" && "status" in reason
-          ? (reason.status as number) ?? null : null,
-        message: reason instanceof Error ? reason.message : String(reason),
-        retryable: true,
-      });
+      const { statusCode, message } = extractRejectionError(result.reason);
+      allErrors.push({ repo: "pr-detail", statusCode, message, retryable: true });
     }
   }
 
@@ -878,16 +917,17 @@ export async function fetchWorkflowRuns(
     }
 
     // Sort workflows by most recent run, take top N
-    const topWorkflows = [...byWorkflow.entries()]
-      .sort(([, a], [, b]) => {
-        const latestA = Math.max(...a.map((r) => new Date(r.updated_at).getTime()));
-        const latestB = Math.max(...b.map((r) => new Date(r.updated_at).getTime()));
-        return latestB - latestA;
-      })
+    const workflowEntries = [...byWorkflow.entries()].map(([id, runs]) => ({
+      id,
+      runs,
+      latestAt: runs.reduce((max, r) => r.updated_at > max ? r.updated_at : max, ""),
+    }));
+    workflowEntries.sort((a, b) => b.latestAt < a.latestAt ? -1 : b.latestAt > a.latestAt ? 1 : 0);
+    const topWorkflows = workflowEntries
       .slice(0, maxWorkflows);
 
     // Take most recent M runs per workflow
-    for (const [, workflowRuns] of topWorkflows) {
+    for (const { runs: workflowRuns } of topWorkflows) {
       const sorted = workflowRuns.sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
@@ -920,14 +960,8 @@ export async function fetchWorkflowRuns(
   const repoResults = await Promise.allSettled(repoTasks);
   for (const result of repoResults) {
     if (result.status === "rejected") {
-      const reason = result.reason as { status?: number; message?: string } | Error;
-      allErrors.push({
-        repo: "workflow-runs",
-        statusCode: typeof reason === "object" && "status" in reason
-          ? (reason.status as number) ?? null : null,
-        message: reason instanceof Error ? reason.message : String(reason),
-        retryable: true,
-      });
+      const { statusCode, message } = extractRejectionError(result.reason);
+      allErrors.push({ repo: "workflow-runs", statusCode, message, retryable: true });
     }
   }
 
