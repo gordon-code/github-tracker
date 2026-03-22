@@ -13,12 +13,12 @@ describe("WorkflowRunRow", () => {
     screen.getByText("CI Build");
   });
 
-  it("renders branch name", () => {
-    const run = makeWorkflowRun({ headBranch: "feature/my-branch" });
+  it("renders displayTitle as primary text", () => {
+    const run = makeWorkflowRun({ displayTitle: "feat: my cool feature" });
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    screen.getByText("feature/my-branch");
+    screen.getByText("feat: my cool feature");
   });
 
   it("shows relative time", () => {

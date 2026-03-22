@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, labelTextColor } from "../../src/app/lib/format";
+import { relativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -82,5 +82,151 @@ describe("labelTextColor", () => {
 
   it("returns #000000 for a light grey (#e4e4e4)", () => {
     expect(labelTextColor("e4e4e4")).toBe("#000000");
+  });
+});
+
+describe("formatDuration", () => {
+  it("formats minutes and seconds", () => {
+    expect(formatDuration("2026-03-21T10:00:00Z", "2026-03-21T10:02:34Z")).toBe("2m 34s");
+  });
+
+  it("formats hours and minutes", () => {
+    expect(formatDuration("2026-03-21T10:00:00Z", "2026-03-21T11:12:00Z")).toBe("1h 12m");
+  });
+
+  it("formats seconds only", () => {
+    expect(formatDuration("2026-03-21T10:00:00Z", "2026-03-21T10:00:45Z")).toBe("45s");
+  });
+
+  it("returns '--' for same timestamps", () => {
+    expect(formatDuration("2026-03-21T10:00:00Z", "2026-03-21T10:00:00Z")).toBe("--");
+  });
+
+  it("returns '--' for falsy startedAt", () => {
+    expect(formatDuration("", "2026-03-21T10:00:00Z")).toBe("--");
+  });
+
+  it("returns '--' for negative diff (completedAt before startedAt)", () => {
+    expect(formatDuration("2026-03-21T11:00:00Z", "2026-03-21T10:00:00Z")).toBe("--");
+  });
+
+  it("returns '<1s' for sub-second duration", () => {
+    expect(formatDuration("2026-03-21T10:00:00.000Z", "2026-03-21T10:00:00.500Z")).toBe("<1s");
+  });
+});
+
+describe("prSizeCategory", () => {
+  it("returns XS for total < 10", () => {
+    expect(prSizeCategory(3, 2)).toBe("XS");
+  });
+
+  it("returns S for total 10-99", () => {
+    expect(prSizeCategory(50, 30)).toBe("S");
+  });
+
+  it("returns M for total 100-499", () => {
+    expect(prSizeCategory(200, 100)).toBe("M");
+  });
+
+  it("returns L for total 500-999", () => {
+    expect(prSizeCategory(600, 200)).toBe("L");
+  });
+
+  it("returns XL for total >= 1000", () => {
+    expect(prSizeCategory(800, 500)).toBe("XL");
+  });
+
+  it("returns XS for (0, 0)", () => {
+    expect(prSizeCategory(0, 0)).toBe("XS");
+  });
+
+  it("returns XS for total 9 (boundary below 10)", () => {
+    expect(prSizeCategory(5, 4)).toBe("XS");
+  });
+
+  it("returns S for total 10 (boundary at 10)", () => {
+    expect(prSizeCategory(5, 5)).toBe("S");
+  });
+
+  it("returns L for total 999 (boundary below 1000)", () => {
+    expect(prSizeCategory(500, 499)).toBe("L");
+  });
+
+  it("returns XL for total 1000 (boundary at 1000)", () => {
+    expect(prSizeCategory(500, 500)).toBe("XL");
+  });
+
+  it("handles NaN/undefined gracefully — defaults to XS", () => {
+    expect(prSizeCategory(NaN, 0)).toBe("XS");
+    expect(prSizeCategory(0, NaN)).toBe("XS");
+    expect(prSizeCategory(NaN, NaN)).toBe("XS");
+  });
+});
+
+describe("deriveInvolvementRoles", () => {
+  it("returns ['author'] when user is author", () => {
+    expect(deriveInvolvementRoles("alice", "alice", [], [])).toEqual(["author"]);
+  });
+
+  it("returns ['reviewer'] when user is reviewer", () => {
+    expect(deriveInvolvementRoles("bob", "alice", [], ["bob"])).toEqual(["reviewer"]);
+  });
+
+  it("returns ['assignee'] when user is assignee", () => {
+    expect(deriveInvolvementRoles("carol", "alice", ["carol"], [])).toEqual(["assignee"]);
+  });
+
+  it("returns ['author', 'reviewer'] when user is both", () => {
+    expect(deriveInvolvementRoles("alice", "alice", [], ["alice"])).toEqual(["author", "reviewer"]);
+  });
+
+  it("returns all three roles when user is author, reviewer, and assignee", () => {
+    expect(deriveInvolvementRoles("alice", "alice", ["alice"], ["alice"])).toEqual(["author", "reviewer", "assignee"]);
+  });
+
+  it("returns [] when user has no role", () => {
+    expect(deriveInvolvementRoles("dave", "alice", [], [])).toEqual([]);
+  });
+
+  it("returns [] for empty userLogin", () => {
+    expect(deriveInvolvementRoles("", "alice", [], [])).toEqual([]);
+  });
+
+  it("is case-insensitive for author", () => {
+    expect(deriveInvolvementRoles("Alice", "alice", [], [])).toEqual(["author"]);
+  });
+
+  it("is case-insensitive for reviewer", () => {
+    expect(deriveInvolvementRoles("Alice", "bob", [], ["ALICE"])).toEqual(["reviewer"]);
+  });
+
+  it("is case-insensitive for assignee", () => {
+    expect(deriveInvolvementRoles("Alice", "bob", ["alice"], [])).toEqual(["assignee"]);
+  });
+});
+
+describe("formatCount", () => {
+  it("returns '0' for 0", () => {
+    expect(formatCount(0)).toBe("0");
+  });
+
+  it("returns '42' for 42", () => {
+    expect(formatCount(42)).toBe("42");
+  });
+
+  it("returns '999' for 999", () => {
+    expect(formatCount(999)).toBe("999");
+  });
+
+  it("returns '1k' for 1000", () => {
+    expect(formatCount(1000)).toBe("1k");
+  });
+
+  it("returns '1.5k' for 1500", () => {
+    expect(formatCount(1500)).toBe("1.5k");
+  });
+
+  it("returns '10k' for 10000", () => {
+    expect(formatCount(10000)).toBe("10k");
   });
 });
