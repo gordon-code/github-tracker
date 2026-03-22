@@ -3,16 +3,11 @@ import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
 import type { ApiError } from "../../src/app/services/api";
-import { makeIssue } from "../helpers/index";
+import { makeIssue, resetViewStore } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 
-// Reset view state between tests
 beforeEach(() => {
-  viewStore.updateViewState({
-    globalFilter: { org: null, repo: null },
-    sortPreferences: {},
-    ignoredItems: [],
-  });
+  resetViewStore();
 });
 
 describe("IssuesTab", () => {
@@ -21,18 +16,18 @@ describe("IssuesTab", () => {
       makeIssue({ number: 1, title: "First issue" }),
       makeIssue({ number: 2, title: "Second issue" }),
     ];
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("First issue");
     screen.getByText("Second issue");
   });
 
   it("shows empty state when issues array is empty", () => {
-    render(() => <IssuesTab issues={[]} />);
+    render(() => <IssuesTab issues={[]} userLogin="" />);
     screen.getByText(/No open issues involving you/i);
   });
 
   it("shows loading skeleton when loading=true", () => {
-    render(() => <IssuesTab issues={[]} loading={true} />);
+    render(() => <IssuesTab issues={[]} loading={true} userLogin="" />);
     const status = screen.getByRole("status");
     expect(status).toBeDefined();
     // Issue list should not render during loading
@@ -44,7 +39,7 @@ describe("IssuesTab", () => {
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
       { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
     ];
-    render(() => <IssuesTab issues={[]} errors={errors} />);
+    render(() => <IssuesTab issues={[]} errors={errors} userLogin="" />);
     screen.getByText(/Server error/i);
     screen.getByText(/Forbidden/i);
   });
@@ -53,7 +48,7 @@ describe("IssuesTab", () => {
     const errors: ApiError[] = [
       { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
     ];
-    render(() => <IssuesTab issues={[]} errors={errors} />);
+    render(() => <IssuesTab issues={[]} errors={errors} userLogin="" />);
     screen.getByText(/will retry/i);
   });
 
@@ -66,7 +61,7 @@ describe("IssuesTab", () => {
       title: issue.title,
       ignoredAt: Date.now(),
     });
-    render(() => <IssuesTab issues={[issue]} />);
+    render(() => <IssuesTab issues={[issue]} userLogin="" />);
     expect(screen.queryByText("Should be hidden")).toBeNull();
     screen.getByText(/No open issues/i);
   });
@@ -77,7 +72,7 @@ describe("IssuesTab", () => {
       makeIssue({ number: 2, title: "In other repo", repoFullName: "owner/other" }),
     ];
     viewStore.setGlobalFilter(null, "owner/target");
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
   });
@@ -88,7 +83,7 @@ describe("IssuesTab", () => {
       makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
   });
@@ -98,7 +93,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 1, title: "Older issue", updatedAt: "2024-01-10T00:00:00Z" }),
       makeIssue({ id: 2, title: "Newer issue", updatedAt: "2024-01-20T00:00:00Z" }),
     ];
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
     const allText = screen.getAllByRole("listitem");
     const texts = allText.map((el) => el.textContent ?? "");
     const newerIdx = texts.findIndex((t) => t.includes("Newer issue"));
@@ -110,7 +105,7 @@ describe("IssuesTab", () => {
     const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
     await user.click(titleHeader);
@@ -123,7 +118,7 @@ describe("IssuesTab", () => {
     const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
     // First click: sets desc
@@ -138,17 +133,55 @@ describe("IssuesTab", () => {
 
   it("does not show pagination when there is only one page", () => {
     const issues = [makeIssue({ title: "Single issue" })];
-    render(() => <IssuesTab issues={issues} />);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
     expect(screen.queryByLabelText("Previous page")).toBeNull();
     expect(screen.queryByLabelText("Next page")).toBeNull();
   });
 
   it("renders column headers for all sortable fields", () => {
-    render(() => <IssuesTab issues={[]} />);
+    render(() => <IssuesTab issues={[]} userLogin="" />);
     screen.getByLabelText("Sort by Repo");
     screen.getByLabelText("Sort by Title");
     screen.getByLabelText("Sort by Author");
     screen.getByLabelText("Sort by Created");
     screen.getByLabelText("Sort by Updated");
+  });
+
+  it("filters by role tab filter", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My Issue", userLogin: "alice", assigneeLogins: [] }),
+      makeIssue({ id: 2, title: "Other Issue", userLogin: "bob", assigneeLogins: [] }),
+    ];
+    viewStore.setTabFilter("issues", "role", "author");
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+    screen.getByText("My Issue");
+    expect(screen.queryByText("Other Issue")).toBeNull();
+  });
+
+  it("filters by comments tab filter — has comments", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Discussed Issue", comments: 5 }),
+      makeIssue({ id: 2, title: "Silent Issue", comments: 0 }),
+    ];
+    viewStore.setTabFilter("issues", "comments", "has");
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Discussed Issue");
+    expect(screen.queryByText("Silent Issue")).toBeNull();
+  });
+
+  it("filters by comments tab filter — no comments", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Discussed Issue", comments: 5 }),
+      makeIssue({ id: 2, title: "Silent Issue", comments: 0 }),
+    ];
+    viewStore.setTabFilter("issues", "comments", "none");
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Silent Issue");
+    expect(screen.queryByText("Discussed Issue")).toBeNull();
+  });
+
+  it("renders Comments column header", () => {
+    render(() => <IssuesTab issues={[]} userLogin="" />);
+    screen.getByLabelText("Sort by Comments");
   });
 });
