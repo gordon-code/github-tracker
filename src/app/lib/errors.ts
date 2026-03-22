@@ -17,8 +17,22 @@ export function getErrors(): AppError[] {
 }
 
 export function pushError(source: string, message: string, retryable = false): void {
-  const id = `err-${++errorCounter}-${Date.now()}`;
-  setErrors((prev) => [...prev, { id, source, message, timestamp: Date.now(), retryable }]);
+  // Intentional design: deduplicate by source to prevent banner spam from repeated
+  // rate limit retries or polling cycles. Trade-off: if two different errors share
+  // a source (e.g., "search" for both "incomplete" and "capped"), only the latest
+  // message survives. This is acceptable because the latest error is the most actionable.
+  setErrors((prev) => {
+    const existing = prev.find((e) => e.source === source);
+    if (existing) {
+      return prev.map((e) =>
+        e.source === source
+          ? { ...e, message, timestamp: Date.now(), retryable }
+          : e
+      );
+    }
+    const id = `err-${++errorCounter}-${Date.now()}`;
+    return [...prev, { id, source, message, timestamp: Date.now(), retryable }];
+  });
 }
 
 export function dismissError(id: string): void {
