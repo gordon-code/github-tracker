@@ -4,6 +4,28 @@ import { createEffect } from "solid-js";
 
 const STORAGE_KEY = "github-tracker:view";
 
+const IssueFiltersSchema = z.object({
+  role: z.enum(["all", "author", "assignee"]).default("all"),
+  comments: z.enum(["all", "has", "none"]).default("all"),
+});
+
+const PullRequestFiltersSchema = z.object({
+  role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
+  reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]).default("all"),
+  draft: z.enum(["all", "draft", "ready"]).default("all"),
+  checkStatus: z.enum(["all", "success", "failure", "pending", "none"]).default("all"),
+  sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL"]).default("all"),
+});
+
+const ActionsFiltersSchema = z.object({
+  conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "other"]).default("all"),
+  event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
+});
+
+export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
+export type PullRequestFilters = z.infer<typeof PullRequestFiltersSchema>;
+export type ActionsFilters = z.infer<typeof ActionsFiltersSchema>;
+
 export const ViewStateSchema = z.object({
   lastActiveTab: z
     .enum(["issues", "pullRequests", "actions"])
@@ -34,6 +56,16 @@ export const ViewStateSchema = z.object({
       repo: z.string().nullable().default(null),
     })
     .default({ org: null, repo: null }),
+  tabFilters: z.object({
+    issues: IssueFiltersSchema.default({ role: "all", comments: "all" }),
+    pullRequests: PullRequestFiltersSchema.default({ role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" }),
+    actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
+  }).default({
+    issues: { role: "all", comments: "all" },
+    pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" },
+    actions: { conclusion: "all", event: "all" },
+  }),
+  showPrRuns: z.boolean().default(false),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -107,9 +139,58 @@ export function setGlobalFilter(
   );
 }
 
+type TabFilterField = {
+  issues: keyof IssueFilters;
+  pullRequests: keyof PullRequestFilters;
+  actions: keyof ActionsFilters;
+};
+
+export function setTabFilter<T extends keyof TabFilterField>(
+  tab: T,
+  field: TabFilterField[T],
+  value: string
+): void {
+  setViewState(
+    produce((draft) => {
+      (draft.tabFilters[tab] as Record<string, string>)[field as string] = value;
+    })
+  );
+}
+
+export function resetTabFilter<T extends keyof TabFilterField>(
+  tab: T,
+  field: TabFilterField[T]
+): void {
+  setViewState(
+    produce((draft) => {
+      (draft.tabFilters[tab] as Record<string, string>)[field as string] = "all";
+    })
+  );
+}
+
+export function resetAllTabFilters(
+  tab: "issues" | "pullRequests" | "actions"
+): void {
+  setViewState(
+    produce((draft) => {
+      if (tab === "issues") {
+        draft.tabFilters.issues = IssueFiltersSchema.parse({});
+      } else if (tab === "pullRequests") {
+        draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
+      } else {
+        draft.tabFilters.actions = ActionsFiltersSchema.parse({});
+      }
+    })
+  );
+}
+
 export function initViewPersistence(): void {
   createEffect(() => {
     const snapshot = JSON.parse(JSON.stringify(viewState)) as ViewState;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // QuotaExceededError — silently fail rather than kill the reactive graph
+    }
   });
 }

@@ -1,10 +1,13 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem } from "../../stores/view";
+import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilters } from "../../stores/view";
+type ActionsFilterField = keyof ActionsFilters;
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
 import ErrorBannerList from "../shared/ErrorBannerList";
+import FilterChips from "../shared/FilterChips";
+import type { FilterChipGroupDef } from "../shared/FilterChips";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -57,6 +60,33 @@ function groupRuns(runs: WorkflowRun[]): RepoGroup[] {
   return result;
 }
 
+const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
+const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
+
+const actionsFilterGroups: FilterChipGroupDef[] = [
+  {
+    label: "Result",
+    field: "conclusion",
+    options: [
+      { value: "success", label: "Success" },
+      { value: "failure", label: "Failure" },
+      { value: "cancelled", label: "Cancelled" },
+      { value: "running", label: "Running" },
+      { value: "other", label: "Other" },
+    ],
+  },
+  {
+    label: "Trigger",
+    field: "event",
+    options: [
+      { value: "push", label: "Push" },
+      { value: "pull_request", label: "PR" },
+      { value: "schedule", label: "Schedule" },
+      { value: "workflow_dispatch", label: "Manual" },
+    ],
+  },
+];
+
 export default function ActionsTab(props: ActionsTabProps) {
   const [collapsedRepos, setCollapsedRepos] = createSignal<Set<string>>(
     new Set()
@@ -64,7 +94,6 @@ export default function ActionsTab(props: ActionsTabProps) {
   const [collapsedWorkflows, setCollapsedWorkflows] = createSignal<Set<string>>(
     new Set()
   );
-  const [showPrRuns, setShowPrRuns] = createSignal(false);
 
   function toggleRepo(repoFullName: string) {
     setCollapsedRepos((prev) => {
@@ -100,15 +129,37 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   }
 
+
   const filteredRuns = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
     const ignoredIds = new Set(viewState.ignoredItems.map((i) => i.id));
+    const conclusionFilter = viewState.tabFilters.actions.conclusion;
+    const eventFilter = viewState.tabFilters.actions.event;
 
     return props.workflowRuns.filter((run) => {
       if (ignoredIds.has(String(run.id))) return false;
-      if (!showPrRuns() && run.isPrRun) return false;
+      if (!viewState.showPrRuns && run.isPrRun) return false;
       if (org && !run.repoFullName.startsWith(`${org}/`)) return false;
       if (repo && run.repoFullName !== repo) return false;
+
+      if (conclusionFilter !== "all") {
+        if (conclusionFilter === "running") {
+          if (run.status !== "in_progress") return false;
+        } else if (conclusionFilter === "other") {
+          if (run.conclusion === null || KNOWN_CONCLUSIONS.includes(run.conclusion)) return false;
+        } else {
+          if (run.conclusion !== conclusionFilter) return false;
+        }
+      }
+
+      if (eventFilter !== "all") {
+        if (eventFilter === "other") {
+          if (KNOWN_EVENTS.includes(run.event)) return false;
+        } else {
+          if (run.event !== eventFilter) return false;
+        }
+      }
+
       return true;
     });
   });
@@ -118,16 +169,23 @@ export default function ActionsTab(props: ActionsTabProps) {
   return (
     <div class="divide-y divide-gray-100 dark:divide-gray-800">
       {/* Toolbar */}
-      <div class="flex items-center gap-3 px-4 py-2 bg-white dark:bg-gray-900">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 bg-white dark:bg-gray-900">
         <label class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
           <input
             type="checkbox"
-            checked={showPrRuns()}
-            onChange={(e) => setShowPrRuns(e.currentTarget.checked)}
+            checked={viewState.showPrRuns}
+            onChange={(e) => setViewState("showPrRuns", e.currentTarget.checked)}
             class="rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-500"
           />
           Show PR runs
         </label>
+        <FilterChips
+          groups={actionsFilterGroups}
+          values={viewState.tabFilters.actions}
+          onChange={(field, value) => setTabFilter("actions", field as ActionsFilterField, value)}
+          onReset={(field) => resetTabFilter("actions", field as ActionsFilterField)}
+          onResetAll={() => resetAllTabFilters("actions")}
+        />
         <div class="flex-1" />
         <IgnoreBadge
           items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
