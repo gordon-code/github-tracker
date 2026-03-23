@@ -28,9 +28,7 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-const AUTH_KEY = "github-tracker:auth";
-
-// auth.ts reads localStorage at module import time (readStoredTokens() on line 56-57).
+// auth.ts no longer reads localStorage on import — access token is in-memory only.
 // Each describe block uses vi.resetModules() + dynamic import to get clean signal state.
 
 describe("setAuth / token signal", () => {
@@ -46,40 +44,20 @@ describe("setAuth / token signal", () => {
     vi.restoreAllMocks();
   });
 
-  it("stores access token in localStorage and updates token signal", () => {
+  it("sets the token signal in memory", () => {
     mod.setAuth({ access_token: "ghs_abc123" });
     expect(mod.token()).toBe("ghs_abc123");
-    const stored = JSON.parse(localStorageMock.getItem(AUTH_KEY)!);
-    expect(stored.accessToken).toBe("ghs_abc123");
   });
 
-  it("does not store refresh token in localStorage (HttpOnly cookie only)", () => {
-    mod.setAuth({ access_token: "ghs_abc" });
-    const stored = JSON.parse(localStorageMock.getItem(AUTH_KEY)!);
-    expect(stored.refreshToken).toBeUndefined();
+  it("does not persist access token to localStorage", () => {
+    mod.setAuth({ access_token: "ghs_abc123" });
+    expect(localStorageMock.getItem("github-tracker:auth")).toBeNull();
   });
 
-  it("stores expiresAt when expires_in is provided", () => {
-    const before = Date.now();
-    mod.setAuth({ access_token: "ghs_abc", expires_in: 3600 });
-    const stored = JSON.parse(localStorageMock.getItem(AUTH_KEY)!);
-    expect(stored.expiresAt).toBeGreaterThanOrEqual(before + 3600 * 1000);
-  });
-
-  it("stores null expiresAt when expires_in is absent", () => {
-    mod.setAuth({ access_token: "ghs_abc" });
-    const stored = JSON.parse(localStorageMock.getItem(AUTH_KEY)!);
-    expect(stored.expiresAt).toBeNull();
-  });
-
-  it("reads stored token from localStorage on module init", async () => {
-    localStorageMock.setItem(
-      AUTH_KEY,
-      JSON.stringify({ accessToken: "ghs_preloaded", expiresAt: null })
-    );
+  it("token signal starts as null on fresh module load", async () => {
     vi.resetModules();
     const fresh = await import("../../src/app/stores/auth");
-    expect(fresh.token()).toBe("ghs_preloaded");
+    expect(fresh.token()).toBeNull();
   });
 });
 
@@ -118,13 +96,6 @@ describe("clearAuth", () => {
     vi.unstubAllGlobals();
   });
 
-  it("removes auth key from localStorage", () => {
-    mod.setAuth({ access_token: "ghs_abc" });
-    expect(localStorageMock.getItem(AUTH_KEY)).not.toBeNull();
-    mod.clearAuth();
-    expect(localStorageMock.getItem(AUTH_KEY)).toBeNull();
-  });
-
   it("clears token signal to null", () => {
     mod.setAuth({ access_token: "ghs_abc" });
     mod.clearAuth();
@@ -137,6 +108,12 @@ describe("clearAuth", () => {
     mod.clearAuth();
     expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+  });
+
+  it("sends POST to /api/oauth/logout to clear HttpOnly cookie", () => {
+    mod.clearAuth();
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledWith("/api/oauth/logout", { method: "POST" });
   });
 });
 
@@ -240,8 +217,6 @@ describe("validateToken", () => {
     expect(mod.token()).toBeNull();
   });
 
-  // ── qa-5: Non-200/non-401 response ─────────────────────────────────────────
-
   it("returns false and leaves token unchanged on non-200/non-401 response (e.g., 503)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
@@ -258,8 +233,6 @@ describe("validateToken", () => {
     // user() should still be null (no successful GET /user)
     expect(mod.user()).toBeNull();
   });
-
-  // ── qa-6: Network exception ─────────────────────────────────────────────────
 
   it("returns false and does not throw when fetch throws a network error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
@@ -291,10 +264,6 @@ describe("refreshAccessToken", () => {
     );
 
     localStorageMock.clear();
-    localStorageMock.setItem(
-      AUTH_KEY,
-      JSON.stringify({ accessToken: "ghs_old", expiresAt: null })
-    );
     vi.resetModules();
     const mod = await import("../../src/app/stores/auth");
 
@@ -307,6 +276,9 @@ describe("refreshAccessToken", () => {
     const [refreshUrl, refreshInit] = fetchMock.mock.calls[0];
     expect(refreshUrl).toBe("/api/oauth/refresh");
     expect((refreshInit as RequestInit).body).toBeUndefined();
+
+    // Verify access token is NOT in localStorage
+    expect(localStorageMock.getItem("github-tracker:auth")).toBeNull();
   });
 
   it("returns false and calls clearAuth() on non-ok refresh response", async () => {
@@ -315,16 +287,12 @@ describe("refreshAccessToken", () => {
     );
 
     localStorageMock.clear();
-    localStorageMock.setItem(
-      AUTH_KEY,
-      JSON.stringify({ accessToken: "ghs_old", expiresAt: null })
-    );
     vi.resetModules();
     const mod = await import("../../src/app/stores/auth");
 
     const result = await mod.refreshAccessToken();
     expect(result).toBe(false);
-    expect(localStorageMock.getItem(AUTH_KEY)).toBeNull();
+    expect(mod.token()).toBeNull();
   });
 
   it("clears auth when refresh succeeds but validation fails (SDR-013)", async () => {
@@ -342,15 +310,11 @@ describe("refreshAccessToken", () => {
     );
 
     localStorageMock.clear();
-    localStorageMock.setItem(
-      AUTH_KEY,
-      JSON.stringify({ accessToken: "ghs_old", expiresAt: null })
-    );
     vi.resetModules();
     const mod = await import("../../src/app/stores/auth");
 
     const result = await mod.refreshAccessToken();
     expect(result).toBe(false);
-    expect(localStorageMock.getItem(AUTH_KEY)).toBeNull();
+    expect(mod.token()).toBeNull();
   });
 });

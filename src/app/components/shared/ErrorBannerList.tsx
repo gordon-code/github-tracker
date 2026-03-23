@@ -1,8 +1,13 @@
 import { For, Show } from "solid-js";
-import type { ApiError } from "../../services/api";
+
+export interface ErrorBannerItem {
+  source: string;
+  message: string;
+  retryable?: boolean;
+}
 
 export default function ErrorBannerList(props: {
-  errors?: ApiError[];
+  errors?: ErrorBannerItem[];
   onDismiss?: (index: number) => void;
 }) {
   return (
@@ -27,7 +32,7 @@ export default function ErrorBannerList(props: {
                 />
               </svg>
               <span class="flex-1">
-                <strong>{err.repo}:</strong> {err.message}
+                <strong>{err.source}:</strong> {err.message}
                 {err.retryable && " (will retry)"}
               </span>
               <Show when={props.onDismiss}>

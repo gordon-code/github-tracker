@@ -2,21 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 
 // Module-level variables to control mock return values
-let mockToken: string | null = null;
 let mockIsAuthenticated = false;
-// validateToken mock fn — replaced per-test
-let mockValidateToken: () => Promise<boolean> = async () => false;
+// refreshAccessToken mock fn — replaced per-test
+let mockRefreshAccessToken: () => Promise<boolean> = async () => false;
 
-// token/isAuthenticated are plain functions (not SolidJS signals) because
-// RootRedirect reads them in onMount (one-shot), not in createEffect.
-// Reactive tracking is not needed for these tests.
+// isAuthenticated/refreshAccessToken are plain functions (not SolidJS signals) because
+// RootRedirect and AuthGuard read them in onMount (one-shot), not in createEffect.
 vi.mock("../../src/app/stores/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
   return {
     ...actual,
-    token: () => mockToken,
     isAuthenticated: () => mockIsAuthenticated,
-    validateToken: vi.fn(async () => mockValidateToken()),
+    refreshAccessToken: vi.fn(async () => mockRefreshAccessToken()),
   };
 });
 
@@ -65,7 +62,6 @@ vi.mock("../../src/app/components/settings/SettingsPage", () => ({
 }));
 
 import * as configStore from "../../src/app/stores/config";
-import * as authStore from "../../src/app/stores/auth";
 import * as githubService from "../../src/app/services/github";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as viewStore from "../../src/app/stores/view";
@@ -75,9 +71,8 @@ describe("App", () => {
   beforeEach(() => {
     // Reset all mock state (implementations, calls, return values)
     vi.resetAllMocks();
-    mockToken = null;
     mockIsAuthenticated = false;
-    mockValidateToken = async () => false;
+    mockRefreshAccessToken = async () => false;
     // Re-apply default mock implementations that are needed across tests
     vi.mocked(cacheStore.evictStaleEntries).mockResolvedValue(0);
     // Reset config to defaults
@@ -89,19 +84,17 @@ describe("App", () => {
     }
   });
 
-  it("shows loading spinner initially (RootRedirect validating)", async () => {
-    mockToken = "tok";
-    mockIsAuthenticated = true;
-    vi.mocked(authStore.validateToken).mockReturnValue(new Promise(() => {}));
+  it("shows loading spinner during auth refresh", async () => {
+    mockIsAuthenticated = false;
+    mockRefreshAccessToken = () => new Promise(() => {}); // never resolves
 
     render(() => <App />);
     screen.getByLabelText("Loading");
   });
 
-  it("redirects to /login when not authenticated", async () => {
-    mockToken = null;
+  it("redirects to /login when not authenticated and refresh fails", async () => {
     mockIsAuthenticated = false;
-    mockValidateToken = async () => false;
+    mockRefreshAccessToken = async () => false;
 
     render(() => <App />);
 
@@ -111,9 +104,7 @@ describe("App", () => {
   });
 
   it("redirects to /onboarding when authenticated but onboarding incomplete", async () => {
-    // token=null → validateToken NOT called → setValidating(false) is synchronous
-    // Then isAuthenticated() = true → checks onboardingComplete = false → /onboarding
-    mockToken = null;
+    // isAuthenticated=true → refreshAccessToken NOT called → immediate routing
     mockIsAuthenticated = true;
     configStore.updateConfig({ onboardingComplete: false });
 
@@ -125,9 +116,7 @@ describe("App", () => {
   });
 
   it("redirects to /dashboard when authenticated and onboarding complete", async () => {
-    // token=null → validateToken NOT called → setValidating(false) is synchronous
-    // Then isAuthenticated() = true → checks onboardingComplete = true → /dashboard
-    mockToken = null;
+    // isAuthenticated=true → refreshAccessToken NOT called → immediate routing
     mockIsAuthenticated = true;
     configStore.updateConfig({ onboardingComplete: true });
 

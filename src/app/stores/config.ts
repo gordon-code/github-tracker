@@ -60,8 +60,12 @@ export function updateConfig(partial: Partial<Config>): void {
 }
 
 export function initConfigPersistence(): void {
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
+    }, 200);
   });
 }

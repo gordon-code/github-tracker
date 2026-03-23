@@ -1,12 +1,20 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Inject auth tokens + config into localStorage and register all API route
- * interceptors BEFORE any navigation. validateToken() fetches /user to
- * populate the user signal — isAuthenticated() requires both token + user.
+ * Register API route interceptors and inject config BEFORE any navigation.
+ * The app calls refreshAccessToken() on load, which POSTs to /api/oauth/refresh
+ * (HttpOnly cookie-based). We intercept that to return a valid access token,
+ * and intercept GET /user (called by refreshAccessToken to validate the token).
  */
 async function setupAuth(page: Page) {
-  // Register ALL route interceptors before navigation
+  // Intercept refresh token exchange — app calls this on page load
+  await page.route("**/api/oauth/refresh", (route) =>
+    route.fulfill({
+      status: 200,
+      json: { access_token: "ghu_fake", expires_in: 86400 },
+    })
+  );
+  // Intercept /user validation (called by refreshAccessToken after getting token)
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
       status: 200,
@@ -38,17 +46,8 @@ async function setupAuth(page: Page) {
     route.fulfill({ status: 200, json: { data: {} } })
   );
 
-  // Inject auth token + config into localStorage before page load.
-  // This runs before the app initialises, so readStoredTokens() will find the token.
+  // Inject config into localStorage (config is still persisted there)
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "github-tracker:auth",
-      JSON.stringify({
-        accessToken: "ghu_fake",
-        refreshToken: "ghr_fake",
-        expiresAt: Date.now() + 86400000,
-      })
-    );
     localStorage.setItem(
       "github-tracker:config",
       JSON.stringify({

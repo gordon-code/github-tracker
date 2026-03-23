@@ -1,11 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Inject auth + config before navigation. Navigating to /settings hits
- * RootRedirect first (via /) which calls validateToken() — the /user
- * interceptor MUST be registered before any navigation.
+ * Register API route interceptors and inject config BEFORE any navigation.
+ * The app calls refreshAccessToken() on load, which POSTs to /api/oauth/refresh
+ * (HttpOnly cookie-based). We intercept that to return a valid access token.
  */
 async function setupAuth(page: Page) {
+  await page.route("**/api/oauth/refresh", (route) =>
+    route.fulfill({
+      status: 200,
+      json: { access_token: "ghu_fake", expires_in: 86400 },
+    })
+  );
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
       status: 200,
@@ -30,14 +36,6 @@ async function setupAuth(page: Page) {
   );
 
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "github-tracker:auth",
-      JSON.stringify({
-        accessToken: "ghu_fake",
-        refreshToken: "ghr_fake",
-        expiresAt: Date.now() + 86400000,
-      })
-    );
     localStorage.setItem(
       "github-tracker:config",
       JSON.stringify({
@@ -116,14 +114,20 @@ test("sign out clears auth and redirects to login", async ({ page }) => {
   // The sign out button is inside the "Data" section
   const signOutBtn = page.getByRole("button", { name: /^sign out$/i });
   await expect(signOutBtn).toBeVisible();
+
+  // Intercept the logout cookie-clearing request
+  await page.route("**/api/oauth/logout", (route) =>
+    route.fulfill({ status: 200, json: { ok: true } })
+  );
+
   await signOutBtn.click();
 
-  // clearAuth() removes localStorage entry and navigates to /login
+  // clearAuth() clears in-memory token and navigates to /login
   await expect(page).toHaveURL(/\/login/);
 
-  // Verify auth token was cleared from localStorage
-  const authEntry = await page.evaluate(() =>
-    localStorage.getItem("github-tracker:auth")
+  // Verify config was cleared from localStorage (SDR-016 data leakage prevention)
+  const configEntry = await page.evaluate(() =>
+    localStorage.getItem("github-tracker:config")
   );
-  expect(authEntry).toBeNull();
+  expect(configEntry).toBeNull();
 });

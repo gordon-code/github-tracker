@@ -186,8 +186,8 @@ export async function cachedFetch(
   const result = await fetchFn(conditionalHeaders);
 
   if (result.status === 304) {
-    if (!existing) {
-      throw new Error(`Received 304 but no cache entry exists for key: ${key}`);
+    if (!existing || (conditionalHeaders.etag === null && conditionalHeaders.lastModified === null)) {
+      throw new Error(`Received 304 but no valid cache entry for key: ${key}`);
     }
     return { data: existing.data, fromCache: true };
   }
