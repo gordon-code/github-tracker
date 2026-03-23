@@ -92,6 +92,11 @@ export const [viewState, setViewState] = createStore<ViewState>(
   loadViewState()
 );
 
+export function resetViewState(): void {
+  const defaults = ViewStateSchema.parse({});
+  setViewState(defaults);
+}
+
 export function updateViewState(partial: Partial<ViewState>): void {
   setViewState(
     produce((draft) => {

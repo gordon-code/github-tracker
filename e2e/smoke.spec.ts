@@ -123,8 +123,9 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
 
   await page.goto(`/oauth/callback?code=fakecode&state=${fakeState}`);
 
-  // After successful auth the callback navigates to '/' then to /dashboard
-  await expect(page).toHaveURL(/\/dashboard/);
+  // After successful auth the callback navigates to '/' which redirects
+  // to /dashboard (if onboardingComplete) or /onboarding (first login)
+  await expect(page).toHaveURL(/\/(dashboard|onboarding)/);
 });
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -136,20 +137,20 @@ test("dashboard loads with tab bar visible", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: /dashboard tabs/i });
   await expect(nav).toBeVisible();
 
-  await expect(page.getByRole("button", { name: /^issues$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^issues/i })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /^pull requests$/i })
+    page.getByRole("button", { name: /^pull requests/i })
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /^actions$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^actions/i })).toBeVisible();
 });
 
 test("switching tabs changes active tab indicator", async ({ page }) => {
   await setupAuth(page);
   await page.goto("/dashboard");
 
-  const issuesBtn = page.getByRole("button", { name: /^issues$/i });
-  const prBtn = page.getByRole("button", { name: /^pull requests$/i });
-  const actionsBtn = page.getByRole("button", { name: /^actions$/i });
+  const issuesBtn = page.getByRole("button", { name: /^issues/i });
+  const prBtn = page.getByRole("button", { name: /^pull requests/i });
+  const actionsBtn = page.getByRole("button", { name: /^actions/i });
 
   // Default tab should be issues (or whatever config says; we didn't set defaultTab)
   await expect(issuesBtn).toBeVisible();
