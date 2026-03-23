@@ -1,3 +1,5 @@
+default_install_hook_types = ["pre-commit", "pre-push"]
+
 [[repos]]
 repo = "builtin"
 hooks = [
@@ -27,4 +29,23 @@ language = "system"
 entry = "pnpm test"
 pass_filenames = false
 always_run = true
+priority = 0
+
+[[repos.hooks]]
+id = "csp-hash"
+name = "CSP hash verification"
+language = "system"
+entry = "node scripts/verify-csp-hash.mjs"
+pass_filenames = false
+always_run = true
+priority = 0
+
+[[repos.hooks]]
+id = "e2e"
+name = "Playwright E2E tests"
+language = "system"
+entry = "pnpm test:e2e"
+pass_filenames = false
+always_run = true
+stages = ["pre-push"]
 priority = 0
