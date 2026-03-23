@@ -54,27 +54,32 @@ function getCorsHeaders(
 
 // ── Refresh token cookie helpers ─────────────────────────────────────────────
 
-const RT_COOKIE_NAME = "github_tracker_rt";
+const RT_COOKIE_NAME_PROD = "__Host-github_tracker_rt";
+const RT_COOKIE_NAME_LOCAL = "github_tracker_rt";
 const RT_MAX_AGE = 15_552_000; // ~6 months, matches GitHub refresh token lifetime
 
 function setRefreshTokenCookie(token: string, env: Env): string {
   const isLocal = env.ALLOWED_ORIGIN.startsWith("http://localhost");
-  const secure = isLocal ? "" : " Secure;";
-  const sameSite = isLocal ? "Lax" : "Strict";
-  return `${RT_COOKIE_NAME}=${token}; HttpOnly;${secure} SameSite=${sameSite}; Path=/api; Max-Age=${RT_MAX_AGE}`;
+  if (isLocal) {
+    return `${RT_COOKIE_NAME_LOCAL}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${RT_MAX_AGE}`;
+  }
+  return `${RT_COOKIE_NAME_PROD}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${RT_MAX_AGE}`;
 }
 
 function clearRefreshTokenCookie(env: Env): string {
   const isLocal = env.ALLOWED_ORIGIN.startsWith("http://localhost");
-  const secure = isLocal ? "" : " Secure;";
-  const sameSite = isLocal ? "Lax" : "Strict";
-  return `${RT_COOKIE_NAME}=; HttpOnly;${secure} SameSite=${sameSite}; Path=/api; Max-Age=0`;
+  if (isLocal) {
+    return `${RT_COOKIE_NAME_LOCAL}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+  }
+  return `${RT_COOKIE_NAME_PROD}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
 }
 
-function getRefreshTokenFromCookie(request: Request): string | null {
+function getRefreshTokenFromCookie(request: Request, env: Env): string | null {
   const cookie = request.headers.get("Cookie");
   if (!cookie) return null;
-  const match = cookie.match(new RegExp(`${RT_COOKIE_NAME}=([^;]+)`));
+  const isLocal = env.ALLOWED_ORIGIN.startsWith("http://localhost");
+  const name = isLocal ? RT_COOKIE_NAME_LOCAL : RT_COOKIE_NAME_PROD;
+  const match = cookie.match(new RegExp(`${name}=([^;]+)`));
   return match ? match[1] : null;
 }
 
@@ -187,7 +192,7 @@ async function handleRefreshToken(
   }
 
   // Read refresh token from HttpOnly cookie (not request body)
-  const refreshToken = getRefreshTokenFromCookie(request);
+  const refreshToken = getRefreshTokenFromCookie(request, env);
   if (!refreshToken || !VALID_REFRESH_TOKEN_RE.test(refreshToken)) {
     return errorResponse("invalid_request", 400, cors);
   }

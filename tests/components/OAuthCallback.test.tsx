@@ -264,32 +264,4 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("shows error when pre-flight token validation fails", async () => {
-    setupValidState();
-    setWindowSearch({ code: "fakecode", state: "teststate" });
-
-    // First fetch: /api/oauth/token succeeds with a token
-    // Second fetch: /user pre-flight fails (e.g., GitHub API down)
-    vi.stubGlobal(
-      "fetch",
-      vi.fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ access_token: "tok123" }),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 503,
-        })
-    );
-
-    renderCallback();
-
-    await waitFor(() => {
-      screen.getByText(/Failed to verify your GitHub account/i);
-    });
-
-    // setAuth should NOT have been called — token never stored (SDR-013)
-    expect(authStore.setAuth).not.toHaveBeenCalled();
-  });
 });

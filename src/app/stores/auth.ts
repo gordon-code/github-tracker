@@ -3,13 +3,6 @@ import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY } from "./config";
 import { VIEW_STORAGE_KEY } from "./view";
 
-export const AUTH_STORAGE_KEY = "github-tracker:auth";
-
-export interface AuthTokens {
-  accessToken: string;
-  expiresAt: number | null;
-}
-
 export interface GitHubUser {
   login: string;
   avatar_url: string;
@@ -23,41 +16,12 @@ interface TokenExchangeResponse {
   expires_in?: number | null;
 }
 
-// ── Internal helpers ────────────────────────────────────────────────────────
-
-function readStoredTokens(): AuthTokens | null {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      typeof (parsed as Record<string, unknown>)["accessToken"] === "string"
-    ) {
-      return parsed as AuthTokens;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredTokens(tokens: AuthTokens): void {
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(tokens));
-}
-
-function removeStoredTokens(): void {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-}
-
 // ── Signals ─────────────────────────────────────────────────────────────────
 
-const stored = readStoredTokens();
-
-const [_token, _setToken] = createSignal<string | null>(
-  stored?.accessToken ?? null
-);
+// Access token is kept in-memory only (never persisted to localStorage).
+// On page reload, refreshAccessToken() uses the HttpOnly refresh token cookie
+// to obtain a fresh access token from the Worker.
+const [_token, _setToken] = createSignal<string | null>(null);
 const [user, setUser] = createSignal<GitHubUser | null>(null);
 
 export const token = _token;
@@ -71,18 +35,8 @@ export { user };
 // ── Actions ─────────────────────────────────────────────────────────────────
 
 export function setAuth(response: TokenExchangeResponse): void {
-  const expiresAt = response.expires_in
-    ? Date.now() + response.expires_in * 1000
-    : null;
-
-  const tokens: AuthTokens = {
-    accessToken: response.access_token,
-    expiresAt,
-  };
-
-  writeStoredTokens(tokens);
   _setToken(response.access_token);
-  console.info("[auth] tokens stored");
+  console.info("[auth] access token set (in-memory)");
 }
 
 const _onClearCallbacks: (() => void)[] = [];
@@ -93,7 +47,6 @@ export function onAuthCleared(cb: () => void): void {
 }
 
 export function clearAuth(): void {
-  removeStoredTokens();
   // Clear config and view state to prevent data leakage between users (SDR-016)
   localStorage.removeItem(CONFIG_STORAGE_KEY);
   localStorage.removeItem(VIEW_STORAGE_KEY);
@@ -133,7 +86,7 @@ export async function refreshAccessToken(): Promise<boolean> {
       return false;
     }
 
-    // Validate the new token BEFORE committing to storage (SDR-013)
+    // Validate the new token before setting it (SDR-013)
     const validationResp = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${data.access_token}`,
@@ -147,7 +100,7 @@ export async function refreshAccessToken(): Promise<boolean> {
       return false;
     }
 
-    // Token is valid — now store it
+    // Token is valid — set it in memory
     setAuth(data);
 
     // Populate user signal from validation response

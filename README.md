@@ -74,7 +74,8 @@ tests/
 - Strict CSP: `script-src 'self'` (SHA-256 exception for dark mode script only)
 - OAuth CSRF protection via `crypto.getRandomValues` state parameter
 - CORS locked to exact origin (strict equality, no substring matching)
-- Tokens in localStorage defended by CSP — auto-refresh on 401
+- Access token in-memory only (never persisted); refresh token in `__Host-` HttpOnly cookie
+- Auto-refresh on 401 and on page load via HttpOnly cookie
 - All GitHub API strings auto-escaped by SolidJS JSX (no innerHTML)
 
 ## Deployment

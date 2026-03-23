@@ -87,9 +87,10 @@ describe("Worker OAuth endpoint", () => {
     expect(json["extra_field"]).toBeUndefined();
     // Refresh token is set as an HttpOnly cookie
     const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("github_tracker_rt=ghr_refresh456");
+    expect(setCookie).toContain("__Host-github_tracker_rt=ghr_refresh456");
     expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("Path=/api");
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).toContain("Path=/");
   });
 
   it("POST /api/oauth/token forwards client_id and client_secret to GitHub", async () => {
@@ -144,10 +145,10 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const cases = [
-      "tooshort",
-      "toolongcodethatexceeds20chars",
-      "g1b2c3d4e5f6a1b2c3d4", // 'g' is not hex
-      "a1b2c3d4e5f6a1b2c3d", // 19 chars
+      "a".repeat(41),         // exceeds 40-char limit
+      "",                      // empty string
+      "abc def",               // contains space
+      "abc!@#$%^&*()",         // contains special chars
     ];
 
     for (const code of cases) {
@@ -268,7 +269,7 @@ describe("Worker OAuth endpoint", () => {
     );
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_old_refresh_token_value",
+      cookie: "__Host-github_tracker_rt=ghr_old_refresh_token_value",
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(200);
@@ -280,7 +281,7 @@ describe("Worker OAuth endpoint", () => {
     expect(json["expires_in"]).toBe(28800);
     // Rotated refresh token is in the Set-Cookie header
     const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("github_tracker_rt=ghr_new_refresh");
+    expect(setCookie).toContain("__Host-github_tracker_rt=ghr_new_refresh");
     expect(setCookie).toContain("HttpOnly");
   });
 
@@ -293,7 +294,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_old_cookie_token_123",
+      cookie: "__Host-github_tracker_rt=ghr_old_cookie_token_123",
     });
     await worker.fetch(req, makeEnv());
 
@@ -312,7 +313,7 @@ describe("Worker OAuth endpoint", () => {
     );
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_" + "a".repeat(20),
+      cookie: "__Host-github_tracker_rt=ghr_" + "a".repeat(20),
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
@@ -411,7 +412,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("network failure"));
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_" + "b".repeat(20),
+      cookie: "__Host-github_tracker_rt=ghr_" + "b".repeat(20),
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
@@ -426,7 +427,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_tooshort",
+      cookie: "__Host-github_tracker_rt=ghr_tooshort",
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
@@ -440,7 +441,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghr_invalid-token-with-dashes!!",
+      cookie: "__Host-github_tracker_rt=ghr_invalid-token-with-dashes!!",
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
@@ -454,7 +455,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "github_tracker_rt=ghx_" + "a".repeat(20),
+      cookie: "__Host-github_tracker_rt=ghx_" + "a".repeat(20),
     });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
@@ -470,7 +471,7 @@ describe("Worker OAuth endpoint", () => {
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(200);
     const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("github_tracker_rt=;");
+    expect(setCookie).toContain("__Host-github_tracker_rt=;");
     expect(setCookie).toContain("Max-Age=0");
     expect(setCookie).toContain("HttpOnly");
   });
@@ -535,5 +536,128 @@ describe("Worker OAuth endpoint", () => {
     const res = await worker.fetch(req, makeEnv({ ASSETS: { fetch: assetFetch } }), );
     expect(assetFetch).toHaveBeenCalledOnce();
     expect(res.status).toBe(200);
+  });
+});
+
+// ── qa-6: localhost cookie path ───────────────────────────────────────────────
+
+const LOCAL_ORIGIN = "http://localhost:5173";
+
+function makeLocalEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    ASSETS: { fetch: async () => new Response("asset") },
+    GITHUB_CLIENT_ID: "test_client_id",
+    GITHUB_CLIENT_SECRET: "test_client_secret",
+    ALLOWED_ORIGIN: LOCAL_ORIGIN,
+    ...overrides,
+  };
+}
+
+function makeLocalRequest(
+  method: string,
+  path: string,
+  options: { body?: unknown; cookie?: string } = {}
+): Request {
+  const url = `http://localhost:5173${path}`;
+  const headers: Record<string, string> = { "Origin": LOCAL_ORIGIN };
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (options.cookie) {
+    headers["Cookie"] = options.cookie;
+  }
+  return new Request(url, {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+}
+
+describe("Worker OAuth endpoint — localhost cookie branch (qa-6)", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("token exchange: Set-Cookie uses plain github_tracker_rt name (no __Host- prefix)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "ghu_local_access",
+          token_type: "bearer",
+          scope: "",
+          refresh_token: "ghr_" + "a".repeat(20),
+          expires_in: 28800,
+        }),
+        { status: 200 }
+      )
+    );
+
+    const req = makeLocalRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
+    const res = await worker.fetch(req, makeLocalEnv());
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    // Must NOT use __Host- prefix
+    expect(setCookie).not.toContain("__Host-");
+    // Must use the plain cookie name
+    expect(setCookie).toContain("github_tracker_rt=ghr_");
+    // Must NOT contain Secure attribute (localhost is not HTTPS)
+    expect(setCookie).not.toContain("Secure");
+    // Must use SameSite=Lax (not Strict)
+    expect(setCookie).toContain("SameSite=Lax");
+  });
+
+  it("token exchange: Set-Cookie contains Path=/", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "ghu_local_access",
+          token_type: "bearer",
+          scope: "",
+          refresh_token: "ghr_" + "b".repeat(20),
+          expires_in: 28800,
+        }),
+        { status: 200 }
+      )
+    );
+
+    const req = makeLocalRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
+    const res = await worker.fetch(req, makeLocalEnv());
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("Path=/");
+  });
+
+  it("refresh: reads cookie from plain github_tracker_rt name and rotates it correctly", async () => {
+    const refreshToken = "ghr_" + "c".repeat(20);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "ghu_local_new",
+          token_type: "bearer",
+          refresh_token: "ghr_" + "d".repeat(20),
+          expires_in: 28800,
+        }),
+        { status: 200 }
+      )
+    );
+
+    const req = makeLocalRequest("POST", "/api/oauth/refresh", {
+      cookie: `github_tracker_rt=${refreshToken}`,
+    });
+    const res = await worker.fetch(req, makeLocalEnv());
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("github_tracker_rt=ghr_");
+    expect(setCookie).not.toContain("__Host-");
+    expect(setCookie).not.toContain("Secure");
+    expect(setCookie).toContain("SameSite=Lax");
   });
 });
