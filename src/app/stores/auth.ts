@@ -1,11 +1,12 @@
 import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
+import { CONFIG_STORAGE_KEY } from "./config";
+import { VIEW_STORAGE_KEY } from "./view";
 
-const AUTH_STORAGE_KEY = "github-tracker:auth";
+export const AUTH_STORAGE_KEY = "github-tracker:auth";
 
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string | null;
   expiresAt: number | null;
 }
 
@@ -19,7 +20,6 @@ interface TokenExchangeResponse {
   access_token: string;
   token_type?: string;
   scope?: string;
-  refresh_token?: string | null;
   expires_in?: number | null;
 }
 
@@ -77,7 +77,6 @@ export function setAuth(response: TokenExchangeResponse): void {
 
   const tokens: AuthTokens = {
     accessToken: response.access_token,
-    refreshToken: response.refresh_token ?? null,
     expiresAt,
   };
 
@@ -96,32 +95,28 @@ export function onAuthCleared(cb: () => void): void {
 export function clearAuth(): void {
   removeStoredTokens();
   // Clear config and view state to prevent data leakage between users (SDR-016)
-  localStorage.removeItem("github-tracker:config");
-  localStorage.removeItem("github-tracker:view");
+  localStorage.removeItem(CONFIG_STORAGE_KEY);
+  localStorage.removeItem(VIEW_STORAGE_KEY);
   _setToken(null);
   setUser(null);
+  // Clear HttpOnly refresh token cookie via Worker (fire-and-forget)
+  fetch("/api/oauth/logout", { method: "POST" }).catch(() => {});
   // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
   clearCache().catch(() => {
     // Non-fatal — cache clear failure should not block logout
   });
   // Run registered cleanup callbacks (e.g., poll state reset)
-  for (const cb of _onClearCallbacks) cb();
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
+  }
   console.info("[auth] auth cleared");
 }
 
 export async function refreshAccessToken(): Promise<boolean> {
-  const stored = readStoredTokens();
-  if (!stored?.refreshToken) {
-    console.info("[auth] no refresh token available");
-    clearAuth();
-    return false;
-  }
-
   try {
+    // Refresh token is in an HttpOnly cookie — the browser sends it automatically
     const resp = await fetch("/api/oauth/refresh", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: stored.refreshToken }),
     });
 
     if (!resp.ok) {

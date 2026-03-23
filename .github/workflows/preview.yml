@@ -17,6 +17,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm test
+      - name: Verify CSP hash
+        run: node scripts/verify-csp-hash.mjs
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
       - name: Run E2E tests
@@ -35,6 +37,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify CSP hash
+        run: node scripts/verify-csp-hash.mjs
       - run: pnpm run build
         env:
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}

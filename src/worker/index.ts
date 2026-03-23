@@ -45,10 +45,37 @@ function getCorsHeaders(
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST",
       "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Credentials": "true",
       "Vary": "Origin",
     };
   }
   return {};
+}
+
+// ── Refresh token cookie helpers ─────────────────────────────────────────────
+
+const RT_COOKIE_NAME = "github_tracker_rt";
+const RT_MAX_AGE = 15_552_000; // ~6 months, matches GitHub refresh token lifetime
+
+function setRefreshTokenCookie(token: string, env: Env): string {
+  const isLocal = env.ALLOWED_ORIGIN.startsWith("http://localhost");
+  const secure = isLocal ? "" : " Secure;";
+  const sameSite = isLocal ? "Lax" : "Strict";
+  return `${RT_COOKIE_NAME}=${token}; HttpOnly;${secure} SameSite=${sameSite}; Path=/api; Max-Age=${RT_MAX_AGE}`;
+}
+
+function clearRefreshTokenCookie(env: Env): string {
+  const isLocal = env.ALLOWED_ORIGIN.startsWith("http://localhost");
+  const secure = isLocal ? "" : " Secure;";
+  const sameSite = isLocal ? "Lax" : "Strict";
+  return `${RT_COOKIE_NAME}=; HttpOnly;${secure} SameSite=${sameSite}; Path=/api; Max-Age=0`;
+}
+
+function getRefreshTokenFromCookie(request: Request): string | null {
+  const cookie = request.headers.get("Cookie");
+  if (!cookie) return null;
+  const match = cookie.match(new RegExp(`${RT_COOKIE_NAME}=([^;]+)`));
+  return match ? match[1] : null;
 }
 
 // GitHub OAuth code format validation (SDR-005): alphanumeric, 1-40 chars.
@@ -125,23 +152,29 @@ async function handleTokenExchange(
     return errorResponse("token_exchange_failed", 400, cors);
   }
 
-  // Return only allowed fields — never forward full GitHub response
+  // Return only allowed fields — never forward full GitHub response.
+  // Refresh token goes into an HttpOnly cookie, NOT the response body.
+  const refreshToken = typeof githubData["refresh_token"] === "string"
+    ? githubData["refresh_token"]
+    : null;
+
   const allowed = {
     access_token: githubData["access_token"],
     token_type: githubData["token_type"] ?? "bearer",
     scope: githubData["scope"] ?? "",
-    refresh_token: githubData["refresh_token"] ?? null,
     expires_in: githubData["expires_in"] ?? null,
   };
 
-  return new Response(JSON.stringify(allowed), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      ...cors,
-      ...securityHeaders(),
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...cors,
+    ...securityHeaders(),
+  };
+  if (refreshToken) {
+    headers["Set-Cookie"] = setRefreshTokenCookie(refreshToken, env);
+  }
+
+  return new Response(JSON.stringify(allowed), { status: 200, headers });
 }
 
 async function handleRefreshToken(
@@ -153,31 +186,9 @@ async function handleRefreshToken(
     return errorResponse("method_not_allowed", 405, cors);
   }
 
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    typeof (body as Record<string, unknown>)["refresh_token"] !== "string"
-  ) {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  const refreshToken = (body as Record<string, unknown>)[
-    "refresh_token"
-  ] as string;
-
-  if (!VALID_REFRESH_TOKEN_RE.test(refreshToken)) {
+  // Read refresh token from HttpOnly cookie (not request body)
+  const refreshToken = getRefreshTokenFromCookie(request);
+  if (!refreshToken || !VALID_REFRESH_TOKEN_RE.test(refreshToken)) {
     return errorResponse("invalid_request", 400, cors);
   }
 
@@ -211,17 +222,42 @@ async function handleRefreshToken(
     return errorResponse("token_exchange_failed", 400, cors);
   }
 
+  // Rotated refresh token goes into HttpOnly cookie, not response body
+  const newRefreshToken = typeof githubData["refresh_token"] === "string"
+    ? githubData["refresh_token"]
+    : null;
+
   const allowed = {
     access_token: githubData["access_token"],
     token_type: githubData["token_type"] ?? "bearer",
-    refresh_token: githubData["refresh_token"] ?? null,
     expires_in: githubData["expires_in"] ?? null,
   };
 
-  return new Response(JSON.stringify(allowed), {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...cors,
+    ...securityHeaders(),
+  };
+  if (newRefreshToken) {
+    headers["Set-Cookie"] = setRefreshTokenCookie(newRefreshToken, env);
+  }
+
+  return new Response(JSON.stringify(allowed), { status: 200, headers });
+}
+
+async function handleLogout(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405, cors);
+  }
+  return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
+      "Set-Cookie": clearRefreshTokenCookie(env),
       ...cors,
       ...securityHeaders(),
     },
@@ -248,6 +284,10 @@ export default {
 
     if (url.pathname === "/api/oauth/refresh") {
       return handleRefreshToken(request, env, cors);
+    }
+
+    if (url.pathname === "/api/oauth/logout") {
+      return handleLogout(request, env, cors);
     }
 
     if (url.pathname === "/api/health" && request.method === "GET") {

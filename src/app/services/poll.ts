@@ -12,8 +12,8 @@ import {
   type WorkflowRun,
   type ApiError,
 } from "./api";
-import { detectNewItems, dispatchNotifications } from "../lib/notifications";
-import { pushError, clearErrors } from "../lib/errors";
+import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
+import { pushError, clearErrors, getErrors } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,7 @@ function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
   _notifGateDisabled = false;
+  _resetNotificationState();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
@@ -222,12 +223,21 @@ export function createPollCoordinator(
     if (destroyed || isRefreshing()) return;
     setIsRefreshing(true);
     try {
+      // Snapshot previous errors before clearing so they can be restored on skip.
+      // Clear before fetchAll so informational pushError calls during the fetch survive.
+      const previousErrors = getErrors();
+      clearErrors();
       const data = await fetchAll();
-      // When notifications gate determined nothing changed, skip all processing
-      if (data.skipped) return;
+      // When notifications gate determined nothing changed, restore previous errors
+      // (the repos that were failing are still failing) and skip all processing.
+      if (data.skipped) {
+        for (const err of previousErrors) {
+          pushError(err.source, err.message, err.retryable);
+        }
+        return;
+      }
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally
-      clearErrors();
       for (const err of data.errors) {
         pushError(err.repo, err.message, err.retryable);
       }

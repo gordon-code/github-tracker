@@ -26,6 +26,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", name: "Test User" }),
+  AUTH_STORAGE_KEY: "github-tracker:auth",
 }));
 
 vi.mock("../../../src/app/stores/cache", () => ({

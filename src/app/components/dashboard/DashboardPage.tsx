@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show, Switch, Match, onMount } from "solid-js";
+import { createSignal, createMemo, Switch, Match, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
 import { useNavigate } from "@solidjs/router";
 import Header from "../layout/Header";
@@ -13,6 +13,7 @@ import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/a
 import { createPollCoordinator, fetchAllData } from "../../services/poll";
 import { refreshAccessToken, clearAuth, user } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
+import ErrorBannerList from "../shared/ErrorBannerList";
 
 // ── Shared dashboard store ──────────────────────────────────────────────────
 
@@ -126,35 +127,10 @@ export default function DashboardPage() {
         />
 
         {/* Global error banner */}
-        <Show when={getErrors().length > 0}>
-          <div class="px-4 pt-2 space-y-1">
-            <For each={getErrors()}>
-              {(err) => (
-                <div
-                  role="alert"
-                  class="flex items-center gap-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300"
-                >
-                  <svg class="h-4 w-4 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                  </svg>
-                  <span class="flex-1">
-                    <strong>{err.source}:</strong> {err.message}
-                    {err.retryable && " (will retry)"}
-                  </span>
-                  <button
-                    onClick={() => dismissError(err.id)}
-                    class="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200"
-                    aria-label="Dismiss error"
-                  >
-                    <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                      <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
+        <ErrorBannerList
+          errors={getErrors().map((e) => ({ repo: e.source, message: e.message, retryable: e.retryable }) as ApiError)}
+          onDismiss={(index) => dismissError(getErrors()[index].id)}
+        />
 
         <main class="flex-1 overflow-auto">
           <Switch>

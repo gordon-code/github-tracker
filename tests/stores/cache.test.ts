@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getDb,
   getCacheEntry,
@@ -74,6 +74,68 @@ describe("CRUD operations", () => {
     await clearCache();
     expect(await getCacheEntry("test:a")).toBeUndefined();
     expect(await getCacheEntry("test:b")).toBeUndefined();
+  });
+});
+
+describe("setCacheEntry — QuotaExceededError eviction", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("evicts oldest 50% and retries when db.put throws QuotaExceededError on first call", async () => {
+    // Seed four entries so eviction has something to remove
+    const db = await getDb();
+    const baseTime = Date.now() - 10_000;
+    for (let i = 1; i <= 4; i++) {
+      await db.put("cache", {
+        key: `quota-seed:${i}`,
+        data: { i },
+        etag: null,
+        lastModified: null,
+        fetchedAt: baseTime + i * 100,
+        maxAge: null,
+      });
+    }
+
+    const countBefore = await db.count("cache");
+    expect(countBefore).toBe(4);
+
+    // Spy on db.put: throw QuotaExceededError on the first call, succeed on subsequent calls
+    let putCallCount = 0;
+    const originalPut = db.put.bind(db);
+    vi.spyOn(db, "put").mockImplementation(async (...args: Parameters<typeof db.put>) => {
+      putCallCount++;
+      if (putCallCount === 1) {
+        const err = new DOMException("QuotaExceededError", "QuotaExceededError");
+        throw err;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return originalPut(...(args as [any, any]));
+    });
+
+    // setCacheEntry should catch the quota error, evict ~50%, then retry
+    await setCacheEntry("quota-new:key", { new: true }, "etag-new");
+
+    const countAfter = await db.count("cache");
+    // 4 original − 2 evicted (50%) + 1 new = 3
+    expect(countAfter).toBeLessThan(countBefore + 1); // at least some eviction happened
+    // The new entry must have been stored
+    const stored = await getCacheEntry("quota-new:key");
+    expect(stored).toBeDefined();
+    expect(stored!.data).toEqual({ new: true });
+  });
+
+  it("propagates error when retry after eviction also fails", async () => {
+    const db = await getDb();
+
+    // Throw QuotaExceededError on every put call
+    vi.spyOn(db, "put").mockImplementation(async () => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+
+    await expect(
+      setCacheEntry("quota-retry-fail:key", { data: true }, null)
+    ).rejects.toThrow();
   });
 });
 

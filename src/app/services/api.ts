@@ -458,7 +458,7 @@ type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
  */
 async function restFallbackCheckStatuses(
   octokit: GitHubOctokit,
-  prs: { owner: string; repo: string; sha: string; prNumber: number }[],
+  prs: { owner: string; repo: string; headOwner: string; headRepo: string; sha: string; prNumber: number }[],
   results: Map<string, CheckStatusResult>
 ): Promise<void> {
   // Process in chunks of 10 to avoid overwhelming the browser's 6-connection limit
@@ -571,10 +571,16 @@ async function restFallbackCheckStatuses(
  *
  * Replaces 2N REST calls (commit status + check runs) with 1 GraphQL call.
  * Uses parameterized variables to prevent injection.
+ *
+ * For fork PRs, `pr.head.sha` exists only in the fork repo, not the base repo.
+ * The `object(expression:)` lookup must use the head repo (fork), while
+ * `pullRequest(number:)` must use the base repo. We handle this by emitting a
+ * separate `objRepo${i}` alias pointing at the head repo when it differs from
+ * the base repo, and reusing the base repo alias otherwise.
  */
 async function batchFetchCheckStatuses(
   octokit: NonNullable<ReturnType<typeof getClient>>,
-  prs: { owner: string; repo: string; sha: string; prNumber: number }[]
+  prs: { owner: string; repo: string; headOwner: string; headRepo: string; sha: string; prNumber: number }[]
 ): Promise<Map<string, CheckStatusResult>> {
   if (prs.length === 0) return new Map();
 
@@ -591,6 +597,9 @@ async function batchFetchCheckStatuses(
     const fragments: string[] = [];
 
     for (let i = 0; i < chunk.length; i++) {
+      const isFork =
+        chunk[i].headOwner !== chunk[i].owner || chunk[i].headRepo !== chunk[i].repo;
+
       varDefs.push(
         `$owner${i}: String!`,
         `$repo${i}: String!`,
@@ -601,28 +610,61 @@ async function batchFetchCheckStatuses(
       variables[`repo${i}`] = chunk[i].repo;
       variables[`sha${i}`] = chunk[i].sha;
       variables[`prNum${i}`] = chunk[i].prNumber;
-      fragments.push(
-        `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
-          object(expression: $sha${i}) {
-            ... on Commit {
-              statusCheckRollup {
-                state
-              }
-            }
-          }
-          pullRequest(number: $prNum${i}) {
-            reviewDecision
-            latestReviews(first: 15) {
-              totalCount
-              nodes {
-                author {
-                  login
+
+      if (isFork) {
+        // Fork PR: SHA lives in the head repo, not the base repo.
+        // Emit a separate alias for the head repo's object lookup.
+        varDefs.push(`$headOwner${i}: String!`, `$headRepo${i}: String!`);
+        variables[`headOwner${i}`] = chunk[i].headOwner;
+        variables[`headRepo${i}`] = chunk[i].headRepo;
+        fragments.push(
+          `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
+            pullRequest(number: $prNum${i}) {
+              reviewDecision
+              latestReviews(first: 15) {
+                totalCount
+                nodes {
+                  author {
+                    login
+                  }
                 }
               }
             }
           }
-        }`
-      );
+          prHead${i}: repository(owner: $headOwner${i}, name: $headRepo${i}) {
+            object(expression: $sha${i}) {
+              ... on Commit {
+                statusCheckRollup {
+                  state
+                }
+              }
+            }
+          }`
+        );
+      } else {
+        fragments.push(
+          `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
+            object(expression: $sha${i}) {
+              ... on Commit {
+                statusCheckRollup {
+                  state
+                }
+              }
+            }
+            pullRequest(number: $prNum${i}) {
+              reviewDecision
+              latestReviews(first: 15) {
+                totalCount
+                nodes {
+                  author {
+                    login
+                  }
+                }
+              }
+            }
+          }`
+        );
+      }
     }
 
     const query = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
@@ -656,7 +698,13 @@ async function batchFetchCheckStatuses(
 
       for (let i = 0; i < chunk.length; i++) {
         const data = response[`pr${i}`] as GraphQLRepoResult | null;
-        const state = data?.object?.statusCheckRollup?.state ?? null;
+        const isFork =
+          chunk[i].headOwner !== chunk[i].owner || chunk[i].headRepo !== chunk[i].repo;
+        // For fork PRs, the object (SHA) lookup is in the prHead${i} alias
+        const objectData = isFork
+          ? (response[`prHead${i}`] as GraphQLRepoResult | null)
+          : data;
+        const state = objectData?.object?.statusCheckRollup?.state ?? null;
         const key = `${chunk[i].owner}/${chunk[i].repo}:${chunk[i].sha}`;
 
         let checkStatus: CheckStatus["status"];
@@ -761,9 +809,14 @@ export async function fetchPullRequests(
   }
 
   // Fetch full PR details for each (head SHA, branch info, reviewers)
-  const prDetailTasks = uniqueItems
-    .filter((item) => item.repository.full_name.includes("/"))
-    .map(async (item) => {
+  // Process in chunks of 10 to avoid unbounded concurrency
+  const PR_DETAIL_CONCURRENCY = 10;
+  const validItems = uniqueItems.filter((item) => item.repository.full_name.includes("/"));
+  const prDetailChunks = chunkArray(validItems, PR_DETAIL_CONCURRENCY);
+  const prDetails: PromiseSettledResult<{ pr: RawPullRequest; repoFullName: string }>[] = [];
+
+  for (const chunk of prDetailChunks) {
+    const chunkTasks = chunk.map(async (item) => {
       const repoFullName = item.repository.full_name;
       const [owner, name] = repoFullName.split("/");
 
@@ -777,7 +830,9 @@ export async function fetchPullRequests(
       return { pr: result.data as RawPullRequest, repoFullName };
     });
 
-  const prDetails = await Promise.allSettled(prDetailTasks);
+    const chunkResults = await Promise.allSettled(chunkTasks);
+    prDetails.push(...chunkResults);
+  }
 
   for (const result of prDetails) {
     if (result.status === "rejected") {
@@ -795,10 +850,14 @@ export async function fetchPullRequests(
     )
     .map((r) => r.value);
 
-  // Batch ALL check statuses into a single GraphQL call
+  // Batch ALL check statuses into a single GraphQL call.
+  // For fork PRs, pr.head.repo.full_name differs from repoFullName (base repo).
+  // The SHA lookup must use the head (fork) repo; pullRequest(number:) uses the base repo.
   const checkInputs = successfulPRs.map(({ pr, repoFullName }) => {
     const [owner, repo] = repoFullName.split("/");
-    return { owner, repo, sha: pr.head.sha, prNumber: pr.number };
+    const headFullName = pr.head.repo?.full_name ?? repoFullName;
+    const [headOwner, headRepo] = headFullName.split("/");
+    return { owner, repo, headOwner, headRepo, sha: pr.head.sha, prNumber: pr.number };
   });
 
   const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);
@@ -929,7 +988,7 @@ export async function fetchWorkflowRuns(
     // Take most recent M runs per workflow
     for (const { runs: workflowRuns } of topWorkflows) {
       const sorted = workflowRuns.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        (a, b) => b.created_at < a.created_at ? -1 : b.created_at > a.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
         allRuns.push({
@@ -983,26 +1042,11 @@ export function aggregateErrors(
     if (result.status !== "rejected") continue;
 
     const reason: unknown = result.reason;
-    const statusCode =
-      typeof reason === "object" &&
-      reason !== null &&
-      typeof (reason as Record<string, unknown>)["status"] === "number"
-        ? ((reason as Record<string, unknown>)["status"] as number)
-        : null;
-
-    const message =
-      typeof reason === "object" &&
-      reason !== null &&
-      typeof (reason as Record<string, unknown>)["message"] === "string"
-        ? ((reason as Record<string, unknown>)["message"] as string)
-        : "Unknown error";
+    const { statusCode, message } = extractRejectionError(reason);
 
     let retryable = false;
 
-    if (statusCode === 401) {
-      // Auth error — not retryable without re-auth
-      retryable = false;
-    } else if (statusCode === 403) {
+    if (statusCode === 403) {
       // Forbidden or rate limit
       const isRateLimit =
         typeof reason === "object" &&
