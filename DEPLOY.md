@@ -63,6 +63,31 @@ CORS note: Preview URLs are same-origin (SPA and API share the same `*.workers.d
 
 **Migration note:** If you previously deployed with `wrangler deploy --env preview`, an orphaned `github-tracker-preview` worker may still exist. Delete it via `wrangler delete --name github-tracker-preview` or through the Cloudflare dashboard.
 
+## Worker API Endpoints
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/api/oauth/token` | POST | none | Exchange OAuth code for access token. Refresh token set as HttpOnly cookie. |
+| `/api/oauth/refresh` | POST | cookie | Refresh expired access token. Reads `github_tracker_rt` HttpOnly cookie. Sets rotated cookie. |
+| `/api/oauth/logout` | POST | none | Clears the `github_tracker_rt` HttpOnly cookie (`Max-Age=0`). |
+| `/api/health` | GET | none | Health check. Returns `OK`. |
+
+### Refresh Token Security
+
+The refresh token (6-month lifetime) is stored as an **HttpOnly cookie** — never in `localStorage` or the response body. This protects the high-value long-lived credential from XSS:
+
+- Cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/api`
+- Local dev uses `SameSite=Lax` without `Secure` (localhost is HTTP)
+- The short-lived access token (8hr) remains in `localStorage`, defended by strict CSP
+- On logout, the client calls `POST /api/oauth/logout` to clear the cookie
+- GitHub rotates the refresh token on each use; the Worker sets the new value as a cookie
+
+### CORS
+
+- `Access-Control-Allow-Origin`: exact match against `ALLOWED_ORIGIN` (no wildcards)
+- `Access-Control-Allow-Credentials: true`: enables cookie-based refresh for cross-origin preview deploys
+- Same-origin requests (production, local dev) send cookies automatically without CORS
+
 ## Local Development
 
 Copy `.dev.vars.example` to `.dev.vars` and fill in your values. Wrangler picks up `.dev.vars` automatically for local `wrangler dev` runs.

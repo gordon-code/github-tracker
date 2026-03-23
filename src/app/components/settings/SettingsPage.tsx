@@ -1,7 +1,8 @@
-import { createSignal, createEffect, Show, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, Show, onMount, onCleanup, JSX } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig } from "../../stores/config";
-import { clearAuth } from "../../stores/auth";
+import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
+import { clearAuth, AUTH_STORAGE_KEY } from "../../stores/auth";
+import { VIEW_STORAGE_KEY } from "../../stores/view";
 import { clearCache } from "../../stores/cache";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
@@ -27,7 +28,7 @@ function applyTheme(theme: "light" | "dark" | "system"): void {
 
 // ── Section wrapper ────────────────────────────────────────────────────────
 
-function Section(props: { title: string; children: import("solid-js").JSX.Element }) {
+function Section(props: { title: string; children: JSX.Element }) {
   return (
     <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
@@ -43,7 +44,7 @@ function Section(props: { title: string; children: import("solid-js").JSX.Elemen
 function SettingRow(props: {
   label: string;
   description?: string;
-  children: import("solid-js").JSX.Element;
+  children: JSX.Element;
 }) {
   return (
     <div class="flex items-start justify-between gap-6 py-3 first:pt-0 last:pb-0">
@@ -244,9 +245,9 @@ export default function SettingsPage() {
       return;
     }
     // Clear all localStorage keys
-    localStorage.removeItem("github-tracker:config");
-    localStorage.removeItem("github-tracker:view");
-    localStorage.removeItem("github-tracker:auth");
+    localStorage.removeItem(CONFIG_STORAGE_KEY);
+    localStorage.removeItem(VIEW_STORAGE_KEY);
+    localStorage.removeItem(AUTH_STORAGE_KEY);
     // Clear IndexedDB cache
     try {
       await clearCache();

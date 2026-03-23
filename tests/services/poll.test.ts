@@ -8,6 +8,7 @@ const mockPushError = vi.fn();
 vi.mock("../../src/app/lib/errors", () => ({
   pushError: (...args: unknown[]) => mockPushError(...args),
   clearErrors: vi.fn(),
+  getErrors: vi.fn(() => []),
 }));
 
 // Mock notifications so doFetch doesn't fail on detectNewItems
@@ -347,6 +348,41 @@ describe("createPollCoordinator", () => {
       await Promise.resolve();
 
       expect(coordinator.isRefreshing()).toBe(false);
+      dispose();
+    });
+  });
+
+  // ── qa-5: fetchAll returns skipped:true — lastRefreshAt not updated ──────────
+
+  it("does not update lastRefreshAt and does not push errors when fetchAll returns skipped:true", async () => {
+    mockPushError.mockClear();
+
+    const skippedData: DashboardData = {
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+      skipped: true,
+    };
+    const fetchAll = vi.fn().mockResolvedValue(skippedData);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      // Wait for the in-flight fetch to settle
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // lastRefreshAt must remain null — skipped fetch should not record a refresh time
+      expect(coordinator.lastRefreshAt()).toBeNull();
+
+      // isRefreshing must be cleared — the finally block always runs
+      expect(coordinator.isRefreshing()).toBe(false);
+
+      // pushError must NOT have been called — per-repo errors are only processed on non-skipped fetches
+      expect(mockPushError).not.toHaveBeenCalled();
+
       dispose();
     });
   });

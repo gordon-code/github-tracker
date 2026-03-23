@@ -1,6 +1,7 @@
 import {
   createSignal,
   createEffect,
+  createMemo,
   For,
   Show,
   Index,
@@ -141,8 +142,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   // ── Selection helpers ──────────────────────────────────────────────────────
 
-  const selectedSet = () =>
-    new Set(props.selected.map((r) => r.fullName));
+  const selectedSet = createMemo(() =>
+    new Set(props.selected.map((r) => r.fullName))
+  );
 
   function isSelected(fullName: string) {
     return selectedSet().has(fullName);

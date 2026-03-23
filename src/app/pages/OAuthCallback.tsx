@@ -6,7 +6,6 @@ interface TokenResponse {
   access_token: string;
   token_type?: string;
   scope?: string;
-  refresh_token?: string | null;
   expires_in?: number | null;
   error?: string;
 }

@@ -5,8 +5,28 @@ import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilte
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
 import ErrorBannerList from "../shared/ErrorBannerList";
+import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
+
+function ChevronIcon(props: { size: "sm" | "md"; rotated: boolean }) {
+  const sizeClass = () => (props.size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5");
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      class={`${sizeClass()} text-gray-400 transition-transform ${props.rotated ? "-rotate-90" : ""}`}
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        fill-rule="evenodd"
+        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+        clip-rule="evenodd"
+      />
+    </svg>
+  );
+}
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -194,30 +214,7 @@ export default function ActionsTab(props: ActionsTabProps) {
 
       {/* Loading */}
       <Show when={props.loading}>
-        <div class="p-8 text-center text-gray-500 dark:text-gray-400">
-          <svg
-            class="animate-spin h-6 w-6 mx-auto mb-2 text-gray-400"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-label="Loading"
-          >
-            <circle
-              class="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              stroke-width="4"
-            />
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          <p class="text-sm">Loading workflow runs...</p>
-        </div>
+        <SkeletonRows label="Loading workflow runs" />
       </Show>
 
       {/* Error */}
@@ -250,19 +247,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   onClick={() => toggleRepo(repoGroup.repoFullName)}
                   class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class={`h-3.5 w-3.5 text-gray-400 transition-transform ${isRepoCollapsed() ? "-rotate-90" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
+                  <ChevronIcon size="md" rotated={isRepoCollapsed()} />
                   {repoGroup.repoFullName}
                 </button>
 
@@ -281,19 +266,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                             onClick={() => toggleWorkflow(wfKey)}
                             class="w-full flex items-center gap-2 px-4 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                           >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              class={`h-3 w-3 text-gray-400 transition-transform ${isWfCollapsed() ? "-rotate-90" : ""}`}
-                              viewBox="0 0 20 20"
-                              fill="currentColor"
-                              aria-hidden="true"
-                            >
-                              <path
-                                fill-rule="evenodd"
-                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                clip-rule="evenodd"
-                              />
-                            </svg>
+                            <ChevronIcon size="sm" rotated={isWfCollapsed()} />
                             {wfGroup.workflowName}
                           </button>
 

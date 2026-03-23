@@ -36,8 +36,9 @@ export function labelTextColor(hexColor: string): string {
  * Formats a duration between two ISO timestamps as a human-readable string.
  * Example outputs: "2m 34s", "1h 12m", "45s"
  */
-export function formatDuration(startedAt: string, completedAt: string): string {
+export function formatDuration(startedAt: string, completedAt: string | null): string {
   if (!startedAt) return "--";
+  if (!completedAt) return "--";
   const diffMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
   if (diffMs <= 0) return "--";
   const totalSec = Math.floor(diffMs / 1000);

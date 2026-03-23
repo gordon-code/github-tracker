@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
 import { createEffect } from "solid-js";
 
-const STORAGE_KEY = "github-tracker:config";
+export const CONFIG_STORAGE_KEY = "github-tracker:config";
 
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
@@ -38,7 +38,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export function loadConfig(): Config {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (raw === null) return ConfigSchema.parse({});
     const parsed = JSON.parse(raw) as unknown;
     const result = ConfigSchema.safeParse(parsed);
@@ -62,6 +62,6 @@ export function updateConfig(partial: Partial<Config>): void {
 export function initConfigPersistence(): void {
   createEffect(() => {
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
   });
 }
