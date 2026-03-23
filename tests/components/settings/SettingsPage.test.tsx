@@ -26,7 +26,6 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", name: "Test User" }),
-  AUTH_STORAGE_KEY: "github-tracker:auth",
 }));
 
 vi.mock("../../../src/app/stores/cache", () => ({
@@ -452,11 +451,9 @@ describe("SettingsPage — Data: Reset all", () => {
     screen.getByRole("button", { name: "Reset all" });
   });
 
-  it("confirming reset clears localStorage keys and calls reload", async () => {
+  it("confirming reset calls clearAuth and reloads the page", async () => {
     const user = userEvent.setup();
-    localStorageMock.setItem("github-tracker:config", '{"test":1}');
-    localStorageMock.setItem("github-tracker:view", '{"test":1}');
-    localStorageMock.setItem("github-tracker:auth", '{"test":1}');
+    const { clearAuth: clearAuthMock } = await import("../../../src/app/stores/auth");
 
     renderSettings();
     const resetBtn = screen.getByRole("button", { name: "Reset all" });
@@ -467,9 +464,7 @@ describe("SettingsPage — Data: Reset all", () => {
     await waitFor(() => {
       expect(window.location.reload).toHaveBeenCalledOnce();
     });
-    expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
-    expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
-    expect(localStorageMock.getItem("github-tracker:auth")).toBeNull();
+    expect(clearAuthMock).toHaveBeenCalled();
   });
 });
 
