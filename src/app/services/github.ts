@@ -20,24 +20,40 @@ interface RateLimitInfo {
   resetAt: Date;
 }
 
-// ── Rate limit signal ────────────────────────────────────────────────────────
+// ── Rate limit signals ───────────────────────────────────────────────────────
 
-const [_rateLimit, _setRateLimit] = createSignal<RateLimitInfo | null>(null);
+const [_coreRateLimit, _setCoreRateLimit] = createSignal<RateLimitInfo | null>(null);
+const [_searchRateLimit, _setSearchRateLimit] = createSignal<RateLimitInfo | null>(null);
 
-export function getRateLimit(): RateLimitInfo | null {
-  return _rateLimit();
+export function getCoreRateLimit(): RateLimitInfo | null {
+  return _coreRateLimit();
 }
 
-function updateRateLimitFromHeaders(
-  headers: Record<string, string>
+export function getSearchRateLimit(): RateLimitInfo | null {
+  return _searchRateLimit();
+}
+
+/** @deprecated Use getCoreRateLimit() instead */
+export function getRateLimit(): RateLimitInfo | null {
+  return _coreRateLimit();
+}
+
+export function updateRateLimitFromHeaders(
+  headers: Record<string, string>,
+  resource: "core" | "search" = "core"
 ): void {
   const remaining = headers["x-ratelimit-remaining"];
   const reset = headers["x-ratelimit-reset"];
   if (remaining !== undefined && reset !== undefined) {
-    _setRateLimit({
+    const info = {
       remaining: parseInt(remaining, 10),
       resetAt: new Date(parseInt(reset, 10) * 1000),
-    });
+    };
+    if (resource === "search") {
+      _setSearchRateLimit(info);
+    } else {
+      _setCoreRateLimit(info);
+    }
   }
 }
 
@@ -89,7 +105,8 @@ export async function cachedRequest(
   cacheKey: string,
   route: string,
   params?: Record<string, unknown>,
-  maxAge?: number
+  maxAge?: number,
+  resource: "core" | "search" = "core"
 ): Promise<{ data: unknown; fromCache: boolean }> {
   return cachedFetch(cacheKey, async (cached: ConditionalHeaders) => {
     const conditionalHeaders: Record<string, string> = {};
@@ -109,7 +126,7 @@ export async function cachedRequest(
       const response = await octokit.request(route, requestParams);
       const headers = response.headers as Record<string, string>;
 
-      updateRateLimitFromHeaders(headers);
+      updateRateLimitFromHeaders(headers, resource);
 
       return {
         data: response.data as unknown,

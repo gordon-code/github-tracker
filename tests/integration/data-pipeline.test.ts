@@ -48,7 +48,7 @@ const rawSearchIssue = {
   user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
   labels: [{ name: "bug", color: "d73a4a" }],
   assignees: [{ login: "octocat" }],
-  repository: { full_name: "octocat/Hello-World" },
+  repository_url: "https://api.github.com/repos/octocat/Hello-World",
   // No pull_request field → this is an issue
 };
 

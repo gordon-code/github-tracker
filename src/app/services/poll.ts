@@ -6,11 +6,11 @@ import {
   fetchIssues,
   fetchPullRequests,
   fetchWorkflowRuns,
-  aggregateErrors,
   type Issue,
   type PullRequest,
   type WorkflowRun,
   type ApiError,
+  resetEmptyActionRepos,
 } from "./api";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
 import { pushError, clearErrors, getErrors } from "../lib/errors";
@@ -42,6 +42,7 @@ function resetPollState(): void {
   _lastSuccessfulFetch = null;
   _notifGateDisabled = false;
   _resetNotificationState();
+  resetEmptyActionRepos();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
@@ -140,28 +141,43 @@ export async function fetchAllData(): Promise<DashboardData> {
   // would cause unchanged items to vanish from the display. ETag caching already
   // handles the "nothing changed" case for workflow runs (304 = free).
 
-  const [issueResult, prResult, runResult] = await Promise.allSettled([
-    fetchIssues(octokit, repos, userLogin),
-    fetchPullRequests(octokit, repos, userLogin),
-    fetchWorkflowRuns(
-      octokit,
-      repos,
-      config.maxWorkflowsPerRepo,
-      config.maxRunsPerWorkflow
-    ),
-  ]);
+  // Search-based fetches (issues, PRs) run sequentially to stay within the
+  // 30 req/min search rate limit. Workflow runs use the core API (5000/hr)
+  // so they run in parallel with the search calls.
+  const runsPromise = fetchWorkflowRuns(
+    octokit,
+    repos,
+    config.maxWorkflowsPerRepo,
+    config.maxRunsPerWorkflow
+  );
+
+  // Issues first, then PRs — both use the search API's shared 30/min budget
+  const issueResult = await Promise.allSettled([fetchIssues(octokit, repos, userLogin)]);
+  const prResult = await Promise.allSettled([fetchPullRequests(octokit, repos, userLogin)]);
+  const runResult = await Promise.allSettled([runsPromise]);
 
   // Collect top-level errors (total function failures)
-  const topLevelErrors = aggregateErrors([
-    [issueResult, "issues"],
-    [prResult, "pull-requests"],
-    [runResult, "workflow-runs"],
-  ]);
+  const topLevelErrors: ApiError[] = [];
+  const settled: [PromiseSettledResult<unknown>, string][] = [
+    [issueResult[0], "issues"],
+    [prResult[0], "pull-requests"],
+    [runResult[0], "workflow-runs"],
+  ];
+  for (const [result, label] of settled) {
+    if (result.status === "rejected") {
+      const reason = result.reason;
+      const statusCode = typeof reason === "object" && reason !== null && typeof (reason as Record<string, unknown>).status === "number"
+        ? (reason as Record<string, unknown>).status as number
+        : null;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      topLevelErrors.push({ repo: label, statusCode, message, retryable: statusCode === null || (statusCode !== null && statusCode >= 500) });
+    }
+  }
 
   // Extract data and per-batch errors from successful results
-  const issueData = issueResult.status === "fulfilled" ? issueResult.value : null;
-  const prData = prResult.status === "fulfilled" ? prResult.value : null;
-  const runData = runResult.status === "fulfilled" ? runResult.value : null;
+  const issueData = issueResult[0].status === "fulfilled" ? issueResult[0].value : null;
+  const prData = prResult[0].status === "fulfilled" ? prResult[0].value : null;
+  const runData = runResult[0].status === "fulfilled" ? runResult[0].value : null;
 
   // Merge all error sources: top-level failures + per-batch partial failures
   const errors = [

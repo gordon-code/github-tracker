@@ -28,6 +28,8 @@ vi.mock("../../../src/app/stores/auth", () => ({
 
 // Mock github service
 vi.mock("../../../src/app/services/github", () => ({
+  getCoreRateLimit: () => null,
+  getSearchRateLimit: () => null,
   getRateLimit: () => null,
 }));
 
@@ -73,18 +75,18 @@ describe("Header", () => {
   });
 
   it("shows rate limit info when available", () => {
-    vi.spyOn(githubService, "getRateLimit").mockReturnValue({
+    vi.spyOn(githubService, "getCoreRateLimit").mockReturnValue({
       remaining: 4567,
       resetAt: new Date("2024-01-10T09:00:00Z"),
     });
     render(() => <Header />);
-    screen.getByText("4567 req remaining");
-    vi.mocked(githubService.getRateLimit).mockRestore();
+    screen.getByText("4567/5k/hr");
+    vi.mocked(githubService.getCoreRateLimit).mockRestore();
   });
 
   it("does not show rate limit when not available", () => {
     render(() => <Header />);
-    expect(screen.queryByText(/req remaining/)).toBeNull();
+    expect(screen.queryByText(/\/5k\/hr/)).toBeNull();
   });
 
   it("logout button calls clearAuth", async () => {

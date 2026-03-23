@@ -1,4 +1,4 @@
-import { getClient, cachedRequest } from "./github";
+import { getClient, cachedRequest, updateRateLimitFromHeaders } from "./github";
 import { evictByPrefix } from "../stores/cache";
 import { pushError } from "../lib/errors";
 
@@ -173,9 +173,19 @@ interface RawSearchItem {
   user: { login: string; avatar_url: string } | null;
   labels: { name: string; color: string }[];
   assignees: { login: string }[];
-  repository: { full_name: string };
+  // Search API returns repository_url (string), NOT repository (object).
+  // We parse full_name from the URL in getRepoFullName().
+  repository_url?: string;
   pull_request?: unknown;
   comments: number;
+}
+
+/** Extract "owner/repo" from "https://api.github.com/repos/owner/repo" */
+function getRepoFullName(item: RawSearchItem): string | null {
+  const url = item.repository_url;
+  if (!url) return null;
+  const match = url.match(/\/repos\/([^/]+\/[^/]+)$/);
+  return match ? match[1] : null;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -188,6 +198,14 @@ const SEARCH_REPO_BATCH_SIZE = 30;
 // At 6 polls/hr (10min interval): ~4800 pts/hr against 5000/hr GraphQL budget.
 // Do not increase batch size or latestReviews.first without recalculating.
 const GRAPHQL_CHECK_BATCH_SIZE = 50;
+
+// Repos confirmed to have zero workflow runs — skipped on subsequent polls.
+// Persists across poll cycles; cleared on auth reset via resetEmptyActionRepos().
+const _emptyActionRepos = new Set<string>();
+
+export function resetEmptyActionRepos(): void {
+  _emptyActionRepos.clear();
+}
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -238,6 +256,7 @@ async function searchAllPages(
       order: "desc",
     });
 
+    updateRateLimitFromHeaders(response.headers as Record<string, string>, "search");
     const data = response.data as unknown as RawSearchResponse;
     items.push(...data.items);
 
@@ -282,13 +301,16 @@ async function batchedSearch(
 ): Promise<BatchSearchResult> {
   if (repos.length === 0) return { items: [], errors: [] };
 
+  // Run search batches sequentially to avoid exceeding the 30 req/min search rate limit.
+  // With multiple search types (issues, PR involves, PR review-requested) running concurrently,
+  // parallel batches can quickly exhaust the shared search budget.
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
-  const tasks = chunks.map((chunk) => {
+  const results: PromiseSettledResult<RawSearchItem[]>[] = [];
+  for (const chunk of chunks) {
     const repoQualifiers = chunk.map((r) => `repo:${r.fullName}`).join(" ");
-    return searchAllPages(octokit, `${baseQuery} ${repoQualifiers}`);
-  });
-
-  const results = await Promise.allSettled(tasks);
+    const result = await Promise.allSettled([searchAllPages(octokit, `${baseQuery} ${repoQualifiers}`)]);
+    results.push(result[0]);
+  }
   const seen = new Set<number>();
   const items: RawSearchItem[] = [];
   const errors: ApiError[] = [];
@@ -416,7 +438,7 @@ export async function fetchIssues(
   );
 
   const issues = items
-    .filter((item) => item.pull_request === undefined)
+    .filter((item) => item.pull_request === undefined && getRepoFullName(item) != null)
     .map((item) => ({
       id: item.id,
       number: item.number,
@@ -429,7 +451,7 @@ export async function fetchIssues(
       userAvatarUrl: item.user?.avatar_url ?? "",
       labels: item.labels.map((l) => ({ name: l.name, color: l.color })),
       assigneeLogins: item.assignees.map((a) => a.login),
-      repoFullName: item.repository.full_name,
+      repoFullName: getRepoFullName(item)!,
       comments: item.comments,
     }));
 
@@ -784,9 +806,12 @@ export async function fetchPullRequests(
 
   const allErrors: ApiError[] = [];
 
-  // Two searches: involves (author/assignee/mentioned/commenter) + review-requested
-  const [involvedResult, reviewResult] = await Promise.allSettled([
+  // Two searches: involves (author/assignee/mentioned/commenter) + review-requested.
+  // Run sequentially to share the 30 req/min search rate limit with issue searches.
+  const [involvedResult] = await Promise.allSettled([
     batchedSearch(octokit, `is:pr is:open involves:${userLogin}`, repos),
+  ]);
+  const [reviewResult] = await Promise.allSettled([
     batchedSearch(
       octokit,
       `is:pr is:open review-requested:${userLogin}`,
@@ -811,13 +836,16 @@ export async function fetchPullRequests(
   // Fetch full PR details for each (head SHA, branch info, reviewers)
   // Process in chunks of 10 to avoid unbounded concurrency
   const PR_DETAIL_CONCURRENCY = 10;
-  const validItems = uniqueItems.filter((item) => item.repository.full_name.includes("/"));
+  const validItems = uniqueItems.filter((item) => {
+    const fullName = getRepoFullName(item);
+    return fullName != null && fullName.includes("/");
+  });
   const prDetailChunks = chunkArray(validItems, PR_DETAIL_CONCURRENCY);
   const prDetails: PromiseSettledResult<{ pr: RawPullRequest; repoFullName: string }>[] = [];
 
   for (const chunk of prDetailChunks) {
     const chunkTasks = chunk.map(async (item) => {
-      const repoFullName = item.repository.full_name;
+      const repoFullName = getRepoFullName(item)!;
       const [owner, name] = repoFullName.split("/");
 
       const result = await cachedRequest(
@@ -899,7 +927,7 @@ export async function fetchPullRequests(
 
   // Evict stale PR detail cache entries for PRs no longer in the active set
   const activeKeys = new Set(
-    uniqueItems.map((item) => `pr-detail:${item.repository.full_name}:${item.number}`)
+    uniqueItems.filter((item) => getRepoFullName(item) != null).map((item) => `pr-detail:${getRepoFullName(item)!}:${item.number}`)
   );
   evictByPrefix("pr-detail:", activeKeys).catch(() => {
     // Non-fatal — eviction failure shouldn't block the result
@@ -936,10 +964,17 @@ export async function fetchWorkflowRuns(
   const allErrors: ApiError[] = [];
 
   // We need enough runs to cover maxWorkflows × maxRuns per repo.
-  // Paginate if the first page isn't enough.
+  // Request only what we need — per_page sized to target + small buffer.
   const targetRunsPerRepo = maxWorkflows * maxRuns;
+  const perPage = Math.min(Math.max(targetRunsPerRepo + 5, 20), 100);
 
-  const repoTasks = repos.map(async (repo) => {
+  const RUNS_CONCURRENCY = 10;
+  const repoChunks = chunkArray(repos, RUNS_CONCURRENCY);
+  for (const chunk of repoChunks) {
+    const chunkResults = await Promise.allSettled(chunk.map(async (repo) => {
+    // Skip repos known to have zero workflow runs (cached empty result)
+    if (_emptyActionRepos.has(repo.fullName)) return;
+
     const rawRuns: RawWorkflowRun[] = [];
     let page = 1;
 
@@ -949,7 +984,7 @@ export async function fetchWorkflowRuns(
         octokit,
         `runs:${repo.fullName}:p${page}`,
         "GET /repos/{owner}/{repo}/actions/runs",
-        { owner: repo.owner, repo: repo.name, per_page: 100, page }
+        { owner: repo.owner, repo: repo.name, per_page: perPage, page }
       );
 
       const data = result.data as {
@@ -960,8 +995,14 @@ export async function fetchWorkflowRuns(
       rawRuns.push(...runs);
 
       // Stop if we got all runs or this page was short
-      if (rawRuns.length >= data.total_count || runs.length < 100) break;
+      if (rawRuns.length >= data.total_count || runs.length < perPage) break;
       page++;
+    }
+
+    // Cache repos with zero runs — skip them on subsequent polls
+    if (rawRuns.length === 0) {
+      _emptyActionRepos.add(repo.fullName);
+      return;
     }
 
     // Group by workflow_id
@@ -981,14 +1022,14 @@ export async function fetchWorkflowRuns(
       runs,
       latestAt: runs.reduce((max, r) => r.updated_at > max ? r.updated_at : max, ""),
     }));
-    workflowEntries.sort((a, b) => b.latestAt < a.latestAt ? -1 : b.latestAt > a.latestAt ? 1 : 0);
+    workflowEntries.sort((a, b) => b.latestAt > a.latestAt ? -1 : b.latestAt < a.latestAt ? 1 : 0);
     const topWorkflows = workflowEntries
       .slice(0, maxWorkflows);
 
     // Take most recent M runs per workflow
     for (const { runs: workflowRuns } of topWorkflows) {
       const sorted = workflowRuns.sort(
-        (a, b) => b.created_at < a.created_at ? -1 : b.created_at > a.created_at ? 1 : 0
+        (a, b) => b.created_at > a.created_at ? -1 : b.created_at < a.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
         allRuns.push({
@@ -1014,62 +1055,16 @@ export async function fetchWorkflowRuns(
         });
       }
     }
-  });
+  }));
 
-  const repoResults = await Promise.allSettled(repoTasks);
-  for (const result of repoResults) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      allErrors.push({ repo: "workflow-runs", statusCode, message, retryable: true });
+    for (const result of chunkResults) {
+      if (result.status === "rejected") {
+        const { statusCode, message } = extractRejectionError(result.reason);
+        allErrors.push({ repo: "workflow-runs", statusCode, message, retryable: true });
+      }
     }
   }
 
   return { workflowRuns: allRuns, errors: allErrors };
 }
 
-// ── Step 6: aggregateErrors ──────────────────────────────────────────────────
-
-/**
- * Input: zipped array of [PromiseSettledResult, repoFullName] pairs.
- * Returns structured errors for each rejected result.
- */
-export function aggregateErrors(
-  results: [PromiseSettledResult<unknown>, string][]
-): ApiError[] {
-  const errors: ApiError[] = [];
-
-  for (const [result, repo] of results) {
-    if (result.status !== "rejected") continue;
-
-    const reason: unknown = result.reason;
-    const { statusCode, message } = extractRejectionError(reason);
-
-    let retryable = false;
-
-    if (statusCode === 403) {
-      // Forbidden or rate limit
-      const isRateLimit =
-        typeof reason === "object" &&
-        reason !== null &&
-        typeof (reason as Record<string, unknown>)["headers"] === "object" &&
-        (
-          (reason as Record<string, unknown>)["headers"] as Record<
-            string,
-            unknown
-          >
-        )["x-ratelimit-remaining"] === "0";
-      retryable = isRateLimit;
-    } else if (statusCode === 404) {
-      retryable = false;
-    } else if (statusCode !== null && statusCode >= 500) {
-      retryable = true;
-    } else if (statusCode === null) {
-      // Network error
-      retryable = true;
-    }
-
-    errors.push({ repo, statusCode, message, retryable });
-  }
-
-  return errors;
-}
