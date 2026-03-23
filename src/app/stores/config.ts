@@ -59,6 +59,11 @@ export function updateConfig(partial: Partial<Config>): void {
   );
 }
 
+export function resetConfig(): void {
+  const defaults = ConfigSchema.parse({});
+  setConfig(defaults);
+}
+
 export function initConfigPersistence(): void {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {

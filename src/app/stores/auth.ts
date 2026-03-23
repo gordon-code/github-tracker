@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
-import { CONFIG_STORAGE_KEY } from "./config";
-import { VIEW_STORAGE_KEY } from "./view";
+import { CONFIG_STORAGE_KEY, resetConfig } from "./config";
+import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 
 export interface GitHubUser {
   login: string;
@@ -47,7 +47,11 @@ export function onAuthCleared(cb: () => void): void {
 }
 
 export function clearAuth(): void {
-  // Clear config and view state to prevent data leakage between users (SDR-016)
+  // Reset in-memory stores to defaults BEFORE clearing localStorage,
+  // so the persistence effects re-write defaults (not stale user data).
+  resetConfig();
+  resetViewState();
+  // Clear localStorage entries (persistence effects will write back defaults)
   localStorage.removeItem(CONFIG_STORAGE_KEY);
   localStorage.removeItem(VIEW_STORAGE_KEY);
   _setToken(null);
