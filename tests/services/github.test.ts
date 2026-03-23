@@ -110,6 +110,39 @@ describe("cachedRequest", () => {
     expect(entry!.data).toEqual({ items: [1, 2, 3] });
   });
 
+  it("sends If-Modified-Since (not If-None-Match) when cache has lastModified but no etag", async () => {
+    const { setCacheEntry } = await import("../../src/app/stores/cache");
+    // Seed entry with no etag but with a lastModified timestamp
+    await setCacheEntry("test:lm-fallback", { old: true }, null, undefined, "Sat, 01 Jan 2025 00:00:00 GMT");
+
+    const mockOctokit = {
+      request: vi.fn().mockResolvedValue({
+        data: { old: true },
+        headers: { "last-modified": "Sat, 01 Jan 2025 00:00:00 GMT" },
+        status: 200,
+      }),
+    };
+
+    await cachedRequest(
+      mockOctokit as unknown as ReturnType<typeof createGitHubClient>,
+      "test:lm-fallback",
+      "GET /repos/{owner}/{repo}/issues",
+      { owner: "org", repo: "repo" }
+    );
+
+    expect(mockOctokit.request).toHaveBeenCalledWith(
+      "GET /repos/{owner}/{repo}/issues",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "If-Modified-Since": "Sat, 01 Jan 2025 00:00:00 GMT",
+        }),
+      })
+    );
+    // Must NOT include If-None-Match when etag is null
+    const callHeaders = (mockOctokit.request.mock.calls[0] as [string, { headers: Record<string, string> }])[1].headers;
+    expect(callHeaders["If-None-Match"]).toBeUndefined();
+  });
+
   it("propagates non-304 errors from octokit.request", async () => {
     const err500 = Object.assign(new Error("Server Error"), { status: 500 });
     const mockOctokit = {

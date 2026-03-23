@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 
-const STORAGE_KEY = "github-tracker:view";
+export const VIEW_STORAGE_KEY = "github-tracker:view";
 
 const IssueFiltersSchema = z.object({
   role: z.enum(["all", "author", "assignee"]).default("all"),
@@ -77,7 +77,7 @@ export type SortPreference = ViewState["sortPreferences"][string];
 
 function loadViewState(): ViewState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
     if (raw === null) return ViewStateSchema.parse({});
     const parsed = JSON.parse(raw) as unknown;
     const result = ViewStateSchema.safeParse(parsed);
@@ -188,12 +188,19 @@ export function resetAllTabFilters(
 }
 
 export function initViewPersistence(): void {
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
-    const snapshot = JSON.parse(JSON.stringify(viewState)) as ViewState;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // QuotaExceededError — silently fail rather than kill the reactive graph
-    }
+    const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(VIEW_STORAGE_KEY, json);
+      } catch {
+        // QuotaExceededError — silently fail rather than kill the reactive graph
+      }
+    }, 200);
+    onCleanup(() => {
+      clearTimeout(debounceTimer);
+    });
   });
 }

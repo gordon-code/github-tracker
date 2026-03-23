@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
   viewState,
@@ -162,6 +162,7 @@ describe("ignoreItem / unignoreItem", () => {
 
 describe("initViewPersistence", () => {
   it("persists state changes to localStorage via createEffect", async () => {
+    vi.useFakeTimers();
     let dispose!: () => void;
     createRoot((d) => {
       dispose = d;
@@ -171,6 +172,8 @@ describe("initViewPersistence", () => {
 
     // SolidJS effects are scheduled as microtasks — flush with a tick
     await Promise.resolve();
+    // Persistence is debounced by 200ms
+    vi.advanceTimersByTime(200);
 
     const raw = localStorageMock.getItem(VIEW_KEY);
     expect(raw).not.toBeNull();
@@ -178,6 +181,7 @@ describe("initViewPersistence", () => {
     expect(parsed.globalFilter.org).toBe("testorg");
     expect(parsed.globalFilter.repo).toBe("testrepo");
     dispose();
+    vi.useRealTimers();
   });
 });
 

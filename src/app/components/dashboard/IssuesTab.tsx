@@ -10,6 +10,7 @@ import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
 import RoleBadge from "../shared/RoleBadge";
+import SkeletonRows from "../shared/SkeletonRows";
 import { deriveInvolvementRoles } from "../../lib/format";
 
 export interface IssuesTabProps {
@@ -206,17 +207,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
       {/* Loading state */}
       <Show when={props.loading}>
-        <div class="flex flex-col gap-2 p-4" role="status" aria-label="Loading issues">
-          <For each={Array(5).fill(null)}>
-            {() => (
-              <div class="flex items-center gap-3 animate-pulse">
-                <div class="h-5 w-24 rounded-full bg-gray-200 dark:bg-gray-700" />
-                <div class="h-4 flex-1 rounded bg-gray-200 dark:bg-gray-700" />
-                <div class="h-4 w-16 rounded bg-gray-200 dark:bg-gray-700" />
-              </div>
-            )}
-          </For>
-        </div>
+        <SkeletonRows label="Loading issues" />
       </Show>
 
       {/* Issue rows */}

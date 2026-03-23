@@ -18,7 +18,7 @@ describe("ActionsTab", () => {
 
   it("shows loading state when loading=true", () => {
     render(() => <ActionsTab workflowRuns={[]} loading={true} />);
-    screen.getByText(/Loading workflow runs/i);
+    screen.getByRole("status", { name: /Loading workflow runs/i });
     expect(screen.queryByText("No workflow runs found.")).toBeNull();
   });
 

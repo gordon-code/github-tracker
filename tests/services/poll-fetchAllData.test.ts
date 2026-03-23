@@ -41,6 +41,7 @@ vi.mock("../../src/app/lib/notifications", () => ({
 vi.mock("../../src/app/lib/errors", () => ({
   pushError: vi.fn(),
   clearErrors: vi.fn(),
+  getErrors: vi.fn(() => []),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
