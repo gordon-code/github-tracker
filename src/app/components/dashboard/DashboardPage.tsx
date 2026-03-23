@@ -1,6 +1,5 @@
 import { createSignal, createMemo, Switch, Match, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
-import { useNavigate } from "@solidjs/router";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
@@ -15,7 +14,7 @@ import { refreshAccessToken, clearAuth, user } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
 
-// ── Shared dashboard store ──────────────────────────────────────────────────
+// ── Shared dashboard store (module-level to survive navigation) ─────────────
 
 interface DashboardStore {
   issues: Issue[];
@@ -26,17 +25,57 @@ interface DashboardStore {
   lastRefreshedAt: Date | null;
 }
 
-export default function DashboardPage() {
-  const navigate = useNavigate();
+const [dashboardData, setDashboardData] = createStore<DashboardStore>({
+  issues: [],
+  pullRequests: [],
+  workflowRuns: [],
+  errors: [],
+  loading: true,
+  lastRefreshedAt: null,
+});
 
-  const [dashboardData, setDashboardData] = createStore<DashboardStore>({
-    issues: [],
-    pullRequests: [],
-    workflowRuns: [],
-    errors: [],
-    loading: true,
-    lastRefreshedAt: null,
-  });
+async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
+  setDashboardData("loading", true);
+  try {
+    const data = await fetchAllData();
+    // When notifications gate says nothing changed, keep existing data
+    if (!data.skipped) {
+      setDashboardData({
+        issues: data.issues,
+        pullRequests: data.pullRequests,
+        workflowRuns: data.workflowRuns,
+        errors: data.errors,
+        loading: false,
+        lastRefreshedAt: new Date(),
+      });
+    } else {
+      setDashboardData("loading", false);
+    }
+    return data;
+  } catch (err) {
+    // Handle 401 auth errors
+    const status =
+      typeof err === "object" &&
+      err !== null &&
+      typeof (err as Record<string, unknown>)["status"] === "number"
+        ? (err as Record<string, unknown>)["status"]
+        : null;
+
+    if (status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (!refreshed) {
+        clearAuth();
+        window.location.replace("/login");
+      }
+    }
+    setDashboardData("loading", false);
+    throw err;
+  }
+}
+
+let _coordinator: ReturnType<typeof createPollCoordinator> | null = null;
+
+export default function DashboardPage() {
 
   const initialTab = createMemo<TabId>(() => {
     if (config.rememberLastTab) {
@@ -52,52 +91,10 @@ export default function DashboardPage() {
     updateViewState({ lastActiveTab: tab });
   }
 
-  async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
-    setDashboardData("loading", true);
-    try {
-      const data = await fetchAllData();
-      // When notifications gate says nothing changed, keep existing data
-      if (!data.skipped) {
-        setDashboardData({
-          issues: data.issues,
-          pullRequests: data.pullRequests,
-          workflowRuns: data.workflowRuns,
-          errors: data.errors,
-          loading: false,
-          lastRefreshedAt: new Date(),
-        });
-      } else {
-        setDashboardData("loading", false);
-      }
-      return data;
-    } catch (err) {
-      // Handle 401 auth errors
-      const status =
-        typeof err === "object" &&
-        err !== null &&
-        typeof (err as Record<string, unknown>)["status"] === "number"
-          ? (err as Record<string, unknown>)["status"]
-          : null;
-
-      if (status === 401) {
-        const refreshed = await refreshAccessToken();
-        if (!refreshed) {
-          clearAuth();
-          navigate("/login");
-        }
-        // If refreshed, the token signal will update the client — let the next poll pick it up
-      }
-      setDashboardData("loading", false);
-      throw err;
-    }
-  }
-
-  const [coordinator, setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
-
   onMount(() => {
-    setCoordinator(
-      createPollCoordinator(() => config.refreshInterval, pollFetch)
-    );
+    if (!_coordinator) {
+      _coordinator = createPollCoordinator(() => config.refreshInterval, pollFetch);
+    }
   });
 
   const tabCounts = createMemo(() => ({
@@ -121,14 +118,14 @@ export default function DashboardPage() {
         />
 
         <FilterBar
-          isRefreshing={coordinator()?.isRefreshing() ?? dashboardData.loading}
-          lastRefreshedAt={coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-          onRefresh={() => coordinator()?.manualRefresh()}
+          isRefreshing={_coordinator?.isRefreshing() ?? dashboardData.loading}
+          lastRefreshedAt={_coordinator?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+          onRefresh={() => _coordinator?.manualRefresh()}
         />
 
         {/* Global error banner */}
         <ErrorBannerList
-          errors={getErrors().map((e) => ({ repo: e.source, message: e.message, retryable: e.retryable }) as ApiError)}
+          errors={getErrors().map((e) => ({ source: e.source, message: e.message, retryable: e.retryable }))}
           onDismiss={(index) => dismissError(getErrors()[index].id)}
         />
 
@@ -159,6 +156,24 @@ export default function DashboardPage() {
             </Match>
           </Switch>
         </main>
+
+        <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-center gap-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
+          <a
+            href="https://github.com/gordon-code/github-tracker"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:text-gray-600 dark:hover:text-gray-300"
+          >
+            Source
+          </a>
+          <span aria-hidden="true">&middot;</span>
+          <a
+            href="/privacy"
+            class="hover:text-gray-600 dark:hover:text-gray-300"
+          >
+            Privacy
+          </a>
+        </footer>
       </div>
     </div>
   );

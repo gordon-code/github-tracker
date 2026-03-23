@@ -95,33 +95,15 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     );
   }
 
-  // queued → gray clock
-  if (props.status === "queued") {
-    return (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-gray-400 shrink-0"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-        aria-label="Queued"
-      >
-        <path
-          fill-rule="evenodd"
-          d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
-          clip-rule="evenodd"
-        />
-      </svg>
-    );
-  }
-
-  // fallback: gray clock
+  // queued or unknown → gray clock
+  const label = props.status === "queued" ? "Queued" : "Unknown status";
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       class="h-4 w-4 text-gray-400 shrink-0"
       viewBox="0 0 20 20"
       fill="currentColor"
-      aria-label="Unknown status"
+      aria-label={label}
     >
       <path
         fill-rule="evenodd"
@@ -188,10 +170,24 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
       <button
         onClick={() => props.onIgnore(props.run)}
-        class="opacity-0 group-hover:opacity-100 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity focus:opacity-100 shrink-0"
+        class="shrink-0 rounded p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-red-400"
+        title="Ignore this run"
         aria-label={`Ignore run ${props.run.name}`}
       >
-        Ignore
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fill-rule="evenodd"
+            d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
+            clip-rule="evenodd"
+          />
+          <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+        </svg>
       </button>
     </div>
   );

@@ -70,11 +70,26 @@ function groupRuns(runs: WorkflowRun[]): RepoGroup[] {
 
   const result: RepoGroup[] = [];
   for (const [repoFullName, wfMap] of repoMap) {
-    result.push({
-      repoFullName,
-      workflows: Array.from(wfMap.values()),
+    const workflows = Array.from(wfMap.values());
+    // Sort runs within each workflow: most recent first
+    for (const wf of workflows) {
+      wf.runs.sort((a, b) => (b.createdAt > a.createdAt ? 1 : b.createdAt < a.createdAt ? -1 : 0));
+    }
+    // Sort workflows within repo: most recent run first
+    workflows.sort((a, b) => {
+      const aLatest = a.runs[0]?.createdAt ?? "";
+      const bLatest = b.runs[0]?.createdAt ?? "";
+      return bLatest > aLatest ? 1 : bLatest < aLatest ? -1 : 0;
     });
+    result.push({ repoFullName, workflows });
   }
+
+  // Sort repos: most recent activity first
+  result.sort((a, b) => {
+    const aLatest = a.workflows[0]?.runs[0]?.createdAt ?? "";
+    const bLatest = b.workflows[0]?.runs[0]?.createdAt ?? "";
+    return bLatest > aLatest ? 1 : bLatest < aLatest ? -1 : 0;
+  });
 
   return result;
 }
@@ -151,7 +166,11 @@ export default function ActionsTab(props: ActionsTabProps) {
 
   const filteredRuns = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
-    const ignoredIds = new Set(viewState.ignoredItems.map((i) => i.id));
+    const ignoredIds = new Set(
+      viewState.ignoredItems
+        .filter((i) => i.type === "workflowRun")
+        .map((i) => i.id)
+    );
     const conclusionFilter = viewState.tabFilters.actions.conclusion;
     const eventFilter = viewState.tabFilters.actions.event;
 
@@ -212,15 +231,13 @@ export default function ActionsTab(props: ActionsTabProps) {
         />
       </div>
 
-      {/* Loading */}
-      <Show when={props.loading}>
+      {/* Loading skeleton — only when no data exists yet */}
+      <Show when={props.loading && props.workflowRuns.length === 0}>
         <SkeletonRows label="Loading workflow runs" />
       </Show>
 
       {/* Error */}
-      <Show when={!props.loading}>
-        <ErrorBannerList errors={props.errors} />
-      </Show>
+      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
 
       {/* Empty */}
       <Show
@@ -234,7 +251,7 @@ export default function ActionsTab(props: ActionsTabProps) {
       </Show>
 
       {/* Repo groups */}
-      <Show when={!props.loading && repoGroups().length > 0}>
+      <Show when={repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isRepoCollapsed = () =>

@@ -110,8 +110,8 @@ export default function IssuesTab(props: IssuesTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
-  const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
+  const filteredSorted = () => filteredSortedWithMeta().items;
+  const issueMeta = () => filteredSortedWithMeta().meta;
 
   const pageSize = createMemo(() => config.itemsPerPage);
 
@@ -155,7 +155,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors} />
+      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
 
       {/* Column headers */}
       <div
@@ -205,13 +205,13 @@ export default function IssuesTab(props: IssuesTabProps) {
         />
       </div>
 
-      {/* Loading state */}
-      <Show when={props.loading}>
+      {/* Loading skeleton — only when no data exists yet */}
+      <Show when={props.loading && props.issues.length === 0}>
         <SkeletonRows label="Loading issues" />
       </Show>
 
       {/* Issue rows */}
-      <Show when={!props.loading}>
+      <Show when={!props.loading || props.issues.length > 0}>
         <Show
           when={pagedItems().length > 0}
           fallback={
@@ -262,7 +262,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         </Show>
       </Show>
 
-      <Show when={!props.loading}>
+      <Show when={!props.loading || props.issues.length > 0}>
         <PaginationControls
           page={page()}
           pageCount={pageCount()}
