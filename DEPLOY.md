@@ -26,18 +26,57 @@
 
 ## GitHub App Setup
 
-1. Go to GitHub → Settings → Developer settings → GitHub Apps → New GitHub App
-2. Fill in:
+1. Go to GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**
+2. Fill in the basic details:
    - **App name**: your app name (e.g. `gh-tracker-yourname`)
+   - **Description**: `Personal dashboard for tracking GitHub issues, PRs, and Actions runs across repos and orgs.`
    - **Homepage URL**: `https://gh.gordoncode.dev`
-   - **Callback URLs**: register all three:
+3. Under **Identifying and authorizing users**:
+   - **Callback URLs** — register all three:
      - `https://gh.gordoncode.dev/oauth/callback` (production)
      - `https://github-tracker.<account>.workers.dev/oauth/callback` (preview — GitHub's subdomain matching should allow per-branch preview aliases like `alias.github-tracker.<account>.workers.dev` to work; verify after first preview deploy)
      - `http://localhost:5173/oauth/callback` (local dev)
-   - **Webhook**: disable (uncheck "Active")
-   - **Permissions**: set to read-only as needed (Issues, Pull requests, Actions, Metadata)
-3. After creation, note the **Client ID** — this is your `VITE_GITHUB_CLIENT_ID`
-4. Generate a **Client Secret** and save it for the Worker secrets below
+   - ✅ **Expire user authorization tokens** — check this. The app uses short-lived access tokens (8hr) with HttpOnly cookie-based refresh token rotation.
+   - ✅ **Request user authorization (OAuth) during installation** — check this. Streamlines the install + authorize flow into one step.
+4. Under **Post installation**:
+   - Leave **Setup URL** blank
+   - Leave **Redirect on update** unchecked
+5. Under **Webhook**:
+   - ❌ Uncheck **Active** — the app polls; it does not use webhooks.
+6. Under **Permissions**:
+
+   **Repository permissions** (read-only):
+
+   | Permission | Access | Used for |
+   |------------|--------|----------|
+   | **Actions** | Read-only | `GET /repos/{owner}/{repo}/actions/runs` — workflow run list |
+   | **Checks** | Read-only | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` — PR check status (REST fallback) |
+   | **Commit statuses** | Read-only | `GET /repos/{owner}/{repo}/commits/{ref}/status` — legacy commit status (REST fallback) |
+   | **Issues** | Read-only | `GET /search/issues?q=is:issue` — issue search |
+   | **Metadata** | Read-only | Automatically granted when any repo permission is set. Required for basic repo info. |
+   | **Pull requests** | Read-only | `GET /search/issues?q=is:pr`, `GET /repos/{owner}/{repo}/pulls/{pull_number}`, `/reviews` — PR search, detail, and reviews |
+
+   **Organization permissions:**
+
+   | Permission | Access | Used for |
+   |------------|--------|----------|
+   | **Members** | Read-only | `GET /user/orgs` — list user's organizations for the org selector |
+
+   **Account permissions:**
+
+   | Permission | Access | Used for |
+   |------------|--------|----------|
+   | _(none required)_ | | |
+
+7. Under **Where can this GitHub App be installed?**:
+   - **Any account** — the app uses OAuth authorization (not installation tokens), so any GitHub user needs to be able to authorize via the login flow
+8. Click **Create GitHub App**
+9. Note the **Client ID** — this is your `VITE_GITHUB_CLIENT_ID`
+10. Click **Generate a new client secret** and save it for the Worker secrets below
+
+### Notifications API limitation
+
+The GitHub Notifications API (`GET /notifications`) does not support GitHub App user access tokens — only classic personal access tokens. The app uses notifications as a polling optimization gate (skip full fetch when nothing changed). When the notifications endpoint returns 403, the gate **auto-disables** and the app falls back to time-based polling. No functionality is lost; polling is just slightly less efficient.
 
 ## Cloudflare Worker Secrets
 
@@ -76,9 +115,9 @@ CORS note: Preview URLs are same-origin (SPA and API share the same `*.workers.d
 
 The refresh token (6-month lifetime) is stored as an **HttpOnly cookie** — never in `localStorage` or the response body. This protects the high-value long-lived credential from XSS:
 
-- Cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/api`
-- Local dev uses `SameSite=Lax` without `Secure` (localhost is HTTP)
-- The short-lived access token (8hr) remains in `localStorage`, defended by strict CSP
+- Production cookie: `__Host-github_tracker_rt` with `HttpOnly; Secure; SameSite=Strict; Path=/`
+- Local dev: `github_tracker_rt` with `HttpOnly; SameSite=Lax; Path=/` (no `Secure` — localhost is HTTP; no `__Host-` prefix — requires `Secure`)
+- The short-lived access token (8hr) is held in-memory only (never persisted to `localStorage`); on page reload, `refreshAccessToken()` obtains a fresh token via the cookie
 - On logout, the client calls `POST /api/oauth/logout` to clear the cookie
 - GitHub rotates the refresh token on each use; the Worker sets the new value as a cookie
 
