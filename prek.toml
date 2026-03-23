@@ -1,0 +1,30 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-json", priority = 0 },
+  { id = "check-toml", priority = 0 },
+  { id = "check-yaml", priority = 0 },
+  { id = "end-of-file-fixer", priority = 0 },
+  { id = "trailing-whitespace", priority = 0 },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "typecheck"
+name = "TypeScript typecheck"
+language = "system"
+entry = "pnpm typecheck"
+pass_filenames = false
+always_run = true
+priority = 0
+
+[[repos.hooks]]
+id = "test"
+name = "Vitest tests"
+language = "system"
+entry = "pnpm test"
+pass_filenames = false
+always_run = true
+priority = 0
