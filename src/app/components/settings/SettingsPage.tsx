@@ -1,8 +1,7 @@
 import { createSignal, createEffect, Show, onMount, onCleanup, JSX } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
-import { clearAuth, AUTH_STORAGE_KEY } from "../../stores/auth";
-import { VIEW_STORAGE_KEY } from "../../stores/view";
+import { config, updateConfig } from "../../stores/config";
+import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
@@ -155,6 +154,19 @@ export default function SettingsPage() {
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
 
+  // Save indicator
+  const [showSaved, setShowSaved] = createSignal(false);
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function saveWithFeedback(patch: Parameters<typeof updateConfig>[0]) {
+    updateConfig(patch);
+    clearTimeout(saveTimer);
+    setShowSaved(true);
+    saveTimer = setTimeout(() => setShowSaved(false), 1500);
+  }
+
+  onCleanup(() => clearTimeout(saveTimer));
+
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
@@ -181,12 +193,12 @@ export default function SettingsPage() {
 
   function handleOrgsChange(orgs: string[]) {
     setLocalOrgs(orgs);
-    updateConfig({ selectedOrgs: orgs });
+    saveWithFeedback({ selectedOrgs: orgs });
   }
 
   function handleReposChange(repos: RepoRef[]) {
     setLocalRepos(repos);
-    updateConfig({ selectedRepos: repos });
+    saveWithFeedback({ selectedRepos: repos });
   }
 
   async function handleRequestNotificationPermission() {
@@ -194,7 +206,7 @@ export default function SettingsPage() {
     const perm = await Notification.requestPermission();
     setNotifPermission(perm);
     if (perm === "granted" && !config.notifications.enabled) {
-      updateConfig({ notifications: { ...config.notifications, enabled: true } });
+      saveWithFeedback({ notifications: { ...config.notifications, enabled: true } });
     }
   }
 
@@ -244,16 +256,9 @@ export default function SettingsPage() {
       setConfirmReset(true);
       return;
     }
-    // Clear all localStorage keys
-    localStorage.removeItem(CONFIG_STORAGE_KEY);
-    localStorage.removeItem(VIEW_STORAGE_KEY);
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    // Clear IndexedDB cache
-    try {
-      await clearCache();
-    } catch {
-      // Non-fatal
-    }
+    // clearAuth handles: token + user signals, localStorage (config/view),
+    // HttpOnly cookie logout, IndexedDB cache, and onAuthCleared callbacks
+    clearAuth();
     window.location.reload();
   }
 
@@ -318,6 +323,11 @@ export default function SettingsPage() {
               </svg>
             </a>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+            <Show when={showSaved()}>
+              <span class="ml-auto text-sm font-medium text-green-600 dark:text-green-400 animate-pulse">
+                Saved
+              </span>
+            </Show>
           </div>
         </div>
       </div>
@@ -356,6 +366,11 @@ export default function SettingsPage() {
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   {localRepos().length} selected
                 </p>
+                <Show when={localRepos().length > 50}>
+                  <p class="text-xs text-amber-600 dark:text-amber-400">
+                    Tracking {localRepos().length} repos will use significant API quota per poll cycle
+                  </p>
+                </Show>
               </div>
               <button
                 type="button"
@@ -385,7 +400,7 @@ export default function SettingsPage() {
           >
             <Select
               value={config.refreshInterval}
-              onChange={(val) => updateConfig({ refreshInterval: val })}
+              onChange={(val) => saveWithFeedback({ refreshInterval: val })}
               options={refreshOptions}
             />
           </SettingRow>
@@ -402,7 +417,7 @@ export default function SettingsPage() {
                 value={config.maxWorkflowsPerRepo}
                 min={1}
                 max={20}
-                onChange={(val) => updateConfig({ maxWorkflowsPerRepo: val })}
+                onChange={(val) => saveWithFeedback({ maxWorkflowsPerRepo: val })}
               />
             </SettingRow>
             <SettingRow
@@ -413,7 +428,7 @@ export default function SettingsPage() {
                 value={config.maxRunsPerWorkflow}
                 min={1}
                 max={10}
-                onChange={(val) => updateConfig({ maxRunsPerWorkflow: val })}
+                onChange={(val) => saveWithFeedback({ maxRunsPerWorkflow: val })}
               />
             </SettingRow>
           </div>
@@ -449,7 +464,7 @@ export default function SettingsPage() {
                     if (val && notifPermission() !== "granted") {
                       void handleRequestNotificationPermission();
                     } else {
-                      updateConfig({
+                      saveWithFeedback({
                         notifications: { ...config.notifications, enabled: val },
                       });
                     }
@@ -463,10 +478,10 @@ export default function SettingsPage() {
                 disabled={!config.notifications.enabled}
                 label="Issues notifications"
                 onChange={(val) =>
-                  updateConfig({
+                  saveWithFeedback({
                     notifications: { ...config.notifications, issues: val },
                   })
-                }
+}
               />
             </SettingRow>
             <SettingRow label="Pull Requests" description="Notify when PRs are opened or updated">
@@ -475,7 +490,7 @@ export default function SettingsPage() {
                 disabled={!config.notifications.enabled}
                 label="Pull requests notifications"
                 onChange={(val) =>
-                  updateConfig({
+                  saveWithFeedback({
                     notifications: { ...config.notifications, pullRequests: val },
                   })
                 }
@@ -487,7 +502,7 @@ export default function SettingsPage() {
                 disabled={!config.notifications.enabled}
                 label="Workflow runs notifications"
                 onChange={(val) =>
-                  updateConfig({
+                  saveWithFeedback({
                     notifications: { ...config.notifications, workflowRuns: val },
                   })
                 }
@@ -502,7 +517,7 @@ export default function SettingsPage() {
             <SettingRow label="Theme">
               <Select
                 value={config.theme}
-                onChange={(val) => updateConfig({ theme: val })}
+                onChange={(val) => saveWithFeedback({ theme: val })}
                 options={themeOptions}
               />
             </SettingRow>
@@ -512,7 +527,7 @@ export default function SettingsPage() {
             >
               <Select
                 value={config.viewDensity}
-                onChange={(val) => updateConfig({ viewDensity: val })}
+                onChange={(val) => saveWithFeedback({ viewDensity: val })}
                 options={densityOptions}
               />
             </SettingRow>
@@ -522,7 +537,7 @@ export default function SettingsPage() {
             >
               <Select
                 value={config.itemsPerPage}
-                onChange={(val) => updateConfig({ itemsPerPage: val })}
+                onChange={(val) => saveWithFeedback({ itemsPerPage: val })}
                 options={itemsPerPageOptions}
               />
             </SettingRow>
@@ -538,7 +553,7 @@ export default function SettingsPage() {
             >
               <Select
                 value={config.defaultTab}
-                onChange={(val) => updateConfig({ defaultTab: val })}
+                onChange={(val) => saveWithFeedback({ defaultTab: val })}
                 options={tabOptions}
               />
             </SettingRow>
@@ -549,7 +564,7 @@ export default function SettingsPage() {
               <Toggle
                 checked={config.rememberLastTab}
                 label="Remember last tab"
-                onChange={(val) => updateConfig({ rememberLastTab: val })}
+                onChange={(val) => saveWithFeedback({ rememberLastTab: val })}
               />
             </SettingRow>
           </div>

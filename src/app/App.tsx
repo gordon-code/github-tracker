@@ -1,6 +1,6 @@
 import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
-import { token, isAuthenticated, validateToken } from "./stores/auth";
+import { isAuthenticated, refreshAccessToken } from "./stores/auth";
 import { config, initConfigPersistence } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
@@ -10,17 +10,17 @@ import OAuthCallback from "./pages/OAuthCallback";
 import DashboardPage from "./components/dashboard/DashboardPage";
 import OnboardingWizard from "./components/onboarding/OnboardingWizard";
 import SettingsPage from "./components/settings/SettingsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 
 // Auth guard: redirects unauthenticated users to /login.
-// Waits for initial token validation before redirecting so that a page
-// refresh with a valid stored token doesn't flash to /login.
+// On page load (no in-memory token), attempts a silent refresh via HttpOnly cookie.
 function AuthGuard(props: { children: JSX.Element }) {
-  const [validating, setValidating] = createSignal(!!token());
+  const [validating, setValidating] = createSignal(true);
   const navigate = useNavigate();
 
   onMount(async () => {
-    if (token()) {
-      await validateToken();
+    if (!isAuthenticated()) {
+      await refreshAccessToken();
     }
     setValidating(false);
   });
@@ -70,8 +70,8 @@ function RootRedirect() {
   const [validating, setValidating] = createSignal(true);
 
   onMount(async () => {
-    if (token()) {
-      await validateToken();
+    if (!isAuthenticated()) {
+      await refreshAccessToken();
     }
     setValidating(false);
   });
@@ -135,6 +135,7 @@ export default function App() {
       <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
       <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
       <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
+      <Route path="/privacy" component={PrivacyPage} />
     </Router>
   );
 }
