@@ -6,3 +6,4 @@ dist/
 .env
 hack/
 .serena/
+.playwright-mcp/
