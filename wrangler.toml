@@ -8,6 +8,7 @@ preview_urls = true
 # The Cloudflare Vite plugin overrides this directory at build time.
 # The `public/` value is needed for wrangler dev and vitest-pool-workers (which parse wrangler.toml directly).
 directory = "public"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
 
 [[routes]]
