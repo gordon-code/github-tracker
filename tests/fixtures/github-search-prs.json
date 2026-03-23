@@ -19,9 +19,7 @@
       "assignees": [
         { "login": "octocat", "id": 1 }
       ],
-      "repository": {
-        "full_name": "octocat/Hello-World"
-      },
+      "repository_url": "https://api.github.com/repos/octocat/Hello-World",
       "pull_request": {
         "url": "https://api.github.com/repos/octocat/Hello-World/pulls/10",
         "html_url": "https://github.com/octocat/Hello-World/pull/10",

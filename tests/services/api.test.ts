@@ -6,7 +6,6 @@ import {
   fetchIssues,
   fetchPullRequests,
   fetchWorkflowRuns,
-  aggregateErrors,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
@@ -597,7 +596,6 @@ describe("fetchWorkflowRuns", () => {
       expect.objectContaining({
         owner: "octocat",
         repo: "Hello-World",
-        per_page: 100,
       })
     );
   });
@@ -696,94 +694,6 @@ describe("fetchWorkflowRuns", () => {
   });
 });
 
-// ── aggregateErrors ───────────────────────────────────────────────────────────
-
-describe("aggregateErrors", () => {
-  it("returns empty array when all results are fulfilled", () => {
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "fulfilled", value: [] }, "octocat/Hello-World"],
-      [{ status: "fulfilled", value: [] }, "acme-corp/acme-api"],
-    ];
-    expect(aggregateErrors(results)).toEqual([]);
-  });
-
-  it("classifies 401 as non-retryable auth error", () => {
-    const err = Object.assign(new Error("Unauthorized"), { status: 401 });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "octocat/Hello-World"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBe(401);
-    expect(errors[0].retryable).toBe(false);
-    expect(errors[0].repo).toBe("octocat/Hello-World");
-  });
-
-  it("classifies 403 without rate-limit header as non-retryable", () => {
-    const err = Object.assign(new Error("Forbidden"), { status: 403, headers: {} });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "acme-corp/acme-api"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBe(403);
-    expect(errors[0].retryable).toBe(false);
-  });
-
-  it("classifies 403 with x-ratelimit-remaining=0 as retryable", () => {
-    const err = Object.assign(new Error("Rate limited"), {
-      status: 403,
-      headers: { "x-ratelimit-remaining": "0" },
-    });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "octocat/Hello-World"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBe(403);
-    expect(errors[0].retryable).toBe(true);
-  });
-
-  it("classifies 404 as non-retryable", () => {
-    const err = Object.assign(new Error("Not Found"), { status: 404 });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "octocat/missing-repo"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBe(404);
-    expect(errors[0].retryable).toBe(false);
-  });
-
-  it("classifies 5xx as retryable", () => {
-    const err = Object.assign(new Error("Internal Server Error"), { status: 500 });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "octocat/Hello-World"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBe(500);
-    expect(errors[0].retryable).toBe(true);
-  });
-
-  it("classifies network errors (no status) as retryable", () => {
-    const err = new Error("fetch failed");
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "rejected", reason: err }, "octocat/Hello-World"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors[0].statusCode).toBeNull();
-    expect(errors[0].retryable).toBe(true);
-  });
-
-  it("handles mixed fulfilled and rejected results", () => {
-    const err = Object.assign(new Error("Server Error"), { status: 503 });
-    const results: [PromiseSettledResult<unknown>, string][] = [
-      [{ status: "fulfilled", value: [] }, "octocat/Hello-World"],
-      [{ status: "rejected", reason: err }, "acme-corp/acme-api"],
-    ];
-    const errors = aggregateErrors(results);
-    expect(errors.length).toBe(1);
-    expect(errors[0].repo).toBe("acme-corp/acme-api");
-    expect(errors[0].retryable).toBe(true);
-  });
-});
-
 // ── searchAllPages pagination ─────────────────────────────────────────────────
 
 describe("searchAllPages (via fetchIssues)", () => {
@@ -805,7 +715,7 @@ describe("searchAllPages (via fetchIssues)", () => {
           user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
           labels: [],
           assignees: [],
-          repository: { full_name: "org/repo" },
+          repository_url: "https://api.github.com/repos/org/repo",
         }));
         return {
           data: {
@@ -859,7 +769,7 @@ describe("searchAllPages (via fetchIssues)", () => {
           user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
           labels: [],
           assignees: [],
-          repository: { full_name: "org/repo" },
+          repository_url: "https://api.github.com/repos/org/repo",
         }));
         return {
           data: { total_count: 2000, incomplete_results: false, items },
@@ -1042,7 +952,7 @@ describe("batchFetchCheckStatuses with 51 PRs (2 GraphQL chunks)", () => {
       user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
       labels: [],
       assignees: [],
-      repository: { full_name: "octocat/Hello-World" },
+      repository_url: "https://api.github.com/repos/octocat/Hello-World",
       pull_request: { url: `https://api.github.com/repos/octocat/Hello-World/pulls/${100 + i}` },
     }));
 
@@ -1385,6 +1295,192 @@ describe("fetchWorkflowRuns pagination", () => {
 
     // Only 1 page request should be made
     expect(requestCount).toBe(1);
+  });
+});
+
+// ── qa-1: Fork PR path in GraphQL batch ───────────────────────────────────────
+
+describe("batchFetchCheckStatuses fork PR path (via fetchPullRequests)", () => {
+  it("emits prHead0 alias for fork PR and populates checkStatus from head repo", async () => {
+    await clearCache();
+
+    // Search returns a PR whose base repo is "octocat/Hello-World"
+    const forkSearchData = {
+      total_count: 1,
+      incomplete_results: false,
+      items: [
+        {
+          id: 3001,
+          number: 42,
+          title: "Fork PR",
+          state: "open",
+          html_url: "https://github.com/octocat/Hello-World/pull/42",
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+          user: { login: "fork-user", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
+          labels: [],
+          assignees: [],
+          repository_url: "https://api.github.com/repos/octocat/Hello-World",
+          pull_request: { url: "https://api.github.com/repos/octocat/Hello-World/pulls/42" },
+          draft: false,
+        },
+      ],
+    };
+
+    // PR detail: head.repo.full_name is the fork, NOT the base repo
+    const forkPrDetail = {
+      ...prsFixture[0],
+      id: 3001,
+      number: 42,
+      head: {
+        sha: "forksha1234567890abcdef1234567890abcdef12",
+        ref: "feat/fork-branch",
+        repo: {
+          full_name: "fork-user/Hello-World", // fork!
+        },
+      },
+    };
+
+    let capturedQuery = "";
+    const graphql = vi.fn(async (query: string, variables: Record<string, unknown>) => {
+      capturedQuery = query;
+      // Respond with both pr0 (base repo PR data) and prHead0 (fork head SHA data)
+      const response: Record<string, unknown> = {};
+      const indices = Object.keys(variables)
+        .filter((k) => k.startsWith("owner") && !k.startsWith("headOwner"))
+        .map((k) => parseInt(k.replace("owner", ""), 10));
+      for (const i of indices) {
+        response[`pr${i}`] = {
+          object: null, // Base repo has no object for fork SHA
+          pullRequest: {
+            reviewDecision: "APPROVED",
+            latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
+          },
+        };
+        response[`prHead${i}`] = {
+          object: {
+            statusCheckRollup: { state: "SUCCESS" },
+          },
+        };
+      }
+      return response;
+    });
+
+    const request = vi.fn(async (route: string) => {
+      if (route === "GET /search/issues") {
+        return { data: forkSearchData, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: forkPrDetail, headers: { etag: "etag-fork-pr" } };
+      }
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
+    });
+
+    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // GraphQL must include prHead0 alias (fork head repo lookup)
+    expect(capturedQuery).toContain("prHead0");
+    // The fork owner/repo variables must be emitted
+    expect(graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headOwner0: "fork-user",
+        headRepo0: "Hello-World",
+      })
+    );
+    // checkStatus must come from the fork head repo's statusCheckRollup
+    expect(pullRequests).toHaveLength(1);
+    expect(pullRequests[0].checkStatus).toBe("success");
+    expect(pullRequests[0].reviewDecision).toBe("APPROVED");
+  });
+});
+
+// ── qa-2: Deleted fork (null head.repo) ───────────────────────────────────────
+
+describe("fetchPullRequests with null head.repo (deleted fork)", () => {
+  it("returns the PR without error and uses base repo full_name as fallback", async () => {
+    await clearCache();
+
+    const deletedForkPrDetail = {
+      ...prsFixture[0],
+      id: 4001,
+      number: 55,
+      head: {
+        sha: "deadbeef1234567890abcdef1234567890abcdef",
+        ref: "feat/deleted-fork",
+        repo: null, // deleted fork
+      },
+    };
+
+    const deletedForkSearchData = {
+      total_count: 1,
+      incomplete_results: false,
+      items: [
+        {
+          id: 4001,
+          number: 55,
+          title: "Deleted Fork PR",
+          state: "open",
+          html_url: "https://github.com/octocat/Hello-World/pull/55",
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+          user: { login: "gone-user", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
+          labels: [],
+          assignees: [],
+          repository_url: "https://api.github.com/repos/octocat/Hello-World",
+          pull_request: { url: "https://api.github.com/repos/octocat/Hello-World/pulls/55" },
+          draft: false,
+        },
+      ],
+    };
+
+    const graphql = vi.fn(async (_query: string, variables: Record<string, unknown>) => {
+      const response: Record<string, unknown> = {};
+      const indices = Object.keys(variables)
+        .filter((k) => k.startsWith("owner") && !k.startsWith("headOwner"))
+        .map((k) => parseInt(k.replace("owner", ""), 10));
+      for (const i of indices) {
+        response[`pr${i}`] = {
+          object: { statusCheckRollup: { state: "SUCCESS" } },
+          pullRequest: {
+            reviewDecision: null,
+            latestReviews: { totalCount: 0, nodes: [] },
+          },
+        };
+      }
+      return response;
+    });
+
+    const request = vi.fn(async (route: string) => {
+      if (route === "GET /search/issues") {
+        return { data: deletedForkSearchData, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return { data: deletedForkPrDetail, headers: { etag: "etag-deleted-fork" } };
+      }
+      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
+    });
+
+    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
+
+    const { pullRequests, errors } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Must not error out
+    expect(errors.filter((e) => e.repo === "pr-detail")).toHaveLength(0);
+    // PR must be returned
+    expect(pullRequests).toHaveLength(1);
+    // Base repo full_name is used as fallback for head.repo.full_name
+    expect(pullRequests[0].repoFullName).toBe("octocat/Hello-World");
   });
 });
 

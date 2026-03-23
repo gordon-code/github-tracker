@@ -387,6 +387,52 @@ describe("createPollCoordinator", () => {
     });
   });
 
+  // ── qa-3: doFetch error-restore-on-skip ──────────────────────────────────────
+
+  it("restores previous errors via pushError when fetchAll returns skipped:true", async () => {
+    mockPushError.mockClear();
+
+    const previousError = {
+      id: "err1",
+      source: "graphql",
+      message: "Rate limited",
+      timestamp: Date.now(),
+      retryable: true,
+    };
+
+    // Swap getErrors to return a pre-existing error for this test
+    const { getErrors } = await import("../../src/app/lib/errors");
+    vi.mocked(getErrors).mockReturnValue([previousError]);
+
+    const skippedData: DashboardData = {
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+      skipped: true,
+    };
+    const fetchAll = vi.fn().mockResolvedValue(skippedData);
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // pushError must have been called to restore the previous error
+      expect(mockPushError).toHaveBeenCalledWith(
+        previousError.source,
+        previousError.message,
+        previousError.retryable
+      );
+      dispose();
+    });
+
+    // Restore getErrors to default for other tests
+    vi.mocked(getErrors).mockReturnValue([]);
+  });
+
   // ── qa-11: Jitter test with fixed Math.random to make interval deterministic ──
 
   it("fires at the configured interval with deterministic jitter (Math.random = 0)", async () => {

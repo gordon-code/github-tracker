@@ -1,7 +1,7 @@
 import { Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
-import { getRateLimit } from "../../services/github";
+import { getCoreRateLimit, getSearchRateLimit } from "../../services/github";
 
 export default function Header() {
   const navigate = useNavigate();
@@ -11,7 +11,13 @@ export default function Header() {
     navigate("/login");
   }
 
-  const rateLimit = () => getRateLimit();
+  const coreRL = () => getCoreRateLimit();
+  const searchRL = () => getSearchRateLimit();
+
+  function formatLimit(remaining: number, limit: number, unit: string): string {
+    const k = limit >= 1000 ? `${limit / 1000}k` : String(limit);
+    return `${remaining}/${k}/${unit}`;
+  }
 
   return (
     <header class="fixed top-0 left-0 right-0 z-50 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
@@ -21,15 +27,32 @@ export default function Header() {
 
       <div class="flex-1" />
 
-      <Show when={rateLimit()}>
-        {(rl) => (
-          <div
-            class="text-xs text-gray-500 dark:text-gray-400 tabular-nums shrink-0"
-            title={`Rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
-          >
-            {rl().remaining} req remaining
+      <Show when={coreRL() || searchRL()}>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-xs font-medium text-gray-400 dark:text-gray-500">Rate Limits</span>
+          <div class="flex flex-col items-end text-xs tabular-nums leading-tight gap-0.5">
+            <Show when={coreRL()}>
+              {(rl) => (
+                <span
+                  class={rl().remaining < 500 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
+                  title={`Core rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
+                >
+                  {formatLimit(rl().remaining, 5000, "hr")}
+                </span>
+              )}
+            </Show>
+            <Show when={searchRL()}>
+              {(rl) => (
+                <span
+                  class={rl().remaining < 5 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
+                  title={`Search rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
+                >
+                  {formatLimit(rl().remaining, 30, "min")}
+                </span>
+              )}
+            </Show>
           </div>
-        )}
+        </div>
       </Show>
 
       <Show when={user()}>
