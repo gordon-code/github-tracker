@@ -1,5 +1,5 @@
 import { createSignal, Show } from "solid-js";
-import { config, updateConfig } from "../../stores/config";
+import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
 import { RepoRef } from "../../services/api";
 import OrgSelector from "./OrgSelector";
 import RepoSelector from "./RepoSelector";
@@ -27,6 +27,8 @@ export default function OnboardingWizard() {
       selectedRepos: selectedRepos(),
       onboardingComplete: true,
     });
+    // Flush synchronously — the debounced persistence effect won't fire before page unload
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
     window.location.replace("/dashboard");
   }
 

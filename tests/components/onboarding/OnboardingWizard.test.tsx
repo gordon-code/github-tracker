@@ -34,6 +34,7 @@ vi.mock("../../../src/app/components/onboarding/RepoSelector", () => ({
 
 // Mock config store
 vi.mock("../../../src/app/stores/config", () => ({
+  CONFIG_STORAGE_KEY: "github-tracker:config",
   config: { selectedOrgs: [], selectedRepos: [] },
   updateConfig: vi.fn(),
 }));
@@ -49,6 +50,16 @@ describe("OnboardingWizard", () => {
       writable: true,
       value: { replace: vi.fn(), href: "" },
     });
+    // Ensure localStorage.setItem is available (happy-dom may not expose it in all contexts)
+    if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        writable: true,
+        value: { setItem: vi.fn(), getItem: vi.fn(() => null), removeItem: vi.fn(), clear: vi.fn() },
+      });
+    } else {
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
+    }
   });
 
   afterEach(() => {

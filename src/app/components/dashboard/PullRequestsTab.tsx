@@ -190,8 +190,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
-  const prMeta = createMemo(() => filteredSortedWithMeta().meta);
+  const filteredSorted = () => filteredSortedWithMeta().items;
+  const prMeta = () => filteredSortedWithMeta().meta;
 
   const pageSize = createMemo(() => config.itemsPerPage);
 
@@ -236,7 +236,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors} />
+      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
 
       {/* Column headers */}
       <div
@@ -276,13 +276,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         />
       </div>
 
-      {/* Loading state */}
-      <Show when={props.loading}>
+      {/* Loading skeleton — only when no data exists yet */}
+      <Show when={props.loading && props.pullRequests.length === 0}>
         <SkeletonRows label="Loading pull requests" />
       </Show>
 
       {/* PR rows */}
-      <Show when={!props.loading}>
+      <Show when={!props.loading || props.pullRequests.length > 0}>
         <Show
           when={pagedItems().length > 0}
           fallback={
@@ -350,7 +350,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         </Show>
       </Show>
 
-      <Show when={!props.loading}>
+      <Show when={!props.loading || props.pullRequests.length > 0}>
         <PaginationControls
           page={page()}
           pageCount={pageCount()}

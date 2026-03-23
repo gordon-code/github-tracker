@@ -5,41 +5,20 @@ import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 import type { DashboardData } from "../../src/app/services/poll";
 
-const mockNavigate = vi.fn();
+const mockLocationReplace = vi.fn();
 
-// Mock the entire router — vi.importActual with SolidJS Vite plugin causes
-// empty renders. DashboardPage only needs useNavigate for 401 redirect.
+// DashboardPage no longer uses useNavigate — it calls window.location.replace("/login").
+// Mock window.location so we can assert on the replace call.
+Object.defineProperty(window, "location", {
+  configurable: true,
+  writable: true,
+  value: { replace: mockLocationReplace, href: "" },
+});
+
+// Header (rendered inside DashboardPage) uses useNavigate — provide a stub so
+// the real router context is not required in unit tests.
 vi.mock("@solidjs/router", () => ({
-  useNavigate: () => mockNavigate,
-}));
-
-// Mock poll service.
-// createPollCoordinator captures the fetchAll callback and calls it immediately
-// so that pollFetch (which calls fetchAllData) actually runs during tests.
-// This is the only way to test data flow and error handling — without invoking
-// the callback, the dashboard store never updates.
-let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
-
-vi.mock("../../src/app/services/poll", () => ({
-  fetchAllData: vi.fn().mockResolvedValue({
-    issues: [],
-    pullRequests: [],
-    workflowRuns: [],
-    errors: [],
-  }),
-  createPollCoordinator: vi.fn().mockImplementation(
-    (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
-      capturedFetchAll = fetchAll;
-      // Invoke immediately so the dashboard fetches on mount.
-      // .catch prevents unhandled rejection when auth error tests reject.
-      void fetchAll().catch(() => {});
-      return {
-        isRefreshing: () => false,
-        lastRefreshAt: () => null,
-        manualRefresh: vi.fn(),
-      };
-    }
-  ),
+  useNavigate: () => vi.fn(),
 }));
 
 // Mock auth store
@@ -54,6 +33,8 @@ vi.mock("../../src/app/stores/auth", () => ({
 
 // Mock github service (used by Header)
 vi.mock("../../src/app/services/github", () => ({
+  getCoreRateLimit: () => null,
+  getSearchRateLimit: () => null,
   getRateLimit: () => null,
 }));
 
@@ -65,12 +46,50 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearErrors: vi.fn(),
 }));
 
-import DashboardPage from "../../src/app/components/dashboard/DashboardPage";
-import * as pollService from "../../src/app/services/poll";
-import * as authStore from "../../src/app/stores/auth";
+// capturedFetchAll is populated by the createPollCoordinator mock each time
+// the module is reset and DashboardPage re-mounts, creating a fresh coordinator.
+let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
 
-beforeEach(() => {
-  mockNavigate.mockClear();
+// DashboardPage and pollService are imported dynamically after each vi.resetModules()
+// so the module-level _coordinator variable is always fresh (null) per test.
+let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
+let pollService: typeof import("../../src/app/services/poll");
+let authStore: typeof import("../../src/app/stores/auth");
+
+beforeEach(async () => {
+  // Reset module registry so DashboardPage's module-level _coordinator starts as null
+  vi.resetModules();
+
+  // Re-register mocks for the fresh module instances
+  vi.mock("../../src/app/services/poll", () => ({
+    fetchAllData: vi.fn().mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    }),
+    createPollCoordinator: vi.fn().mockImplementation(
+      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        capturedFetchAll = fetchAll;
+        // Invoke immediately so the dashboard fetches on mount.
+        // .catch prevents unhandled rejection when auth error tests reject.
+        void fetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+        };
+      }
+    ),
+  }));
+
+  // Re-import with fresh module instances
+  const dashboardModule = await import("../../src/app/components/dashboard/DashboardPage");
+  DashboardPage = dashboardModule.default;
+  pollService = await import("../../src/app/services/poll");
+  authStore = await import("../../src/app/stores/auth");
+
+  mockLocationReplace.mockClear();
   capturedFetchAll = null;
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(authStore.refreshAccessToken).mockClear();
@@ -269,7 +288,7 @@ describe("DashboardPage — auth error handling", () => {
     render(() => <DashboardPage />);
     await waitFor(() => {
       expect(authStore.clearAuth).toHaveBeenCalledOnce();
-      expect(mockNavigate).toHaveBeenCalledWith("/login");
+      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
     });
   });
 
@@ -283,7 +302,7 @@ describe("DashboardPage — auth error handling", () => {
       expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
     });
     expect(authStore.clearAuth).not.toHaveBeenCalled();
-    expect(mockNavigate).not.toHaveBeenCalledWith("/login");
+    expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
   });
 
   it("does not call refreshAccessToken for non-401 errors", async () => {
@@ -295,6 +314,6 @@ describe("DashboardPage — auth error handling", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(authStore.refreshAccessToken).not.toHaveBeenCalled();
-    expect(mockNavigate).not.toHaveBeenCalledWith("/login");
+    expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
   });
 });
