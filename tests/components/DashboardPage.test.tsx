@@ -77,6 +77,7 @@ beforeEach(async () => {
           isRefreshing: () => false,
           lastRefreshAt: () => null,
           manualRefresh: vi.fn(),
+          destroy: vi.fn(),
         };
       }
     ),
@@ -105,6 +106,7 @@ beforeEach(async () => {
         isRefreshing: () => false,
         lastRefreshAt: () => null,
         manualRefresh: vi.fn(),
+        destroy: vi.fn(),
       };
     }
   );
@@ -229,6 +231,7 @@ describe("DashboardPage — data flow", () => {
       isRefreshing: () => true,
       lastRefreshAt: () => null,
       manualRefresh: vi.fn(),
+      destroy: vi.fn(),
     });
     // fetchAllData never resolves
     vi.mocked(pollService.fetchAllData).mockReturnValue(new Promise(() => {}));

@@ -145,8 +145,8 @@ export default {
     const origin = request.headers.get("Origin");
     const cors = getCorsHeaders(origin, env.ALLOWED_ORIGIN);
 
-    // CORS preflight
-    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    // CORS preflight for the token exchange endpoint only
+    if (request.method === "OPTIONS" && url.pathname === "/api/oauth/token") {
       return new Response(null, {
         status: 204,
         headers: { ...cors, "Access-Control-Max-Age": "86400", ...securityHeaders() },

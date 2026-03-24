@@ -25,15 +25,12 @@ export default function PrivacyPage() {
           <ul class="list-disc pl-5 space-y-1">
             <li>
               <strong>localStorage</strong> — your settings (selected orgs,
-              repos, theme, etc.) and view state (tab filters, sort order).
+              repos, theme, etc.), view state (tab filters, sort order), and
+              OAuth access token for GitHub API authentication. Cleared on logout.
             </li>
             <li>
               <strong>IndexedDB</strong> — cached API responses with ETags to
               reduce GitHub API usage. Cleared on logout.
-            </li>
-            <li>
-              <strong>localStorage</strong> — your OAuth access token, used to
-              authenticate GitHub API requests. Cleared on logout.
             </li>
           </ul>
 

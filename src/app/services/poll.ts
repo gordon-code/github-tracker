@@ -30,6 +30,7 @@ export interface PollCoordinator {
   isRefreshing: () => boolean;
   lastRefreshAt: () => Date | null;
   manualRefresh: () => void;
+  destroy: () => void;
 }
 
 // ── Notifications gate ───────────────────────────────────────────────────────
@@ -330,5 +331,11 @@ export function createPollCoordinator(
     }
   }
 
-  return { isRefreshing, lastRefreshAt, manualRefresh };
+  function destroy(): void {
+    destroyed = true;
+    clearTimer();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }
+
+  return { isRefreshing, lastRefreshAt, manualRefresh, destroy };
 }

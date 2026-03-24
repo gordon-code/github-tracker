@@ -10,7 +10,7 @@ import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
 import { createPollCoordinator, fetchAllData } from "../../services/poll";
-import { clearAuth, user } from "../../stores/auth";
+import { clearAuth, user, onAuthCleared } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
 
@@ -25,13 +25,30 @@ interface DashboardStore {
   lastRefreshedAt: Date | null;
 }
 
-const [dashboardData, setDashboardData] = createStore<DashboardStore>({
+const initialDashboardState: DashboardStore = {
   issues: [],
   pullRequests: [],
   workflowRuns: [],
   errors: [],
   loading: true,
   lastRefreshedAt: null,
+};
+
+const [dashboardData, setDashboardData] = createStore<DashboardStore>({ ...initialDashboardState });
+
+function resetDashboardData(): void {
+  setDashboardData({ ...initialDashboardState });
+}
+
+// Clear dashboard data on logout so user A's data doesn't show to user B
+onAuthCleared(resetDashboardData);
+
+// Stop polling on logout so the coordinator doesn't keep firing with a null token
+onAuthCleared(() => {
+  if (_coordinator) {
+    _coordinator.destroy();
+    _coordinator = null;
+  }
 });
 
 async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
@@ -62,7 +79,8 @@ async function pollFetch(): Promise<import("../../services/poll").DashboardData>
         : null;
 
     if (status === 401) {
-      // Permanent token is revoked — clear auth and redirect to login
+      // Hard redirect (not navigate()) forces a full page reload, which clears
+      // module-level state like _coordinator and dashboardData for the next user.
       clearAuth();
       window.location.replace("/login");
     }

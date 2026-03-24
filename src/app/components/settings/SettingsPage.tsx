@@ -251,7 +251,7 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleResetAll() {
+  function handleResetAll() {
     if (!confirmReset()) {
       setConfirmReset(true);
       return;
