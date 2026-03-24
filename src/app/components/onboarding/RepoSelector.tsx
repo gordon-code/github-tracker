@@ -149,7 +149,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   const sortedOrgStates = createMemo(() => {
     const states = orgStates();
-    if (states.some((s) => s.loading)) return states;
+    // Defer sorting during initial load to prevent layout shift as orgs trickle in.
+    // After initial load (all orgs resolved), sorting stays active during retries
+    // because loadedCount is not reset by retryOrg.
+    if (loadedCount() < props.selectedOrgs.length) return states;
     return [...states].sort((a, b) => {
       const aMax = a.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
       const bMax = b.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
