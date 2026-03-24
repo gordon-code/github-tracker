@@ -17,6 +17,7 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
+import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -102,57 +103,6 @@ const prFilterGroups: FilterChipGroupDef[] = [
     ],
   },
 ];
-
-interface PrRepoGroup {
-  repoFullName: string;
-  items: PullRequest[];
-}
-
-function groupByRepo(items: PullRequest[]): PrRepoGroup[] {
-  const groups: PrRepoGroup[] = [];
-  const map = new Map<string, PrRepoGroup>();
-  for (const item of items) {
-    let group = map.get(item.repoFullName);
-    if (!group) {
-      group = { repoFullName: item.repoFullName, items: [] };
-      map.set(item.repoFullName, group);
-      groups.push(group);
-    }
-    group.items.push(item);
-  }
-  return groups;
-}
-
-function computePageLayout(
-  groups: PrRepoGroup[],
-  approxPageSize: number,
-): { boundaries: number[]; pageCount: number } {
-  if (groups.length === 0) return { boundaries: [0], pageCount: 1 };
-
-  const boundaries: number[] = [0];
-  let currentPageItems = 0;
-  for (let i = 0; i < groups.length; i++) {
-    if (currentPageItems > 0 && currentPageItems + groups[i].items.length > approxPageSize) {
-      boundaries.push(i);
-      currentPageItems = 0;
-    }
-    currentPageItems += groups[i].items.length;
-  }
-
-  return { boundaries, pageCount: Math.max(1, boundaries.length) };
-}
-
-function slicePageGroups(
-  groups: PrRepoGroup[],
-  boundaries: number[],
-  pageCount: number,
-  page: number,
-): PrRepoGroup[] {
-  const clampedPage = Math.max(0, Math.min(page, pageCount - 1));
-  const start = boundaries[clampedPage];
-  const end = clampedPage + 1 < boundaries.length ? boundaries[clampedPage + 1] : groups.length;
-  return groups.slice(start, end);
-}
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
@@ -251,13 +201,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const pageSize = createMemo(() => config.itemsPerPage);
-
   const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
-  const pageLayout = createMemo(() => computePageLayout(repoGroups(), pageSize()));
-  const pageCount = () => pageLayout().pageCount;
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
+  const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
-    slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
   );
 
   createEffect(() => {
@@ -330,9 +278,18 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         <FilterChips
           groups={prFilterGroups}
           values={viewState.tabFilters.pullRequests}
-          onChange={(field, value) => { setTabFilter("pullRequests", field as PullRequestFilterField, value); setPage(0); }}
-          onReset={(field) => { resetTabFilter("pullRequests", field as PullRequestFilterField); setPage(0); }}
-          onResetAll={() => { resetAllTabFilters("pullRequests"); setPage(0); }}
+          onChange={(field, value) => {
+            setTabFilter("pullRequests", field as PullRequestFilterField, value);
+            setPage(0);
+          }}
+          onReset={(field) => {
+            resetTabFilter("pullRequests", field as PullRequestFilterField);
+            setPage(0);
+          }}
+          onResetAll={() => {
+            resetAllTabFilters("pullRequests");
+            setPage(0);
+          }}
         />
       </div>
 
@@ -370,60 +327,63 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         >
           <div class="divide-y divide-gray-100 dark:divide-gray-800">
             <For each={pageGroups()}>
-              {(repoGroup) => (
-                <div class="bg-white dark:bg-gray-900">
-                  <button
-                    onClick={() => toggleRepo(repoGroup.repoFullName)}
-                    aria-expanded={!collapsedRepos[repoGroup.repoFullName]}
-                    class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <ChevronIcon size="md" rotated={collapsedRepos[repoGroup.repoFullName]} />
-                    {repoGroup.repoFullName}
-                  </button>
-                  <Show when={!collapsedRepos[repoGroup.repoFullName]}>
-                    <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
-                      <For each={repoGroup.items}>
-                        {(pr) => (
-                          <div role="listitem">
-                            <ItemRow
-                              hideRepo={true}
-                              repo={pr.repoFullName}
-                              number={pr.number}
-                              title={pr.title}
-                              author={pr.userLogin}
-                              createdAt={pr.createdAt}
-                              url={pr.htmlUrl}
-                              labels={pr.labels}
-                              commentCount={pr.comments + pr.reviewComments}
-                              onIgnore={() => handleIgnore(pr)}
-                              density={config.viewDensity}
-                            >
-                              <div class="flex items-center gap-2 flex-wrap">
-                                <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
-                                <ReviewBadge decision={pr.reviewDecision} />
-                                <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
-                                <StatusDot status={pr.checkStatus} />
-                                <Show when={pr.draft}>
-                                  <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 font-medium">
-                                    Draft
-                                  </span>
-                                </Show>
-                                <Show when={pr.reviewerLogins.length > 0}>
-                                  <span class="text-xs text-gray-500 dark:text-gray-400" title={pr.reviewerLogins.join(", ")}>
-                                    Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
-                                    {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
-                                    {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
-                                  </span>
-                                </Show>
-                              </div>
-                            </ItemRow>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-              )}
+              {(repoGroup) => {
+                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                return (
+                  <div class="bg-white dark:bg-gray-900">
+                    <button
+                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      aria-expanded={!isRepoCollapsed()}
+                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      {repoGroup.repoFullName}
+                    </button>
+                    <Show when={!isRepoCollapsed()}>
+                      <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <For each={repoGroup.items}>
+                          {(pr) => (
+                            <div role="listitem">
+                              <ItemRow
+                                hideRepo={true}
+                                repo={pr.repoFullName}
+                                number={pr.number}
+                                title={pr.title}
+                                author={pr.userLogin}
+                                createdAt={pr.createdAt}
+                                url={pr.htmlUrl}
+                                labels={pr.labels}
+                                commentCount={pr.comments + pr.reviewComments}
+                                onIgnore={() => handleIgnore(pr)}
+                                density={config.viewDensity}
+                              >
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
+                                  <ReviewBadge decision={pr.reviewDecision} />
+                                  <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
+                                  <StatusDot status={pr.checkStatus} />
+                                  <Show when={pr.draft}>
+                                    <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 font-medium">
+                                      Draft
+                                    </span>
+                                  </Show>
+                                  <Show when={pr.reviewerLogins.length > 0}>
+                                    <span class="text-xs text-gray-500 dark:text-gray-400" title={pr.reviewerLogins.join(", ")}>
+                                      Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
+                                      {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
+                                      {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
+                                    </span>
+                                  </Show>
+                                </div>
+                              </ItemRow>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
             </For>
           </div>
         </Show>

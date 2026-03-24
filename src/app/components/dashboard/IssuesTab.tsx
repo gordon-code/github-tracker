@@ -14,6 +14,7 @@ import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import { deriveInvolvementRoles } from "../../lib/format";
+import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -42,57 +43,6 @@ const issueFilterGroups: FilterChipGroupDef[] = [
     ],
   },
 ];
-
-interface IssueRepoGroup {
-  repoFullName: string;
-  items: Issue[];
-}
-
-function groupByRepo(items: Issue[]): IssueRepoGroup[] {
-  const groups: IssueRepoGroup[] = [];
-  const map = new Map<string, IssueRepoGroup>();
-  for (const item of items) {
-    let group = map.get(item.repoFullName);
-    if (!group) {
-      group = { repoFullName: item.repoFullName, items: [] };
-      map.set(item.repoFullName, group);
-      groups.push(group);
-    }
-    group.items.push(item);
-  }
-  return groups;
-}
-
-function computePageLayout(
-  groups: IssueRepoGroup[],
-  approxPageSize: number,
-): { boundaries: number[]; pageCount: number } {
-  if (groups.length === 0) return { boundaries: [0], pageCount: 1 };
-
-  const boundaries: number[] = [0];
-  let currentPageItems = 0;
-  for (let i = 0; i < groups.length; i++) {
-    if (currentPageItems > 0 && currentPageItems + groups[i].items.length > approxPageSize) {
-      boundaries.push(i);
-      currentPageItems = 0;
-    }
-    currentPageItems += groups[i].items.length;
-  }
-
-  return { boundaries, pageCount: Math.max(1, boundaries.length) };
-}
-
-function slicePageGroups(
-  groups: IssueRepoGroup[],
-  boundaries: number[],
-  pageCount: number,
-  page: number,
-): IssueRepoGroup[] {
-  const clampedPage = Math.max(0, Math.min(page, pageCount - 1));
-  const start = boundaries[clampedPage];
-  const end = clampedPage + 1 < boundaries.length ? boundaries[clampedPage + 1] : groups.length;
-  return groups.slice(start, end);
-}
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
@@ -171,13 +121,11 @@ export default function IssuesTab(props: IssuesTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const pageSize = createMemo(() => config.itemsPerPage);
-
   const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
-  const pageLayout = createMemo(() => computePageLayout(repoGroups(), pageSize()));
-  const pageCount = () => pageLayout().pageCount;
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
+  const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
-    slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
   );
 
   createEffect(() => {
@@ -298,43 +246,46 @@ export default function IssuesTab(props: IssuesTabProps) {
         >
           <div class="divide-y divide-gray-100 dark:divide-gray-800">
             <For each={pageGroups()}>
-              {(repoGroup) => (
-                <div class="bg-white dark:bg-gray-900">
-                  <button
-                    onClick={() => toggleRepo(repoGroup.repoFullName)}
-                    aria-expanded={!collapsedRepos[repoGroup.repoFullName]}
-                    class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <ChevronIcon size="md" rotated={collapsedRepos[repoGroup.repoFullName]} />
-                    {repoGroup.repoFullName}
-                  </button>
-                  <Show when={!collapsedRepos[repoGroup.repoFullName]}>
-                    <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
-                      <For each={repoGroup.items}>
-                        {(issue) => (
-                          <div role="listitem">
-                            <ItemRow
-                              hideRepo={true}
-                              repo={issue.repoFullName}
-                              number={issue.number}
-                              title={issue.title}
-                              author={issue.userLogin}
-                              createdAt={issue.createdAt}
-                              url={issue.htmlUrl}
-                              labels={issue.labels}
-                              onIgnore={() => handleIgnore(issue)}
-                              density={config.viewDensity}
-                              commentCount={issue.comments}
-                            >
-                              <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
-                            </ItemRow>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-              )}
+              {(repoGroup) => {
+                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                return (
+                  <div class="bg-white dark:bg-gray-900">
+                    <button
+                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      aria-expanded={!isRepoCollapsed()}
+                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      {repoGroup.repoFullName}
+                    </button>
+                    <Show when={!isRepoCollapsed()}>
+                      <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <For each={repoGroup.items}>
+                          {(issue) => (
+                            <div role="listitem">
+                              <ItemRow
+                                hideRepo={true}
+                                repo={issue.repoFullName}
+                                number={issue.number}
+                                title={issue.title}
+                                author={issue.userLogin}
+                                createdAt={issue.createdAt}
+                                url={issue.htmlUrl}
+                                labels={issue.labels}
+                                onIgnore={() => handleIgnore(issue)}
+                                density={config.viewDensity}
+                                commentCount={issue.comments}
+                              >
+                                <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
+                              </ItemRow>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
             </For>
           </div>
         </Show>

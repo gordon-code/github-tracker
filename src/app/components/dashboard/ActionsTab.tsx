@@ -245,6 +245,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                           {/* Workflow header */}
                           <button
                             onClick={() => toggleWorkflow(wfKey)}
+                            aria-expanded={!isWfCollapsed()}
                             class="w-full flex items-center gap-2 px-4 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                           >
                             <ChevronIcon size="sm" rotated={isWfCollapsed()} />

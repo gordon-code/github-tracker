@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
-import type { ApiError } from "../../src/app/services/api";
+import type { PullRequest, ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { makePullRequest, resetViewStore } from "../helpers/index";
 import { updateConfig, resetConfig } from "../../src/app/stores/config";
@@ -354,5 +355,30 @@ describe("PullRequestsTab", () => {
     screen.getByText("Big repo PR 0");
     screen.getByText("Big repo PR 14");
     expect(screen.queryByLabelText("Next page")).toBeNull();
+  });
+
+  it("resets page when data shrinks below current page", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const repoAPrs = Array.from({ length: 6 }, (_, i) =>
+      makePullRequest({ id: 100 + i, title: `Repo A PR ${i}`, repoFullName: "org/repo-a" })
+    );
+    const repoBPrs = Array.from({ length: 6 }, (_, i) =>
+      makePullRequest({ id: 200 + i, title: `Repo B PR ${i}`, repoFullName: "org/repo-b" })
+    );
+    const [prs, setPrs] = createSignal<PullRequest[]>([...repoAPrs, ...repoBPrs]);
+    render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
+
+    // Navigate to page 2
+    screen.getByText(/Page 1 of 2/);
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText(/Page 2 of 2/);
+    screen.getByText("org/repo-b");
+
+    // Shrink data to fit on 1 page — page should reset
+    setPrs(repoAPrs);
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+    screen.getByText("org/repo-a");
+    screen.getByText("Repo A PR 0");
   });
 });

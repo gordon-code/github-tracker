@@ -192,4 +192,62 @@ describe("ActionsTab", () => {
     screen.getByText("push-run");
     expect(screen.queryByText("schedule-run")).toBeNull();
   });
+
+  it("sets aria-expanded on repo group header", () => {
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    const repoHeader = screen.getByText("owner/repo").closest("button")!;
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("toggles repo aria-expanded on click", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    const repoHeader = screen.getByText("owner/repo").closest("button")!;
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
+
+    await user.click(repoHeader);
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(repoHeader);
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("sets aria-expanded on workflow group header", () => {
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "MyWorkflow" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    const buttons = screen.getAllByRole("button");
+    const wfHeader = buttons.find(
+      (b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo")
+    )!;
+    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("toggles workflow aria-expanded on click", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "MyWorkflow", displayTitle: "wf-run" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    const buttons = screen.getAllByRole("button");
+    const wfHeader = buttons.find(
+      (b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo")
+    )!;
+    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
+
+    await user.click(wfHeader);
+    expect(wfHeader.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("wf-run")).toBeNull();
+
+    await user.click(wfHeader);
+    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
+    screen.getByText("wf-run");
+  });
 });
