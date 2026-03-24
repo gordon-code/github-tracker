@@ -167,9 +167,13 @@ export async function cachedRequest(
 // Wrapped in try/catch: if Octokit construction fails, fall back to null and let
 // initClientWatcher retry when its effect fires.
 let _eagerClient: GitHubOctokitInstance | null = null;
+let _clientToken: string | null = null;
 try {
   const t = token();
-  if (t) _eagerClient = createGitHubClient(t);
+  if (t) {
+    _eagerClient = createGitHubClient(t);
+    _clientToken = t;
+  }
 } catch {
   // Non-fatal — initClientWatcher will retry
 }
@@ -188,9 +192,13 @@ export function initClientWatcher(): void {
   createEffect(() => {
     const currentToken = token();
     if (currentToken) {
+      // Skip if the eager init already created a client for this exact token
+      if (currentToken === _clientToken && _client()) return;
       _setClient(createGitHubClient(currentToken));
+      _clientToken = currentToken;
     } else {
       _setClient(null);
+      _clientToken = null;
     }
   });
 }

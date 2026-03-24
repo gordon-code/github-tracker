@@ -10,13 +10,12 @@ import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
-import { clearAuth, user, onAuthCleared } from "../../stores/auth";
+import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
-export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
 const CACHE_VERSION = 1;
 
 interface DashboardStore {

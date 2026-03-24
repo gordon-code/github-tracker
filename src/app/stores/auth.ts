@@ -4,6 +4,7 @@ import { CONFIG_STORAGE_KEY, resetConfig } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
+export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
 
 export interface GitHubUser {
   login: string;
@@ -65,6 +66,7 @@ export function clearAuth(): void {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     localStorage.removeItem(VIEW_STORAGE_KEY);
+    localStorage.removeItem(DASHBOARD_STORAGE_KEY);
     _setToken(null);
     setUser(null);
     // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
