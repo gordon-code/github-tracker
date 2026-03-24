@@ -10,7 +10,7 @@ import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
 import { createPollCoordinator, fetchAllData } from "../../services/poll";
-import { refreshAccessToken, clearAuth, user } from "../../stores/auth";
+import { clearAuth, user } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
 
@@ -62,11 +62,9 @@ async function pollFetch(): Promise<import("../../services/poll").DashboardData>
         : null;
 
     if (status === 401) {
-      const refreshed = await refreshAccessToken();
-      if (!refreshed) {
-        clearAuth();
-        window.location.replace("/login");
-      }
+      // Permanent token is revoked — clear auth and redirect to login
+      clearAuth();
+      window.location.replace("/login");
     }
     setDashboardData("loading", false);
     throw err;

@@ -112,13 +112,12 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("passes token response (access_token, expires_in) to setAuth", async () => {
+  it("passes token response (access_token, token_type) to setAuth", async () => {
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
 
     const fullResponse = {
       access_token: "tok123",
-      expires_in: 28800,
       token_type: "bearer",
     };
     vi.stubGlobal(

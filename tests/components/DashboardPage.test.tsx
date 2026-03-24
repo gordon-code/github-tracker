@@ -23,7 +23,6 @@ vi.mock("@solidjs/router", () => ({
 
 // Mock auth store
 vi.mock("../../src/app/stores/auth", () => ({
-  refreshAccessToken: vi.fn().mockResolvedValue(true),
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
@@ -92,8 +91,6 @@ beforeEach(async () => {
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
   vi.mocked(authStore.clearAuth).mockClear();
-  vi.mocked(authStore.refreshAccessToken).mockClear();
-  vi.mocked(authStore.refreshAccessToken).mockResolvedValue(true);
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -270,20 +267,9 @@ describe("DashboardPage — auth error handling", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("calls refreshAccessToken on 401 error from fetchAllData", async () => {
+  it("calls clearAuth and redirects to /login on 401 error (permanent token revoked)", async () => {
     const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
-    });
-  });
-
-  it("calls clearAuth and navigates to /login when refresh fails", async () => {
-    const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
-    vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-    vi.mocked(authStore.refreshAccessToken).mockResolvedValue(false);
 
     render(() => <DashboardPage />);
     await waitFor(() => {
@@ -292,20 +278,7 @@ describe("DashboardPage — auth error handling", () => {
     });
   });
 
-  it("does not call clearAuth when refresh succeeds after 401", async () => {
-    const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
-    vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-    vi.mocked(authStore.refreshAccessToken).mockResolvedValue(true);
-
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
-    });
-    expect(authStore.clearAuth).not.toHaveBeenCalled();
-    expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
-  });
-
-  it("does not call refreshAccessToken for non-401 errors", async () => {
+  it("does not call clearAuth for non-401 errors", async () => {
     const err500 = Object.assign(new Error("Server Error"), { status: 500 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err500);
 
@@ -313,7 +286,7 @@ describe("DashboardPage — auth error handling", () => {
     // Flush all pending microtasks so the rejected promise settles
     await Promise.resolve();
     await Promise.resolve();
-    expect(authStore.refreshAccessToken).not.toHaveBeenCalled();
+    expect(authStore.clearAuth).not.toHaveBeenCalled();
     expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
   });
 });

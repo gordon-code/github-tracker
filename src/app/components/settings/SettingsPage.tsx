@@ -256,8 +256,8 @@ export default function SettingsPage() {
       setConfirmReset(true);
       return;
     }
-    // clearAuth handles: token + user signals, localStorage (config/view),
-    // HttpOnly cookie logout, IndexedDB cache, and onAuthCleared callbacks
+    // clearAuth handles: token + user signals, localStorage (auth/config/view),
+    // IndexedDB cache, and onAuthCleared callbacks
     clearAuth();
     window.location.reload();
   }

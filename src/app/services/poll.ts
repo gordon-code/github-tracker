@@ -96,7 +96,7 @@ async function hasNotificationChanges(): Promise<boolean> {
       (err as { status?: number }).status === 403
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
-      pushError("notifications", "Notifications API returned 403 — polling without notification gate", false);
+      pushError("notifications", "Notifications API returned 403 — check that the notifications scope is granted", false);
       _notifGateDisabled = true;
     }
     return true;

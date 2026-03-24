@@ -3,17 +3,17 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 
 // Module-level variables to control mock return values
 let mockIsAuthenticated = false;
-// refreshAccessToken mock fn — replaced per-test
-let mockRefreshAccessToken: () => Promise<boolean> = async () => false;
+// validateToken mock fn — replaced per-test
+let mockValidateToken: () => Promise<boolean> = async () => false;
 
-// isAuthenticated/refreshAccessToken are plain functions (not SolidJS signals) because
+// isAuthenticated/validateToken are plain functions (not SolidJS signals) because
 // RootRedirect and AuthGuard read them in onMount (one-shot), not in createEffect.
 vi.mock("../../src/app/stores/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
   return {
     ...actual,
     isAuthenticated: () => mockIsAuthenticated,
-    refreshAccessToken: vi.fn(async () => mockRefreshAccessToken()),
+    validateToken: vi.fn(async () => mockValidateToken()),
   };
 });
 
@@ -72,7 +72,7 @@ describe("App", () => {
     // Reset all mock state (implementations, calls, return values)
     vi.resetAllMocks();
     mockIsAuthenticated = false;
-    mockRefreshAccessToken = async () => false;
+    mockValidateToken = async () => false;
     // Re-apply default mock implementations that are needed across tests
     vi.mocked(cacheStore.evictStaleEntries).mockResolvedValue(0);
     // Reset config to defaults
@@ -84,17 +84,17 @@ describe("App", () => {
     }
   });
 
-  it("shows loading spinner during auth refresh", async () => {
+  it("shows loading spinner during token validation", async () => {
     mockIsAuthenticated = false;
-    mockRefreshAccessToken = () => new Promise(() => {}); // never resolves
+    mockValidateToken = () => new Promise(() => {}); // never resolves
 
     render(() => <App />);
     screen.getByLabelText("Loading");
   });
 
-  it("redirects to /login when not authenticated and refresh fails", async () => {
+  it("redirects to /login when not authenticated and validation fails", async () => {
     mockIsAuthenticated = false;
-    mockRefreshAccessToken = async () => false;
+    mockValidateToken = async () => false;
 
     render(() => <App />);
 
@@ -104,7 +104,7 @@ describe("App", () => {
   });
 
   it("redirects to /onboarding when authenticated but onboarding incomplete", async () => {
-    // isAuthenticated=true → refreshAccessToken NOT called → immediate routing
+    // isAuthenticated=true → validateToken NOT called → immediate routing
     mockIsAuthenticated = true;
     configStore.updateConfig({ onboardingComplete: false });
 
@@ -116,7 +116,7 @@ describe("App", () => {
   });
 
   it("redirects to /dashboard when authenticated and onboarding complete", async () => {
-    // isAuthenticated=true → refreshAccessToken NOT called → immediate routing
+    // isAuthenticated=true → validateToken NOT called → immediate routing
     mockIsAuthenticated = true;
     configStore.updateConfig({ onboardingComplete: true });
 

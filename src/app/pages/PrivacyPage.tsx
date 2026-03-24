@@ -32,8 +32,8 @@ export default function PrivacyPage() {
               reduce GitHub API usage. Cleared on logout.
             </li>
             <li>
-              <strong>HttpOnly cookie</strong> — a GitHub refresh token managed
-              by the OAuth proxy worker. Never accessible to JavaScript.
+              <strong>localStorage</strong> — your OAuth access token, used to
+              authenticate GitHub API requests. Cleared on logout.
             </li>
           </ul>
 
@@ -44,7 +44,7 @@ export default function PrivacyPage() {
             <li>No analytics or tracking scripts</li>
             <li>No server-side data storage</li>
             <li>No third-party data sharing</li>
-            <li>No cookies beyond the OAuth refresh token</li>
+            <li>No cookies</li>
           </ul>
 
           <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100 pt-2">

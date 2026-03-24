@@ -16,7 +16,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 function makeRequest(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string; contentType?: string; cookie?: string } = {}
+  options: { body?: unknown; origin?: string; contentType?: string } = {}
 ): Request {
   const url = `https://gh.gordoncode.dev${path}`;
   const headers: Record<string, string> = {};
@@ -27,9 +27,6 @@ function makeRequest(
   }
   if (options.body !== undefined) {
     headers["Content-Type"] = options.contentType ?? "application/json";
-  }
-  if (options.cookie) {
-    headers["Cookie"] = options.cookie;
   }
   return new Request(url, {
     method,
@@ -58,15 +55,13 @@ describe("Worker OAuth endpoint", () => {
 
   // ── Token exchange ─────────────────────────────────────────────────────────
 
-  it("POST /api/oauth/token with valid code returns allowed fields", async () => {
+  it("POST /api/oauth/token with valid code returns access_token, token_type, scope", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           access_token: "ghu_access123",
           token_type: "bearer",
-          scope: "",
-          refresh_token: "ghr_refresh456",
-          expires_in: 28800,
+          scope: "repo read:org notifications",
           extra_field: "should_not_be_returned",
         }),
         { status: 200 }
@@ -74,23 +69,20 @@ describe("Worker OAuth endpoint", () => {
     );
 
     const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(200);
 
     const json = await res.json() as Record<string, unknown>;
     expect(json["access_token"]).toBe("ghu_access123");
     expect(json["token_type"]).toBe("bearer");
-    expect(json["expires_in"]).toBe(28800);
-    // Refresh token must NOT be in the response body — it's in an HttpOnly cookie
-    expect(json["refresh_token"]).toBeUndefined();
+    // Must not include expires_in (OAuth App tokens are permanent)
+    expect(json["expires_in"]).toBeUndefined();
     // Must not include extra fields
     expect(json["extra_field"]).toBeUndefined();
-    // Refresh token is set as an HttpOnly cookie
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("__Host-github_tracker_rt=ghr_refresh456");
-    expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("Secure");
-    expect(setCookie).toContain("Path=/");
+    // Must not set a cookie (no refresh token for OAuth App)
+    expect(res.headers.get("Set-Cookie")).toBeNull();
+    // Must not include Access-Control-Allow-Credentials
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
 
   it("POST /api/oauth/token forwards client_id and client_secret to GitHub", async () => {
@@ -102,7 +94,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = mockFetch;
 
     const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    await worker.fetch(req, makeEnv(), );
+    await worker.fetch(req, makeEnv());
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -122,7 +114,7 @@ describe("Worker OAuth endpoint", () => {
     );
 
     const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
 
     const json = await res.json() as Record<string, unknown>;
@@ -134,7 +126,7 @@ describe("Worker OAuth endpoint", () => {
 
   it("POST /api/oauth/token with missing code returns 400", async () => {
     const req = makeRequest("POST", "/api/oauth/token", { body: {} });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("invalid_request");
@@ -153,7 +145,7 @@ describe("Worker OAuth endpoint", () => {
 
     for (const code of cases) {
       const req = makeRequest("POST", "/api/oauth/token", { body: { code } });
-      const res = await worker.fetch(req, makeEnv(), );
+      const res = await worker.fetch(req, makeEnv());
       expect(res.status, `Expected 400 for code: ${code}`).toBe(400);
       const json = await res.json() as Record<string, unknown>;
       expect(json["error"]).toBe("invalid_request");
@@ -227,7 +219,7 @@ describe("Worker OAuth endpoint", () => {
       body: { code: VALID_CODE },
       contentType: "text/plain",
     });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("invalid_request");
@@ -237,7 +229,7 @@ describe("Worker OAuth endpoint", () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("network error"));
 
     const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(400);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("token_exchange_failed");
@@ -247,86 +239,28 @@ describe("Worker OAuth endpoint", () => {
 
   it("GET /api/oauth/token returns 405", async () => {
     const req = makeRequest("GET", "/api/oauth/token");
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(405);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("method_not_allowed");
   });
 
-  // ── Refresh endpoint ────────────────────────────────────────────────────────
+  // ── Removed endpoints return 404 ────────────────────────────────────────────
 
-  it("POST /api/oauth/refresh with valid cookie returns new access_token and rotates cookie", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: "ghu_new_access",
-          token_type: "bearer",
-          refresh_token: "ghr_new_refresh",
-          expires_in: 28800,
-        }),
-        { status: 200 }
-      )
-    );
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_old_refresh_token_value",
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(200);
-
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["access_token"]).toBe("ghu_new_access");
-    // Refresh token must NOT be in the response body
-    expect(json["refresh_token"]).toBeUndefined();
-    expect(json["expires_in"]).toBe(28800);
-    // Rotated refresh token is in the Set-Cookie header
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("__Host-github_tracker_rt=ghr_new_refresh");
-    expect(setCookie).toContain("HttpOnly");
-  });
-
-  it("POST /api/oauth/refresh reads token from cookie and sends grant_type=refresh_token to GitHub", async () => {
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: "ghu_new", token_type: "bearer" }), {
-        status: 200,
-      })
-    );
-    globalThis.fetch = mockFetch;
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_old_cookie_token_123",
-    });
-    await worker.fetch(req, makeEnv());
-
-    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(body["grant_type"]).toBe("refresh_token");
-    expect(body["refresh_token"]).toBe("ghr_old_cookie_token_123");
-  });
-
-  it("POST /api/oauth/refresh with GitHub error returns 400 with generic error", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "bad_refresh_token", error_description: "Token is expired" }),
-        { status: 200 }
-      )
-    );
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_" + "a".repeat(20),
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("token_exchange_failed");
-  });
-
-  it("POST /api/oauth/refresh with no cookie returns 400", async () => {
+  it("POST /api/oauth/refresh returns 404 (endpoint removed for OAuth App)", async () => {
     const req = makeRequest("POST", "/api/oauth/refresh");
     const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("invalid_request");
+    expect(json["error"]).toBe("not_found");
+  });
+
+  it("POST /api/oauth/logout returns 404 (endpoint removed for OAuth App)", async () => {
+    const req = makeRequest("POST", "/api/oauth/logout");
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(404);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("not_found");
   });
 
   // ── CORS ────────────────────────────────────────────────────────────────────
@@ -342,10 +276,12 @@ describe("Worker OAuth endpoint", () => {
       body: { code: VALID_CODE },
       origin: ALLOWED_ORIGIN,
     });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
     expect(res.headers.get("Access-Control-Allow-Methods")).toBe("POST");
     expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+    // No credentials header for OAuth App (no cookies)
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
 
   it("CORS headers are absent for non-matching origin (SDR-004)", async () => {
@@ -359,7 +295,7 @@ describe("Worker OAuth endpoint", () => {
       body: { code: VALID_CODE },
       origin: "https://evil.example.com",
     });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
@@ -375,7 +311,7 @@ describe("Worker OAuth endpoint", () => {
       body: { code: VALID_CODE },
       origin: `https://gh.gordoncode.dev.evil.com`,
     });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
@@ -385,115 +321,23 @@ describe("Worker OAuth endpoint", () => {
     const req = makeRequest("OPTIONS", "/api/oauth/token", {
       origin: ALLOWED_ORIGIN,
     });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
-  });
-
-  it("OPTIONS /api/oauth/refresh returns 204", async () => {
-    const req = makeRequest("OPTIONS", "/api/oauth/refresh", {
-      origin: ALLOWED_ORIGIN,
-    });
-    const res = await worker.fetch(req, makeEnv(), );
-    expect(res.status).toBe(204);
-  });
-
-  // ── qa-7: Refresh endpoint parity tests ────────────────────────────────────
-
-  it("GET /api/oauth/refresh returns 405", async () => {
-    const req = makeRequest("GET", "/api/oauth/refresh");
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(405);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("method_not_allowed");
-  });
-
-  it("POST /api/oauth/refresh when GitHub fetch fails returns generic error", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("network failure"));
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_" + "b".repeat(20),
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("token_exchange_failed");
-    // Stack trace must not be in response (SDR-006)
-    expect(JSON.stringify(json)).not.toContain("Error");
-  });
-
-  it("POST /api/oauth/refresh with invalid cookie token format returns 400 (too short)", async () => {
-    const mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_tooshort",
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("invalid_request");
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("POST /api/oauth/refresh with invalid cookie token format returns 400 (invalid chars)", async () => {
-    const mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghr_invalid-token-with-dashes!!",
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("invalid_request");
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("POST /api/oauth/refresh with missing ghr_ prefix in cookie returns 400", async () => {
-    const mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
-
-    const req = makeRequest("POST", "/api/oauth/refresh", {
-      cookie: "__Host-github_tracker_rt=ghx_" + "a".repeat(20),
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("invalid_request");
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  // ── Logout endpoint ──────────────────────────────────────────────────────
-
-  it("POST /api/oauth/logout clears the refresh token cookie", async () => {
-    const req = makeRequest("POST", "/api/oauth/logout");
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(200);
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("__Host-github_tracker_rt=;");
-    expect(setCookie).toContain("Max-Age=0");
-    expect(setCookie).toContain("HttpOnly");
-  });
-
-  it("GET /api/oauth/logout returns 405", async () => {
-    const req = makeRequest("GET", "/api/oauth/logout");
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(405);
   });
 
   // ── Health and routing ──────────────────────────────────────────────────────
 
   it("GET /api/health returns 200 OK", async () => {
     const req = makeRequest("GET", "/api/health");
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
   });
 
   it("POST /api/unknown returns 404 with predefined error", async () => {
     const req = makeRequest("POST", "/api/unknown");
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(404);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("not_found");
@@ -509,7 +353,7 @@ describe("Worker OAuth endpoint", () => {
     );
 
     const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
     expect(res.headers.get("X-Frame-Options")).toBe("DENY");
@@ -517,14 +361,14 @@ describe("Worker OAuth endpoint", () => {
 
   it("Security headers present on error responses", async () => {
     const req = makeRequest("POST", "/api/oauth/token", { body: {} });
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("X-Frame-Options")).toBe("DENY");
   });
 
   it("Security headers present on health response", async () => {
     const req = makeRequest("GET", "/api/health");
-    const res = await worker.fetch(req, makeEnv(), );
+    const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
@@ -533,131 +377,8 @@ describe("Worker OAuth endpoint", () => {
   it("Non-API requests are forwarded to ASSETS", async () => {
     const req = new Request("https://gh.gordoncode.dev/index.html");
     const assetFetch = vi.fn().mockResolvedValue(new Response("<!DOCTYPE html>", { status: 200 }));
-    const res = await worker.fetch(req, makeEnv({ ASSETS: { fetch: assetFetch } }), );
+    const res = await worker.fetch(req, makeEnv({ ASSETS: { fetch: assetFetch } }));
     expect(assetFetch).toHaveBeenCalledOnce();
     expect(res.status).toBe(200);
-  });
-});
-
-// ── qa-6: localhost cookie path ───────────────────────────────────────────────
-
-const LOCAL_ORIGIN = "http://localhost:5173";
-
-function makeLocalEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    ASSETS: { fetch: async () => new Response("asset") },
-    GITHUB_CLIENT_ID: "test_client_id",
-    GITHUB_CLIENT_SECRET: "test_client_secret",
-    ALLOWED_ORIGIN: LOCAL_ORIGIN,
-    ...overrides,
-  };
-}
-
-function makeLocalRequest(
-  method: string,
-  path: string,
-  options: { body?: unknown; cookie?: string } = {}
-): Request {
-  const url = `http://localhost:5173${path}`;
-  const headers: Record<string, string> = { "Origin": LOCAL_ORIGIN };
-  if (options.body !== undefined) {
-    headers["Content-Type"] = "application/json";
-  }
-  if (options.cookie) {
-    headers["Cookie"] = options.cookie;
-  }
-  return new Request(url, {
-    method,
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-}
-
-describe("Worker OAuth endpoint — localhost cookie branch (qa-6)", () => {
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
-  });
-
-  it("token exchange: Set-Cookie uses plain github_tracker_rt name (no __Host- prefix)", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: "ghu_local_access",
-          token_type: "bearer",
-          scope: "",
-          refresh_token: "ghr_" + "a".repeat(20),
-          expires_in: 28800,
-        }),
-        { status: 200 }
-      )
-    );
-
-    const req = makeLocalRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeLocalEnv());
-    expect(res.status).toBe(200);
-
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    // Must NOT use __Host- prefix
-    expect(setCookie).not.toContain("__Host-");
-    // Must use the plain cookie name
-    expect(setCookie).toContain("github_tracker_rt=ghr_");
-    // Must NOT contain Secure attribute (localhost is not HTTPS)
-    expect(setCookie).not.toContain("Secure");
-    // Must use SameSite=Lax (not Strict)
-    expect(setCookie).toContain("SameSite=Lax");
-  });
-
-  it("token exchange: Set-Cookie contains Path=/", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: "ghu_local_access",
-          token_type: "bearer",
-          scope: "",
-          refresh_token: "ghr_" + "b".repeat(20),
-          expires_in: 28800,
-        }),
-        { status: 200 }
-      )
-    );
-
-    const req = makeLocalRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
-    const res = await worker.fetch(req, makeLocalEnv());
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("Path=/");
-  });
-
-  it("refresh: reads cookie from plain github_tracker_rt name and rotates it correctly", async () => {
-    const refreshToken = "ghr_" + "c".repeat(20);
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: "ghu_local_new",
-          token_type: "bearer",
-          refresh_token: "ghr_" + "d".repeat(20),
-          expires_in: 28800,
-        }),
-        { status: 200 }
-      )
-    );
-
-    const req = makeLocalRequest("POST", "/api/oauth/refresh", {
-      cookie: `github_tracker_rt=${refreshToken}`,
-    });
-    const res = await worker.fetch(req, makeLocalEnv());
-    expect(res.status).toBe(200);
-
-    const setCookie = res.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("github_tracker_rt=ghr_");
-    expect(setCookie).not.toContain("__Host-");
-    expect(setCookie).not.toContain("Secure");
-    expect(setCookie).toContain("SameSite=Lax");
   });
 });
