@@ -120,4 +120,15 @@ describe("ItemRow", () => {
     render(() => <ItemRow {...defaultProps} labels={[]} />);
     expect(screen.queryByText("bug")).toBeNull();
   });
+
+  it("hides repo badge when hideRepo is true", () => {
+    render(() => <ItemRow {...defaultProps} hideRepo={true} />);
+    expect(screen.queryByText("octocat/Hello-World")).toBeNull();
+    screen.getByText("Fix a bug");
+  });
+
+  it("shows repo badge when hideRepo is false", () => {
+    render(() => <ItemRow {...defaultProps} hideRepo={false} />);
+    screen.getByText("octocat/Hello-World");
+  });
 });

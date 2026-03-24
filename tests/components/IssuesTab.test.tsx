@@ -184,4 +184,43 @@ describe("IssuesTab", () => {
     render(() => <IssuesTab issues={[]} userLogin="" />);
     screen.getByLabelText("Sort by Comments");
   });
+
+  it("groups issues by repo with collapsible headers", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue in repo A", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Issue in repo B", repoFullName: "org/repo-b" }),
+      makeIssue({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    screen.getByText("Issue in repo A");
+    screen.getByText("Another in repo A");
+    screen.getByText("Issue in repo B");
+  });
+
+  it("collapses a repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Visible issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Other repo issue", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Visible issue");
+
+    const repoHeader = screen.getByText("org/repo-a");
+    await user.click(repoHeader);
+
+    expect(screen.queryByText("Visible issue")).toBeNull();
+    screen.getByText("Other repo issue");
+  });
+
+  it("sets aria-expanded on repo group headers", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Test issue", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+  });
 });

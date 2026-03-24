@@ -263,4 +263,43 @@ describe("PullRequestsTab", () => {
     screen.getByText("Small PR");
     expect(screen.queryByText("Large PR")).toBeNull();
   });
+
+  it("groups PRs by repo with collapsible headers", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR in repo A", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "PR in repo B", repoFullName: "org/repo-b" }),
+      makePullRequest({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    screen.getByText("PR in repo A");
+    screen.getByText("Another in repo A");
+    screen.getByText("PR in repo B");
+  });
+
+  it("collapses a repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "Visible PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Other repo PR", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Visible PR");
+
+    const repoHeader = screen.getByText("org/repo-a");
+    await user.click(repoHeader);
+
+    expect(screen.queryByText("Visible PR")).toBeNull();
+    screen.getByText("Other repo PR");
+  });
+
+  it("sets aria-expanded on repo group headers", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Test PR", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+  });
 });

@@ -14,6 +14,7 @@ export interface ItemRowProps {
   onIgnore: () => void;
   density: "compact" | "comfortable";
   commentCount?: number;
+  hideRepo?: boolean;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -43,14 +44,16 @@ export default function ItemRow(props: ItemRowProps) {
         ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
     >
       {/* Repo badge */}
-      <span
-        class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
-          bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200
-          ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
-        title={props.repo}
-      >
-        {props.repo}
-      </span>
+      <Show when={!props.hideRepo}>
+        <span
+          class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
+            bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200
+            ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
+          title={props.repo}
+        >
+          {props.repo}
+        </span>
+      </Show>
 
       {/* Main content */}
       <div class="flex-1 min-w-0">
