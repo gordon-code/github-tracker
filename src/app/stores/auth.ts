@@ -55,26 +55,29 @@ let _clearing = false;
 export function clearAuth(): void {
   if (_clearing) return;
   _clearing = true;
-  // Reset in-memory stores to defaults BEFORE clearing localStorage,
-  // so the persistence effects re-write defaults (not stale user data).
-  resetConfig();
-  resetViewState();
-  // Clear localStorage entries (persistence effects will write back defaults)
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  localStorage.removeItem(CONFIG_STORAGE_KEY);
-  localStorage.removeItem(VIEW_STORAGE_KEY);
-  _setToken(null);
-  setUser(null);
-  // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
-  clearCache().catch(() => {
-    // Non-fatal — cache clear failure should not block logout
-  });
-  // Run registered cleanup callbacks (e.g., poll state reset)
-  for (const cb of _onClearCallbacks) {
-    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
+  try {
+    // Reset in-memory stores to defaults BEFORE clearing localStorage,
+    // so the persistence effects re-write defaults (not stale user data).
+    resetConfig();
+    resetViewState();
+    // Clear localStorage entries (persistence effects will write back defaults)
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(CONFIG_STORAGE_KEY);
+    localStorage.removeItem(VIEW_STORAGE_KEY);
+    _setToken(null);
+    setUser(null);
+    // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
+    clearCache().catch(() => {
+      // Non-fatal — cache clear failure should not block logout
+    });
+    // Run registered cleanup callbacks (e.g., poll state reset)
+    for (const cb of _onClearCallbacks) {
+      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
+    }
+    console.info("[auth] auth cleared");
+  } finally {
+    _clearing = false;
   }
-  console.info("[auth] auth cleared");
-  _clearing = false;
 }
 
 export async function validateToken(): Promise<boolean> {
