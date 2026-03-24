@@ -141,6 +141,9 @@ describe("RepoSelector", () => {
     const result = onChange.mock.calls[0][0] as RepoRef[];
     expect(result.map((r) => r.fullName)).toContain("myorg/repo-a");
     expect(result.map((r) => r.fullName)).toContain("myorg/repo-b");
+    for (const r of result) {
+      expect(r).not.toHaveProperty("pushedAt");
+    }
   });
 
   it("per-org Deselect All deselects all repos in that org", async () => {
@@ -149,7 +152,7 @@ describe("RepoSelector", () => {
     const onChange = vi.fn();
 
     render(() => (
-      <RepoSelector selectedOrgs={["myorg"]} selected={myorgRepos} onChange={onChange} />
+      <RepoSelector selectedOrgs={["myorg"]} selected={myorgRepos.map((r) => ({ owner: r.owner, name: r.name, fullName: r.fullName }))} onChange={onChange} />
     ));
 
     await waitFor(() => {
@@ -203,7 +206,7 @@ describe("RepoSelector", () => {
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
 
     render(() => (
-      <RepoSelector selectedOrgs={["myorg"]} selected={myorgRepos} onChange={vi.fn()} />
+      <RepoSelector selectedOrgs={["myorg"]} selected={myorgRepos.map((r) => ({ owner: r.owner, name: r.name, fullName: r.fullName }))} onChange={vi.fn()} />
     ));
 
     await waitFor(() => {

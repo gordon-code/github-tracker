@@ -147,13 +147,15 @@ export default function RepoSelector(props: RepoSelectorProps) {
     new Set(props.selected.map((r) => r.fullName))
   );
 
-  const sortedOrgStates = createMemo(() =>
-    [...orgStates()].sort((a, b) => {
+  const sortedOrgStates = createMemo(() => {
+    const states = orgStates();
+    if (states.some((s) => s.loading)) return states;
+    return [...states].sort((a, b) => {
       const aMax = a.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
       const bMax = b.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
       return aMax > bMax ? -1 : aMax < bMax ? 1 : 0;
-    })
-  );
+    });
+  });
 
   function toRepoRef(entry: RepoEntry): RepoRef {
     return { owner: entry.owner, name: entry.name, fullName: entry.fullName };
