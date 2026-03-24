@@ -65,9 +65,10 @@ function resetDashboardData(): void {
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
-  if (_coordinator) {
-    _coordinator.destroy();
-    _coordinator = null;
+  const coord = _coordinator();
+  if (coord) {
+    coord.destroy();
+    _setCoordinator(null);
   }
 });
 
@@ -127,7 +128,7 @@ async function pollFetch(): Promise<DashboardData> {
   }
 }
 
-let _coordinator: ReturnType<typeof createPollCoordinator> | null = null;
+const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
 
 export default function DashboardPage() {
 
@@ -146,14 +147,11 @@ export default function DashboardPage() {
   }
 
   onMount(() => {
-    if (!_coordinator) {
-      _coordinator = createPollCoordinator(() => config.refreshInterval, pollFetch);
+    if (!_coordinator()) {
+      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
-    // Null the reference on unmount so a fresh coordinator is created on remount.
-    // onCleanup inside createPollCoordinator marks it destroyed; this ensures
-    // the guard in onMount doesn't skip recreation on the next navigation back.
     onCleanup(() => {
-      _coordinator = null;
+      _setCoordinator(null);
     });
   });
 
@@ -178,9 +176,9 @@ export default function DashboardPage() {
         />
 
         <FilterBar
-          isRefreshing={_coordinator?.isRefreshing() ?? dashboardData.loading}
-          lastRefreshedAt={_coordinator?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-          onRefresh={() => _coordinator?.manualRefresh()}
+          isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
+          lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+          onRefresh={() => _coordinator()?.manualRefresh()}
         />
 
         {/* Global error banner */}
