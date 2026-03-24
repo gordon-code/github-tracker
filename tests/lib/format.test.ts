@@ -52,6 +52,12 @@ describe("relativeTime", () => {
     // Intl.RelativeTimeFormat with numeric:'auto' outputs 'now' for 0 seconds
     expect(result).toMatch(/now/i);
   });
+
+  it("returns empty string for invalid date input", () => {
+    expect(relativeTime("not-a-date")).toBe("");
+    expect(relativeTime("")).toBe("");
+    expect(relativeTime("garbage-2026-13-99")).toBe("");
+  });
 });
 
 describe("labelTextColor", () => {

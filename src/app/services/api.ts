@@ -16,6 +16,10 @@ export interface RepoRef {
   fullName: string;
 }
 
+export interface RepoEntry extends RepoRef {
+  pushedAt: string | null;
+}
+
 export interface Issue {
   id: number;
   number: number;
@@ -110,6 +114,7 @@ interface RawRepo {
   owner: { login: string };
   name: string;
   full_name: string;
+  pushed_at: string | null;
 }
 
 interface RawPullRequest {
@@ -380,29 +385,39 @@ export async function fetchRepos(
   octokit: ReturnType<typeof getClient>,
   orgOrUser: string,
   type: "org" | "user"
-): Promise<RepoRef[]> {
+): Promise<RepoEntry[]> {
   if (!octokit) throw new Error("No GitHub client available");
 
-  const route =
-    type === "org"
-      ? `GET /orgs/{org}/repos`
-      : `GET /user/repos`;
+  const repos: RepoEntry[] = [];
 
-  const params =
-    type === "org"
-      ? { org: orgOrUser, per_page: 100 }
-      : { affiliation: "owner", per_page: 100 };
-
-  const repos: RepoRef[] = [];
-
-  for await (const response of octokit.paginate.iterator(route, params)) {
-    const page = response.data as RawRepo[];
+  function collectRepos(page: RawRepo[], into: RepoEntry[]): void {
     for (const repo of page) {
-      repos.push({
+      into.push({
         owner: repo.owner.login,
         name: repo.name,
         fullName: repo.full_name,
+        pushedAt: repo.pushed_at ?? null,
       });
+    }
+  }
+
+  if (type === "org") {
+    for await (const response of octokit.paginate.iterator(`GET /orgs/{org}/repos`, {
+      org: orgOrUser,
+      per_page: 100,
+      sort: "pushed" as const,
+      direction: "desc" as const,
+    })) {
+      collectRepos(response.data as RawRepo[], repos);
+    }
+  } else {
+    for await (const response of octokit.paginate.iterator(`GET /user/repos`, {
+      affiliation: "owner",
+      per_page: 100,
+      sort: "pushed" as const,
+      direction: "desc" as const,
+    })) {
+      collectRepos(response.data as RawRepo[], repos);
     }
   }
 
@@ -1022,14 +1037,14 @@ export async function fetchWorkflowRuns(
       runs,
       latestAt: runs.reduce((max, r) => r.updated_at > max ? r.updated_at : max, ""),
     }));
-    workflowEntries.sort((a, b) => b.latestAt > a.latestAt ? -1 : b.latestAt < a.latestAt ? 1 : 0);
+    workflowEntries.sort((a, b) => a.latestAt > b.latestAt ? -1 : a.latestAt < b.latestAt ? 1 : 0);
     const topWorkflows = workflowEntries
       .slice(0, maxWorkflows);
 
     // Take most recent M runs per workflow
     for (const { runs: workflowRuns } of topWorkflows) {
       const sorted = workflowRuns.sort(
-        (a, b) => b.created_at > a.created_at ? -1 : b.created_at < a.created_at ? 1 : 0
+        (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
         allRuns.push({

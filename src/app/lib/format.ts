@@ -6,6 +6,7 @@ const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
  */
 export function relativeTime(isoString: string): string {
   const diffMs = Date.now() - new Date(isoString).getTime();
+  if (isNaN(diffMs)) return "";
   const diffSec = Math.floor(diffMs / 1000);
 
   if (diffSec < 60) return rtf.format(-diffSec, "second");

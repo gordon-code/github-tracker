@@ -6,8 +6,9 @@ import {
   Show,
   Index,
 } from "solid-js";
-import { fetchOrgs, fetchRepos, OrgEntry, RepoRef } from "../../services/api";
+import { fetchOrgs, fetchRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
 import { getClient } from "../../services/github";
+import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 
@@ -20,7 +21,7 @@ interface RepoSelectorProps {
 interface OrgRepoState {
   org: string;
   type: "org" | "user";
-  repos: RepoRef[];
+  repos: RepoEntry[];
   loading: boolean;
   error: string | null;
 }
@@ -146,15 +147,38 @@ export default function RepoSelector(props: RepoSelectorProps) {
     new Set(props.selected.map((r) => r.fullName))
   );
 
+  const sortedOrgStates = createMemo(() => {
+    const states = orgStates();
+    // Defer sorting during initial load to prevent layout shift as orgs trickle in.
+    // After initial load (all orgs resolved), sorting stays active during retries
+    // because loadedCount is not reset by retryOrg.
+    if (loadedCount() < props.selectedOrgs.length) return states;
+    const maxPushedAt = new Map(
+      states.map((s) => [
+        s.org,
+        s.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, ""),
+      ])
+    );
+    return [...states].sort((a, b) => {
+      const aMax = maxPushedAt.get(a.org) ?? "";
+      const bMax = maxPushedAt.get(b.org) ?? "";
+      return aMax > bMax ? -1 : aMax < bMax ? 1 : 0;
+    });
+  });
+
+  function toRepoRef(entry: RepoEntry): RepoRef {
+    return { owner: entry.owner, name: entry.name, fullName: entry.fullName };
+  }
+
   function isSelected(fullName: string) {
     return selectedSet().has(fullName);
   }
 
-  function toggleRepo(repo: RepoRef) {
+  function toggleRepo(repo: RepoEntry) {
     if (isSelected(repo.fullName)) {
       props.onChange(props.selected.filter((r) => r.fullName !== repo.fullName));
     } else {
-      props.onChange([...props.selected, repo]);
+      props.onChange([...props.selected, toRepoRef(repo)]);
     }
   }
 
@@ -162,7 +186,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   const q = () => filter().toLowerCase().trim();
 
-  function filteredReposForOrg(state: OrgRepoState): RepoRef[] {
+  function filteredReposForOrg(state: OrgRepoState): RepoEntry[] {
     const query = q();
     if (!query) return state.repos;
     return state.repos.filter(
@@ -177,7 +201,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
   function selectAllInOrg(state: OrgRepoState) {
     const visible = filteredReposForOrg(state);
     const current = new Map(props.selected.map((r) => [r.fullName, r]));
-    for (const repo of visible) current.set(repo.fullName, repo);
+    for (const repo of visible) current.set(repo.fullName, toRepoRef(repo));
     props.onChange([...current.values()]);
   }
 
@@ -186,18 +210,13 @@ export default function RepoSelector(props: RepoSelectorProps) {
     props.onChange(props.selected.filter((r) => !visible.has(r.fullName)));
   }
 
-  function allVisibleInOrgSelected(state: OrgRepoState): boolean {
-    const visible = filteredReposForOrg(state);
-    return visible.length > 0 && visible.every((r) => isSelected(r.fullName));
-  }
-
   // ── Global select/deselect all ────────────────────────────────────────────
 
   function selectAll() {
     const current = new Map(props.selected.map((r) => [r.fullName, r]));
     for (const state of orgStates()) {
       for (const repo of filteredReposForOrg(state)) {
-        current.set(repo.fullName, repo);
+        current.set(repo.fullName, toRepoRef(repo));
       }
     }
     props.onChange([...current.values()]);
@@ -252,9 +271,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
       </Show>
 
       {/* Per-org repo lists */}
-      <For each={orgStates()}>
+      <For each={sortedOrgStates()}>
         {(state) => {
-          const visible = () => filteredReposForOrg(state);
+          const visible = createMemo(() => filteredReposForOrg(state));
 
           return (
             <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
@@ -269,8 +288,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
                       type="button"
                       onClick={() => selectAllInOrg(state)}
                       disabled={
-                        allVisibleInOrgSelected(state) ||
-                        visible().length === 0
+                        visible().length === 0 ||
+                        visible().every((r) => isSelected(r.fullName))
                       }
                       class="text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400"
                     >
@@ -341,9 +360,14 @@ export default function RepoSelector(props: RepoSelectorProps) {
                               />
                               <div class="min-w-0 flex-1">
                                 <div class="flex items-center gap-2">
-                                  <span class="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
                                     {repo().name}
                                   </span>
+                                  <Show when={repo().pushedAt}>
+                                    <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                                      {relativeTime(repo().pushedAt!)}
+                                    </span>
+                                  </Show>
                                 </div>
                               </div>
                             </label>
