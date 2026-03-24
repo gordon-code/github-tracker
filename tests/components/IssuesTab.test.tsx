@@ -82,7 +82,7 @@ describe("IssuesTab", () => {
   it("filters by globalFilter.org", () => {
     const issues = [
       makeIssue({ number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
-      makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
+      makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <IssuesTab issues={issues} userLogin="" />);
@@ -118,19 +118,16 @@ describe("IssuesTab", () => {
 
   it("toggles sort direction on second click of same column", async () => {
     const user = userEvent.setup();
-    const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} userLogin="" />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    // First click: sets desc
+    // First click: title was not active, so sets desc
     await user.click(titleHeader);
-    // Simulate sort pref being updated to title/desc (spy already called)
-    // Second click should toggle to asc
+    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "desc" });
+    // Second click on same column: toggles to asc
     await user.click(titleHeader);
-
-    expect(setSortSpy).toHaveBeenCalledTimes(2);
-    setSortSpy.mockRestore();
+    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "asc" });
   });
 
   it("does not show pagination when there is only one page", () => {

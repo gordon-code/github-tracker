@@ -1,5 +1,7 @@
+import { createMemo } from "solid-js";
+
 export default function ChevronIcon(props: { size: "sm" | "md"; rotated: boolean }) {
-  const sizeClass = () => (props.size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5");
+  const sizeClass = createMemo(() => (props.size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"));
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

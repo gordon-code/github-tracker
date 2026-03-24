@@ -162,8 +162,8 @@ export default function IssuesTab(props: IssuesTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = () => filteredSortedWithMeta().items;
-  const issueMeta = () => filteredSortedWithMeta().meta;
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const pageSize = createMemo(() => config.itemsPerPage);
 

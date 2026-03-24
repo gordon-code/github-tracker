@@ -81,7 +81,7 @@ describe("PullRequestsTab", () => {
   it("filters by globalFilter.org", () => {
     const prs = [
       makePullRequest({ number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
-      makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
+      makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -208,7 +208,6 @@ describe("PullRequestsTab", () => {
     render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
     screen.getByText("My PR");
     expect(screen.queryByText("Other PR")).toBeNull();
-    viewStore.resetTabFilter("pullRequests", "role");
   });
 
   it("filters by reviewDecision tab filter", () => {

@@ -242,8 +242,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = () => filteredSortedWithMeta().items;
-  const prMeta = () => filteredSortedWithMeta().meta;
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const pageSize = createMemo(() => config.itemsPerPage);
 
