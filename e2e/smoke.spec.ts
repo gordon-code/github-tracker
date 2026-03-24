@@ -45,7 +45,7 @@ async function setupAuth(page: Page) {
       "github-tracker:config",
       JSON.stringify({
         selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo" }],
+        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
       })
     );
@@ -98,7 +98,7 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
       "github-tracker:config",
       JSON.stringify({
         selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo" }],
+        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
       })
     );
