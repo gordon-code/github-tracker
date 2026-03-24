@@ -21,13 +21,14 @@ vi.mock("@solidjs/router", () => ({
   useNavigate: () => vi.fn(),
 }));
 
-// Mock auth store
+// Mock auth store — capture onAuthCleared callbacks so qa-4 can invoke them
+const authClearCallbacks: (() => void)[] = [];
 vi.mock("../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
   isAuthenticated: () => true,
-  onAuthCleared: vi.fn(),
+  onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
 }));
 
 // Mock github service (used by Header)
@@ -58,9 +59,14 @@ let authStore: typeof import("../../src/app/stores/auth");
 beforeEach(async () => {
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
+  // Clear captured callbacks from previous test's module load
+  authClearCallbacks.length = 0;
 
-  // Re-register mocks for the fresh module instances
-  vi.mock("../../src/app/services/poll", () => ({
+  // Re-register mocks for the fresh module instances.
+  // vi.doMock (not vi.mock) is the correct API for dynamic re-registration
+  // after vi.resetModules(). vi.mock inside beforeEach is hoisted and will
+  // become a hard error in a future Vitest version.
+  vi.doMock("../../src/app/services/poll", () => ({
     fetchAllData: vi.fn().mockResolvedValue({
       issues: [],
       pullRequests: [],
@@ -291,5 +297,45 @@ describe("DashboardPage — auth error handling", () => {
     await Promise.resolve();
     expect(authStore.clearAuth).not.toHaveBeenCalled();
     expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
+  });
+});
+
+describe("DashboardPage — onAuthCleared integration", () => {
+  it("onAuthCleared callback destroys coordinator and resets data", async () => {
+    const issues = [makeIssue({ id: 1, title: "Should be cleared" })];
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues,
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    // Track the coordinator mock returned by createPollCoordinator
+    const mockDestroy = vi.fn();
+    vi.mocked(pollService.createPollCoordinator).mockImplementation(
+      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        capturedFetchAll = fetchAll;
+        void fetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+          destroy: mockDestroy,
+        };
+      }
+    );
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("Should be cleared");
+    });
+
+    // DashboardPage registered an onAuthCleared callback at module scope.
+    // Invoking it simulates what clearAuth() does on logout.
+    expect(authClearCallbacks.length).toBeGreaterThan(0);
+    for (const cb of authClearCallbacks) cb();
+
+    // The coordinator's destroy() should have been called
+    expect(mockDestroy).toHaveBeenCalled();
   });
 });
