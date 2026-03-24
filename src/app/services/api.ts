@@ -480,7 +480,7 @@ type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
  */
 async function restFallbackCheckStatuses(
   octokit: GitHubOctokit,
-  prs: { owner: string; repo: string; headOwner: string; headRepo: string; sha: string; prNumber: number }[],
+  prs: { owner: string; repo: string; sha: string; prNumber: number }[],
   results: Map<string, CheckStatusResult>
 ): Promise<void> {
   // Process in chunks of 10 to avoid overwhelming the browser's 6-connection limit
@@ -602,7 +602,7 @@ async function restFallbackCheckStatuses(
  */
 async function batchFetchCheckStatuses(
   octokit: NonNullable<ReturnType<typeof getClient>>,
-  prs: { owner: string; repo: string; headOwner: string; headRepo: string; sha: string; prNumber: number }[]
+  prs: { owner: string; repo: string; sha: string; prNumber: number }[]
 ): Promise<Map<string, CheckStatusResult>> {
   if (prs.length === 0) return new Map();
 
@@ -619,9 +619,6 @@ async function batchFetchCheckStatuses(
     const fragments: string[] = [];
 
     for (let i = 0; i < chunk.length; i++) {
-      const isFork =
-        chunk[i].headOwner !== chunk[i].owner || chunk[i].headRepo !== chunk[i].repo;
-
       varDefs.push(
         `$owner${i}: String!`,
         `$repo${i}: String!`,
@@ -633,39 +630,11 @@ async function batchFetchCheckStatuses(
       variables[`sha${i}`] = chunk[i].sha;
       variables[`prNum${i}`] = chunk[i].prNumber;
 
-      if (isFork) {
-        // Fork PR: SHA lives in the head repo, not the base repo.
-        // Emit a separate alias for the head repo's object lookup.
-        varDefs.push(`$headOwner${i}: String!`, `$headRepo${i}: String!`);
-        variables[`headOwner${i}`] = chunk[i].headOwner;
-        variables[`headRepo${i}`] = chunk[i].headRepo;
-        fragments.push(
-          `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
-            pullRequest(number: $prNum${i}) {
-              reviewDecision
-              latestReviews(first: 15) {
-                totalCount
-                nodes {
-                  author {
-                    login
-                  }
-                }
-              }
-            }
-          }
-          prHead${i}: repository(owner: $headOwner${i}, name: $headRepo${i}) {
-            object(expression: $sha${i}) {
-              ... on Commit {
-                statusCheckRollup {
-                  state
-                }
-              }
-            }
-          }`
-        );
-      } else {
-        fragments.push(
-          `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
+      // GitHub copies fork PR head commits into the base repo (refs/pull/N/head),
+      // and CI check suites are associated with the base repo — so always query
+      // statusCheckRollup from the base repo, even for fork PRs.
+      fragments.push(
+        `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
             object(expression: $sha${i}) {
               ... on Commit {
                 statusCheckRollup {
@@ -685,8 +654,7 @@ async function batchFetchCheckStatuses(
               }
             }
           }`
-        );
-      }
+      );
     }
 
     const query = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
@@ -720,13 +688,7 @@ async function batchFetchCheckStatuses(
 
       for (let i = 0; i < chunk.length; i++) {
         const data = response[`pr${i}`] as GraphQLRepoResult | null;
-        const isFork =
-          chunk[i].headOwner !== chunk[i].owner || chunk[i].headRepo !== chunk[i].repo;
-        // For fork PRs, the object (SHA) lookup is in the prHead${i} alias
-        const objectData = isFork
-          ? (response[`prHead${i}`] as GraphQLRepoResult | null)
-          : data;
-        const state = objectData?.object?.statusCheckRollup?.state ?? null;
+        const state = data?.object?.statusCheckRollup?.state ?? null;
         const key = `${chunk[i].owner}/${chunk[i].repo}:${chunk[i].sha}`;
 
         let checkStatus: CheckStatus["status"];
@@ -879,13 +841,12 @@ export async function fetchPullRequests(
     .map((r) => r.value);
 
   // Batch ALL check statuses into a single GraphQL call.
-  // For fork PRs, pr.head.repo.full_name differs from repoFullName (base repo).
-  // The SHA lookup must use the head (fork) repo; pullRequest(number:) uses the base repo.
+  // statusCheckRollup is always queried from the base repo — GitHub copies fork PR
+  // head commits into the base repo (refs/pull/N/head) and CI check suites are
+  // associated with the base repo.
   const checkInputs = successfulPRs.map(({ pr, repoFullName }) => {
     const [owner, repo] = repoFullName.split("/");
-    const headFullName = pr.head.repo?.full_name ?? repoFullName;
-    const [headOwner, headRepo] = headFullName.split("/");
-    return { owner, repo, headOwner, headRepo, sha: pr.head.sha, prNumber: pr.number };
+    return { owner, repo, sha: pr.head.sha, prNumber: pr.number };
   });
 
   const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);

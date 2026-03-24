@@ -103,7 +103,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
   client.hook.before("request", (options) => {
     const method = (options.method ?? "GET").toUpperCase();
     if (method === "GET") return;
-    if (method === "POST" && options.url.endsWith("/graphql")) return;
+    if (method === "POST" && options.url === "/graphql") return;
     throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
   });
 

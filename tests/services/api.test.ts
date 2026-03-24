@@ -1301,7 +1301,7 @@ describe("fetchWorkflowRuns pagination", () => {
 // ── qa-1: Fork PR path in GraphQL batch ───────────────────────────────────────
 
 describe("batchFetchCheckStatuses fork PR path (via fetchPullRequests)", () => {
-  it("emits prHead0 alias for fork PR and populates checkStatus from head repo", async () => {
+  it("queries statusCheckRollup from base repo for fork PRs", async () => {
     await clearCache();
 
     // Search returns a PR whose base repo is "octocat/Hello-World"
@@ -1344,22 +1344,19 @@ describe("batchFetchCheckStatuses fork PR path (via fetchPullRequests)", () => {
     let capturedQuery = "";
     const graphql = vi.fn(async (query: string, variables: Record<string, unknown>) => {
       capturedQuery = query;
-      // Respond with both pr0 (base repo PR data) and prHead0 (fork head SHA data)
+      // Base repo alias includes both statusCheckRollup and pullRequest data
       const response: Record<string, unknown> = {};
       const indices = Object.keys(variables)
-        .filter((k) => k.startsWith("owner") && !k.startsWith("headOwner"))
+        .filter((k) => k.startsWith("owner"))
         .map((k) => parseInt(k.replace("owner", ""), 10));
       for (const i of indices) {
         response[`pr${i}`] = {
-          object: null, // Base repo has no object for fork SHA
+          object: {
+            statusCheckRollup: { state: "SUCCESS" },
+          },
           pullRequest: {
             reviewDecision: "APPROVED",
             latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
-          },
-        };
-        response[`prHead${i}`] = {
-          object: {
-            statusCheckRollup: { state: "SUCCESS" },
           },
         };
       }
@@ -1384,17 +1381,17 @@ describe("batchFetchCheckStatuses fork PR path (via fetchPullRequests)", () => {
       "octocat"
     );
 
-    // GraphQL must include prHead0 alias (fork head repo lookup)
-    expect(capturedQuery).toContain("prHead0");
-    // The fork owner/repo variables must be emitted
+    // GraphQL should NOT have a prHead0 alias — base repo has the check suites
+    expect(capturedQuery).not.toContain("prHead0");
+    // No headOwner/headRepo variables needed
     expect(graphql).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        headOwner0: "fork-user",
-        headRepo0: "Hello-World",
+        owner0: "octocat",
+        repo0: "Hello-World",
       })
     );
-    // checkStatus must come from the fork head repo's statusCheckRollup
+    // checkStatus comes from the base repo's statusCheckRollup
     expect(pullRequests).toHaveLength(1);
     expect(pullRequests[0].checkStatus).toBe("success");
     expect(pullRequests[0].reviewDecision).toBe("APPROVED");
@@ -1443,7 +1440,7 @@ describe("fetchPullRequests with null head.repo (deleted fork)", () => {
     const graphql = vi.fn(async (_query: string, variables: Record<string, unknown>) => {
       const response: Record<string, unknown> = {};
       const indices = Object.keys(variables)
-        .filter((k) => k.startsWith("owner") && !k.startsWith("headOwner"))
+        .filter((k) => k.startsWith("owner"))
         .map((k) => parseInt(k.replace("owner", ""), 10));
       for (const i of indices) {
         response[`pr${i}`] = {

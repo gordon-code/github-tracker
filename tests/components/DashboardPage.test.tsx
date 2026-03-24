@@ -59,7 +59,7 @@ let authStore: typeof import("../../src/app/stores/auth");
 beforeEach(async () => {
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
-  // Clear captured callbacks from previous test's module load
+  // Mutate in place (not reassign) to preserve the reference captured by vi.mock
   authClearCallbacks.length = 0;
 
   // Re-register mocks for the fresh module instances.
@@ -104,18 +104,6 @@ beforeEach(async () => {
     workflowRuns: [],
     errors: [],
   });
-  vi.mocked(pollService.createPollCoordinator).mockImplementation(
-    (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
-      capturedFetchAll = fetchAll;
-      void fetchAll().catch(() => {});
-      return {
-        isRefreshing: () => false,
-        lastRefreshAt: () => null,
-        manualRefresh: vi.fn(),
-        destroy: vi.fn(),
-      };
-    }
-  );
   // Reset view store to defaults
   viewStore.updateViewState({
     lastActiveTab: "issues",
