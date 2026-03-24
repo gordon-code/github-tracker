@@ -29,6 +29,7 @@ vi.mock("../../src/app/stores/auth", () => ({
   user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
   isAuthenticated: () => true,
   onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+  DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
 }));
 
 // Mock github service (used by Header)
