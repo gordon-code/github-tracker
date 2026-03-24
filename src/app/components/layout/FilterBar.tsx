@@ -15,16 +15,13 @@ export default function FilterBar(props: FilterBarProps) {
 
   // Fade out the "Updated X ago" label after 8 seconds
   const [labelVisible, setLabelVisible] = createSignal(false);
-  let fadeTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     const ts = props.lastRefreshedAt;
-    if (ts) {
-      setLabelVisible(true);
-      clearTimeout(fadeTimer);
-      fadeTimer = setTimeout(() => setLabelVisible(false), 8_000);
-    }
+    if (!ts) return;
+    setLabelVisible(true);
+    const id = setTimeout(() => setLabelVisible(false), 8_000);
+    onCleanup(() => clearTimeout(id));
   });
-  onCleanup(() => clearTimeout(fadeTimer));
 
   const orgs = createMemo(() => config.selectedOrgs);
 

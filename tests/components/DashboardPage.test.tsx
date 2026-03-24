@@ -337,5 +337,10 @@ describe("DashboardPage — onAuthCleared integration", () => {
 
     // The coordinator's destroy() should have been called
     expect(mockDestroy).toHaveBeenCalled();
+
+    // Dashboard data should be cleared — no stale items visible
+    await waitFor(() => {
+      expect(screen.queryByText("Should be cleared")).toBeNull();
+    });
   });
 });

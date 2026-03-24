@@ -17,6 +17,7 @@ import ErrorBannerList from "../shared/ErrorBannerList";
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
 export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
+const CACHE_VERSION = 1;
 
 interface DashboardStore {
   issues: Issue[];
@@ -40,15 +41,20 @@ function loadCachedDashboard(): DashboardStore {
   try {
     const raw = localStorage.getItem?.(DASHBOARD_STORAGE_KEY);
     if (!raw) return { ...initialDashboardState };
-    const parsed = JSON.parse(raw) as DashboardStore;
-    // Restore Date from ISO string
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Invalidate cache on schema version mismatch
+    if (parsed._v !== CACHE_VERSION) return { ...initialDashboardState };
+    // Validate expected shape — arrays must be arrays
+    if (!Array.isArray(parsed.issues) || !Array.isArray(parsed.pullRequests) || !Array.isArray(parsed.workflowRuns)) {
+      return { ...initialDashboardState };
+    }
     return {
-      issues: parsed.issues ?? [],
-      pullRequests: parsed.pullRequests ?? [],
-      workflowRuns: parsed.workflowRuns ?? [],
+      issues: parsed.issues as Issue[],
+      pullRequests: parsed.pullRequests as PullRequest[],
+      workflowRuns: parsed.workflowRuns as WorkflowRun[],
       errors: [],
       loading: false,
-      lastRefreshedAt: parsed.lastRefreshedAt ? new Date(parsed.lastRefreshedAt) : null,
+      lastRefreshedAt: typeof parsed.lastRefreshedAt === "string" ? new Date(parsed.lastRefreshedAt) : null,
     };
   } catch {
     return { ...initialDashboardState };
@@ -93,17 +99,21 @@ async function pollFetch(): Promise<DashboardData> {
         lastRefreshedAt: now,
       });
       // Persist for stale-while-revalidate on full page reload.
-      // Errors are transient and not persisted.
-      try {
-        localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
-          issues: data.issues,
-          pullRequests: data.pullRequests,
-          workflowRuns: data.workflowRuns,
-          lastRefreshedAt: now.toISOString(),
-        }));
-      } catch {
-        // localStorage full or unavailable — non-fatal
-      }
+      // Errors are transient and not persisted. Deferred to avoid blocking paint.
+      const cachePayload = {
+        _v: CACHE_VERSION,
+        issues: data.issues,
+        pullRequests: data.pullRequests,
+        workflowRuns: data.workflowRuns,
+        lastRefreshedAt: now.toISOString(),
+      };
+      setTimeout(() => {
+        try {
+          localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
+        } catch {
+          // localStorage full or unavailable — non-fatal
+        }
+      }, 0);
     } else {
       setDashboardData("loading", false);
     }
