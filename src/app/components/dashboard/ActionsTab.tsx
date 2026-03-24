@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
@@ -104,35 +105,15 @@ const actionsFilterGroups: FilterChipGroupDef[] = [
 ];
 
 export default function ActionsTab(props: ActionsTabProps) {
-  const [collapsedRepos, setCollapsedRepos] = createSignal<Set<string>>(
-    new Set()
-  );
-  const [collapsedWorkflows, setCollapsedWorkflows] = createSignal<Set<string>>(
-    new Set()
-  );
+  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+  const [collapsedWorkflows, setCollapsedWorkflows] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
+    setCollapsedRepos(repoFullName, (v) => !v);
   }
 
   function toggleWorkflow(key: string) {
-    setCollapsedWorkflows((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+    setCollapsedWorkflows(key, (v) => !v);
   }
 
   function handleIgnore(run: WorkflowRun) {
@@ -237,7 +218,7 @@ export default function ActionsTab(props: ActionsTabProps) {
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isRepoCollapsed = () =>
-              collapsedRepos().has(repoGroup.repoFullName);
+              collapsedRepos[repoGroup.repoFullName];
 
             return (
               <div class="bg-white dark:bg-gray-900">
@@ -257,7 +238,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                     {(wfGroup) => {
                       const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
                       const isWfCollapsed = () =>
-                        collapsedWorkflows().has(wfKey);
+                        collapsedWorkflows[wfKey];
 
                       return (
                         <div class="border-l-2 border-gray-100 dark:border-gray-800 ml-4">

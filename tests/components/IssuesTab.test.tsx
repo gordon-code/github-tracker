@@ -5,9 +5,11 @@ import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
 import type { ApiError } from "../../src/app/services/api";
 import { makeIssue, resetViewStore } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
+import { updateConfig, resetConfig } from "../../src/app/stores/config";
 
 beforeEach(() => {
   resetViewStore();
+  resetConfig();
 });
 
 describe("IssuesTab", () => {
@@ -222,5 +224,60 @@ describe("IssuesTab", () => {
     render(() => <IssuesTab issues={issues} userLogin="" />);
     const header = screen.getByText("org/repo-a").closest("button")!;
     expect(header.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("toggles aria-expanded to false on collapse and back to true on re-expand", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Toggle issue", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Toggle issue")).toBeNull();
+
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    screen.getByText("Toggle issue");
+  });
+
+  it("paginates repo groups across pages", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const issues = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 100 + i, title: `Repo A issue ${i}`, repoFullName: "org/repo-a" })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
+      ),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // Page 1: repo-a (6 items), Page 2: repo-b (6 items) — 12 total > pageSize 10
+    screen.getByText("org/repo-a");
+    screen.getByText(/Page 1 of 2/);
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+
+    const nextBtn = screen.getByLabelText("Next page");
+    await user.click(nextBtn);
+    screen.getByText("org/repo-b");
+    screen.getByText(/Page 2 of 2/);
+  });
+
+  it("keeps a large single-repo group on one page without splitting", () => {
+    updateConfig({ itemsPerPage: 10 });
+    const issues = Array.from({ length: 15 }, (_, i) =>
+      makeIssue({ id: 300 + i, title: `Big repo issue ${i}`, repoFullName: "org/big-repo" })
+    );
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // All 15 items in one group — whole-groups-only pagination keeps them together
+    screen.getByText("org/big-repo");
+    screen.getByText("Big repo issue 0");
+    screen.getByText("Big repo issue 14");
+    // No pagination controls (single page with oversized group)
+    expect(screen.queryByLabelText("Next page")).toBeNull();
   });
 });

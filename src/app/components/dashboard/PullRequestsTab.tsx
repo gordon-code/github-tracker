@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, ApiError } from "../../services/api";
@@ -149,18 +150,10 @@ function paginateGroups(
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
-  const [collapsedRepos, setCollapsedRepos] = createSignal<Set<string>>(new Set());
+  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
+    setCollapsedRepos(repoFullName, (v) => !v);
   }
 
   const sortPref = createMemo(() => {
@@ -367,13 +360,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 <div class="bg-white dark:bg-gray-900">
                   <button
                     onClick={() => toggleRepo(repoGroup.repoFullName)}
-                    aria-expanded={!collapsedRepos().has(repoGroup.repoFullName)}
+                    aria-expanded={!collapsedRepos[repoGroup.repoFullName]}
                     class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
-                    <ChevronIcon size="md" rotated={collapsedRepos().has(repoGroup.repoFullName)} />
+                    <ChevronIcon size="md" rotated={collapsedRepos[repoGroup.repoFullName]} />
                     {repoGroup.repoFullName}
                   </button>
-                  <Show when={!collapsedRepos().has(repoGroup.repoFullName)}>
+                  <Show when={!collapsedRepos[repoGroup.repoFullName]}>
                     <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
                       <For each={repoGroup.items}>
                         {(pr) => (
