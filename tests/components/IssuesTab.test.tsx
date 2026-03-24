@@ -267,6 +267,36 @@ describe("IssuesTab", () => {
     screen.getByText(/Page 2 of 2/);
   });
 
+  it("preserves collapse state across filter changes", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Alice issue", repoFullName: "org/repo-a", userLogin: "alice" }),
+      makeIssue({ id: 2, title: "Bob issue", repoFullName: "org/repo-b", userLogin: "bob" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+
+    // Collapse repo-a
+    const repoHeader = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(repoHeader);
+    expect(screen.queryByText("Alice issue")).toBeNull();
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
+
+    // Apply role filter that keeps only alice's issue (repo-a)
+    viewStore.setTabFilter("issues", "role", "author");
+    // repo-a still visible (collapsed), repo-b filtered out
+    screen.getByText("org/repo-a");
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+    // Items still hidden because collapse state persists
+    expect(screen.queryByText("Alice issue")).toBeNull();
+
+    // Clear filter — repo-b reappears, repo-a stays collapsed
+    viewStore.resetTabFilter("issues", "role");
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    expect(screen.queryByText("Alice issue")).toBeNull();
+    screen.getByText("Bob issue");
+  });
+
   it("keeps a large single-repo group on one page without splitting", () => {
     updateConfig({ itemsPerPage: 10 });
     const issues = Array.from({ length: 15 }, (_, i) =>
