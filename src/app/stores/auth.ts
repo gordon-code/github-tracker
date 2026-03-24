@@ -50,7 +50,11 @@ export function onAuthCleared(cb: () => void): void {
   _onClearCallbacks.push(cb);
 }
 
+let _clearing = false;
+
 export function clearAuth(): void {
+  if (_clearing) return;
+  _clearing = true;
   // Reset in-memory stores to defaults BEFORE clearing localStorage,
   // so the persistence effects re-write defaults (not stale user data).
   resetConfig();
@@ -70,6 +74,7 @@ export function clearAuth(): void {
     try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
   }
   console.info("[auth] auth cleared");
+  _clearing = false;
 }
 
 export async function validateToken(): Promise<boolean> {

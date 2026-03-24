@@ -16,6 +16,7 @@ export default function LoginPage() {
       client_id: clientId,
       redirect_uri: redirectUri,
       state,
+      // repo: read issues/PRs; read:org: list orgs; notifications: gate
       scope: "repo read:org notifications",
     });
 
