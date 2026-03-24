@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
-import type { ApiError } from "../../src/app/services/api";
+import type { Issue, ApiError } from "../../src/app/services/api";
 import { makeIssue, resetViewStore } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 import { updateConfig, resetConfig } from "../../src/app/stores/config";
@@ -292,6 +293,31 @@ describe("IssuesTab", () => {
     screen.getByText("org/repo-b");
     expect(screen.queryByText("Alice issue")).toBeNull();
     screen.getByText("Bob issue");
+  });
+
+  it("resets page when data shrinks below current page", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const repoAIssues = Array.from({ length: 6 }, (_, i) =>
+      makeIssue({ id: 100 + i, title: `Repo A issue ${i}`, repoFullName: "org/repo-a" })
+    );
+    const repoBIssues = Array.from({ length: 6 }, (_, i) =>
+      makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
+    );
+    const [issues, setIssues] = createSignal<Issue[]>([...repoAIssues, ...repoBIssues]);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+
+    // Navigate to page 2
+    screen.getByText(/Page 1 of 2/);
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText(/Page 2 of 2/);
+    screen.getByText("org/repo-b");
+
+    // Shrink data to fit on 1 page — page should reset
+    setIssues(repoAIssues);
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+    screen.getByText("org/repo-a");
+    screen.getByText("Repo A issue 0");
   });
 
   it("keeps a large single-repo group on one page without splitting", () => {
