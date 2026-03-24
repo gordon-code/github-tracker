@@ -63,29 +63,35 @@ function groupByRepo(items: Issue[]): IssueRepoGroup[] {
   return groups;
 }
 
-function paginateGroups(
+function computePageLayout(
   groups: IssueRepoGroup[],
-  page: number,
   approxPageSize: number,
-): { pageGroups: IssueRepoGroup[]; pageCount: number } {
-  if (groups.length === 0) return { pageGroups: [], pageCount: 1 };
+): { boundaries: number[]; pageCount: number } {
+  if (groups.length === 0) return { boundaries: [0], pageCount: 1 };
 
-  const pageBoundaries: number[] = [0];
+  const boundaries: number[] = [0];
   let currentPageItems = 0;
   for (let i = 0; i < groups.length; i++) {
     if (currentPageItems > 0 && currentPageItems + groups[i].items.length > approxPageSize) {
-      pageBoundaries.push(i);
+      boundaries.push(i);
       currentPageItems = 0;
     }
     currentPageItems += groups[i].items.length;
   }
 
-  const pageCount = Math.max(1, pageBoundaries.length);
-  const clampedPage = Math.max(0, Math.min(page, pageCount - 1));
-  const start = pageBoundaries[clampedPage];
-  const end = clampedPage + 1 < pageBoundaries.length ? pageBoundaries[clampedPage + 1] : groups.length;
+  return { boundaries, pageCount: Math.max(1, boundaries.length) };
+}
 
-  return { pageGroups: groups.slice(start, end), pageCount };
+function slicePageGroups(
+  groups: IssueRepoGroup[],
+  boundaries: number[],
+  pageCount: number,
+  page: number,
+): IssueRepoGroup[] {
+  const clampedPage = Math.max(0, Math.min(page, pageCount - 1));
+  const start = boundaries[clampedPage];
+  const end = clampedPage + 1 < boundaries.length ? boundaries[clampedPage + 1] : groups.length;
+  return groups.slice(start, end);
 }
 
 export default function IssuesTab(props: IssuesTabProps) {
@@ -168,8 +174,11 @@ export default function IssuesTab(props: IssuesTabProps) {
   const pageSize = createMemo(() => config.itemsPerPage);
 
   const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
-  const paginatedResult = createMemo(() => paginateGroups(repoGroups(), page(), pageSize()));
-  const pageCount = () => paginatedResult().pageCount;
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), pageSize()));
+  const pageCount = () => pageLayout().pageCount;
+  const pageGroups = createMemo(() =>
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
+  );
 
   function handleSort(field: SortField) {
     const current = sortPref();
@@ -258,7 +267,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       {/* Issue rows */}
       <Show when={!props.loading || props.issues.length > 0}>
         <Show
-          when={paginatedResult().pageGroups.length > 0}
+          when={pageGroups().length > 0}
           fallback={
             <div class="flex flex-col items-center justify-center gap-2 py-16 text-gray-500 dark:text-gray-400">
               <svg
@@ -283,7 +292,7 @@ export default function IssuesTab(props: IssuesTabProps) {
           }
         >
           <div class="divide-y divide-gray-100 dark:divide-gray-800">
-            <For each={paginatedResult().pageGroups}>
+            <For each={pageGroups()}>
               {(repoGroup) => (
                 <div class="bg-white dark:bg-gray-900">
                   <button
