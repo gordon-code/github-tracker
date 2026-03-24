@@ -251,13 +251,13 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleResetAll() {
+  function handleResetAll() {
     if (!confirmReset()) {
       setConfirmReset(true);
       return;
     }
-    // clearAuth handles: token + user signals, localStorage (config/view),
-    // HttpOnly cookie logout, IndexedDB cache, and onAuthCleared callbacks
+    // clearAuth handles: token + user signals, localStorage (auth/config/view),
+    // IndexedDB cache, and onAuthCleared callbacks
     clearAuth();
     window.location.reload();
   }
@@ -637,7 +637,7 @@ export default function SettingsPage() {
                     <span class="text-xs text-gray-600 dark:text-gray-400">Are you sure?</span>
                     <button
                       type="button"
-                      onClick={() => void handleResetAll()}
+                      onClick={() => handleResetAll()}
                       class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
                     >
                       Yes, reset
@@ -654,7 +654,7 @@ export default function SettingsPage() {
               >
                 <button
                   type="button"
-                  onClick={() => void handleResetAll()}
+                  onClick={() => handleResetAll()}
                   class="rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-700 dark:bg-gray-700 dark:text-red-400 dark:hover:bg-red-900/20"
                 >
                   Reset all

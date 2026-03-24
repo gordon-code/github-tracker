@@ -30,12 +30,13 @@ export interface PollCoordinator {
   isRefreshing: () => boolean;
   lastRefreshAt: () => Date | null;
   manualRefresh: () => void;
+  destroy: () => void;
 }
 
 // ── Notifications gate ───────────────────────────────────────────────────────
 
 let _notifLastModified: string | null = null;
-let _notifGateDisabled = false; // Disabled after 403 (missing notifications permission)
+let _notifGateDisabled = false; // Disabled after 403 (notifications scope not granted)
 
 function resetPollState(): void {
   _notifLastModified = null;
@@ -53,7 +54,7 @@ onAuthCleared(resetPollState);
  * Returns true if there are new notifications (or first check), false if unchanged.
  * Uses If-Modified-Since for zero-cost 304 checks (doesn't count against rate limit).
  *
- * Auto-disables after a 403 (missing notifications permission) to stop wasting
+ * Auto-disables after a 403 (notifications scope not granted) to stop wasting
  * rate limit tokens on requests that will always fail.
  */
 async function hasNotificationChanges(): Promise<boolean> {
@@ -88,7 +89,7 @@ async function hasNotificationChanges(): Promise<boolean> {
     ) {
       return false; // Nothing changed since last check
     }
-    // 403 = missing notifications permission — disable gate permanently
+    // 403 = notifications scope not granted — disable gate permanently
     // to stop burning rate limit tokens on every poll cycle
     if (
       typeof err === "object" &&
@@ -96,7 +97,7 @@ async function hasNotificationChanges(): Promise<boolean> {
       (err as { status?: number }).status === 403
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
-      pushError("notifications", "Notifications API returned 403 — polling without notification gate", false);
+      pushError("notifications", "Notifications API returned 403 — check that the notifications scope is granted", false);
       _notifGateDisabled = true;
     }
     return true;
@@ -117,7 +118,7 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
 export async function fetchAllData(): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
-    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
   }
 
   // On subsequent polls, check notifications first (free when 304)
@@ -315,11 +316,13 @@ export function createPollCoordinator(
   // Immediate fetch on init
   void doFetch();
 
-  onCleanup(() => {
+  function destroy(): void {
     destroyed = true;
     clearTimer();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
-  });
+  }
+
+  onCleanup(destroy);
 
   function manualRefresh(): void {
     void doFetch();
@@ -330,5 +333,5 @@ export function createPollCoordinator(
     }
   }
 
-  return { isRefreshing, lastRefreshAt, manualRefresh };
+  return { isRefreshing, lastRefreshAt, manualRefresh, destroy };
 }

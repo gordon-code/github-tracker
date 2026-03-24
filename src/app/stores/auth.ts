@@ -3,6 +3,9 @@ import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 
+export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
+export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
+
 export interface GitHubUser {
   login: string;
   avatar_url: string;
@@ -13,15 +16,17 @@ interface TokenExchangeResponse {
   access_token: string;
   token_type?: string;
   scope?: string;
-  expires_in?: number | null;
 }
 
 // ── Signals ─────────────────────────────────────────────────────────────────
 
-// Access token is kept in-memory only (never persisted to localStorage).
-// On page reload, refreshAccessToken() uses the HttpOnly refresh token cookie
-// to obtain a fresh access token from the Worker.
-const [_token, _setToken] = createSignal<string | null>(null);
+// Access token is persisted to localStorage for permanent OAuth App tokens.
+// On page reload, validateToken() reads from localStorage and verifies with GitHub.
+// Optional chaining: happy-dom initializes localStorage methods lazily, so getItem
+// may not be a function yet during early module initialization in tests.
+const [_token, _setToken] = createSignal<string | null>(
+  localStorage.getItem?.(AUTH_STORAGE_KEY) ?? null
+);
 const [user, setUser] = createSignal<GitHubUser | null>(null);
 
 export const token = _token;
@@ -35,8 +40,9 @@ export { user };
 // ── Actions ─────────────────────────────────────────────────────────────────
 
 export function setAuth(response: TokenExchangeResponse): void {
+  localStorage.setItem(AUTH_STORAGE_KEY, response.access_token);
   _setToken(response.access_token);
-  console.info("[auth] access token set (in-memory)");
+  console.info("[auth] access token set (localStorage)");
 }
 
 const _onClearCallbacks: (() => void)[] = [];
@@ -46,81 +52,34 @@ export function onAuthCleared(cb: () => void): void {
   _onClearCallbacks.push(cb);
 }
 
+let _clearing = false;
+
 export function clearAuth(): void {
-  // Reset in-memory stores to defaults BEFORE clearing localStorage,
-  // so the persistence effects re-write defaults (not stale user data).
-  resetConfig();
-  resetViewState();
-  // Clear localStorage entries (persistence effects will write back defaults)
-  localStorage.removeItem(CONFIG_STORAGE_KEY);
-  localStorage.removeItem(VIEW_STORAGE_KEY);
-  _setToken(null);
-  setUser(null);
-  // Clear HttpOnly refresh token cookie via Worker (fire-and-forget)
-  fetch("/api/oauth/logout", { method: "POST" }).catch(() => {});
-  // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
-  clearCache().catch(() => {
-    // Non-fatal — cache clear failure should not block logout
-  });
-  // Run registered cleanup callbacks (e.g., poll state reset)
-  for (const cb of _onClearCallbacks) {
-    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
-  }
-  console.info("[auth] auth cleared");
-}
-
-export async function refreshAccessToken(): Promise<boolean> {
+  if (_clearing) return;
+  _clearing = true;
   try {
-    // Refresh token is in an HttpOnly cookie — the browser sends it automatically
-    const resp = await fetch("/api/oauth/refresh", {
-      method: "POST",
+    // Reset in-memory stores to defaults BEFORE clearing localStorage,
+    // so the persistence effects re-write defaults (not stale user data).
+    resetConfig();
+    resetViewState();
+    // Clear localStorage entries (persistence effects will write back defaults)
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(CONFIG_STORAGE_KEY);
+    localStorage.removeItem(VIEW_STORAGE_KEY);
+    localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+    _setToken(null);
+    setUser(null);
+    // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
+    clearCache().catch(() => {
+      // Non-fatal — cache clear failure should not block logout
     });
-
-    if (!resp.ok) {
-      console.info("[auth] token refresh failed — clearing auth");
-      clearAuth();
-      return false;
+    // Run registered cleanup callbacks (e.g., poll state reset)
+    for (const cb of _onClearCallbacks) {
+      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
     }
-
-    const data = (await resp.json()) as TokenExchangeResponse;
-
-    if (typeof data.access_token !== "string") {
-      console.info("[auth] token refresh returned invalid response");
-      clearAuth();
-      return false;
-    }
-
-    // Validate the new token before setting it (SDR-013)
-    const validationResp = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${data.access_token}`,
-        Accept: "application/vnd.github+json",
-      },
-    });
-
-    if (!validationResp.ok) {
-      console.info("[auth] new token failed validation — clearing auth");
-      clearAuth();
-      return false;
-    }
-
-    // Token is valid — set it in memory
-    setAuth(data);
-
-    // Populate user signal from validation response
-    const userData = (await validationResp.json()) as {
-      login: string;
-      avatar_url: string;
-      name: string | null;
-    };
-    setUser(userData);
-
-    console.info("[auth] token refresh succeeded");
-    return true;
-  } catch {
-    console.info("[auth] token refresh error — clearing auth");
-    clearAuth();
-    return false;
+    console.info("[auth] auth cleared");
+  } finally {
+    _clearing = false;
   }
 }
 
@@ -148,12 +107,15 @@ export async function validateToken(): Promise<boolean> {
     }
 
     if (resp.status === 401) {
-      console.info("[auth] access token expired — attempting refresh");
-      return refreshAccessToken();
+      // Permanent token is revoked — clear auth and redirect to login
+      console.info("[auth] access token invalid — clearing auth");
+      clearAuth();
+      return false;
     }
 
     return false;
   } catch {
+    // Network error — permanent token survives transient failures
     return false;
   }
 }

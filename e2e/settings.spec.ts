@@ -1,17 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Register API route interceptors and inject config BEFORE any navigation.
- * The app calls refreshAccessToken() on load, which POSTs to /api/oauth/refresh
- * (HttpOnly cookie-based). We intercept that to return a valid access token.
+ * Register API route interceptors and inject auth + config into localStorage BEFORE navigation.
+ * OAuth App uses permanent tokens stored in localStorage — no refresh endpoint needed.
+ * The app calls validateToken() on load, which GETs /user to verify the token.
  */
 async function setupAuth(page: Page) {
-  await page.route("**/api/oauth/refresh", (route) =>
-    route.fulfill({
-      status: 200,
-      json: { access_token: "ghu_fake", expires_in: 86400 },
-    })
-  );
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
       status: 200,
@@ -36,11 +30,12 @@ async function setupAuth(page: Page) {
   );
 
   await page.addInitScript(() => {
+    localStorage.setItem("github-tracker:auth-token", "ghu_fake");
     localStorage.setItem(
       "github-tracker:config",
       JSON.stringify({
         selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo" }],
+        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
       })
     );
@@ -114,15 +109,16 @@ test("sign out clears auth and redirects to login", async ({ page }) => {
   const signOutBtn = page.getByRole("button", { name: /^sign out$/i });
   await expect(signOutBtn).toBeVisible();
 
-  // Intercept the logout cookie-clearing request
-  await page.route("**/api/oauth/logout", (route) =>
-    route.fulfill({ status: 200, json: { ok: true } })
-  );
-
   await signOutBtn.click();
 
-  // clearAuth() clears in-memory token and navigates to /login
+  // clearAuth() removes the localStorage token and navigates to /login
   await expect(page).toHaveURL(/\/login/);
+
+  // Verify auth token was cleared from localStorage
+  const authToken = await page.evaluate(() =>
+    localStorage.getItem("github-tracker:auth-token")
+  );
+  expect(authToken).toBeNull();
 
   // Verify config was reset (SDR-016 data leakage prevention).
   // The persistence effect may re-write defaults, so check that user-specific

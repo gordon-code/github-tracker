@@ -60,7 +60,7 @@ export function updateRateLimitFromHeaders(
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(token: string): GitHubOctokitInstance {
-  return new GitHubOctokit({
+  const client = new GitHubOctokit({
     auth: token,
     userAgent: "github-tracker",
     throttle: {
@@ -96,6 +96,18 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       doNotRetry: [400, 401, 403, 404, 410, 422, 429, 451],
     },
   });
+
+  // Read-only guard: the OAuth App `repo` scope grants write access, but this
+  // app is strictly read-only. Block any non-GET request except POST /graphql
+  // (GraphQL queries are read-only but always use POST).
+  client.hook.before("request", (options) => {
+    const method = (options.method ?? "GET").toUpperCase();
+    if (method === "GET") return;
+    if (method === "POST" && options.url === "/graphql") return;
+    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
+  });
+
+  return client;
 }
 
 // ── ETag-aware request wrapper ───────────────────────────────────────────────
@@ -150,7 +162,22 @@ export async function cachedRequest(
 
 // ── Client singleton ─────────────────────────────────────────────────────────
 
-const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(null);
+// Eagerly create client if token exists at module load (before initClientWatcher effect runs).
+// This ensures getClient() returns non-null for early callers like the poll coordinator.
+// Wrapped in try/catch: if Octokit construction fails, fall back to null and let
+// initClientWatcher retry when its effect fires.
+let _eagerClient: GitHubOctokitInstance | null = null;
+let _clientToken: string | null = null;
+try {
+  const t = token();
+  if (t) {
+    _eagerClient = createGitHubClient(t);
+    _clientToken = t;
+  }
+} catch {
+  // Non-fatal — initClientWatcher will retry
+}
+const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(_eagerClient);
 
 export function getClient(): GitHubOctokitInstance | null {
   return _client();
@@ -165,9 +192,13 @@ export function initClientWatcher(): void {
   createEffect(() => {
     const currentToken = token();
     if (currentToken) {
+      // Skip if the eager init already created a client for this exact token
+      if (currentToken === _clientToken && _client()) return;
       _setClient(createGitHubClient(currentToken));
+      _clientToken = currentToken;
     } else {
       _setClient(null);
+      _clientToken = null;
     }
   });
 }

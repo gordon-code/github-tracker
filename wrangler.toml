@@ -2,7 +2,6 @@ name = "github-tracker"
 main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
 workers_dev = false
-preview_urls = true
 
 [assets]
 # The Cloudflare Vite plugin overrides this directory at build time.

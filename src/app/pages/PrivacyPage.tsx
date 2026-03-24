@@ -25,15 +25,12 @@ export default function PrivacyPage() {
           <ul class="list-disc pl-5 space-y-1">
             <li>
               <strong>localStorage</strong> — your settings (selected orgs,
-              repos, theme, etc.) and view state (tab filters, sort order).
+              repos, theme, etc.), view state (tab filters, sort order), and
+              OAuth access token for GitHub API authentication. Cleared on logout.
             </li>
             <li>
               <strong>IndexedDB</strong> — cached API responses with ETags to
               reduce GitHub API usage. Cleared on logout.
-            </li>
-            <li>
-              <strong>HttpOnly cookie</strong> — a GitHub refresh token managed
-              by the OAuth proxy worker. Never accessible to JavaScript.
             </li>
           </ul>
 
@@ -44,7 +41,7 @@ export default function PrivacyPage() {
             <li>No analytics or tracking scripts</li>
             <li>No server-side data storage</li>
             <li>No third-party data sharing</li>
-            <li>No cookies beyond the OAuth refresh token</li>
+            <li>No cookies</li>
           </ul>
 
           <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100 pt-2">

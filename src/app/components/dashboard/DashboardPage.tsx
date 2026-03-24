@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Switch, Match, onMount } from "solid-js";
+import { createSignal, createMemo, Switch, Match, onMount, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -9,12 +9,14 @@ import PullRequestsTab from "./PullRequestsTab";
 import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
-import { createPollCoordinator, fetchAllData } from "../../services/poll";
-import { refreshAccessToken, clearAuth, user } from "../../stores/auth";
+import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
+import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
+
+const CACHE_VERSION = 1;
 
 interface DashboardStore {
   issues: Issue[];
@@ -25,29 +27,92 @@ interface DashboardStore {
   lastRefreshedAt: Date | null;
 }
 
-const [dashboardData, setDashboardData] = createStore<DashboardStore>({
+const initialDashboardState: DashboardStore = {
   issues: [],
   pullRequests: [],
   workflowRuns: [],
   errors: [],
   loading: true,
   lastRefreshedAt: null,
+};
+
+function loadCachedDashboard(): DashboardStore {
+  try {
+    const raw = localStorage.getItem?.(DASHBOARD_STORAGE_KEY);
+    if (!raw) return { ...initialDashboardState };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Invalidate cache on schema version mismatch
+    if (parsed._v !== CACHE_VERSION) return { ...initialDashboardState };
+    // Validate expected shape — arrays must be arrays
+    if (!Array.isArray(parsed.issues) || !Array.isArray(parsed.pullRequests) || !Array.isArray(parsed.workflowRuns)) {
+      return { ...initialDashboardState };
+    }
+    return {
+      issues: parsed.issues as Issue[],
+      pullRequests: parsed.pullRequests as PullRequest[],
+      workflowRuns: parsed.workflowRuns as WorkflowRun[],
+      errors: [],
+      loading: false,
+      lastRefreshedAt: typeof parsed.lastRefreshedAt === "string" ? new Date(parsed.lastRefreshedAt) : null,
+    };
+  } catch {
+    return { ...initialDashboardState };
+  }
+}
+
+const [dashboardData, setDashboardData] = createStore<DashboardStore>(loadCachedDashboard());
+
+function resetDashboardData(): void {
+  setDashboardData({ ...initialDashboardState });
+  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
+}
+
+// Clear dashboard data and stop polling on logout to prevent cross-user data leakage
+onAuthCleared(() => {
+  resetDashboardData();
+  const coord = _coordinator();
+  if (coord) {
+    coord.destroy();
+    _setCoordinator(null);
+  }
 });
 
-async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
-  setDashboardData("loading", true);
+async function pollFetch(): Promise<DashboardData> {
+  // Only show skeleton on initial load (no data yet).
+  // Subsequent refreshes keep existing data visible — the coordinator's
+  // isRefreshing signal handles the "Refreshing..." indicator.
+  if (!dashboardData.lastRefreshedAt) {
+    setDashboardData("loading", true);
+  }
   try {
     const data = await fetchAllData();
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
+      const now = new Date();
       setDashboardData({
         issues: data.issues,
         pullRequests: data.pullRequests,
         workflowRuns: data.workflowRuns,
         errors: data.errors,
         loading: false,
-        lastRefreshedAt: new Date(),
+        lastRefreshedAt: now,
       });
+      // Persist for stale-while-revalidate on full page reload.
+      // Errors are transient and not persisted. Deferred to avoid blocking paint.
+      const cachePayload = {
+        _v: CACHE_VERSION,
+        issues: data.issues,
+        pullRequests: data.pullRequests,
+        workflowRuns: data.workflowRuns,
+        lastRefreshedAt: now.toISOString(),
+      };
+      setTimeout(() => {
+        try {
+          localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
+        } catch {
+          // localStorage full or unavailable — non-fatal
+        }
+      }, 0);
     } else {
       setDashboardData("loading", false);
     }
@@ -62,18 +127,17 @@ async function pollFetch(): Promise<import("../../services/poll").DashboardData>
         : null;
 
     if (status === 401) {
-      const refreshed = await refreshAccessToken();
-      if (!refreshed) {
-        clearAuth();
-        window.location.replace("/login");
-      }
+      // Hard redirect (not navigate()) forces a full page reload, which clears
+      // module-level state like _coordinator and dashboardData for the next user.
+      clearAuth();
+      window.location.replace("/login");
     }
     setDashboardData("loading", false);
     throw err;
   }
 }
 
-let _coordinator: ReturnType<typeof createPollCoordinator> | null = null;
+const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
 
 export default function DashboardPage() {
 
@@ -92,9 +156,13 @@ export default function DashboardPage() {
   }
 
   onMount(() => {
-    if (!_coordinator) {
-      _coordinator = createPollCoordinator(() => config.refreshInterval, pollFetch);
+    if (!_coordinator()) {
+      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
+    onCleanup(() => {
+      _coordinator()?.destroy();
+      _setCoordinator(null);
+    });
   });
 
   const tabCounts = createMemo(() => ({
@@ -118,9 +186,9 @@ export default function DashboardPage() {
         />
 
         <FilterBar
-          isRefreshing={_coordinator?.isRefreshing() ?? dashboardData.loading}
-          lastRefreshedAt={_coordinator?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-          onRefresh={() => _coordinator?.manualRefresh()}
+          isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
+          lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+          onRefresh={() => _coordinator()?.manualRefresh()}
         />
 
         {/* Global error banner */}

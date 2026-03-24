@@ -94,6 +94,15 @@ describe("LoginPage", () => {
     expect(url.searchParams.get("redirect_uri")).toContain("/oauth/callback");
   });
 
+  it("OAuth URL includes scope parameter with required scopes", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    const button = screen.getByText("Sign in with GitHub");
+    await user.click(button);
+    const url = new URL(window.location.href);
+    expect(url.searchParams.get("scope")).toBe("repo read:org notifications");
+  });
+
   it("each login click generates a unique state", async () => {
     // Render two separate instances to simulate two clicks
     const { unmount } = render(() => <LoginPage />);

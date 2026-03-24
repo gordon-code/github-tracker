@@ -16,7 +16,8 @@ export default function LoginPage() {
       client_id: clientId,
       redirect_uri: redirectUri,
       state,
-      // No scope param — GitHub App uses installation-level permissions (SDR-009)
+      // repo: read issues/PRs; read:org: list orgs; notifications: gate
+      scope: "repo read:org notifications",
     });
 
     window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;

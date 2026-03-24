@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup } from "solid-js";
+import { createMemo, createSignal, createEffect, For, onCleanup } from "solid-js";
 import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
 
@@ -12,6 +12,16 @@ export default function FilterBar(props: FilterBarProps) {
   const [tick, setTick] = createSignal(0);
   const tickTimer = setInterval(() => setTick((t) => t + 1), 30_000);
   onCleanup(() => clearInterval(tickTimer));
+
+  // Fade out the "Updated X ago" label after 8 seconds
+  const [labelVisible, setLabelVisible] = createSignal(false);
+  createEffect(() => {
+    const ts = props.lastRefreshedAt;
+    if (!ts) return;
+    setLabelVisible(true);
+    const id = setTimeout(() => setLabelVisible(false), 8_000);
+    onCleanup(() => clearTimeout(id));
+  });
 
   const orgs = createMemo(() => config.selectedOrgs);
 
@@ -76,7 +86,11 @@ export default function FilterBar(props: FilterBarProps) {
       <div class="flex-1" />
 
       {updatedLabel() && (
-        <span class="text-xs text-gray-500 dark:text-gray-400">
+        <span
+          class={`text-xs text-gray-500 dark:text-gray-400 transition-opacity duration-1000 ${
+            props.isRefreshing || labelVisible() ? "opacity-100" : "opacity-0"
+          }`}
+        >
           {updatedLabel()}
         </span>
       )}

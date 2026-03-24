@@ -21,14 +21,15 @@ vi.mock("@solidjs/router", () => ({
   useNavigate: () => vi.fn(),
 }));
 
-// Mock auth store
+// Mock auth store — capture onAuthCleared callbacks so qa-4 can invoke them
+const authClearCallbacks: (() => void)[] = [];
 vi.mock("../../src/app/stores/auth", () => ({
-  refreshAccessToken: vi.fn().mockResolvedValue(true),
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
   isAuthenticated: () => true,
-  onAuthCleared: vi.fn(),
+  onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+  DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
 }));
 
 // Mock github service (used by Header)
@@ -57,11 +58,18 @@ let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 
 beforeEach(async () => {
+  // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
+  localStorage.clear?.();
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
+  // Mutate in place (not reassign) to preserve the reference captured by vi.mock
+  authClearCallbacks.length = 0;
 
-  // Re-register mocks for the fresh module instances
-  vi.mock("../../src/app/services/poll", () => ({
+  // Re-register mocks for the fresh module instances.
+  // vi.doMock (not vi.mock) is the correct API for dynamic re-registration
+  // after vi.resetModules(). vi.mock inside beforeEach is hoisted and will
+  // become a hard error in a future Vitest version.
+  vi.doMock("../../src/app/services/poll", () => ({
     fetchAllData: vi.fn().mockResolvedValue({
       issues: [],
       pullRequests: [],
@@ -78,6 +86,7 @@ beforeEach(async () => {
           isRefreshing: () => false,
           lastRefreshAt: () => null,
           manualRefresh: vi.fn(),
+          destroy: vi.fn(),
         };
       }
     ),
@@ -92,25 +101,12 @@ beforeEach(async () => {
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
   vi.mocked(authStore.clearAuth).mockClear();
-  vi.mocked(authStore.refreshAccessToken).mockClear();
-  vi.mocked(authStore.refreshAccessToken).mockResolvedValue(true);
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
     workflowRuns: [],
     errors: [],
   });
-  vi.mocked(pollService.createPollCoordinator).mockImplementation(
-    (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
-      capturedFetchAll = fetchAll;
-      void fetchAll().catch(() => {});
-      return {
-        isRefreshing: () => false,
-        lastRefreshAt: () => null,
-        manualRefresh: vi.fn(),
-      };
-    }
-  );
   // Reset view store to defaults
   viewStore.updateViewState({
     lastActiveTab: "issues",
@@ -232,6 +228,7 @@ describe("DashboardPage — data flow", () => {
       isRefreshing: () => true,
       lastRefreshAt: () => null,
       manualRefresh: vi.fn(),
+      destroy: vi.fn(),
     });
     // fetchAllData never resolves
     vi.mocked(pollService.fetchAllData).mockReturnValue(new Promise(() => {}));
@@ -270,20 +267,9 @@ describe("DashboardPage — auth error handling", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("calls refreshAccessToken on 401 error from fetchAllData", async () => {
+  it("calls clearAuth and redirects to /login on 401 error (permanent token revoked)", async () => {
     const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
-    });
-  });
-
-  it("calls clearAuth and navigates to /login when refresh fails", async () => {
-    const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
-    vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-    vi.mocked(authStore.refreshAccessToken).mockResolvedValue(false);
 
     render(() => <DashboardPage />);
     await waitFor(() => {
@@ -292,20 +278,7 @@ describe("DashboardPage — auth error handling", () => {
     });
   });
 
-  it("does not call clearAuth when refresh succeeds after 401", async () => {
-    const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
-    vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
-    vi.mocked(authStore.refreshAccessToken).mockResolvedValue(true);
-
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      expect(authStore.refreshAccessToken).toHaveBeenCalledOnce();
-    });
-    expect(authStore.clearAuth).not.toHaveBeenCalled();
-    expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
-  });
-
-  it("does not call refreshAccessToken for non-401 errors", async () => {
+  it("does not call clearAuth for non-401 errors", async () => {
     const err500 = Object.assign(new Error("Server Error"), { status: 500 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err500);
 
@@ -313,7 +286,52 @@ describe("DashboardPage — auth error handling", () => {
     // Flush all pending microtasks so the rejected promise settles
     await Promise.resolve();
     await Promise.resolve();
-    expect(authStore.refreshAccessToken).not.toHaveBeenCalled();
+    expect(authStore.clearAuth).not.toHaveBeenCalled();
     expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
+  });
+});
+
+describe("DashboardPage — onAuthCleared integration", () => {
+  it("onAuthCleared callback destroys coordinator and resets data", async () => {
+    const issues = [makeIssue({ id: 1, title: "Should be cleared" })];
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues,
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    // Track the coordinator mock returned by createPollCoordinator
+    const mockDestroy = vi.fn();
+    vi.mocked(pollService.createPollCoordinator).mockImplementation(
+      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        capturedFetchAll = fetchAll;
+        void fetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+          destroy: mockDestroy,
+        };
+      }
+    );
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("Should be cleared");
+    });
+
+    // DashboardPage registered an onAuthCleared callback at module scope.
+    // Invoking it simulates what clearAuth() does on logout.
+    expect(authClearCallbacks.length).toBeGreaterThan(0);
+    for (const cb of authClearCallbacks) cb();
+
+    // The coordinator's destroy() should have been called
+    expect(mockDestroy).toHaveBeenCalled();
+
+    // Dashboard data should be cleared — no stale items visible
+    await waitFor(() => {
+      expect(screen.queryByText("Should be cleared")).toBeNull();
+    });
   });
 });

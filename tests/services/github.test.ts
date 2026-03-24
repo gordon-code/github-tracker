@@ -18,6 +18,79 @@ describe("createGitHubClient", () => {
     const c2 = createGitHubClient("token-b");
     expect(c1).not.toBe(c2);
   });
+
+  it("read-only guard allows GET requests", async () => {
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    // GET should not throw — use a route that won't actually hit GitHub
+    await expect(client.request("GET /user")).resolves.toBeDefined();
+    vi.unstubAllGlobals();
+  });
+
+  it("read-only guard allows POST /graphql", async () => {
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: {} }), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    await expect(client.request("POST /graphql", { query: "{ viewer { login } }" })).resolves.toBeDefined();
+    vi.unstubAllGlobals();
+  });
+
+  it("read-only guard blocks POST to non-graphql endpoints", async () => {
+    const client = createGitHubClient("test-token");
+
+    await expect(
+      client.request("POST /repos/{owner}/{repo}/issues", {
+        owner: "test",
+        repo: "test",
+        title: "blocked",
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("read-only guard blocks PUT requests", async () => {
+    const client = createGitHubClient("test-token");
+
+    await expect(
+      client.request("PUT /repos/{owner}/{repo}/issues/{issue_number}", {
+        owner: "test",
+        repo: "test",
+        issue_number: 1,
+        title: "blocked",
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("read-only guard blocks PATCH requests", async () => {
+    const client = createGitHubClient("test-token");
+
+    await expect(
+      client.request("PATCH /repos/{owner}/{repo}/issues/{issue_number}", {
+        owner: "test",
+        repo: "test",
+        issue_number: 1,
+        state: "closed",
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("read-only guard blocks DELETE requests", async () => {
+    const client = createGitHubClient("test-token");
+
+    await expect(
+      client.request("DELETE /repos/{owner}/{repo}/issues/{issue_number}/lock", {
+        owner: "test",
+        repo: "test",
+        issue_number: 1,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
 });
 
 // ── cachedRequest ────────────────────────────────────────────────────────────

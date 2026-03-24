@@ -1,20 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Register API route interceptors and inject config BEFORE any navigation.
- * The app calls refreshAccessToken() on load, which POSTs to /api/oauth/refresh
- * (HttpOnly cookie-based). We intercept that to return a valid access token,
- * and intercept GET /user (called by refreshAccessToken to validate the token).
+ * Register API route interceptors and inject auth + config into localStorage BEFORE navigation.
+ * OAuth App uses permanent tokens stored in localStorage — no refresh endpoint needed.
+ * The app calls validateToken() on load, which GETs /user to verify the token.
  */
 async function setupAuth(page: Page) {
-  // Intercept refresh token exchange — app calls this on page load
-  await page.route("**/api/oauth/refresh", (route) =>
-    route.fulfill({
-      status: 200,
-      json: { access_token: "ghu_fake", expires_in: 86400 },
-    })
-  );
-  // Intercept /user validation (called by refreshAccessToken after getting token)
+  // Intercept /user validation (called by validateToken on page load)
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
       status: 200,
@@ -46,13 +38,14 @@ async function setupAuth(page: Page) {
     route.fulfill({ status: 200, json: { data: {} } })
   );
 
-  // Inject config into localStorage (config is still persisted there)
+  // Seed localStorage with auth token and config before the page loads
   await page.addInitScript(() => {
+    localStorage.setItem("github-tracker:auth-token", "ghu_fake");
     localStorage.setItem(
       "github-tracker:config",
       JSON.stringify({
         selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo" }],
+        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
       })
     );
@@ -83,8 +76,8 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
       status: 200,
       json: {
         access_token: "ghu_fake",
-        refresh_token: "ghr_fake",
-        expires_in: 86400,
+        token_type: "bearer",
+        scope: "repo read:org notifications",
       },
     })
   );
@@ -105,7 +98,7 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
       "github-tracker:config",
       JSON.stringify({
         selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo" }],
+        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
       })
     );

@@ -6,6 +6,7 @@ import { MemoryRouter, Route } from "@solidjs/router";
 vi.mock("../../src/app/stores/auth", () => ({
   setAuth: vi.fn(),
   validateToken: vi.fn(),
+  clearAuth: vi.fn(),
 }));
 
 import * as authStore from "../../src/app/stores/auth";
@@ -112,13 +113,12 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("passes token response (access_token, expires_in) to setAuth", async () => {
+  it("passes token response (access_token, token_type) to setAuth", async () => {
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
 
     const fullResponse = {
       access_token: "tok123",
-      expires_in: 28800,
       token_type: "bearer",
     };
     vi.stubGlobal(
@@ -261,6 +261,29 @@ describe("OAuthCallback", () => {
 
     await waitFor(() => {
       screen.getByText(/No authorization code/i);
+    });
+  });
+
+  it("clears auth and shows error when validateToken returns false after token exchange", async () => {
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "tok123" }),
+      })
+    );
+    vi.mocked(authStore.validateToken).mockResolvedValue(false);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.setAuth).toHaveBeenCalledWith({ access_token: "tok123" });
+      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.clearAuth).toHaveBeenCalled();
+      screen.getByText(/Could not verify token/i);
     });
   });
 

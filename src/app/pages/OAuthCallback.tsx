@@ -1,12 +1,11 @@
 import { createSignal, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { setAuth, validateToken } from "../stores/auth";
+import { setAuth, validateToken, clearAuth } from "../stores/auth";
 
 interface TokenResponse {
   access_token: string;
   token_type?: string;
   scope?: string;
-  expires_in?: number | null;
   error?: string;
 }
 
@@ -50,10 +49,14 @@ export default function OAuthCallback() {
         return;
       }
 
-      // Set token in memory and populate user signal via validateToken
+      // Persist token and populate user signal via validateToken
       setAuth(data);
       console.info("[auth] token exchange succeeded");
-      await validateToken();
+      if (!(await validateToken())) {
+        clearAuth();
+        setError("Could not verify token. Please try again.");
+        return;
+      }
 
       navigate("/", { replace: true });
     } catch {

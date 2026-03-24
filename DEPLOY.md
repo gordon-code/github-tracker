@@ -20,63 +20,38 @@
 ### Variables (GitHub repo → Settings → Secrets and variables → Actions → Variables)
 
 **`VITE_GITHUB_CLIENT_ID`**
-- This is the GitHub App Client ID (not a secret — it is embedded in the built JS bundle)
+- This is the GitHub OAuth App Client ID (not a secret — it is embedded in the built JS bundle)
 - Add it as an Actions **variable** (not a secret)
-- See GitHub App setup below for how to obtain it
+- See OAuth App setup below for how to obtain it
 
-## GitHub App Setup
+## GitHub OAuth App Setup
 
-1. Go to GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**
-2. Fill in the basic details:
-   - **App name**: your app name (e.g. `gh-tracker-yourname`)
-   - **Description**: `Personal dashboard for tracking GitHub issues, PRs, and Actions runs across repos and orgs.`
+1. Go to GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
+2. Fill in the details:
+   - **Application name**: your app name (e.g. `gh-tracker-yourname`)
    - **Homepage URL**: `https://gh.gordoncode.dev`
-3. Under **Identifying and authorizing users**:
-   - **Callback URLs** — register all three:
-     - `https://gh.gordoncode.dev/oauth/callback` (production)
-     - `https://github-tracker.<account>.workers.dev/oauth/callback` (preview — GitHub's subdomain matching should allow per-branch preview aliases like `alias.github-tracker.<account>.workers.dev` to work; verify after first preview deploy)
-     - `http://localhost:5173/oauth/callback` (local dev)
-   - ✅ **Expire user authorization tokens** — check this. The app uses short-lived access tokens (8hr) with HttpOnly cookie-based refresh token rotation.
-   - ✅ **Request user authorization (OAuth) during installation** — check this. Streamlines the install + authorize flow into one step.
-4. Under **Post installation**:
-   - Leave **Setup URL** blank
-   - Leave **Redirect on update** unchecked
-5. Under **Webhook**:
-   - ❌ Uncheck **Active** — the app polls; it does not use webhooks.
-6. Under **Permissions**:
+   - **Authorization callback URL**: `https://gh.gordoncode.dev/oauth/callback`
+3. Click **Register application**
+4. Note the **Client ID** — this is your `VITE_GITHUB_CLIENT_ID`
+5. Click **Generate a new client secret** and save it for the Worker secrets below
 
-   **Repository permissions** (read-only):
+### Scopes
 
-   | Permission | Access | Used for |
-   |------------|--------|----------|
-   | **Actions** | Read-only | `GET /repos/{owner}/{repo}/actions/runs` — workflow run list |
-   | **Checks** | Read-only | `GET /repos/{owner}/{repo}/commits/{ref}/check-runs` — PR check status (REST fallback) |
-   | **Commit statuses** | Read-only | `GET /repos/{owner}/{repo}/commits/{ref}/status` — legacy commit status (REST fallback) |
-   | **Issues** | Read-only | `GET /search/issues?q=is:issue` — issue search |
-   | **Metadata** | Read-only | Automatically granted when any repo permission is set. Required for basic repo info. |
-   | **Pull requests** | Read-only | `GET /search/issues?q=is:pr`, `GET /repos/{owner}/{repo}/pulls/{pull_number}`, `/reviews` — PR search, detail, and reviews |
+The login flow requests `scope=repo read:org notifications`:
 
-   **Organization permissions:**
+| Scope | Used for |
+|-------|----------|
+| `repo` | Read issues, PRs, check runs, workflow runs (includes private repos) |
+| `read:org` | `GET /user/orgs` — list user's organizations for the org selector |
+| `notifications` | `GET /notifications` — polling optimization gate (304 = skip full fetch) |
 
-   | Permission | Access | Used for |
-   |------------|--------|----------|
-   | **Members** | Read-only | `GET /user/orgs` — list user's organizations for the org selector |
+**Note:** The `repo` scope grants write access to repositories, but this app never performs write operations (POST/PUT/PATCH/DELETE on repo endpoints). It is read-only by design.
 
-   **Account permissions:**
+### Local development OAuth App
 
-   | Permission | Access | Used for |
-   |------------|--------|----------|
-   | _(none required)_ | | |
-
-7. Under **Where can this GitHub App be installed?**:
-   - **Any account** — the app uses OAuth authorization (not installation tokens), so any GitHub user needs to be able to authorize via the login flow
-8. Click **Create GitHub App**
-9. Note the **Client ID** — this is your `VITE_GITHUB_CLIENT_ID`
-10. Click **Generate a new client secret** and save it for the Worker secrets below
-
-### Notifications API limitation
-
-The GitHub Notifications API (`GET /notifications`) does not support GitHub App user access tokens — only classic personal access tokens. The app uses notifications as a polling optimization gate (skip full fetch when nothing changed). When the notifications endpoint returns 403, the gate **auto-disables** and the app falls back to time-based polling. No functionality is lost; polling is just slightly less efficient.
+Create a second OAuth App for local development:
+- **Authorization callback URL**: `http://localhost:5173/oauth/callback`
+- Set its Client ID and Secret in `.dev.vars` (see Local Development below)
 
 ## Cloudflare Worker Secrets
 
@@ -91,41 +66,30 @@ wrangler secret put ALLOWED_ORIGIN
 ```
 
 - `GITHUB_CLIENT_ID`: same value as `VITE_GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`: the Client Secret from your GitHub App
+- `GITHUB_CLIENT_SECRET`: the Client Secret from your GitHub OAuth App
 - `ALLOWED_ORIGIN`: `https://gh.gordoncode.dev`
-
-### Preview versions
-
-Preview deployments use `wrangler versions upload` (not a separate environment), so they inherit production secrets automatically. No additional secret configuration is needed.
-
-CORS note: Preview URLs are same-origin (SPA and API share the same `*.workers.dev` host), so the `ALLOWED_ORIGIN` strict-equality check is irrelevant — browsers don't enforce CORS on same-origin requests.
-
-**Migration note:** If you previously deployed with `wrangler deploy --env preview`, an orphaned `github-tracker-preview` worker may still exist. Delete it via `wrangler delete --name github-tracker-preview` or through the Cloudflare dashboard.
 
 ## Worker API Endpoints
 
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/oauth/token` | POST | none | Exchange OAuth code for access token. Refresh token set as HttpOnly cookie. |
-| `/api/oauth/refresh` | POST | cookie | Refresh expired access token. Reads `github_tracker_rt` HttpOnly cookie. Sets rotated cookie. |
-| `/api/oauth/logout` | POST | none | Clears the `github_tracker_rt` HttpOnly cookie (`Max-Age=0`). |
-| `/api/health` | GET | none | Health check. Returns `OK`. |
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/oauth/token` | POST | Exchange OAuth authorization code for permanent access token. |
+| `/api/health` | GET | Health check. Returns `OK`. |
 
-### Refresh Token Security
+### Token Storage Security
 
-The refresh token (6-month lifetime) is stored as an **HttpOnly cookie** — never in `localStorage` or the response body. This protects the high-value long-lived credential from XSS:
+The OAuth App access token is a permanent credential (no expiry). It is stored in `localStorage` under the key `github-tracker:auth-token`:
 
-- Production cookie: `__Host-github_tracker_rt` with `HttpOnly; Secure; SameSite=Strict; Path=/`
-- Local dev: `github_tracker_rt` with `HttpOnly; SameSite=Lax; Path=/` (no `Secure` — localhost is HTTP; no `__Host-` prefix — requires `Secure`)
-- The short-lived access token (8hr) is held in-memory only (never persisted to `localStorage`); on page reload, `refreshAccessToken()` obtains a fresh token via the cookie
-- On logout, the client calls `POST /api/oauth/logout` to clear the cookie
-- GitHub rotates the refresh token on each use; the Worker sets the new value as a cookie
+- **CSP protects against XSS token theft**: `script-src 'self'` prevents injection of unauthorized scripts that could read `localStorage`
+- On page load, `validateToken()` calls `GET /user` to verify the token is still valid
+- On 401, the app immediately clears auth and redirects to login (token is revoked, not expired)
+- On logout, the token is removed from `localStorage` and all local state is cleared
+- Transient network errors do NOT clear the token (permanent tokens survive connectivity issues)
 
 ### CORS
 
 - `Access-Control-Allow-Origin`: exact match against `ALLOWED_ORIGIN` (no wildcards)
-- `Access-Control-Allow-Credentials: true`: enables cookie-based refresh for cross-origin preview deploys
-- Same-origin requests (production, local dev) send cookies automatically without CORS
+- No `Access-Control-Allow-Credentials` header (OAuth App uses no cookies)
 
 ## Local Development
 
@@ -138,9 +102,15 @@ pnpm run build
 wrangler deploy
 ```
 
-For preview (uploads a version without promoting to production):
+## Migration from GitHub App
 
-```sh
-pnpm run build
-wrangler versions upload --preview-alias my-feature
-```
+If you previously deployed with the GitHub App model (HttpOnly cookie refresh tokens), follow these steps:
+
+1. **Update GitHub Actions variable**: change `VITE_GITHUB_CLIENT_ID` to your OAuth App's Client ID
+2. **Update Cloudflare secrets**: re-run `wrangler secret put GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` with OAuth App values
+3. **Update `ALLOWED_ORIGIN`** if it changed (usually unchanged)
+4. **Redeploy** the Worker: `pnpm run build && wrangler deploy`
+5. **Existing users** will be logged out on next page load (their refresh cookie is no longer valid; they will be prompted to log in again via the new OAuth App flow)
+6. **Delete the old GitHub App** (optional): GitHub → Settings → Developer settings → GitHub Apps → your app → Advanced → Delete
+
+The old `POST /api/oauth/refresh` and `POST /api/oauth/logout` endpoints no longer exist and return 404.
