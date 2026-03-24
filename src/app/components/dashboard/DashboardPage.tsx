@@ -50,7 +50,12 @@ onAuthCleared(() => {
 });
 
 async function pollFetch(): Promise<DashboardData> {
-  setDashboardData("loading", true);
+  // Only show skeleton on initial load (no data yet).
+  // Subsequent refreshes keep existing data visible — the coordinator's
+  // isRefreshing signal handles the "Refreshing..." indicator.
+  if (!dashboardData.lastRefreshedAt) {
+    setDashboardData("loading", true);
+  }
   try {
     const data = await fetchAllData();
     // When notifications gate says nothing changed, keep existing data
