@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import type { RepoRef } from "../../../src/app/services/api";
+import type { RepoRef, RepoEntry } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
 vi.mock("../../../src/app/services/github", () => ({
@@ -16,6 +16,8 @@ vi.mock("../../../src/app/services/api", async (importOriginal) => {
     fetchOrgs: vi.fn().mockResolvedValue([
       { login: "myorg", avatarUrl: "", type: "org" },
       { login: "otherog", avatarUrl: "", type: "org" },
+      { login: "stale-org", avatarUrl: "", type: "org" },
+      { login: "active-org", avatarUrl: "", type: "org" },
     ]),
     fetchRepos: vi.fn(),
   };
@@ -24,13 +26,13 @@ vi.mock("../../../src/app/services/api", async (importOriginal) => {
 import * as api from "../../../src/app/services/api";
 import RepoSelector from "../../../src/app/components/onboarding/RepoSelector";
 
-const myorgRepos: RepoRef[] = [
-  { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" },
-  { owner: "myorg", name: "repo-b", fullName: "myorg/repo-b" },
+const myorgRepos: RepoEntry[] = [
+  { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a", pushedAt: "2026-03-20T10:00:00Z" },
+  { owner: "myorg", name: "repo-b", fullName: "myorg/repo-b", pushedAt: "2026-03-22T10:00:00Z" },
 ];
 
-const otherorgRepos: RepoRef[] = [
-  { owner: "otherog", name: "repo-c", fullName: "otherog/repo-c" },
+const otherorgRepos: RepoEntry[] = [
+  { owner: "otherog", name: "repo-c", fullName: "otherog/repo-c", pushedAt: "2026-03-10T10:00:00Z" },
 ];
 
 describe("RepoSelector", () => {
@@ -90,7 +92,11 @@ describe("RepoSelector", () => {
     });
 
     await user.click(repoACheckbox!);
-    expect(onChange).toHaveBeenCalledWith([myorgRepos[0]]);
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }),
+    ]);
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    expect(result[0]).not.toHaveProperty("pushedAt");
   });
 
   it("filters repos by text input", async () => {
@@ -203,5 +209,53 @@ describe("RepoSelector", () => {
     await waitFor(() => {
       screen.getByText(/2 repos selected/i);
     });
+  });
+
+  it("shows relative time next to each repo", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      const labels = screen.getAllByText(/ago|yesterday|just now|last/i);
+      expect(labels.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("sorts org groups by most recent activity", async () => {
+    const staleRepos: RepoEntry[] = [
+      { owner: "stale-org", name: "old-repo", fullName: "stale-org/old-repo", pushedAt: "2025-01-01T00:00:00Z" },
+    ];
+    const activeRepos: RepoEntry[] = [
+      { owner: "active-org", name: "new-repo", fullName: "active-org/new-repo", pushedAt: "2026-03-23T00:00:00Z" },
+    ];
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "stale-org") return Promise.resolve(staleRepos);
+      return Promise.resolve(activeRepos);
+    });
+    render(() => (
+      <RepoSelector selectedOrgs={["stale-org", "active-org"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("old-repo");
+      screen.getByText("new-repo");
+    });
+    const orgHeaders = screen.getAllByText(/^(active-org|stale-org)$/);
+    expect(orgHeaders[0].textContent).toBe("active-org");
+    expect(orgHeaders[1].textContent).toBe("stale-org");
+  });
+
+  it("does not show timestamp for repos with null pushedAt", async () => {
+    const reposWithNull: RepoEntry[] = [
+      { owner: "myorg", name: "empty-repo", fullName: "myorg/empty-repo", pushedAt: null },
+    ];
+    vi.mocked(api.fetchRepos).mockResolvedValue(reposWithNull);
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("empty-repo");
+    });
+    expect(screen.queryByText(/ago|yesterday|just now|last/i)).toBeNull();
   });
 });

@@ -23,7 +23,8 @@ function makeOctokit(requestImpl: (route: string, params?: unknown) => Promise<u
   return {
     request: vi.fn(requestImpl),
     paginate: {
-      iterator: vi.fn((route: string, _params?: unknown) => {
+      iterator: vi.fn((route: string, params?: unknown) => {
+        void params; // captured for test assertions
         // For tests that need paginate.iterator, return a single page
         const data =
           route.includes("/orgs/") || route.includes("/user/repos")
@@ -110,6 +111,33 @@ describe("fetchRepos", () => {
       expect(repo.name).toBeDefined();
       expect(repo.fullName).toBeDefined();
     }
+    expect(result[0].pushedAt).toBe("2011-01-26T19:06:43Z");
+  });
+
+  it("passes sort=pushed and direction=desc to paginate.iterator", async () => {
+    const octokit = makeBasicOctokit();
+    await fetchRepos(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      "acme-corp",
+      "org"
+    );
+    expect(octokit.paginate.iterator).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ sort: "pushed", direction: "desc" })
+    );
+  });
+
+  it("passes sort=pushed and direction=desc for user repos", async () => {
+    const octokit = makeBasicOctokit();
+    await fetchRepos(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      "octocat",
+      "user"
+    );
+    expect(octokit.paginate.iterator).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ sort: "pushed", direction: "desc" })
+    );
   });
 
   it("returns repos for a user account via paginate.iterator", async () => {
