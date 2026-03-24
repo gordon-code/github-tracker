@@ -118,7 +118,7 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
 export async function fetchAllData(): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
-    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
   }
 
   // On subsequent polls, check notifications first (free when 304)

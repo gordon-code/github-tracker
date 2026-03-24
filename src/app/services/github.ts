@@ -162,7 +162,12 @@ export async function cachedRequest(
 
 // ── Client singleton ─────────────────────────────────────────────────────────
 
-const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(null);
+// Eagerly create client if token exists at module load (before initClientWatcher effect runs).
+// This ensures getClient() returns non-null for early callers like the poll coordinator.
+const _initialToken = token();
+const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(
+  _initialToken ? createGitHubClient(_initialToken) : null
+);
 
 export function getClient(): GitHubOctokitInstance | null {
   return _client();
