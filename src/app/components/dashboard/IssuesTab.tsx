@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilterField } from "../../stores/view";
@@ -179,6 +179,11 @@ export default function IssuesTab(props: IssuesTabProps) {
   const pageGroups = createMemo(() =>
     slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
   );
+
+  createEffect(() => {
+    const max = pageCount() - 1;
+    if (page() > max) setPage(max);
+  });
 
   function handleSort(field: SortField) {
     const current = sortPref();

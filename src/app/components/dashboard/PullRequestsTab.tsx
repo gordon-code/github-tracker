@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
@@ -259,6 +259,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const pageGroups = createMemo(() =>
     slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
   );
+
+  createEffect(() => {
+    const max = pageCount() - 1;
+    if (page() > max) setPage(max);
+  });
 
   function handleSort(field: SortField) {
     const current = sortPref();
