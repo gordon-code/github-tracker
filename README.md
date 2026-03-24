@@ -52,14 +52,14 @@ src/
       github.ts     # Octokit client factory with ETag caching and rate limit tracking
       poll.ts       # Poll coordinator with visibility-aware auto-refresh
     stores/
-      auth.ts       # OAuth token management with auto-refresh
+      auth.ts       # OAuth token management (localStorage persistence, validateToken)
       cache.ts      # IndexedDB cache with TTL eviction and ETag support
       config.ts     # Zod v4-validated config with localStorage persistence
       view.ts       # View state (tabs, sorting, ignored items, filters)
     lib/
       notifications.ts  # Desktop notification permission, detection, and dispatch
   worker/
-    index.ts        # OAuth token exchange/refresh endpoint, CORS, security headers
+    index.ts        # OAuth token exchange endpoint, CORS, security headers
 tests/
   fixtures/         # GitHub API response fixtures (orgs, repos, issues, PRs, runs)
   services/         # API service, Octokit client, and poll coordinator tests
@@ -74,10 +74,11 @@ tests/
 - Strict CSP: `script-src 'self'` (SHA-256 exception for dark mode script only)
 - OAuth CSRF protection via `crypto.getRandomValues` state parameter
 - CORS locked to exact origin (strict equality, no substring matching)
-- Access token in-memory only (never persisted); refresh token in `__Host-` HttpOnly cookie
-- Auto-refresh on 401 and on page load via HttpOnly cookie
+- Access token stored in `localStorage` under app-specific key; CSP prevents XSS token theft
+- Token validation on page load via `GET /user`; 401 clears auth immediately (no silent refresh)
 - All GitHub API strings auto-escaped by SolidJS JSX (no innerHTML)
+- `repo` scope granted (required for private repos) — app never performs write operations
 
 ## Deployment
 
-See [DEPLOY.md](./DEPLOY.md) for Cloudflare, GitHub App, and CI/CD setup.
+See [DEPLOY.md](./DEPLOY.md) for Cloudflare, OAuth App, and CI/CD setup.
