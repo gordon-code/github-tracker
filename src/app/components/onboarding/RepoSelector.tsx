@@ -210,11 +210,6 @@ export default function RepoSelector(props: RepoSelectorProps) {
     props.onChange(props.selected.filter((r) => !visible.has(r.fullName)));
   }
 
-  function allVisibleInOrgSelected(state: OrgRepoState): boolean {
-    const visible = filteredReposForOrg(state);
-    return visible.length > 0 && visible.every((r) => isSelected(r.fullName));
-  }
-
   // ── Global select/deselect all ────────────────────────────────────────────
 
   function selectAll() {
@@ -293,8 +288,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
                       type="button"
                       onClick={() => selectAllInOrg(state)}
                       disabled={
-                        allVisibleInOrgSelected(state) ||
-                        visible().length === 0
+                        visible().length === 0 ||
+                        visible().every((r) => isSelected(r.fullName))
                       }
                       class="text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400"
                     >
