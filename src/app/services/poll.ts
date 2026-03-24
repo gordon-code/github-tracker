@@ -316,11 +316,13 @@ export function createPollCoordinator(
   // Immediate fetch on init
   void doFetch();
 
-  onCleanup(() => {
+  function destroy(): void {
     destroyed = true;
     clearTimer();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
-  });
+  }
+
+  onCleanup(destroy);
 
   function manualRefresh(): void {
     void doFetch();
@@ -329,12 +331,6 @@ export function createPollCoordinator(
     if (currentInterval > 0) {
       startTimer(currentInterval);
     }
-  }
-
-  function destroy(): void {
-    destroyed = true;
-    clearTimer();
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
 
   return { isRefreshing, lastRefreshAt, manualRefresh, destroy };

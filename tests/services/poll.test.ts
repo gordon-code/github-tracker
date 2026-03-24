@@ -457,4 +457,36 @@ describe("createPollCoordinator", () => {
 
     randomSpy.mockRestore();
   });
+
+  it("destroy() stops future fetches and removes visibility listener", async () => {
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      coordinator.destroy();
+
+      // Advance past the interval — no fetch should fire
+      vi.advanceTimersByTime(90_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+
+      // Visibility change should not trigger a fetch either
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      setDocumentVisible(true);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+
+      // Manual refresh should also be blocked (doFetch checks destroyed flag)
+      coordinator.manualRefresh();
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+
+      dispose();
+    });
+  });
 });

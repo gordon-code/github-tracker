@@ -178,6 +178,23 @@ describe("onAuthCleared callbacks", () => {
     expect(cb1).toHaveBeenCalledOnce();
     expect(cb2).toHaveBeenCalledOnce();
   });
+
+  it("reentrancy guard: callback that calls clearAuth() does not cause infinite recursion", () => {
+    const innerClearCalls: number[] = [];
+    const reentrantCb = vi.fn(() => {
+      // This reentrant call should be a no-op due to _clearing flag
+      mod.clearAuth();
+      innerClearCalls.push(1);
+    });
+    const normalCb = vi.fn();
+    mod.onAuthCleared(reentrantCb);
+    mod.onAuthCleared(normalCb);
+
+    expect(() => mod.clearAuth()).not.toThrow();
+    // Both callbacks ran exactly once (reentrant clearAuth was a no-op)
+    expect(reentrantCb).toHaveBeenCalledOnce();
+    expect(normalCb).toHaveBeenCalledOnce();
+  });
 });
 
 describe("validateToken", () => {

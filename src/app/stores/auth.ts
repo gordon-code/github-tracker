@@ -21,9 +21,10 @@ interface TokenExchangeResponse {
 
 // Access token is persisted to localStorage for permanent OAuth App tokens.
 // On page reload, validateToken() reads from localStorage and verifies with GitHub.
+// Optional chaining: happy-dom initializes localStorage methods lazily, so getItem
+// may not be a function yet during early module initialization in tests.
 const [_token, _setToken] = createSignal<string | null>(
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  typeof localStorage !== "undefined" ? (localStorage.getItem?.(AUTH_STORAGE_KEY) ?? null) : null
+  localStorage.getItem?.(AUTH_STORAGE_KEY) ?? null
 );
 const [user, setUser] = createSignal<GitHubUser | null>(null);
 

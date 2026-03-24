@@ -60,7 +60,7 @@ export function updateRateLimitFromHeaders(
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(token: string): GitHubOctokitInstance {
-  return new GitHubOctokit({
+  const client = new GitHubOctokit({
     auth: token,
     userAgent: "github-tracker",
     throttle: {
@@ -96,6 +96,18 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       doNotRetry: [400, 401, 403, 404, 410, 422, 429, 451],
     },
   });
+
+  // Read-only guard: the OAuth App `repo` scope grants write access, but this
+  // app is strictly read-only. Block any non-GET request except POST /graphql
+  // (GraphQL queries are read-only but always use POST).
+  client.hook.before("request", (options) => {
+    const method = (options.method ?? "GET").toUpperCase();
+    if (method === "GET") return;
+    if (method === "POST" && options.url.endsWith("/graphql")) return;
+    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
+  });
+
+  return client;
 }
 
 // ── ETag-aware request wrapper ───────────────────────────────────────────────

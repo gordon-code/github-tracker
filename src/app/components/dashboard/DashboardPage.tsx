@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Switch, Match, onMount } from "solid-js";
+import { createSignal, createMemo, Switch, Match, onMount, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
-import { createPollCoordinator, fetchAllData } from "../../services/poll";
+import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared } from "../../stores/auth";
 import { getErrors, dismissError } from "../../lib/errors";
 import ErrorBannerList from "../shared/ErrorBannerList";
@@ -40,18 +40,16 @@ function resetDashboardData(): void {
   setDashboardData({ ...initialDashboardState });
 }
 
-// Clear dashboard data on logout so user A's data doesn't show to user B
-onAuthCleared(resetDashboardData);
-
-// Stop polling on logout so the coordinator doesn't keep firing with a null token
+// Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
+  resetDashboardData();
   if (_coordinator) {
     _coordinator.destroy();
     _coordinator = null;
   }
 });
 
-async function pollFetch(): Promise<import("../../services/poll").DashboardData> {
+async function pollFetch(): Promise<DashboardData> {
   setDashboardData("loading", true);
   try {
     const data = await fetchAllData();
@@ -111,6 +109,12 @@ export default function DashboardPage() {
     if (!_coordinator) {
       _coordinator = createPollCoordinator(() => config.refreshInterval, pollFetch);
     }
+    // Null the reference on unmount so a fresh coordinator is created on remount.
+    // onCleanup inside createPollCoordinator marks it destroyed; this ensures
+    // the guard in onMount doesn't skip recreation on the next navigation back.
+    onCleanup(() => {
+      _coordinator = null;
+    });
   });
 
   const tabCounts = createMemo(() => ({

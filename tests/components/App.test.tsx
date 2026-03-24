@@ -138,6 +138,24 @@ describe("App", () => {
     });
   });
 
+  it("redirects to /dashboard when not initially authenticated but validateToken succeeds", async () => {
+    // Simulates cold start: localStorage has a token but user() is null
+    // → isAuthenticated() = false → validateToken called → returns true → routes to dashboard
+    mockIsAuthenticated = false;
+    mockValidateToken = async () => {
+      // Simulate validateToken populating user, making isAuthenticated true
+      mockIsAuthenticated = true;
+      return true;
+    };
+    configStore.updateConfig({ onboardingComplete: true });
+
+    render(() => <App />);
+
+    await waitFor(() => {
+      screen.getByTestId("dashboard-page");
+    });
+  });
+
   it("all routes are registered: /, /login, /oauth/callback, /onboarding, /dashboard, /settings", () => {
     expect(() => render(() => <App />)).not.toThrow();
   });

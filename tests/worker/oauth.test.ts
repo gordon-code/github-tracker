@@ -326,6 +326,22 @@ describe("Worker OAuth endpoint", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
   });
 
+  it("OPTIONS /api/oauth/refresh returns 404 (preflight narrowed to /token only)", async () => {
+    const req = makeRequest("OPTIONS", "/api/oauth/refresh", {
+      origin: ALLOWED_ORIGIN,
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(404);
+  });
+
+  it("OPTIONS /api/oauth/logout returns 404 (preflight narrowed to /token only)", async () => {
+    const req = makeRequest("OPTIONS", "/api/oauth/logout", {
+      origin: ALLOWED_ORIGIN,
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(404);
+  });
+
   // ── Health and routing ──────────────────────────────────────────────────────
 
   it("GET /api/health returns 200 OK", async () => {
