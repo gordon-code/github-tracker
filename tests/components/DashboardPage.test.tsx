@@ -58,6 +58,8 @@ let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 
 beforeEach(async () => {
+  // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
+  localStorage.clear?.();
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
   // Mutate in place (not reassign) to preserve the reference captured by vi.mock
