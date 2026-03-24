@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
-import type { ApiError } from "../../src/app/services/api";
+import type { PullRequest, ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { makePullRequest, resetViewStore } from "../helpers/index";
+import { updateConfig, resetConfig } from "../../src/app/stores/config";
 
 beforeEach(() => {
   resetViewStore();
+  resetConfig();
 });
 
 describe("PullRequestsTab", () => {
@@ -79,7 +82,7 @@ describe("PullRequestsTab", () => {
   it("filters by globalFilter.org", () => {
     const prs = [
       makePullRequest({ number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
-      makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
+      makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -206,7 +209,6 @@ describe("PullRequestsTab", () => {
     render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
     screen.getByText("My PR");
     expect(screen.queryByText("Other PR")).toBeNull();
-    viewStore.resetTabFilter("pullRequests", "role");
   });
 
   it("filters by reviewDecision tab filter", () => {
@@ -262,5 +264,121 @@ describe("PullRequestsTab", () => {
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Small PR");
     expect(screen.queryByText("Large PR")).toBeNull();
+  });
+
+  it("groups PRs by repo with collapsible headers", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR in repo A", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "PR in repo B", repoFullName: "org/repo-b" }),
+      makePullRequest({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    screen.getByText("PR in repo A");
+    screen.getByText("Another in repo A");
+    screen.getByText("PR in repo B");
+  });
+
+  it("collapses a repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "Visible PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Other repo PR", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Visible PR");
+
+    const repoHeader = screen.getByText("org/repo-a");
+    await user.click(repoHeader);
+
+    expect(screen.queryByText("Visible PR")).toBeNull();
+    screen.getByText("Other repo PR");
+  });
+
+  it("sets aria-expanded on repo group headers", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Test PR", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("toggles aria-expanded to false on collapse and back to true on re-expand", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "Toggle PR", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Toggle PR")).toBeNull();
+
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    screen.getByText("Toggle PR");
+  });
+
+  it("paginates repo groups across pages", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const prs = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        makePullRequest({ id: 100 + i, title: `Repo A PR ${i}`, repoFullName: "org/repo-a" })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makePullRequest({ id: 200 + i, title: `Repo B PR ${i}`, repoFullName: "org/repo-b" })
+      ),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("org/repo-a");
+    screen.getByText(/Page 1 of 2/);
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+
+    const nextBtn = screen.getByLabelText("Next page");
+    await user.click(nextBtn);
+    screen.getByText("org/repo-b");
+    screen.getByText(/Page 2 of 2/);
+  });
+
+  it("keeps a large single-repo group on one page without splitting", () => {
+    updateConfig({ itemsPerPage: 10 });
+    const prs = Array.from({ length: 15 }, (_, i) =>
+      makePullRequest({ id: 300 + i, title: `Big repo PR ${i}`, repoFullName: "org/big-repo" })
+    );
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("org/big-repo");
+    screen.getByText("Big repo PR 0");
+    screen.getByText("Big repo PR 14");
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+  });
+
+  it("resets page when data shrinks below current page", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const repoAPrs = Array.from({ length: 6 }, (_, i) =>
+      makePullRequest({ id: 100 + i, title: `Repo A PR ${i}`, repoFullName: "org/repo-a" })
+    );
+    const repoBPrs = Array.from({ length: 6 }, (_, i) =>
+      makePullRequest({ id: 200 + i, title: `Repo B PR ${i}`, repoFullName: "org/repo-b" })
+    );
+    const [prs, setPrs] = createSignal<PullRequest[]>([...repoAPrs, ...repoBPrs]);
+    render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
+
+    // Navigate to page 2
+    screen.getByText(/Page 1 of 2/);
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText(/Page 2 of 2/);
+    screen.getByText("org/repo-b");
+
+    // Shrink data to fit on 1 page — page should reset
+    setPrs(repoAPrs);
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+    screen.getByText("org/repo-a");
+    screen.getByText("Repo A PR 0");
   });
 });

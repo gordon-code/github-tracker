@@ -12,7 +12,7 @@
     "test:watch": "vitest --config vitest.config.ts",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test"
   },
   "dependencies": {
     "@octokit/core": "^7.0.6",

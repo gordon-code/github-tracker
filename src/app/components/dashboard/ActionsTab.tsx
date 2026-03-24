@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import type { WorkflowRun, ApiError } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
@@ -8,25 +9,7 @@ import ErrorBannerList from "../shared/ErrorBannerList";
 import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
-
-function ChevronIcon(props: { size: "sm" | "md"; rotated: boolean }) {
-  const sizeClass = () => (props.size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5");
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      class={`${sizeClass()} text-gray-400 transition-transform ${props.rotated ? "-rotate-90" : ""}`}
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path
-        fill-rule="evenodd"
-        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-        clip-rule="evenodd"
-      />
-    </svg>
-  );
-}
+import ChevronIcon from "../shared/ChevronIcon";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -122,35 +105,15 @@ const actionsFilterGroups: FilterChipGroupDef[] = [
 ];
 
 export default function ActionsTab(props: ActionsTabProps) {
-  const [collapsedRepos, setCollapsedRepos] = createSignal<Set<string>>(
-    new Set()
-  );
-  const [collapsedWorkflows, setCollapsedWorkflows] = createSignal<Set<string>>(
-    new Set()
-  );
+  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+  const [collapsedWorkflows, setCollapsedWorkflows] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
+    setCollapsedRepos(repoFullName, (v) => !v);
   }
 
   function toggleWorkflow(key: string) {
-    setCollapsedWorkflows((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+    setCollapsedWorkflows(key, (v) => !v);
   }
 
   function handleIgnore(run: WorkflowRun) {
@@ -255,13 +218,14 @@ export default function ActionsTab(props: ActionsTabProps) {
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isRepoCollapsed = () =>
-              collapsedRepos().has(repoGroup.repoFullName);
+              collapsedRepos[repoGroup.repoFullName];
 
             return (
               <div class="bg-white dark:bg-gray-900">
                 {/* Repo header */}
                 <button
                   onClick={() => toggleRepo(repoGroup.repoFullName)}
+                  aria-expanded={!isRepoCollapsed()}
                   class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <ChevronIcon size="md" rotated={isRepoCollapsed()} />
@@ -274,13 +238,14 @@ export default function ActionsTab(props: ActionsTabProps) {
                     {(wfGroup) => {
                       const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
                       const isWfCollapsed = () =>
-                        collapsedWorkflows().has(wfKey);
+                        collapsedWorkflows[wfKey];
 
                       return (
                         <div class="border-l-2 border-gray-100 dark:border-gray-800 ml-4">
                           {/* Workflow header */}
                           <button
                             onClick={() => toggleWorkflow(wfKey)}
+                            aria-expanded={!isWfCollapsed()}
                             class="w-full flex items-center gap-2 px-4 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                           >
                             <ChevronIcon size="sm" rotated={isWfCollapsed()} />

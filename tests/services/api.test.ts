@@ -715,6 +715,41 @@ describe("fetchWorkflowRuns", () => {
     });
   });
 
+  it("sorts workflows by most recent activity descending", async () => {
+    const octokit = makeOctokitForRuns();
+
+    const { workflowRuns } = await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      5,
+      10
+    );
+
+    // CI workflow (id 1001) has latestAt 2024-01-15T10:05 (from run 9002)
+    // Deploy workflow (id 1002) has latestAt 2024-01-15T09:25 (from run 9004)
+    // CI should appear first (more recent)
+    const firstCiIndex = workflowRuns.findIndex((r) => r.workflowId === 1001);
+    const firstDeployIndex = workflowRuns.findIndex((r) => r.workflowId === 1002);
+    expect(firstCiIndex).toBeLessThan(firstDeployIndex);
+  });
+
+  it("sorts runs within a workflow by created_at descending", async () => {
+    const octokit = makeOctokitForRuns();
+
+    const { workflowRuns } = await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      5,
+      10
+    );
+
+    // CI runs: 9002 (10:00), 9001 (09:00), 9003 (Jan 14 15:00) — descending by created_at
+    const ciRuns = workflowRuns.filter((r) => r.workflowId === 1001);
+    expect(ciRuns[0].id).toBe(9002);
+    expect(ciRuns[1].id).toBe(9001);
+    expect(ciRuns[2].id).toBe(9003);
+  });
+
   it("throws when octokit is null", async () => {
     await expect(
       fetchWorkflowRuns(null, [testRepo], 5, 3)

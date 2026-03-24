@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilterField } from "../../stores/view";
 import type { Issue, ApiError } from "../../services/api";
@@ -11,7 +12,9 @@ import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
+import ChevronIcon from "../shared/ChevronIcon";
 import { deriveInvolvementRoles } from "../../lib/format";
+import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -43,6 +46,11 @@ const issueFilterGroups: FilterChipGroupDef[] = [
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
+  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+
+  function toggleRepo(repoFullName: string) {
+    setCollapsedRepos(repoFullName, (v) => !v);
+  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
@@ -110,20 +118,19 @@ export default function IssuesTab(props: IssuesTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = () => filteredSortedWithMeta().items;
-  const issueMeta = () => filteredSortedWithMeta().meta;
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const pageSize = createMemo(() => config.itemsPerPage);
-
-  const pageCount = createMemo(() =>
-    Math.max(1, Math.ceil(filteredSorted().length / pageSize()))
+  const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
+  const pageCount = createMemo(() => pageLayout().pageCount);
+  const pageGroups = createMemo(() =>
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
   );
 
-  // Reset to first page when filters/sort change
-  const pagedItems = createMemo(() => {
-    const p = Math.min(page(), pageCount() - 1);
-    const start = p * pageSize();
-    return filteredSorted().slice(start, start + pageSize());
+  createEffect(() => {
+    const max = pageCount() - 1;
+    if (page() > max) setPage(max);
   });
 
   function handleSort(field: SortField) {
@@ -213,7 +220,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       {/* Issue rows */}
       <Show when={!props.loading || props.issues.length > 0}>
         <Show
-          when={pagedItems().length > 0}
+          when={pageGroups().length > 0}
           fallback={
             <div class="flex flex-col items-center justify-center gap-2 py-16 text-gray-500 dark:text-gray-400">
               <svg
@@ -237,26 +244,48 @@ export default function IssuesTab(props: IssuesTabProps) {
             </div>
           }
         >
-          <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
-            <For each={pagedItems()}>
-              {(issue) => (
-                <div role="listitem">
-                  <ItemRow
-                    repo={issue.repoFullName}
-                    number={issue.number}
-                    title={issue.title}
-                    author={issue.userLogin}
-                    createdAt={issue.createdAt}
-                    url={issue.htmlUrl}
-                    labels={issue.labels}
-                    onIgnore={() => handleIgnore(issue)}
-                    density={config.viewDensity}
-                    commentCount={issue.comments}
-                  >
-                    <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
-                  </ItemRow>
-                </div>
-              )}
+          <div class="divide-y divide-gray-100 dark:divide-gray-800">
+            <For each={pageGroups()}>
+              {(repoGroup) => {
+                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                return (
+                  <div class="bg-white dark:bg-gray-900">
+                    <button
+                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      aria-expanded={!isRepoCollapsed()}
+                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      {repoGroup.repoFullName}
+                    </button>
+                    <Show when={!isRepoCollapsed()}>
+                      <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <For each={repoGroup.items}>
+                          {(issue) => (
+                            <div role="listitem">
+                              <ItemRow
+                                hideRepo={true}
+                                repo={issue.repoFullName}
+                                number={issue.number}
+                                title={issue.title}
+                                author={issue.userLogin}
+                                createdAt={issue.createdAt}
+                                url={issue.htmlUrl}
+                                labels={issue.labels}
+                                onIgnore={() => handleIgnore(issue)}
+                                density={config.viewDensity}
+                                commentCount={issue.comments}
+                              >
+                                <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
+                              </ItemRow>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
             </For>
           </div>
         </Show>

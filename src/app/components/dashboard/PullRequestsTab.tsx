@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, ApiError } from "../../services/api";
@@ -15,6 +16,8 @@ import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
+import ChevronIcon from "../shared/ChevronIcon";
+import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -103,6 +106,11 @@ const prFilterGroups: FilterChipGroupDef[] = [
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
+  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+
+  function toggleRepo(repoFullName: string) {
+    setCollapsedRepos(repoFullName, (v) => !v);
+  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
@@ -190,19 +198,19 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     return { items, meta };
   });
 
-  const filteredSorted = () => filteredSortedWithMeta().items;
-  const prMeta = () => filteredSortedWithMeta().meta;
+  const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
+  const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const pageSize = createMemo(() => config.itemsPerPage);
-
-  const pageCount = createMemo(() =>
-    Math.max(1, Math.ceil(filteredSorted().length / pageSize()))
+  const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
+  const pageCount = createMemo(() => pageLayout().pageCount);
+  const pageGroups = createMemo(() =>
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
   );
 
-  const pagedItems = createMemo(() => {
-    const p = Math.min(page(), pageCount() - 1);
-    const start = p * pageSize();
-    return filteredSorted().slice(start, start + pageSize());
+  createEffect(() => {
+    const max = pageCount() - 1;
+    if (page() > max) setPage(max);
   });
 
   function handleSort(field: SortField) {
@@ -270,9 +278,18 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         <FilterChips
           groups={prFilterGroups}
           values={viewState.tabFilters.pullRequests}
-          onChange={(field, value) => { setTabFilter("pullRequests", field as PullRequestFilterField, value); setPage(0); }}
-          onReset={(field) => { resetTabFilter("pullRequests", field as PullRequestFilterField); setPage(0); }}
-          onResetAll={() => { resetAllTabFilters("pullRequests"); setPage(0); }}
+          onChange={(field, value) => {
+            setTabFilter("pullRequests", field as PullRequestFilterField, value);
+            setPage(0);
+          }}
+          onReset={(field) => {
+            resetTabFilter("pullRequests", field as PullRequestFilterField);
+            setPage(0);
+          }}
+          onResetAll={() => {
+            resetAllTabFilters("pullRequests");
+            setPage(0);
+          }}
         />
       </div>
 
@@ -284,7 +301,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       {/* PR rows */}
       <Show when={!props.loading || props.pullRequests.length > 0}>
         <Show
-          when={pagedItems().length > 0}
+          when={pageGroups().length > 0}
           fallback={
             <div class="flex flex-col items-center justify-center gap-2 py-16 text-gray-500 dark:text-gray-400">
               <svg
@@ -308,43 +325,65 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             </div>
           }
         >
-          <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
-            <For each={pagedItems()}>
-              {(pr) => (
-                <div role="listitem">
-                  <ItemRow
-                    repo={pr.repoFullName}
-                    number={pr.number}
-                    title={pr.title}
-                    author={pr.userLogin}
-                    createdAt={pr.createdAt}
-                    url={pr.htmlUrl}
-                    labels={pr.labels}
-                    commentCount={pr.comments + pr.reviewComments}
-                    onIgnore={() => handleIgnore(pr)}
-                    density={config.viewDensity}
-                  >
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
-                      <ReviewBadge decision={pr.reviewDecision} />
-                      <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
-                      <StatusDot status={pr.checkStatus} />
-                      <Show when={pr.draft}>
-                        <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 font-medium">
-                          Draft
-                        </span>
-                      </Show>
-                      <Show when={pr.reviewerLogins.length > 0}>
-                        <span class="text-xs text-gray-500 dark:text-gray-400" title={pr.reviewerLogins.join(", ")}>
-                          Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
-                          {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
-                          {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
-                        </span>
-                      </Show>
-                    </div>
-                  </ItemRow>
-                </div>
-              )}
+          <div class="divide-y divide-gray-100 dark:divide-gray-800">
+            <For each={pageGroups()}>
+              {(repoGroup) => {
+                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                return (
+                  <div class="bg-white dark:bg-gray-900">
+                    <button
+                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      aria-expanded={!isRepoCollapsed()}
+                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      {repoGroup.repoFullName}
+                    </button>
+                    <Show when={!isRepoCollapsed()}>
+                      <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                        <For each={repoGroup.items}>
+                          {(pr) => (
+                            <div role="listitem">
+                              <ItemRow
+                                hideRepo={true}
+                                repo={pr.repoFullName}
+                                number={pr.number}
+                                title={pr.title}
+                                author={pr.userLogin}
+                                createdAt={pr.createdAt}
+                                url={pr.htmlUrl}
+                                labels={pr.labels}
+                                commentCount={pr.comments + pr.reviewComments}
+                                onIgnore={() => handleIgnore(pr)}
+                                density={config.viewDensity}
+                              >
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
+                                  <ReviewBadge decision={pr.reviewDecision} />
+                                  <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
+                                  <StatusDot status={pr.checkStatus} />
+                                  <Show when={pr.draft}>
+                                    <span class="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 font-medium">
+                                      Draft
+                                    </span>
+                                  </Show>
+                                  <Show when={pr.reviewerLogins.length > 0}>
+                                    <span class="text-xs text-gray-500 dark:text-gray-400" title={pr.reviewerLogins.join(", ")}>
+                                      Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
+                                      {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
+                                      {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
+                                    </span>
+                                  </Show>
+                                </div>
+                              </ItemRow>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
             </For>
           </div>
         </Show>

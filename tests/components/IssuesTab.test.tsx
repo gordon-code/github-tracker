@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
-import type { ApiError } from "../../src/app/services/api";
+import type { Issue, ApiError } from "../../src/app/services/api";
 import { makeIssue, resetViewStore } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
+import { updateConfig, resetConfig } from "../../src/app/stores/config";
 
 beforeEach(() => {
   resetViewStore();
+  resetConfig();
 });
 
 describe("IssuesTab", () => {
@@ -80,7 +83,7 @@ describe("IssuesTab", () => {
   it("filters by globalFilter.org", () => {
     const issues = [
       makeIssue({ number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
-      makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorge/repo-b" }),
+      makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <IssuesTab issues={issues} userLogin="" />);
@@ -116,19 +119,16 @@ describe("IssuesTab", () => {
 
   it("toggles sort direction on second click of same column", async () => {
     const user = userEvent.setup();
-    const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} userLogin="" />);
 
     const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    // First click: sets desc
+    // First click: title was not active, so sets desc
     await user.click(titleHeader);
-    // Simulate sort pref being updated to title/desc (spy already called)
-    // Second click should toggle to asc
+    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "desc" });
+    // Second click on same column: toggles to asc
     await user.click(titleHeader);
-
-    expect(setSortSpy).toHaveBeenCalledTimes(2);
-    setSortSpy.mockRestore();
+    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "asc" });
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -183,5 +183,154 @@ describe("IssuesTab", () => {
   it("renders Comments column header", () => {
     render(() => <IssuesTab issues={[]} userLogin="" />);
     screen.getByLabelText("Sort by Comments");
+  });
+
+  it("groups issues by repo with collapsible headers", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue in repo A", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Issue in repo B", repoFullName: "org/repo-b" }),
+      makeIssue({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    screen.getByText("Issue in repo A");
+    screen.getByText("Another in repo A");
+    screen.getByText("Issue in repo B");
+  });
+
+  it("collapses a repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Visible issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Other repo issue", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Visible issue");
+
+    const repoHeader = screen.getByText("org/repo-a");
+    await user.click(repoHeader);
+
+    expect(screen.queryByText("Visible issue")).toBeNull();
+    screen.getByText("Other repo issue");
+  });
+
+  it("sets aria-expanded on repo group headers", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Test issue", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("toggles aria-expanded to false on collapse and back to true on re-expand", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Toggle issue", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const header = screen.getByText("org/repo-a").closest("button")!;
+
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Toggle issue")).toBeNull();
+
+    await user.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    screen.getByText("Toggle issue");
+  });
+
+  it("paginates repo groups across pages", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const issues = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 100 + i, title: `Repo A issue ${i}`, repoFullName: "org/repo-a" })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
+      ),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // Page 1: repo-a (6 items), Page 2: repo-b (6 items) — 12 total > pageSize 10
+    screen.getByText("org/repo-a");
+    screen.getByText(/Page 1 of 2/);
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+
+    const nextBtn = screen.getByLabelText("Next page");
+    await user.click(nextBtn);
+    screen.getByText("org/repo-b");
+    screen.getByText(/Page 2 of 2/);
+  });
+
+  it("preserves collapse state across filter changes", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Alice issue", repoFullName: "org/repo-a", userLogin: "alice" }),
+      makeIssue({ id: 2, title: "Bob issue", repoFullName: "org/repo-b", userLogin: "bob" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+
+    // Collapse repo-a
+    const repoHeader = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(repoHeader);
+    expect(screen.queryByText("Alice issue")).toBeNull();
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
+
+    // Apply role filter that keeps only alice's issue (repo-a)
+    viewStore.setTabFilter("issues", "role", "author");
+    // repo-a still visible (collapsed), repo-b filtered out
+    screen.getByText("org/repo-a");
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+    // Items still hidden because collapse state persists
+    expect(screen.queryByText("Alice issue")).toBeNull();
+
+    // Clear filter — repo-b reappears, repo-a stays collapsed
+    viewStore.resetTabFilter("issues", "role");
+    screen.getByText("org/repo-a");
+    screen.getByText("org/repo-b");
+    expect(screen.queryByText("Alice issue")).toBeNull();
+    screen.getByText("Bob issue");
+  });
+
+  it("resets page when data shrinks below current page", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const repoAIssues = Array.from({ length: 6 }, (_, i) =>
+      makeIssue({ id: 100 + i, title: `Repo A issue ${i}`, repoFullName: "org/repo-a" })
+    );
+    const repoBIssues = Array.from({ length: 6 }, (_, i) =>
+      makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
+    );
+    const [issues, setIssues] = createSignal<Issue[]>([...repoAIssues, ...repoBIssues]);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+
+    // Navigate to page 2
+    screen.getByText(/Page 1 of 2/);
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText(/Page 2 of 2/);
+    screen.getByText("org/repo-b");
+
+    // Shrink data to fit on 1 page — page should reset
+    setIssues(repoAIssues);
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+    screen.getByText("org/repo-a");
+    screen.getByText("Repo A issue 0");
+  });
+
+  it("keeps a large single-repo group on one page without splitting", () => {
+    updateConfig({ itemsPerPage: 10 });
+    const issues = Array.from({ length: 15 }, (_, i) =>
+      makeIssue({ id: 300 + i, title: `Big repo issue ${i}`, repoFullName: "org/big-repo" })
+    );
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // All 15 items in one group — whole-groups-only pagination keeps them together
+    screen.getByText("org/big-repo");
+    screen.getByText("Big repo issue 0");
+    screen.getByText("Big repo issue 14");
+    // No pagination controls (single page with oversized group)
+    expect(screen.queryByLabelText("Next page")).toBeNull();
   });
 });
