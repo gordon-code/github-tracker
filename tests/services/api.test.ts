@@ -720,6 +720,38 @@ describe("fetchWorkflowRuns", () => {
       fetchWorkflowRuns(null, [testRepo], 5, 3)
     ).rejects.toThrow("No GitHub client available");
   });
+
+  it("returns runs sorted newest-first within each workflow", async () => {
+    const octokit = makeOctokitForRuns();
+
+    const { workflowRuns } = await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      5,
+      10
+    );
+
+    // Workflow 1001 has 3 runs: 9002 (10:00), 9001 (09:00), 9003 (14:15:00 prev day)
+    const w1001Runs = workflowRuns.filter((r) => r.workflowId === 1001);
+    for (let i = 1; i < w1001Runs.length; i++) {
+      expect(w1001Runs[i - 1].createdAt >= w1001Runs[i].createdAt).toBe(true);
+    }
+  });
+
+  it("selects workflows with most recent activity first", async () => {
+    const octokit = makeOctokitForRuns();
+
+    const { workflowRuns } = await fetchWorkflowRuns(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      5,
+      10
+    );
+
+    // First run in results should be from the workflow with the most recent updatedAt
+    // Workflow 1001 latestAt=2024-01-15T10:05:00Z > Workflow 1002 latestAt=2024-01-15T09:25:00Z
+    expect(workflowRuns[0].workflowId).toBe(1001);
+  });
 });
 
 // ── searchAllPages pagination ─────────────────────────────────────────────────

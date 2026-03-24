@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { RepoRef, RepoEntry } from "../../../src/app/services/api";
 
@@ -38,6 +38,7 @@ const otherorgRepos: RepoEntry[] = [
 describe("RepoSelector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("shows loading while fetching repos", async () => {
@@ -100,6 +101,7 @@ describe("RepoSelector", () => {
   });
 
   it("filters repos by text input", async () => {
+    const user = userEvent.setup();
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
 
     render(() => (
@@ -111,7 +113,7 @@ describe("RepoSelector", () => {
     });
 
     const filterInput = screen.getByPlaceholderText(/Filter repos/i);
-    fireEvent.input(filterInput, { target: { value: "repo-a" } });
+    await user.type(filterInput, "repo-a");
 
     await waitFor(() => {
       screen.getByText("repo-a");
@@ -132,9 +134,8 @@ describe("RepoSelector", () => {
       screen.getByText("repo-a");
     });
 
-    // "Select All" button in the org header (there may be multiple — use the first one)
+    // With a single org: [global Select All, per-org Select All] — click the per-org (last) one
     const selectAllBtns = screen.getAllByText("Select All");
-    // The per-org one is inside the org group; for a single org there's only one
     await user.click(selectAllBtns[selectAllBtns.length - 1]);
 
     expect(onChange).toHaveBeenCalled();
@@ -215,13 +216,14 @@ describe("RepoSelector", () => {
   });
 
   it("shows relative time next to each repo", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-03-24T12:00:00Z").getTime());
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
     render(() => (
       <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
     ));
     await waitFor(() => {
-      const labels = screen.getAllByText(/ago|yesterday|just now|last/i);
-      expect(labels.length).toBeGreaterThanOrEqual(2);
+      screen.getByText("4 days ago");
+      screen.getByText("2 days ago");
     });
   });
 
@@ -260,5 +262,54 @@ describe("RepoSelector", () => {
       screen.getByText("empty-repo");
     });
     expect(screen.queryByText(/ago|yesterday|just now|last/i)).toBeNull();
+  });
+
+  it("global Select All strips pushedAt from onChange payload", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "myorg") return Promise.resolve(myorgRepos);
+      return Promise.resolve(otherorgRepos);
+    });
+    const onChange = vi.fn();
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg", "otherog"]} selected={[]} onChange={onChange} />
+    ));
+    await waitFor(() => {
+      screen.getByText("repo-a");
+      screen.getByText("repo-c");
+    });
+    // The first "Select All" button is the global one in the header
+    const selectAllBtns = screen.getAllByText("Select All");
+    await user.click(selectAllBtns[0]);
+    expect(onChange).toHaveBeenCalled();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    expect(result.length).toBe(3);
+    for (const r of result) {
+      expect(r).not.toHaveProperty("pushedAt");
+    }
+  });
+
+  it("preserves org order when all repos have null pushedAt", async () => {
+    const nullOrg1: RepoEntry[] = [
+      { owner: "stale-org", name: "null-repo-1", fullName: "stale-org/null-repo-1", pushedAt: null },
+    ];
+    const nullOrg2: RepoEntry[] = [
+      { owner: "active-org", name: "null-repo-2", fullName: "active-org/null-repo-2", pushedAt: null },
+    ];
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "stale-org") return Promise.resolve(nullOrg1);
+      return Promise.resolve(nullOrg2);
+    });
+    render(() => (
+      <RepoSelector selectedOrgs={["stale-org", "active-org"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("null-repo-1");
+      screen.getByText("null-repo-2");
+    });
+    const orgHeaders = screen.getAllByText(/^(active-org|stale-org)$/);
+    // Both have null pushedAt → comparator returns 0 → original order preserved
+    expect(orgHeaders[0].textContent).toBe("stale-org");
+    expect(orgHeaders[1].textContent).toBe("active-org");
   });
 });

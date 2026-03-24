@@ -153,9 +153,15 @@ export default function RepoSelector(props: RepoSelectorProps) {
     // After initial load (all orgs resolved), sorting stays active during retries
     // because loadedCount is not reset by retryOrg.
     if (loadedCount() < props.selectedOrgs.length) return states;
+    const maxPushedAt = new Map(
+      states.map((s) => [
+        s.org,
+        s.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, ""),
+      ])
+    );
     return [...states].sort((a, b) => {
-      const aMax = a.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
-      const bMax = b.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, "");
+      const aMax = maxPushedAt.get(a.org) ?? "";
+      const bMax = maxPushedAt.get(b.org) ?? "";
       return aMax > bMax ? -1 : aMax < bMax ? 1 : 0;
     });
   });
@@ -272,7 +278,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
       {/* Per-org repo lists */}
       <For each={sortedOrgStates()}>
         {(state) => {
-          const visible = () => filteredReposForOrg(state);
+          const visible = createMemo(() => filteredReposForOrg(state));
 
           return (
             <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">

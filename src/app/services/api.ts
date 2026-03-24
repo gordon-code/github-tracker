@@ -1037,14 +1037,14 @@ export async function fetchWorkflowRuns(
       runs,
       latestAt: runs.reduce((max, r) => r.updated_at > max ? r.updated_at : max, ""),
     }));
-    workflowEntries.sort((a, b) => b.latestAt > a.latestAt ? -1 : b.latestAt < a.latestAt ? 1 : 0);
+    workflowEntries.sort((a, b) => a.latestAt > b.latestAt ? -1 : a.latestAt < b.latestAt ? 1 : 0);
     const topWorkflows = workflowEntries
       .slice(0, maxWorkflows);
 
     // Take most recent M runs per workflow
     for (const { runs: workflowRuns } of topWorkflows) {
       const sorted = workflowRuns.sort(
-        (a, b) => b.created_at > a.created_at ? -1 : b.created_at < a.created_at ? 1 : 0
+        (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
         allRuns.push({
