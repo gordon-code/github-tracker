@@ -16,6 +16,8 @@ import ErrorBannerList from "../shared/ErrorBannerList";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
+export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
+
 interface DashboardStore {
   issues: Issue[];
   pullRequests: PullRequest[];
@@ -34,10 +36,30 @@ const initialDashboardState: DashboardStore = {
   lastRefreshedAt: null,
 };
 
-const [dashboardData, setDashboardData] = createStore<DashboardStore>({ ...initialDashboardState });
+function loadCachedDashboard(): DashboardStore {
+  try {
+    const raw = localStorage.getItem?.(DASHBOARD_STORAGE_KEY);
+    if (!raw) return { ...initialDashboardState };
+    const parsed = JSON.parse(raw) as DashboardStore;
+    // Restore Date from ISO string
+    return {
+      issues: parsed.issues ?? [],
+      pullRequests: parsed.pullRequests ?? [],
+      workflowRuns: parsed.workflowRuns ?? [],
+      errors: [],
+      loading: false,
+      lastRefreshedAt: parsed.lastRefreshedAt ? new Date(parsed.lastRefreshedAt) : null,
+    };
+  } catch {
+    return { ...initialDashboardState };
+  }
+}
+
+const [dashboardData, setDashboardData] = createStore<DashboardStore>(loadCachedDashboard());
 
 function resetDashboardData(): void {
   setDashboardData({ ...initialDashboardState });
+  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
 }
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
@@ -60,14 +82,27 @@ async function pollFetch(): Promise<DashboardData> {
     const data = await fetchAllData();
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
+      const now = new Date();
       setDashboardData({
         issues: data.issues,
         pullRequests: data.pullRequests,
         workflowRuns: data.workflowRuns,
         errors: data.errors,
         loading: false,
-        lastRefreshedAt: new Date(),
+        lastRefreshedAt: now,
       });
+      // Persist for stale-while-revalidate on full page reload.
+      // Errors are transient and not persisted.
+      try {
+        localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
+          issues: data.issues,
+          pullRequests: data.pullRequests,
+          workflowRuns: data.workflowRuns,
+          lastRefreshedAt: now.toISOString(),
+        }));
+      } catch {
+        // localStorage full or unavailable — non-fatal
+      }
     } else {
       setDashboardData("loading", false);
     }
