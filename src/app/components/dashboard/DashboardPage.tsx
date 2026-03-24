@@ -151,6 +151,7 @@ export default function DashboardPage() {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
     onCleanup(() => {
+      _coordinator()?.destroy();
       _setCoordinator(null);
     });
   });
