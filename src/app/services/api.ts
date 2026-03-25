@@ -1,6 +1,6 @@
 import { getClient, cachedRequest, updateRateLimitFromHeaders } from "./github";
 import { evictByPrefix } from "../stores/cache";
-import { pushError } from "../lib/errors";
+import { pushNotification } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -274,13 +274,13 @@ async function searchAllPages(
         console.warn(
           `[api] Search results incomplete for: ${query.slice(0, 80)}…`
         );
-        pushError("search", "Search results may be incomplete — GitHub returned partial data", false);
+        pushNotification("search", "Search results may be incomplete — GitHub returned partial data", "warning");
       }
       if (items.length >= 1000 && data.total_count > 1000) {
         console.warn(
           `[api] Search results capped at 1000 (${data.total_count} total) for: ${query.slice(0, 80)}…`
         );
-        pushError("search", `Search results capped at 1,000 of ${data.total_count.toLocaleString()} total — some items are hidden`, false);
+        pushNotification("search", `Search results capped at 1,000 of ${data.total_count.toLocaleString()} total — some items are hidden`, "warning");
       }
       break;
     }
@@ -749,7 +749,7 @@ async function batchFetchCheckStatuses(
   // REST uses the core rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
   // ETag caching via cachedRequest means unchanged PRs return 304 (free).
   if (failedPrs.length > 0) {
-    pushError("graphql", `Fetching check/review data via REST for ${failedPrs.length} PR(s) — GraphQL rate limited`, true);
+    pushNotification("graphql", `Fetching check/review data via REST for ${failedPrs.length} PR(s) — GraphQL rate limited`, "info", true);
     await restFallbackCheckStatuses(octokit, failedPrs, results);
   }
 

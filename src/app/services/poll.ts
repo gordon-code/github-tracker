@@ -13,7 +13,7 @@ import {
   resetEmptyActionRepos,
 } from "./api";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking } from "../lib/errors";
+import { pushError, pushNotification, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ async function hasNotificationChanges(): Promise<boolean> {
       (err as { status?: number }).status === 403
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
-      pushError("notifications", "Notifications API returned 403 — check that the notifications scope is granted", false); // kept as pushError — this is a real error
+      pushNotification("notifications", "Notifications API returned 403 — check that the notifications scope is granted", "warning");
       _notifGateDisabled = true;
     }
     return true;
