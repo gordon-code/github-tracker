@@ -14,12 +14,13 @@ beforeEach(() => {
 });
 
 describe("PullRequestsTab", () => {
-  it("renders a list of pull requests", () => {
+  it("renders a list of pull requests", async () => {
     const prs = [
-      makePullRequest({ number: 1, title: "First PR" }),
-      makePullRequest({ number: 2, title: "Second PR" }),
+      makePullRequest({ id: 1, number: 1, title: "First PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, number: 2, title: "Second PR", repoFullName: "org/repo-a" }),
     ];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // First group auto-expands, so items are visible
     screen.getByText("First PR");
     screen.getByText("Second PR");
   });
@@ -52,8 +53,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by globalFilter.repo", () => {
     const prs = [
-      makePullRequest({ number: 1, title: "In target repo", repoFullName: "owner/target" }),
-      makePullRequest({ number: 2, title: "In other repo", repoFullName: "owner/other" }),
+      makePullRequest({ id: 1, number: 1, title: "In target repo", repoFullName: "owner/target" }),
+      makePullRequest({ id: 2, number: 2, title: "In other repo", repoFullName: "owner/other" }),
     ];
     viewStore.setGlobalFilter(null, "owner/target");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -63,8 +64,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by globalFilter.org", () => {
     const prs = [
-      makePullRequest({ number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
-      makePullRequest({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
+      makePullRequest({ id: 1, number: 1, title: "In org", repoFullName: "myorg/repo-a" }),
+      makePullRequest({ id: 2, number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -74,8 +75,8 @@ describe("PullRequestsTab", () => {
 
   it("sorts by updatedAt descending by default", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Older PR", updatedAt: "2024-01-10T00:00:00Z" }),
-      makePullRequest({ id: 2, title: "Newer PR", updatedAt: "2024-01-20T00:00:00Z" }),
+      makePullRequest({ id: 1, title: "Older PR", updatedAt: "2024-01-10T00:00:00Z", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Newer PR", updatedAt: "2024-01-20T00:00:00Z", repoFullName: "org/repo-a" }),
     ];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     const items = screen.getAllByRole("listitem");
@@ -85,29 +86,33 @@ describe("PullRequestsTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("changes sort when column header clicked", async () => {
+  it("renders SortDropdown with all sort options", () => {
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
+    const dropdown = screen.getByLabelText("Sort by") as HTMLSelectElement;
+    expect(dropdown).toBeDefined();
+    // Check all sort fields appear as options
+    const optionText = Array.from(dropdown.options).map((o) => o.text);
+    expect(optionText.some((t) => t.includes("Repo"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Title"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Author"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Checks"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Review"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Size"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Created"))).toBe(true);
+    expect(optionText.some((t) => t.includes("Updated"))).toBe(true);
+  });
+
+  it("changes sort when SortDropdown selection changes", async () => {
     const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
-    const prs = [makePullRequest({ title: "PR A" })];
+    const prs = [makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
 
-    const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    await user.click(titleHeader);
+    const dropdown = screen.getByLabelText("Sort by");
+    await user.selectOptions(dropdown, "title:desc");
 
     expect(setSortSpy).toHaveBeenCalledWith("pullRequests", "title", "desc");
     setSortSpy.mockRestore();
-  });
-
-  it("renders column headers for all sortable fields", () => {
-    render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    screen.getByLabelText("Sort by Repo");
-    screen.getByLabelText("Sort by Title");
-    screen.getByLabelText("Sort by Author");
-    screen.getByLabelText("Sort by Checks");
-    screen.getByLabelText("Sort by Review");
-    screen.getByLabelText("Sort by Size");
-    screen.getByLabelText("Sort by Created");
-    screen.getByLabelText("Sort by Updated");
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -117,19 +122,19 @@ describe("PullRequestsTab", () => {
     expect(screen.queryByLabelText("Next page")).toBeNull();
   });
 
-  it("shows StatusDot for each PR's checkStatus", () => {
+  it("shows StatusDot for each PR's checkStatus when expanded", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "PR with status", checkStatus: "success" }),
+      makePullRequest({ id: 1, title: "PR with status", checkStatus: "success", repoFullName: "org/repo-a" }),
     ];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
-    // StatusDot renders a <span> with aria-label matching the check status label
+    // First group auto-expands, so StatusDot is visible
     screen.getByLabelText("All checks passed");
   });
 
-  it("shows Draft badge for draft PRs", () => {
-    const pr = makePullRequest({ title: "Draft PR", draft: true });
+  it("shows Draft badge for draft PRs when expanded", () => {
+    const pr = makePullRequest({ id: 1, title: "Draft PR", draft: true, repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Draft" appears in both the filter chip button and the PR badge
+    // "Draft" appears in both the filter chip button and the PR badge (first group auto-expands)
     const draftEls = screen.getAllByText("Draft");
     // At least one is a span (the badge), not a button (the chip)
     const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
@@ -137,7 +142,7 @@ describe("PullRequestsTab", () => {
   });
 
   it("does not show Draft badge for non-draft PRs", () => {
-    const pr = makePullRequest({ title: "Normal PR", draft: false });
+    const pr = makePullRequest({ id: 1, title: "Normal PR", draft: false, repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // "Draft" may appear as a filter chip button, but should NOT appear as a badge span
     const draftEls = screen.queryAllByText("Draft");
@@ -146,36 +151,36 @@ describe("PullRequestsTab", () => {
   });
 
   it("shows Author role badge when userLogin matches PR author", () => {
-    const pr = makePullRequest({ title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [] });
+    const pr = makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Author" appears in both the filter chip button and the role badge
+    // "Author" appears in both the filter chip button and the role badge (first group auto-expands)
     const authorEls = screen.getAllByText("Author");
     const badgeEl = authorEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
 
   it("shows Reviewer role badge when userLogin is a reviewer", () => {
-    const pr = makePullRequest({ title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [] });
+    const pr = makePullRequest({ id: 1, title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [], repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Reviewer" appears in both the filter chip button and the role badge
+    // "Reviewer" appears in both the filter chip button and the role badge (first group auto-expands)
     const reviewerEls = screen.getAllByText("Reviewer");
     const badgeEl = reviewerEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
 
-  it("shows ReviewBadge for approved PRs", () => {
-    const pr = makePullRequest({ title: "Approved PR", reviewDecision: "APPROVED" });
+  it("shows ReviewBadge for approved PRs when expanded", () => {
+    const pr = makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED", repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Approved" appears in both the filter chip button and the review badge
+    // "Approved" appears in both the filter chip button and the review badge (first group auto-expands)
     const approvedEls = screen.getAllByText("Approved");
     const badgeEl = approvedEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
 
-  it("shows SizeBadge for each PR", () => {
-    const pr = makePullRequest({ title: "Big PR", additions: 300, deletions: 100 });
+  it("shows SizeBadge for each PR when expanded", () => {
+    const pr = makePullRequest({ id: 1, title: "Big PR", additions: 300, deletions: 100, repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // prSizeCategory(300, 100) = 400 total -> M
+    // prSizeCategory(300, 100) = 400 total -> M (first group auto-expands)
     // "M" appears in both the filter chip button and the size badge
     const mEls = screen.getAllByText("M");
     const badgeEl = mEls.find((el) => el.tagName.toLowerCase() === "span");
@@ -184,8 +189,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by tab role filter", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [] }),
-      makePullRequest({ id: 2, title: "Other PR", userLogin: "bob", reviewerLogins: [], assigneeLogins: [] }),
+      makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Other PR", userLogin: "bob", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "role", "author");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
@@ -195,8 +200,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by reviewDecision tab filter", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED" }),
-      makePullRequest({ id: 2, title: "Pending PR", reviewDecision: null }),
+      makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Pending PR", reviewDecision: null, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "reviewDecision", "APPROVED");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -206,8 +211,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by draft tab filter", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Draft PR", draft: true }),
-      makePullRequest({ id: 2, title: "Ready PR", draft: false }),
+      makePullRequest({ id: 1, title: "Draft PR", draft: true, repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Ready PR", draft: false, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "draft", "draft");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -217,8 +222,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by checkStatus tab filter", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Passing PR", checkStatus: "success" }),
-      makePullRequest({ id: 2, title: "Failing PR", checkStatus: "failure" }),
+      makePullRequest({ id: 1, title: "Passing PR", checkStatus: "success", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Failing PR", checkStatus: "failure", repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "checkStatus", "success");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -228,8 +233,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by checkStatus 'none' for PRs without CI", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "No CI PR", checkStatus: null }),
-      makePullRequest({ id: 2, title: "Has CI PR", checkStatus: "success" }),
+      makePullRequest({ id: 1, title: "No CI PR", checkStatus: null, repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Has CI PR", checkStatus: "success", repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "checkStatus", "none");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -239,8 +244,8 @@ describe("PullRequestsTab", () => {
 
   it("filters by sizeCategory tab filter", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Small PR", additions: 5, deletions: 2 }),
-      makePullRequest({ id: 2, title: "Large PR", additions: 600, deletions: 200 }),
+      makePullRequest({ id: 1, title: "Small PR", additions: 5, deletions: 2, repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Large PR", additions: 600, deletions: 200, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "sizeCategory", "XS");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
@@ -257,28 +262,60 @@ describe("PullRequestsTab", () => {
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
+    // First group (repo-a) is auto-expanded
     screen.getByText("PR in repo A");
     screen.getByText("Another in repo A");
-    screen.getByText("PR in repo B");
+    // repo-b is collapsed, so its PR is not visible
+    expect(screen.queryByText("PR in repo B")).toBeNull();
+  });
+
+  it("auto-expands first repo group on initial mount", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "First Repo PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Second Repo PR", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // First group is auto-expanded
+    screen.getByText("First Repo PR");
+    // Second group is collapsed
+    expect(screen.queryByText("Second Repo PR")).toBeNull();
+    // First group header has aria-expanded=true
+    const firstHeader = screen.getByText("org/repo-a").closest("button")!;
+    expect(firstHeader.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("collapses a repo group when header is clicked", async () => {
     const user = userEvent.setup();
     const prs = [
       makePullRequest({ id: 1, title: "Visible PR", repoFullName: "org/repo-a" }),
-      makePullRequest({ id: 2, title: "Other repo PR", repoFullName: "org/repo-b" }),
     ];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // First group auto-expands
     screen.getByText("Visible PR");
 
     const repoHeader = screen.getByText("org/repo-a");
     await user.click(repoHeader);
 
     expect(screen.queryByText("Visible PR")).toBeNull();
-    screen.getByText("Other repo PR");
   });
 
-  it("sets aria-expanded on repo group headers", () => {
+  it("expands a collapsed repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "First Repo PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Second Repo PR", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // Second group starts collapsed
+    expect(screen.queryByText("Second Repo PR")).toBeNull();
+
+    const repoHeader = screen.getByText("org/repo-b");
+    await user.click(repoHeader);
+
+    screen.getByText("Second Repo PR");
+  });
+
+  it("sets aria-expanded=true on first repo group header by default", () => {
     const prs = [
       makePullRequest({ id: 1, title: "Test PR", repoFullName: "org/repo-a" }),
     ];
@@ -303,6 +340,88 @@ describe("PullRequestsTab", () => {
     await user.click(header);
     expect(header.getAttribute("aria-expanded")).toBe("true");
     screen.getByText("Toggle PR");
+  });
+
+  it("shows collapsed summary with PR count when group is collapsed", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "PR One", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "PR Two", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // Collapse the first group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    // Summary should show count
+    screen.getByText("2 PRs");
+  });
+
+  it("shows check status dots in collapsed summary", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "PR One", checkStatus: "success", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "PR Two", checkStatus: "failure", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // Collapse the first group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    // Check success count (1) and failure count (1) shown as text
+    const summarySpan = header.querySelector(".ml-auto")!;
+    expect(summarySpan.textContent).toContain("1");
+  });
+
+  it("shows review state badges in collapsed summary", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "PR One", reviewDecision: "APPROVED", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "PR Two", reviewDecision: "CHANGES_REQUESTED", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // Collapse the first group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    screen.getByText("Approved x1");
+    screen.getByText("Changes x1");
+  });
+
+  it("shows role badges in collapsed summary", async () => {
+    const user = userEvent.setup();
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
+    // Collapse the first group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    screen.getByText("author x1");
+  });
+
+  it("hides summary metadata when group is expanded", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR One", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // First group is auto-expanded — no summary count shown
+    expect(screen.queryByText("1 PR")).toBeNull();
+  });
+
+  it("renders IgnoreBadge in filter toolbar", () => {
+    const pr = makePullRequest({ id: 42, title: "To Ignore", repoFullName: "org/repo-a" });
+    viewStore.ignoreItem({
+      id: "42",
+      type: "pullRequest",
+      repo: pr.repoFullName,
+      title: pr.title,
+      ignoredAt: Date.now(),
+    });
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
+    // IgnoreBadge shows ignored count
+    screen.getByText(/1 ignored/i);
   });
 
   it("paginates repo groups across pages", async () => {

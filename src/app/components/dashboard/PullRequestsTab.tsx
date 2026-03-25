@@ -7,7 +7,8 @@ import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
-import SortIcon from "../shared/SortIcon";
+import SortDropdown from "../shared/SortDropdown";
+import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -102,12 +103,23 @@ const prFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
+const sortOptions: SortOption[] = [
+  { label: "Repo", field: "repo", type: "text" },
+  { label: "Title", field: "title", type: "text" },
+  { label: "Author", field: "author", type: "text" },
+  { label: "Checks", field: "checkStatus", type: "text" },
+  { label: "Review", field: "reviewDecision", type: "text" },
+  { label: "Size", field: "size", type: "number" },
+  { label: "Created", field: "createdAt", type: "date" },
+  { label: "Updated", field: "updatedAt", type: "date" },
+];
+
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
-  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos(repoFullName, (v) => !v);
+    setExpandedRepos(repoFullName, (v) => !v);
   }
 
   const sortPref = createMemo(() => {
@@ -211,10 +223,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (page() > max) setPage(max);
   });
 
-  function handleSort(field: SortField) {
-    const current = sortPref();
-    const direction =
-      current.field === field && current.direction === "desc" ? "asc" : "desc";
+  // Auto-expand first group on initial load
+  let hasAutoExpanded = false;
+  createEffect(() => {
+    const groups = pageGroups();
+    if (!hasAutoExpanded && groups.length > 0) {
+      hasAutoExpanded = true;
+      setExpandedRepos(groups[0].repoFullName, true);
+    }
+  });
+
+  function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("pullRequests", field, direction);
     setPage(0);
   }
@@ -229,48 +248,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     });
   }
 
-  const columnHeaders: { label: string; field: SortField }[] = [
-    { label: "Repo", field: "repo" },
-    { label: "Title", field: "title" },
-    { label: "Author", field: "author" },
-    { label: "Checks", field: "checkStatus" },
-    { label: "Review", field: "reviewDecision" },
-    { label: "Size", field: "size" },
-    { label: "Created", field: "createdAt" },
-    { label: "Updated", field: "updatedAt" },
-  ];
-
   return (
     <div class="flex flex-col h-full">
-      {/* Column headers */}
-      <div
-        role="rowgroup"
-        class="flex items-center gap-2 px-4 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-400 select-none"
-      >
-        <For each={columnHeaders}>
-          {(col) => (
-            <button
-              onClick={() => handleSort(col.field)}
-              class="hover:text-gray-900 dark:hover:text-gray-100 transition-colors focus:outline-none focus:underline"
-              aria-label={`Sort by ${col.label}`}
-            >
-              {col.label}
-              <SortIcon
-                active={sortPref().field === col.field}
-                direction={sortPref().direction}
-              />
-            </button>
-          )}
-        </For>
-        <div class="flex-1" />
-        <IgnoreBadge
-          items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
-          onUnignore={unignoreItem}
+      {/* Filter toolbar with SortDropdown */}
+      <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <SortDropdown
+          options={sortOptions}
+          value={sortPref().field}
+          direction={sortPref().direction}
+          onChange={handleSort}
         />
-      </div>
-
-      {/* Filter chips */}
-      <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
         <FilterChips
           groups={prFilterGroups}
           values={viewState.tabFilters.pullRequests}
@@ -286,6 +273,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             resetAllTabFilters("pullRequests");
             setPage(0);
           }}
+        />
+        <div class="flex-1" />
+        <IgnoreBadge
+          items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
+          onUnignore={unignoreItem}
         />
       </div>
 
@@ -324,18 +316,89 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <div class="divide-y divide-gray-100 dark:divide-gray-800">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+
+                const summaryMeta = createMemo(() => {
+                  const checks = { success: 0, failure: 0, pending: 0 };
+                  const reviews = { APPROVED: 0, CHANGES_REQUESTED: 0, REVIEW_REQUIRED: 0 };
+                  const roles: Record<string, number> = {};
+
+                  for (const item of repoGroup.items) {
+                    if (item.checkStatus === "success") checks.success++;
+                    else if (item.checkStatus === "failure") checks.failure++;
+                    else if (item.checkStatus === "pending") checks.pending++;
+
+                    if (item.reviewDecision === "APPROVED") reviews.APPROVED++;
+                    else if (item.reviewDecision === "CHANGES_REQUESTED") reviews.CHANGES_REQUESTED++;
+                    else if (item.reviewDecision === "REVIEW_REQUIRED") reviews.REVIEW_REQUIRED++;
+
+                    const m = prMeta().get(item.id);
+                    if (m) {
+                      for (const role of m.roles) {
+                        roles[role] = (roles[role] || 0) + 1;
+                      }
+                    }
+                  }
+
+                  return { checks, reviews, roles: Object.entries(roles) };
+                });
+
                 return (
                   <div class="bg-white dark:bg-gray-900">
                     <button
                       onClick={() => toggleRepo(repoGroup.repoFullName)}
-                      aria-expanded={!isRepoCollapsed()}
+                      aria-expanded={isExpanded()}
                       class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     >
-                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      <ChevronIcon size="md" rotated={!isExpanded()} />
                       {repoGroup.repoFullName}
+                      <Show when={!isExpanded()}>
+                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
+                          <Show when={summaryMeta().checks.success > 0}>
+                            <span class="flex items-center gap-0.5">
+                              <span class="inline-block w-2 h-2 rounded-full bg-green-500" />
+                              <span>{summaryMeta().checks.success}</span>
+                            </span>
+                          </Show>
+                          <Show when={summaryMeta().checks.failure > 0}>
+                            <span class="flex items-center gap-0.5">
+                              <span class="inline-block w-2 h-2 rounded-full bg-red-500" />
+                              <span>{summaryMeta().checks.failure}</span>
+                            </span>
+                          </Show>
+                          <Show when={summaryMeta().checks.pending > 0}>
+                            <span class="flex items-center gap-0.5">
+                              <span class="inline-block w-2 h-2 rounded-full bg-yellow-500" />
+                              <span>{summaryMeta().checks.pending}</span>
+                            </span>
+                          </Show>
+                          <Show when={summaryMeta().reviews.APPROVED > 0}>
+                            <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                              {`Approved x${summaryMeta().reviews.APPROVED}`}
+                            </span>
+                          </Show>
+                          <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
+                            <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                              {`Changes x${summaryMeta().reviews.CHANGES_REQUESTED}`}
+                            </span>
+                          </Show>
+                          <For each={summaryMeta().roles}>
+                            {([role, count]) => (
+                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                role === "author" ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" :
+                                role === "reviewer" ? "bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300" :
+                                role === "assignee" ? "bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300" :
+                                "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                              }`}>
+                                {`${role} x${count}`}
+                              </span>
+                            )}
+                          </For>
+                        </span>
+                      </Show>
                     </button>
-                    <Show when={!isRepoCollapsed()}>
+                    <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
                         <For each={repoGroup.items}>
                           {(pr) => (
