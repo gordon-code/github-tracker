@@ -42,6 +42,7 @@ vi.mock("../../../src/app/services/api", () => ({
 }));
 
 vi.mock("../../../src/app/lib/url", () => ({
+  isSafeGitHubUrl: vi.fn(() => true),
   openGitHubUrl: vi.fn(),
 }));
 
@@ -93,6 +94,9 @@ function setupMatchMedia(prefersDark = false) {
 beforeEach(() => {
   setupMatchMedia();
   vi.clearAllMocks();
+
+  // Restore isSafeGitHubUrl mock (vi.restoreAllMocks strips factory implementations)
+  vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(true);
 
   // Reset config to defaults
   updateConfig({
@@ -613,7 +617,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
     const github = await import("../../../src/app/services/github");
-    vi.mocked(github.getClient).mockReturnValue(null);
+    vi.mocked(github.getClient).mockReturnValueOnce(null);
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
@@ -621,6 +625,52 @@ describe("SettingsPage — Grant more orgs button", () => {
     // Give mergeNewOrgs time to bail out
     await new Promise((r) => setTimeout(r, 50));
     expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it("rapid double-click deduplicates focus listeners", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    await user.click(btn);
+    // Second click removes the first listener before adding a new one
+    const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
+    expect(focusRemoves.length).toBeGreaterThanOrEqual(1);
+    vi.unstubAllEnvs();
+  });
+
+  it("cleans up pending focus listener on component unmount", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const { unmount } = renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    unmount();
+    const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
+    expect(focusRemoves.length).toBeGreaterThanOrEqual(1);
+    vi.unstubAllEnvs();
+  });
+
+  it("focus listener self-removes — second focus does not re-trigger merge", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    updateConfig({ selectedOrgs: [] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([]);
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
+    });
+    // Second focus should NOT trigger another merge
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
     vi.unstubAllEnvs();
   });
 });
