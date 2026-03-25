@@ -3,6 +3,7 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
+import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl } from "../../lib/oauth";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { fetchOrgs } from "../../services/api";
@@ -221,7 +222,7 @@ export default function SettingsPage() {
         console.info(`[settings] merged ${newOrgs.length} new org(s)`);
       }
     } catch {
-      // Non-fatal — user can manually manage orgs
+      pushNotification("org-sync", "Failed to sync organizations — try again or manage manually", "warning");
     } finally {
       setMerging(false);
     }
