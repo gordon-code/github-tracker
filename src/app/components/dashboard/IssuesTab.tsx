@@ -268,7 +268,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 role === "assignee" ? "bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300" :
                                 "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                               }`}>
-                                {role} x{count}
+                                {role} ×{count}
                               </span>
                             )}
                           </For>

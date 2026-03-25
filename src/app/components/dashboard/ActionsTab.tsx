@@ -137,7 +137,6 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   }
 
-
   const filteredRuns = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
     const ignoredIds = new Set(
@@ -236,15 +235,14 @@ export default function ActionsTab(props: ActionsTabProps) {
               const total = wfs.length;
               let passed = 0;
               let failed = 0;
+              let running = 0;
               for (const wf of wfs) {
                 const latest = wf.runs[0];
                 if (latest?.conclusion === "success") passed++;
                 else if (latest?.conclusion === "failure") failed++;
+                else if (latest?.status === "in_progress") running++;
               }
-              const parts: string[] = [];
-              if (passed > 0) parts.push(`${passed} passed`);
-              if (failed > 0) parts.push(`${failed} failed`);
-              return `${total} workflow${total !== 1 ? "s" : ""}: ${parts.join(", ")}`;
+              return { total, passed, failed, running };
             });
 
             return (
@@ -259,14 +257,32 @@ export default function ActionsTab(props: ActionsTabProps) {
                   {repoGroup.repoFullName}
                   <Show when={!isExpanded()}>
                     <span class="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
-                      {collapsedSummary()}
+                      {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
+                      <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
+                        {": "}
+                        <Show when={collapsedSummary().passed > 0}>
+                          <span>{collapsedSummary().passed} passed</span>
+                        </Show>
+                        <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
+                          {", "}
+                        </Show>
+                        <Show when={collapsedSummary().failed > 0}>
+                          <span class="text-red-600 dark:text-red-400 font-medium">{collapsedSummary().failed} failed</span>
+                        </Show>
+                        <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
+                          {", "}
+                        </Show>
+                        <Show when={collapsedSummary().running > 0}>
+                          <span>{collapsedSummary().running} running</span>
+                        </Show>
+                      </Show>
                     </span>
                   </Show>
                 </button>
 
                 {/* Workflow cards grid */}
                 <Show when={isExpanded()}>
-                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
                     <For each={sortedWorkflows()}>
                       {(wfGroup) => {
                         const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;

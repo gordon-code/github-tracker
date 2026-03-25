@@ -375,12 +375,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           </Show>
                           <Show when={summaryMeta().reviews.APPROVED > 0}>
                             <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
-                              {`Approved x${summaryMeta().reviews.APPROVED}`}
+                              {`Approved ×${summaryMeta().reviews.APPROVED}`}
                             </span>
                           </Show>
                           <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
                             <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
-                              {`Changes x${summaryMeta().reviews.CHANGES_REQUESTED}`}
+                              {`Changes ×${summaryMeta().reviews.CHANGES_REQUESTED}`}
+                            </span>
+                          </Show>
+                          <Show when={summaryMeta().reviews.REVIEW_REQUIRED > 0}>
+                            <span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300">
+                              {`Needs review ×${summaryMeta().reviews.REVIEW_REQUIRED}`}
                             </span>
                           </Show>
                           <For each={summaryMeta().roles}>
@@ -391,7 +396,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 role === "assignee" ? "bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300" :
                                 "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                               }`}>
-                                {`${role} x${count}`}
+                                {`${role} ×${count}`}
                               </span>
                             )}
                           </For>

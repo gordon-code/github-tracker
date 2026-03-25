@@ -36,8 +36,8 @@ export default function Header() {
 
   return (
     <>
-      <header class="fixed top-0 left-0 right-0 z-50 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4">
-        <div class="max-w-6xl mx-auto w-full h-full flex items-center gap-4">
+      <header class="fixed top-0 left-0 right-0 z-50 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-6xl mx-auto w-full h-full flex items-center gap-4 px-4">
         <span class="font-semibold text-gray-900 dark:text-gray-100 text-lg shrink-0">
           GitHub Tracker
         </span>

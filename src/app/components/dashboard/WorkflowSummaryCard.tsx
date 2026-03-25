@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import WorkflowRunRow from "./WorkflowRunRow";
 
@@ -11,43 +11,65 @@ interface WorkflowSummaryCardProps {
   density: "compact" | "comfortable";
 }
 
-function getAccentColor(runs: WorkflowRun[]): "green" | "red" | "yellow" | "gray" {
-  const hasFailure = runs.some((r) => r.conclusion === "failure");
-  const hasRunning = runs.some((r) => r.status === "in_progress");
-  const allSuccess = runs.every((r) => r.conclusion === "success");
-
-  if (hasFailure) return "red";
-  if (hasRunning) return "yellow";
-  if (allSuccess) return "green";
-  return "gray";
-}
-
 export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
-  const successCount = () => props.runs.filter((r) => r.conclusion === "success").length;
-  const failureCount = () => props.runs.filter((r) => r.conclusion === "failure").length;
-  const runningCount = () => props.runs.filter((r) => r.status === "in_progress").length;
+  const counts = createMemo(() => {
+    let success = 0;
+    let failure = 0;
+    let running = 0;
+    for (const r of props.runs) {
+      if (r.status === "in_progress") running++;
+      else if (r.conclusion === "success") success++;
+      else if (r.conclusion === "failure") failure++;
+    }
+    return { success, failure, running };
+  });
 
-  const accentColor = () => getAccentColor(props.runs);
+  const accentColor = createMemo(() => {
+    const { failure, running, success } = counts();
+    if (failure > 0) return "red";
+    if (running > 0) return "yellow";
+    if (success > 0 && success === props.runs.length) return "green";
+    return "gray";
+  });
 
-  const hasFailure = () => failureCount() > 0;
+  const hasFailure = createMemo(() => counts().failure > 0);
 
-  const borderLeftClass = () => {
+  const borderLeftClass = createMemo(() => {
     const color = accentColor();
     if (color === "red") return "border-l-4 border-l-red-500";
     if (color === "yellow") return "border-l-4 border-l-yellow-500";
     if (color === "green") return "border-l-4 border-l-green-500";
     return "border-l-4 border-l-gray-300 dark:border-l-gray-600";
-  };
+  });
 
-  const cardBgClass = () =>
+  const cardBgClass = createMemo(() =>
     hasFailure()
       ? "border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-900/10"
-      : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700";
+      : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+  );
+
+  const hoverClass = createMemo(() =>
+    hasFailure()
+      ? "hover:bg-red-100/50 dark:hover:bg-red-900/20"
+      : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
+  );
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      props.onToggle();
+    }
+  }
 
   return (
     <div
-      class={`rounded-lg border p-3 cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${borderLeftClass()} ${cardBgClass()}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={props.expanded}
+      aria-label={props.workflowName}
+      class={`rounded-lg border p-3 cursor-pointer transition-colors ${hoverClass()} ${borderLeftClass()} ${cardBgClass()}`}
       onClick={props.onToggle}
+      onKeyDown={handleKeyDown}
     >
       {/* Card header */}
       <div class="flex items-center gap-2 min-w-0">
@@ -55,19 +77,19 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
           {props.workflowName}
         </span>
         <div class="flex items-center gap-1.5 shrink-0">
-          <Show when={successCount() > 0}>
-            <span class="text-xs font-medium text-green-600 dark:text-green-400">
-              {successCount()}
+          <Show when={counts().success > 0}>
+            <span class="text-xs font-medium text-green-600 dark:text-green-400" title={`${counts().success} successful`}>
+              {counts().success}
             </span>
           </Show>
-          <Show when={failureCount() > 0}>
-            <span class="text-xs font-medium text-red-600 dark:text-red-400">
-              {failureCount()}
+          <Show when={counts().failure > 0}>
+            <span class="text-xs font-medium text-red-600 dark:text-red-400" title={`${counts().failure} failed`}>
+              {counts().failure}
             </span>
           </Show>
-          <Show when={runningCount() > 0}>
-            <span class="text-xs font-medium text-yellow-600 dark:text-yellow-400">
-              {runningCount()}
+          <Show when={counts().running > 0}>
+            <span class="text-xs font-medium text-yellow-600 dark:text-yellow-400" title={`${counts().running} running`}>
+              {counts().running}
             </span>
           </Show>
         </div>

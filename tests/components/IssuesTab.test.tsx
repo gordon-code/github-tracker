@@ -296,7 +296,7 @@ describe("IssuesTab", () => {
     await user.click(header);
 
     // Should show author role badge with count
-    screen.getByText("author x2");
+    screen.getByText("author ×2");
   });
 
   it("hides summary metadata when repo group is expanded", async () => {

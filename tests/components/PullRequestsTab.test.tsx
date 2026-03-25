@@ -384,8 +384,8 @@ describe("PullRequestsTab", () => {
     const header = screen.getByText("org/repo-a").closest("button")!;
     await user.click(header);
 
-    screen.getByText("Approved x1");
-    screen.getByText("Changes x1");
+    screen.getByText("Approved ×1");
+    screen.getByText("Changes ×1");
   });
 
   it("shows role badges in collapsed summary", async () => {
@@ -398,7 +398,7 @@ describe("PullRequestsTab", () => {
     const header = screen.getByText("org/repo-a").closest("button")!;
     await user.click(header);
 
-    screen.getByText("author x1");
+    screen.getByText("author ×1");
   });
 
   it("hides summary metadata when group is expanded", () => {
