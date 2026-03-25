@@ -50,9 +50,8 @@ export function severityConfig(severity: NotificationSeverity): SeverityConfig {
   }
 }
 
-// Placeholder — will be replaced with import from NotificationDrawer after C4
-// Uses a module-level mutable reference so ToastContainer.test can override it
-export let getMutedSources: () => Set<string> = () => new Set();
+// Import mutedSources from NotificationDrawer — shared session-only mute set
+import { mutedSources } from "./NotificationDrawer";
 
 interface ToastItem {
   notification: AppNotification;
@@ -130,7 +129,7 @@ export default function ToastContainer() {
       // Check suppression conditions
       const lastToasted = lastToastedAt.get(notif.source);
       const inCooldown = lastToasted !== undefined && Date.now() - lastToasted < COOLDOWN_MS;
-      const muted = getMutedSources().has(notif.source);
+      const muted = mutedSources.has(notif.source);
 
       if (inCooldown || muted) continue;
 
