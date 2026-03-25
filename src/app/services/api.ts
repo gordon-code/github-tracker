@@ -397,6 +397,7 @@ async function graphqlSearchIssues(
 
     while (true) {
       let response: GraphQLIssueSearchResponse;
+      let isPartial = false;
       try {
         response = await octokit.graphql<GraphQLIssueSearchResponse>(
           ISSUES_SEARCH_QUERY,
@@ -407,6 +408,14 @@ async function graphqlSearchIssues(
         const partial = extractGraphQLPartialData<GraphQLIssueSearchResponse>(err);
         if (partial) {
           response = partial;
+          isPartial = true;
+          const { message } = extractRejectionError(err);
+          errors.push({
+            repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
+            statusCode: null,
+            message,
+            retryable: true,
+          });
         } else {
           const { statusCode, message } = extractRejectionError(err);
           errors.push({
@@ -417,14 +426,6 @@ async function graphqlSearchIssues(
           });
           break;
         }
-        const { message } = extractRejectionError(err);
-        errors.push({
-          repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-          statusCode: null,
-          message,
-          retryable: true,
-        });
-        // Continue processing partial data below — don't break
       }
 
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
@@ -449,6 +450,9 @@ async function graphqlSearchIssues(
           comments: node.comments.totalCount,
         });
       }
+
+      // Don't paginate after partial error — pageInfo may be unreliable
+      if (isPartial) break;
 
       if (issues.length >= 1000 && !capReached) {
         capReached = true;
@@ -528,6 +532,7 @@ async function graphqlSearchPRs(
 
       while (true) {
         let response: GraphQLPRSearchResponse;
+        let isPartial = false;
         try {
           response = await octokit.graphql<GraphQLPRSearchResponse>(
             PR_SEARCH_QUERY,
@@ -537,6 +542,14 @@ async function graphqlSearchPRs(
           const partial = extractGraphQLPartialData<GraphQLPRSearchResponse>(err);
           if (partial) {
             response = partial;
+            isPartial = true;
+            const { message } = extractRejectionError(err);
+            errors.push({
+              repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+              statusCode: null,
+              message,
+              retryable: true,
+            });
           } else {
             const { statusCode, message } = extractRejectionError(err);
             errors.push({
@@ -547,13 +560,6 @@ async function graphqlSearchPRs(
             });
             break;
           }
-          const { message } = extractRejectionError(err);
-          errors.push({
-            repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-            statusCode: null,
-            message,
-            retryable: true,
-          });
         }
 
         if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
@@ -619,6 +625,9 @@ async function graphqlSearchPRs(
             totalReviewCount: node.latestReviews.totalCount,
           });
         }
+
+        // Don't paginate after partial error — pageInfo may be unreliable
+        if (isPartial) break;
 
         if (prMap.size >= 1000 && !prCapReached) {
           prCapReached = true;
