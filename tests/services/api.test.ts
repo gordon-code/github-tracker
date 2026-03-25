@@ -469,6 +469,56 @@ describe("fetchIssues", () => {
     expect(result.errors[0].retryable).toBe(false);
   });
 
+  it("rejects invalid userLogin with error instead of injecting into query", async () => {
+    const octokit = makeIssueOctokit();
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "bad user" // contains space — fails VALID_LOGIN
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("Invalid userLogin");
+    expect(octokit.graphql).not.toHaveBeenCalled();
+  });
+
+  it("truncates to exactly 1000 when parallel chunks overshoot", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // 35 repos → 2 chunks. Each chunk returns 600 items (total 1200, well over cap).
+    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+
+    let callCount = 0;
+    const octokit = makeIssueOctokit(async () => {
+      callCount++;
+      const batchStart = (callCount - 1) * 600;
+      const nodes = Array.from({ length: 600 }, (_, i) => ({
+        ...graphqlIssueNode,
+        databaseId: batchStart + i + 1,
+      }));
+      return makeGraphqlIssueResponse(nodes, false, 600);
+    });
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      repos,
+      "octocat"
+    );
+
+    // splice(1000) ensures exactly 1000 even with parallel overshoot
+    expect(result.issues.length).toBe(1000);
+    expect(pushNotification).toHaveBeenCalledWith(
+      "search/issues",
+      expect.stringContaining("capped at 1,000"),
+      "warning"
+    );
+  });
+
   it("throws when octokit is null", async () => {
     await expect(fetchIssues(null, [testRepo], "octocat")).rejects.toThrow(
       "No GitHub client available"
@@ -787,6 +837,61 @@ describe("fetchPullRequests", () => {
 
     expect(pullRequests.length).toBe(1);
     expect(pullRequests[0].checkStatus).toBeNull(); // fallback failed, stays null
+    expect(pushNotification).toHaveBeenCalledWith(
+      "graphql",
+      expect.stringContaining("Fork PR check status unavailable"),
+      "warning"
+    );
+  });
+
+  it("recovers partial data from fork fallback GraphqlResponseError", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // Two fork PRs: one resolves in partial data, one doesn't
+    const forkNodes = [
+      {
+        ...graphqlPRNode, databaseId: 901,
+        headRepository: { owner: { login: "fork-a" }, nameWithOwner: "fork-a/repo" },
+        repository: { nameWithOwner: "octocat/Hello-World" },
+        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+      },
+      {
+        ...graphqlPRNode, databaseId: 902,
+        headRepository: { owner: { login: "fork-b" }, nameWithOwner: "fork-b/repo" },
+        repository: { nameWithOwner: "octocat/Hello-World" },
+        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+      },
+    ] as unknown as (typeof graphqlPRNode)[];
+
+    let graphqlCallCount = 0;
+    const octokit = makePROctokit(async () => {
+      graphqlCallCount++;
+      if (graphqlCallCount <= 2) {
+        return makeGraphqlPRResponse(forkNodes);
+      }
+      // Fork fallback: GraphqlResponseError with partial data — fork0 resolves, fork1 doesn't
+      throw Object.assign(new Error("Partial fork resolution failure"), {
+        data: {
+          fork0: { object: { statusCheckRollup: { state: "SUCCESS" } } },
+          // fork1 is missing — that fork repo was deleted/inaccessible
+          rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        },
+      });
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    const pr901 = pullRequests.find((pr) => pr.id === 901);
+    const pr902 = pullRequests.find((pr) => pr.id === 902);
+    // fork0 resolved from partial data
+    expect(pr901?.checkStatus).toBe("success");
+    // fork1 not in partial data — stays null
+    expect(pr902?.checkStatus).toBeNull();
+    // Notification still fires for the partial failure
     expect(pushNotification).toHaveBeenCalledWith(
       "graphql",
       expect.stringContaining("Fork PR check status unavailable"),

@@ -704,7 +704,22 @@ async function graphqlSearchPRs(
           if (pr) pr.checkStatus = mapCheckStatus(state);
         }
       } catch (err) {
-        console.warn("[api] Fork PR statusCheckRollup fallback failed:", err);
+        // Extract partial data from GraphqlResponseError — some fork aliases may have resolved
+        const partialData = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+          ? err.data as Record<string, ForkRepoResult | null | undefined>
+          : null;
+
+        if (partialData) {
+          for (let i = 0; i < forkChunk.length; i++) {
+            const data = partialData[`fork${i}`];
+            if (!data) continue;
+            const state = data.object?.statusCheckRollup?.state ?? null;
+            const pr = prMap.get(forkChunk[i].databaseId);
+            if (pr) pr.checkStatus = mapCheckStatus(state);
+          }
+        }
+
+        console.warn("[api] Fork PR statusCheckRollup fallback partially failed:", err);
         pushNotification("graphql", "Fork PR check status unavailable — CI status may be missing for some PRs", "warning");
       }
     }));
