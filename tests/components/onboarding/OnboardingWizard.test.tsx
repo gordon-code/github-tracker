@@ -68,23 +68,16 @@ describe("OnboardingWizard", () => {
       writable: true,
       value: { replace: vi.fn(), href: "" },
     });
-    if (
-      typeof localStorage === "undefined" ||
-      typeof localStorage.setItem !== "function"
-    ) {
-      Object.defineProperty(window, "localStorage", {
-        configurable: true,
-        writable: true,
-        value: {
-          setItem: vi.fn(),
-          getItem: vi.fn(() => null),
-          removeItem: vi.fn(),
-          clear: vi.fn(),
-        },
-      });
-    } else {
-      vi.spyOn(localStorage, "setItem").mockImplementation(() => {});
-    }
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: {
+        setItem: vi.fn(),
+        getItem: vi.fn(() => null),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+      },
+    });
   });
 
   afterEach(() => {
