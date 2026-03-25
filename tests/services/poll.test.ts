@@ -398,6 +398,8 @@ describe("createPollCoordinator", () => {
       message: "Rate limited",
       timestamp: Date.now(),
       retryable: true,
+      severity: "error" as const,
+      read: false,
     };
 
     // Swap getErrors to return a pre-existing error for this test
