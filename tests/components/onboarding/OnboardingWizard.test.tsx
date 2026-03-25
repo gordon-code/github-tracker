@@ -83,7 +83,7 @@ describe("OnboardingWizard", () => {
         },
       });
     } else {
-      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
+      vi.spyOn(localStorage, "setItem").mockImplementation(() => {});
     }
   });
 
