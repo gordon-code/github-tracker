@@ -58,6 +58,12 @@
   animation: overlay-fade-out 0.3s ease-in forwards;
 }
 
+/* ── Dark-mode scrollbar styling ─────────────────────────────────────────── */
+
+.dark * {
+  scrollbar-color: #4b5563 #1f2937; /* gray-600 thumb, gray-800 track */
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-toast-in, .animate-toast-out,
   .animate-drawer-in, .animate-drawer-out,
