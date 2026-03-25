@@ -1,34 +1,46 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import type { RepoRef } from "../../../src/app/services/api";
+import type { RepoRef, OrgEntry } from "../../../src/app/services/api";
 
-// Mock OrgSelector and RepoSelector to avoid their internal fetching
-vi.mock("../../../src/app/components/onboarding/OrgSelector", () => ({
-  default: (props: { selected: string[]; onChange: (s: string[]) => void }) => (
-    <div data-testid="org-selector">
-      <button onClick={() => props.onChange(["myorg"])}>Select Org</button>
-      <span>Selected: {props.selected.join(",")}</span>
-    </div>
-  ),
+// Mock fetchOrgs and getClient
+vi.mock("../../../src/app/services/api", () => ({
+  fetchOrgs: vi.fn(),
+}));
+vi.mock("../../../src/app/services/github", () => ({
+  getClient: vi.fn(() => ({})),
 }));
 
+// Mock RepoSelector to avoid internal fetching
 vi.mock("../../../src/app/components/onboarding/RepoSelector", () => ({
   default: (props: {
     selectedOrgs: string[];
+    orgEntries?: OrgEntry[];
     selected: RepoRef[];
     onChange: (s: RepoRef[]) => void;
   }) => (
     <div data-testid="repo-selector">
+      <span data-testid="repo-selector-orgs">
+        {props.selectedOrgs.join(",")}
+      </span>
       <button
         onClick={() =>
-          props.onChange([{ owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" }])
+          props.onChange([
+            { owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" },
+          ])
         }
       >
         Select Repo
       </button>
       <span>Repos: {props.selected.length}</span>
     </div>
+  ),
+}));
+
+// Mock LoadingSpinner
+vi.mock("../../../src/app/components/shared/LoadingSpinner", () => ({
+  default: (props: { label?: string }) => (
+    <div data-testid="loading-spinner">{props.label ?? "Loading..."}</div>
   ),
 }));
 
@@ -40,7 +52,13 @@ vi.mock("../../../src/app/stores/config", () => ({
 }));
 
 import * as configStore from "../../../src/app/stores/config";
+import * as apiModule from "../../../src/app/services/api";
 import OnboardingWizard from "../../../src/app/components/onboarding/OnboardingWizard";
+
+const mockOrgs: OrgEntry[] = [
+  { login: "myorg", avatarUrl: "", type: "org" },
+  { login: "otherog", avatarUrl: "", type: "org" },
+];
 
 describe("OnboardingWizard", () => {
   beforeEach(() => {
@@ -50,177 +68,194 @@ describe("OnboardingWizard", () => {
       writable: true,
       value: { replace: vi.fn(), href: "" },
     });
-    // Ensure localStorage.setItem is available (happy-dom may not expose it in all contexts)
-    if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") {
-      Object.defineProperty(window, "localStorage", {
-        configurable: true,
-        writable: true,
-        value: { setItem: vi.fn(), getItem: vi.fn(() => null), removeItem: vi.fn(), clear: vi.fn() },
-      });
-    } else {
-      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {});
-    }
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: {
+        setItem: vi.fn(),
+        getItem: vi.fn(() => null),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+      },
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("renders wizard with step indicator", () => {
+  it('renders "GitHub Tracker Setup" heading', async () => {
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
     render(() => <OnboardingWizard />);
     screen.getByText("GitHub Tracker Setup");
-    screen.getByText(/Step 1 of 2/i);
   });
 
-  it("first step shows OrgSelector", () => {
+  it('renders "Select the repositories you want to track" subtitle', async () => {
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
     render(() => <OnboardingWizard />);
-    screen.getByTestId("org-selector");
+    screen.getByText("Select the repositories you want to track.");
   });
 
-  it("shows Select Organizations step label in progress indicator", () => {
+  it("does NOT render OrgSelector or step indicator", async () => {
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
     render(() => <OnboardingWizard />);
-    // Text appears twice (step indicator + section heading): use getAllByText
-    const matches = screen.getAllByText("Select Organizations");
-    expect(matches.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByTestId("org-selector")).toBeNull();
+    expect(screen.queryByText(/Step \d of \d/i)).toBeNull();
+    expect(
+      screen.queryByRole("navigation", { name: /progress/i })
+    ).toBeNull();
   });
 
-  it("Next button is disabled when no orgs selected", () => {
+  it("shows loading spinner while fetching orgs", async () => {
+    vi.mocked(apiModule.fetchOrgs).mockReturnValue(new Promise(() => {}));
     render(() => <OnboardingWizard />);
-    const nextButton = screen.getByText("Next");
-    expect(nextButton.hasAttribute("disabled")).toBe(true);
-  });
-
-  it("Next button enables after org selection", async () => {
-    const user = userEvent.setup();
-    render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
     await waitFor(() => {
-      const nextButton = screen.getByText("Next");
-      expect(nextButton.hasAttribute("disabled")).toBe(false);
+      screen.getByTestId("loading-spinner");
     });
   });
 
-  it("clicking Next advances to step 2", async () => {
-    const user = userEvent.setup();
+  it("redirects to /dashboard when onboardingComplete is already true", async () => {
+    Object.assign(configStore.config, { onboardingComplete: true });
     render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
     await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
+      expect(window.location.replace).toHaveBeenCalledWith("/dashboard");
     });
+    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+    Object.assign(configStore.config, { onboardingComplete: false });
+  });
 
-    await user.click(screen.getByText("Next"));
-
+  it("retry clears error and shows RepoSelector on success", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs)
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce(mockOrgs);
+    render(() => <OnboardingWizard />);
     await waitFor(() => {
-      screen.getByText(/Step 2 of 2/i);
+      screen.getByText("Retry");
+    });
+    await user.click(screen.getByText("Retry"));
+    await waitFor(() => {
       screen.getByTestId("repo-selector");
     });
+    expect(screen.queryByText(/Network error/i)).toBeNull();
   });
 
-  it("calls updateConfig with selected orgs on Next", async () => {
-    const user = userEvent.setup();
+  it("shows error when getClient returns null", async () => {
+    const { getClient } = await import("../../../src/app/services/github");
+    vi.mocked(getClient).mockReturnValueOnce(null);
     render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
     await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
+      screen.getByText(/No GitHub client available/i);
     });
+  });
 
-    await user.click(screen.getByText("Next"));
+  it("shows error state with retry button when fetchOrgs fails", async () => {
+    vi.mocked(apiModule.fetchOrgs).mockRejectedValue(
+      new Error("Network error")
+    );
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByText(/Network error/i);
+      screen.getByText("Retry");
+    });
+  });
 
+  it("renders RepoSelector with all fetched org logins once loaded", async () => {
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      const orgsSpan = screen.getByTestId("repo-selector-orgs");
+      expect(orgsSpan.textContent).toBe("myorg,otherog");
+    });
+  });
+
+  it('"Finish Setup" button is disabled when no repos are selected', async () => {
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    const btn = screen.getByText("Finish Setup");
+    expect(btn.hasAttribute("disabled")).toBe(true);
+  });
+
+  it('"Finish Setup" button shows selected repo count', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+  });
+
+  it("on finish: selectedOrgs is derived from unique repo owners", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
     expect(vi.mocked(configStore.updateConfig)).toHaveBeenCalledWith(
       expect.objectContaining({ selectedOrgs: ["myorg"] })
     );
   });
 
-  it("Back button visible on step 2", async () => {
+  it("on finish: onboardingComplete is set to true", async () => {
     const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
     render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
-    });
-
-    await user.click(screen.getByText("Next"));
-
-    await waitFor(() => {
-      screen.getByText("Back");
-    });
-  });
-
-  it("clicking Back returns to step 1", async () => {
-    const user = userEvent.setup();
-    render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
-    });
-
-    await user.click(screen.getByText("Next"));
-
-    await waitFor(() => {
-      screen.getByText("Back");
-    });
-
-    await user.click(screen.getByText("Back"));
-
-    await waitFor(() => {
-      screen.getByTestId("org-selector");
-      screen.getByText(/Step 1 of 2/i);
-    });
-  });
-
-  it("Finish Setup button disabled when no repos selected", async () => {
-    const user = userEvent.setup();
-    render(() => <OnboardingWizard />);
-    await user.click(screen.getByText("Select Org"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
-    });
-
-    await user.click(screen.getByText("Next"));
-
-    await waitFor(() => {
-      const finishButton = screen.getByText("Finish Setup");
-      expect(finishButton.hasAttribute("disabled")).toBe(true);
-    });
-  });
-
-  it("completing final step calls updateConfig and window.location.replace", async () => {
-    const user = userEvent.setup();
-    render(() => <OnboardingWizard />);
-
-    // Step 1: select org, advance
-    await user.click(screen.getByText("Select Org"));
-    await waitFor(() => {
-      expect(screen.getByText("Next").hasAttribute("disabled")).toBe(false);
-    });
-    await user.click(screen.getByText("Next"));
-
-    // Step 2: select repo, finish
     await waitFor(() => {
       screen.getByTestId("repo-selector");
     });
     await user.click(screen.getByText("Select Repo"));
-
     await waitFor(() => {
-      const finishBtn = screen.queryByText(/Finish Setup \(1 repo\)/);
-      expect(finishBtn).toBeDefined();
-      expect(finishBtn?.hasAttribute("disabled")).toBe(false);
+      screen.getByText(/Finish Setup \(1 repo\)/);
     });
-
     await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
-
-    expect(vi.mocked(configStore.updateConfig)).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        selectedRepos: [{ owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" }],
-        onboardingComplete: true,
-      })
+    expect(vi.mocked(configStore.updateConfig)).toHaveBeenCalledWith(
+      expect.objectContaining({ onboardingComplete: true })
     );
+  });
+
+  it("on finish: flushes config to localStorage", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      "github-tracker:config",
+      expect.any(String)
+    );
+  });
+
+  it("on finish: navigates to /dashboard via window.location.replace", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
     expect(window.location.replace).toHaveBeenCalledWith("/dashboard");
   });
 });

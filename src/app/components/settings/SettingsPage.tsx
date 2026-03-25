@@ -3,6 +3,9 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
+import { buildAuthorizeUrl, MERGE_ORGS_KEY } from "../../lib/oauth";
+import { fetchOrgs } from "../../services/api";
+import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import type { RepoRef } from "../../services/api";
@@ -150,6 +153,7 @@ export default function SettingsPage() {
   const [confirmClearCache, setConfirmClearCache] = createSignal(false);
   const [confirmReset, setConfirmReset] = createSignal(false);
   const [cacheClearing, setCacheClearing] = createSignal(false);
+  const [reauthing, setReauthing] = createSignal(false);
   const [notifPermission, setNotifPermission] = createSignal<NotificationPermission>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
@@ -187,9 +191,46 @@ export default function SettingsPage() {
     };
     mq.addEventListener("change", handler);
     onCleanup(() => mq.removeEventListener("change", handler));
+
+    // Auto-merge newly accessible orgs after re-auth redirect
+    const shouldMerge = sessionStorage.getItem(MERGE_ORGS_KEY);
+    if (shouldMerge) {
+      sessionStorage.removeItem(MERGE_ORGS_KEY);
+      void mergeNewOrgs();
+    }
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  async function mergeNewOrgs() {
+    const client = getClient();
+    if (!client) return;
+    const snapshot = [...config.selectedOrgs];
+    try {
+      const allOrgs = await fetchOrgs(client);
+      // Case-insensitive comparison — GitHub logins are case-insensitive
+      const currentSet = new Set(snapshot.map((o) => o.toLowerCase()));
+      const newOrgs = allOrgs
+        .map((o) => o.login)
+        .filter((login) => !currentSet.has(login.toLowerCase()));
+      if (newOrgs.length > 0) {
+        const merged = [...snapshot, ...newOrgs];
+        setLocalOrgs(merged);
+        saveWithFeedback({ selectedOrgs: merged });
+        console.info(`[settings] merged ${newOrgs.length} new org(s)`);
+      }
+    } catch {
+      // Non-fatal — user can manually manage orgs
+    }
+  }
+
+  function handleReAuth() {
+    setReauthing(true);
+    // Reset if navigation doesn't happen (e.g., beforeunload dialog blocks redirect)
+    setTimeout(() => setReauthing(false), 3000);
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    window.location.href = buildAuthorizeUrl({ returnTo: "/settings" });
+  }
 
   function handleOrgsChange(orgs: string[]) {
     setLocalOrgs(orgs);
@@ -360,25 +401,48 @@ export default function SettingsPage() {
               </div>
             </Show>
 
-            <div class="border-t border-gray-100 pt-3 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  {localRepos().length} selected
-                </p>
-                <Show when={localRepos().length > 50}>
-                  <p class="text-xs text-amber-600 dark:text-amber-400">
-                    Tracking {localRepos().length} repos will use significant API quota per poll cycle
+            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    Organization Access
                   </p>
-                </Show>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    Re-authorize with GitHub to grant access to additional organizations
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReAuth}
+                  disabled={reauthing()}
+                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Grant more orgs
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setRepoPanelOpen((v) => !v)}
-                class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                Manage Repositories
-              </button>
+            </div>
+
+            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {localRepos().length} selected
+                  </p>
+                  <Show when={localRepos().length > 50}>
+                    <p class="text-xs text-amber-600 dark:text-amber-400">
+                      Tracking {localRepos().length} repos will use significant API quota per poll cycle
+                    </p>
+                  </Show>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRepoPanelOpen((v) => !v)}
+                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Manage Repositories
+                </button>
+              </div>
             </div>
             <Show when={repoPanelOpen()}>
               <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">

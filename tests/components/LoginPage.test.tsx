@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import LoginPage from "../../src/app/pages/LoginPage";
+import { OAUTH_STATE_KEY } from "../../src/app/lib/oauth";
 
 describe("LoginPage", () => {
   beforeEach(() => {
@@ -70,7 +71,7 @@ describe("LoginPage", () => {
     render(() => <LoginPage />);
     const button = screen.getByText("Sign in with GitHub");
     await user.click(button);
-    const stored = sessionStorage.getItem("github-tracker:oauth-state");
+    const stored = sessionStorage.getItem(OAUTH_STATE_KEY);
     expect(stored).toBeTruthy();
   });
 
@@ -81,7 +82,7 @@ describe("LoginPage", () => {
     await user.click(button);
     const url = new URL(window.location.href);
     const urlState = url.searchParams.get("state");
-    const storedState = sessionStorage.getItem("github-tracker:oauth-state");
+    const storedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     expect(urlState).toBe(storedState);
   });
 

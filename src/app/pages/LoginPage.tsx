@@ -1,26 +1,8 @@
+import { buildAuthorizeUrl } from "../lib/oauth";
+
 export default function LoginPage() {
   function handleLogin() {
-    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID as string;
-
-    // Generate cryptographically random state for CSRF protection (SDR-002)
-    const stateBytes = crypto.getRandomValues(new Uint8Array(16));
-    const state = btoa(String.fromCharCode(...stateBytes))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=/g, "");
-
-    sessionStorage.setItem("github-tracker:oauth-state", state);
-
-    const redirectUri = `${window.location.origin}/oauth/callback`;
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      state,
-      // repo: read issues/PRs; read:org: list orgs; notifications: gate
-      scope: "repo read:org notifications",
-    });
-
-    window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
+    window.location.href = buildAuthorizeUrl();
   }
 
   return (
@@ -38,6 +20,7 @@ export default function LoginPage() {
           </div>
 
           <button
+            type="button"
             onClick={handleLogin}
             class="w-full flex items-center justify-center gap-3 px-4 py-2.5 bg-gray-900 dark:bg-gray-700 text-white rounded-lg font-medium hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >

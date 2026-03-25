@@ -2,7 +2,6 @@ import {
   createSignal,
   createEffect,
   createMemo,
-  For,
   Show,
   Index,
 } from "solid-js";
@@ -14,6 +13,7 @@ import FilterInput from "../shared/FilterInput";
 
 interface RepoSelectorProps {
   selectedOrgs: string[];
+  orgEntries?: OrgEntry[]; // Pre-fetched org entries — skip internal fetchOrgs when provided
   selected: RepoRef[];
   onChange: (selected: RepoRef[]) => void;
 }
@@ -30,10 +30,19 @@ export default function RepoSelector(props: RepoSelectorProps) {
   const [filter, setFilter] = createSignal("");
   const [orgStates, setOrgStates] = createSignal<OrgRepoState[]>([]);
   const [loadedCount, setLoadedCount] = createSignal(0);
+  let effectVersion = 0;
 
   // Initialize org states and fetch repos on mount / when selectedOrgs change
   createEffect(() => {
     const orgs = props.selectedOrgs;
+    // Capture orgEntries synchronously so SolidJS tracks it as a reactive
+    // dependency. Reading it inside the async IIFE below would be fragile —
+    // it happens to work today (before any await) but would silently break
+    // if the check were moved after an await.
+    const preloadedEntries = props.orgEntries;
+    // Version counter: if selectedOrgs changes while fetches are in-flight,
+    // stale callbacks check this and bail out instead of writing to state.
+    const version = ++effectVersion;
     if (orgs.length === 0) {
       setOrgStates([]);
       setLoadedCount(0);
@@ -69,15 +78,21 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
     // Fetch org type info first, then repos incrementally
     void (async () => {
-      let orgEntries: OrgEntry[] = [];
-      try {
-        orgEntries = await fetchOrgs(client);
-      } catch {
-        // If fetchOrgs fails, treat all as "org" type
+      let entries: OrgEntry[];
+      if (preloadedEntries != null) {
+        entries = preloadedEntries;
+      } else {
+        try {
+          entries = await fetchOrgs(client);
+        } catch {
+          entries = [];
+        }
       }
 
+      if (version !== effectVersion) return;
+
       const typeMap = new Map<string, "org" | "user">(
-        orgEntries.map((e) => [e.login, e.type])
+        entries.map((e) => [e.login, e.type])
       );
 
       // Fetch repos for each org independently so results trickle in
@@ -85,12 +100,14 @@ export default function RepoSelector(props: RepoSelectorProps) {
         const type = typeMap.get(org) ?? "org";
         try {
           const repos = await fetchRepos(client, org, type);
+          if (version !== effectVersion) return;
           setOrgStates((prev) =>
             prev.map((s) =>
               s.org === org ? { ...s, type, repos, loading: false } : s
             )
           );
         } catch (err) {
+          if (version !== effectVersion) return;
           const message =
             err instanceof Error ? err.message : "Failed to load repositories";
           setOrgStates((prev) =>
@@ -101,7 +118,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
             )
           );
         } finally {
-          setLoadedCount((c) => c + 1);
+          if (version === effectVersion) {
+            setLoadedCount((c) => c + 1);
+          }
         }
       });
 
@@ -112,6 +131,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
   function retryOrg(org: string) {
     const client = getClient();
     if (!client) return;
+
+    const version = effectVersion;
 
     setOrgStates((prev) =>
       prev.map((s) =>
@@ -124,6 +145,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
     void fetchRepos(client, org, type)
       .then((repos) => {
+        if (version !== effectVersion) return;
         setOrgStates((prev) =>
           prev.map((s) =>
             s.org === org ? { ...s, repos, loading: false, error: null } : s
@@ -131,6 +153,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
         );
       })
       .catch((err) => {
+        if (version !== effectVersion) return;
         const message =
           err instanceof Error ? err.message : "Failed to load repositories";
         setOrgStates((prev) =>
@@ -184,7 +207,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const q = () => filter().toLowerCase().trim();
+  const q = createMemo(() => filter().toLowerCase().trim());
 
   function filteredReposForOrg(state: OrgRepoState): RepoEntry[] {
     const query = q();
@@ -270,23 +293,24 @@ export default function RepoSelector(props: RepoSelectorProps) {
         </div>
       </Show>
 
-      {/* Per-org repo lists */}
-      <For each={sortedOrgStates()}>
+      {/* Per-org repo lists — Index (not For) avoids tearing down every org's
+           DOM subtree when a single org's state updates via setOrgStates(prev.map(...)) */}
+      <Index each={sortedOrgStates()}>
         {(state) => {
-          const visible = createMemo(() => filteredReposForOrg(state));
+          const visible = createMemo(() => filteredReposForOrg(state()));
 
           return (
             <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
               {/* Org header */}
               <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800/60">
                 <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  {state.org}
+                  {state().org}
                 </span>
-                <Show when={!state.loading && !state.error}>
+                <Show when={!state().loading && !state().error}>
                   <div class="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => selectAllInOrg(state)}
+                      onClick={() => selectAllInOrg(state())}
                       disabled={
                         visible().length === 0 ||
                         visible().every((r) => isSelected(r.fullName))
@@ -298,7 +322,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     <span class="text-gray-300 dark:text-gray-600">·</span>
                     <button
                       type="button"
-                      onClick={() => deselectAllInOrg(state)}
+                      onClick={() => deselectAllInOrg(state())}
                       disabled={
                         visible().length === 0 ||
                         visible().every((r) => !isSelected(r.fullName))
@@ -312,21 +336,21 @@ export default function RepoSelector(props: RepoSelectorProps) {
               </div>
 
               {/* Loading state for this org */}
-              <Show when={state.loading}>
+              <Show when={state().loading}>
                 <div class="flex justify-center py-6">
                   <LoadingSpinner size="sm" label="Loading..." />
                 </div>
               </Show>
 
               {/* Error state for this org */}
-              <Show when={!state.loading && state.error !== null}>
+              <Show when={!state().loading && state().error !== null}>
                 <div class="flex items-center justify-between px-4 py-3">
                   <span class="text-sm text-red-600 dark:text-red-400">
-                    {state.error}
+                    {state().error}
                   </span>
                   <button
                     type="button"
-                    onClick={() => retryOrg(state.org)}
+                    onClick={() => retryOrg(state().org)}
                     class="ml-3 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
                   >
                     Retry
@@ -335,7 +359,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
               </Show>
 
               {/* Repo list */}
-              <Show when={!state.loading && state.error === null}>
+              <Show when={!state().loading && state().error === null}>
                 <Show
                   when={visible().length > 0}
                   fallback={
@@ -346,42 +370,48 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     </p>
                   }
                 >
-                  <ul class="divide-y divide-gray-100 dark:divide-gray-700">
-                    <Index each={visible()}>
-                      {(repo) => {
-                        return (
-                          <li>
-                            <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                              <input
-                                type="checkbox"
-                                checked={isSelected(repo().fullName)}
-                                onChange={() => toggleRepo(repo())}
-                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
-                              />
-                              <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2">
-                                  <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                                    {repo().name}
-                                  </span>
-                                  <Show when={repo().pushedAt}>
-                                    <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
-                                      {relativeTime(repo().pushedAt!)}
+                  <div
+                    class="max-h-[300px] overflow-y-auto"
+                    role="region"
+                    aria-label={`${state().org} repositories`}
+                  >
+                    <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+                      <Index each={visible()}>
+                        {(repo) => {
+                          return (
+                            <li>
+                              <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected(repo().fullName)}
+                                  onChange={() => toggleRepo(repo())}
+                                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
+                                />
+                                <div class="min-w-0 flex-1">
+                                  <div class="flex items-center gap-2">
+                                    <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                      {repo().name}
                                     </span>
-                                  </Show>
+                                    <Show when={repo().pushedAt}>
+                                      <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                                        {relativeTime(repo().pushedAt!)}
+                                      </span>
+                                    </Show>
+                                  </div>
                                 </div>
-                              </div>
-                            </label>
-                          </li>
-                        );
-                      }}
-                    </Index>
-                  </ul>
+                              </label>
+                            </li>
+                          );
+                        }}
+                      </Index>
+                    </ul>
+                  </div>
                 </Show>
               </Show>
             </div>
           );
         }}
-      </For>
+      </Index>
 
       {/* Total count */}
       <Show when={!isLoadingAny() && props.selected.length > 0}>

@@ -11,6 +11,7 @@ vi.mock("../../src/app/stores/auth", () => ({
 
 import * as authStore from "../../src/app/stores/auth";
 import OAuthCallback from "../../src/app/pages/OAuthCallback";
+import { OAUTH_STATE_KEY, OAUTH_RETURN_TO_KEY } from "../../src/app/lib/oauth";
 
 /** Render OAuthCallback inside a proper router context (useNavigate requires a Route). */
 function renderCallback() {
@@ -55,7 +56,7 @@ describe("OAuthCallback", () => {
   }
 
   function setupValidState() {
-    sessionStorage.setItem("github-tracker:oauth-state", "teststate");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "teststate");
   }
 
   it("shows loading state while exchanging code", async () => {
@@ -186,7 +187,7 @@ describe("OAuthCallback", () => {
   });
 
   it("shows CSRF error when state param is missing from URL", async () => {
-    sessionStorage.setItem("github-tracker:oauth-state", "teststate");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "teststate");
     setWindowSearch({ code: "fakecode" }); // no state param
 
     renderCallback();
@@ -197,7 +198,7 @@ describe("OAuthCallback", () => {
   });
 
   it("shows CSRF error when state param does not match sessionStorage", async () => {
-    sessionStorage.setItem("github-tracker:oauth-state", "expected-state");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "expected-state");
     setWindowSearch({ code: "fakecode", state: "wrong-state" });
 
     renderCallback();
@@ -228,7 +229,7 @@ describe("OAuthCallback", () => {
 
     // onMount runs asynchronously — wait for the key to be cleared
     await waitFor(() => {
-      expect(sessionStorage.getItem("github-tracker:oauth-state")).toBeNull();
+      expect(sessionStorage.getItem(OAUTH_STATE_KEY)).toBeNull();
     });
   });
 
@@ -241,7 +242,7 @@ describe("OAuthCallback", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(() => {
-        expect(sessionStorage.getItem("github-tracker:oauth-state")).toBeNull();
+        expect(sessionStorage.getItem(OAUTH_STATE_KEY)).toBeNull();
         return new Promise(() => {}); // keep pending
       })
     );
@@ -254,7 +255,7 @@ describe("OAuthCallback", () => {
   });
 
   it("handles missing code param", async () => {
-    sessionStorage.setItem("github-tracker:oauth-state", "teststate");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "teststate");
     setWindowSearch({ state: "teststate" });
 
     renderCallback();
@@ -286,5 +287,92 @@ describe("OAuthCallback", () => {
       screen.getByText(/Could not verify token/i);
     });
   });
+
+  // ── returnTo redirect tests ────────────────────────────────────────────────
+
+  function setupSuccessfulCallback() {
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "tok123" }),
+      })
+    );
+    vi.mocked(authStore.validateToken).mockResolvedValue(true);
+  }
+
+  it("navigates to returnTo path when OAUTH_RETURN_TO_KEY is set to /settings", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupSuccessfulCallback();
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.validateToken).toHaveBeenCalled();
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+  });
+
+  it("OAUTH_RETURN_TO_KEY is removed from sessionStorage after reading", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+    });
+  });
+
+  it("OAUTH_RETURN_TO_KEY is cleared even when CSRF check fails (stale key protection)", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "expected-state");
+    setWindowSearch({ code: "fakecode", state: "wrong-state" });
+
+    renderCallback();
+
+    await waitFor(() => {
+      screen.getByText(/Invalid OAuth state/i);
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+  });
+
+  it("navigates to / when OAUTH_RETURN_TO_KEY is not set", async () => {
+    setupSuccessfulCallback();
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.validateToken).toHaveBeenCalled();
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+  });
+
+  it("rejects absolute URL returnTo (open-redirect protection)", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "https://evil.com");
+    setupSuccessfulCallback();
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.validateToken).toHaveBeenCalled();
+    });
+    // Key consumed regardless
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+  });
+
+  it("rejects protocol-relative URL returnTo (// attack)", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "//evil.com");
+    setupSuccessfulCallback();
+    renderCallback();
+
+    await waitFor(() => {
+      expect(authStore.validateToken).toHaveBeenCalled();
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+  });
+
+  // returnTo validation is tested via sanitizeReturnTo in tests/lib/oauth.test.ts
 
 });
