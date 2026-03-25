@@ -41,6 +41,15 @@ vi.mock("../../../src/app/services/api", () => ({
   fetchRepos: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../../../src/app/lib/url", () => ({
+  isSafeGitHubUrl: vi.fn(() => true),
+  openGitHubUrl: vi.fn(),
+}));
+
+vi.mock("../../../src/app/lib/errors", () => ({
+  pushNotification: vi.fn(),
+}));
+
 // ── Imports after mocks ───────────────────────────────────────────────────────
 
 import { render } from "@solidjs/testing-library";
@@ -50,7 +59,8 @@ import * as authStore from "../../../src/app/stores/auth";
 import * as cacheStore from "../../../src/app/stores/cache";
 import * as apiModule from "../../../src/app/services/api";
 import { updateConfig, config } from "../../../src/app/stores/config";
-import { MERGE_ORGS_KEY, OAUTH_STATE_KEY } from "../../../src/app/lib/oauth";
+import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
+import * as urlModule from "../../../src/app/lib/url";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +99,9 @@ beforeEach(() => {
   setupMatchMedia();
   vi.clearAllMocks();
 
+  // Restore isSafeGitHubUrl mock (vi.restoreAllMocks strips factory implementations)
+  vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(true);
+
   // Reset config to defaults
   updateConfig({
     refreshInterval: 300,
@@ -104,7 +117,6 @@ beforeEach(() => {
     selectedRepos: [],
   });
 
-  // Clear sessionStorage — re-auth tests set MERGE_ORGS_KEY and OAUTH_STATE_KEY
   sessionStorage.clear();
 
   // Mock window.location with both reload and href
@@ -521,126 +533,147 @@ describe("SettingsPage — Theme application", () => {
   });
 });
 
-describe("SettingsPage — Re-auth button", () => {
+describe("SettingsPage — Grant more orgs button", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("renders 'Grant more orgs' button in Organizations & Repositories section", () => {
     renderSettings();
     screen.getByRole("button", { name: "Grant more orgs" });
   });
 
-  it("clicking 'Grant more orgs' sets MERGE_ORGS_KEY in sessionStorage", async () => {
+  it("clicking 'Grant more orgs' opens GitHub app settings via openGitHubUrl", async () => {
     const user = userEvent.setup();
-    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBe("true");
-    vi.unstubAllEnvs();
+    expect(urlModule.openGitHubUrl).toHaveBeenCalledWith(buildOrgAccessUrl());
   });
 
-  it("clicking 'Grant more orgs' sets window.location.href to GitHub authorize URL", async () => {
+  it("clicking 'Grant more orgs' registers a focus listener for auto-merge", async () => {
     const user = userEvent.setup();
-    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    const addSpy = vi.spyOn(window, "addEventListener");
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(window.location.href).toContain("https://github.com/login/oauth/authorize");
-    vi.unstubAllEnvs();
+    expect(addSpy).toHaveBeenCalledWith("focus", expect.any(Function));
   });
 
-  it("clicking 'Grant more orgs' also sets OAUTH_STATE_KEY in sessionStorage", async () => {
+  it("shows disabled 'Syncing...' button during merge, reverts after", async () => {
     const user = userEvent.setup();
-    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    updateConfig({ selectedOrgs: [] });
+    let resolveFetch!: (v: never[]) => void;
+    vi.mocked(apiModule.fetchOrgs).mockReturnValue(
+      new Promise((r) => { resolveFetch = r as (v: never[]) => void; })
+    );
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(sessionStorage.getItem(OAUTH_STATE_KEY)).toBeTruthy();
-    vi.unstubAllEnvs();
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      const syncBtn = screen.getByRole("button", { name: "Syncing..." });
+      expect(syncBtn.hasAttribute("disabled")).toBe(true);
+    });
+    resolveFetch([]);
+    await waitFor(() => {
+      const restored = screen.getByRole("button", { name: "Grant more orgs" });
+      expect(restored.hasAttribute("disabled")).toBe(false);
+    });
   });
 
-  it("'Grant more orgs' button is disabled after click and re-enables after timeout", async () => {
-    vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
-    await user.click(btn);
-    expect(btn.hasAttribute("disabled")).toBe(true);
-    vi.advanceTimersByTime(3000);
-    expect(btn.hasAttribute("disabled")).toBe(false);
-    vi.unstubAllEnvs();
-    vi.useRealTimers();
-  });
-});
-
-describe("SettingsPage — Auto-merge orgs on mount", () => {
-  it("calls fetchOrgs and merges new orgs when MERGE_ORGS_KEY is in sessionStorage", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+  it("auto-merges new orgs when window regains focus after granting", async () => {
+    const user = userEvent.setup();
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
       { login: "existing-org", avatarUrl: "", type: "org" },
       { login: "new-org", avatarUrl: "", type: "org" },
     ]);
     renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(apiModule.fetchOrgs).toHaveBeenCalled();
     });
     await waitFor(() => {
       expect(config.selectedOrgs).toContain("new-org");
-    });
-  });
-
-  it("preserves existing selectedOrgs when merging", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
-    updateConfig({ selectedOrgs: ["existing-org"] });
-    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
-      { login: "existing-org", avatarUrl: "", type: "org" },
-      { login: "new-org", avatarUrl: "", type: "org" },
-    ]);
-    renderSettings();
-    await waitFor(() => {
       expect(config.selectedOrgs).toContain("existing-org");
     });
   });
 
-  it("removes MERGE_ORGS_KEY from sessionStorage after processing", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
-    updateConfig({ selectedOrgs: [] });
-    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
-      { login: "new-org", avatarUrl: "", type: "org" },
-    ]);
-    renderSettings();
-    await waitFor(() => {
-      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
-    });
-  });
-
-  it("does not call fetchOrgs when MERGE_ORGS_KEY is not in sessionStorage", () => {
-    // No MERGE_ORGS_KEY set
-    renderSettings();
-    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
-  });
-
-  it("silently handles fetchOrgs rejection without breaking", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+  it("pushes warning notification on fetchOrgs failure", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    const user = userEvent.setup();
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockRejectedValue(new Error("Network error"));
     renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(apiModule.fetchOrgs).toHaveBeenCalled();
     });
-    // Config unchanged — error was swallowed
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "org-sync",
+        expect.stringContaining("Failed to sync"),
+        "warning",
+      );
+    });
     expect(config.selectedOrgs).toEqual(["existing-org"]);
   });
 
-  it("skips merge when getClient returns null", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+  it("skips merge on focus when getClient returns null", async () => {
+    const user = userEvent.setup();
     const github = await import("../../../src/app/services/github");
     vi.mocked(github.getClient).mockReturnValueOnce(null);
     renderSettings();
-    // MERGE_ORGS_KEY still removed synchronously before mergeNewOrgs
-    await waitFor(() => {
-      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
-    });
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((r) => setTimeout(r, 50));
     expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+  });
+
+  it("rapid double-click deduplicates focus listeners", async () => {
+    const user = userEvent.setup();
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    await user.click(btn);
+    const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
+    expect(focusRemoves.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("cleans up pending focus listener on component unmount", async () => {
+    const user = userEvent.setup();
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const { unmount } = renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    unmount();
+    const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
+    expect(focusRemoves.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("focus listener self-removes — second focus does not re-trigger merge", async () => {
+    const user = userEvent.setup();
+    updateConfig({ selectedOrgs: [] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([]);
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
+    });
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
   });
 });

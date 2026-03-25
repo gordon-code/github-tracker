@@ -3,7 +3,9 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
-import { buildAuthorizeUrl, MERGE_ORGS_KEY } from "../../lib/oauth";
+import { pushNotification } from "../../lib/errors";
+import { buildOrgAccessUrl } from "../../lib/oauth";
+import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
@@ -153,7 +155,7 @@ export default function SettingsPage() {
   const [confirmClearCache, setConfirmClearCache] = createSignal(false);
   const [confirmReset, setConfirmReset] = createSignal(false);
   const [cacheClearing, setCacheClearing] = createSignal(false);
-  const [reauthing, setReauthing] = createSignal(false);
+  const [merging, setMerging] = createSignal(false);
   const [notifPermission, setNotifPermission] = createSignal<NotificationPermission>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
@@ -161,6 +163,7 @@ export default function SettingsPage() {
   // Save indicator
   const [showSaved, setShowSaved] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingFocusHandler: (() => void) | undefined;
 
   function saveWithFeedback(patch: Parameters<typeof updateConfig>[0]) {
     updateConfig(patch);
@@ -169,7 +172,12 @@ export default function SettingsPage() {
     saveTimer = setTimeout(() => setShowSaved(false), 1500);
   }
 
-  onCleanup(() => clearTimeout(saveTimer));
+  onCleanup(() => {
+    clearTimeout(saveTimer);
+    if (pendingFocusHandler) {
+      window.removeEventListener("focus", pendingFocusHandler);
+    }
+  });
 
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
@@ -191,13 +199,6 @@ export default function SettingsPage() {
     };
     mq.addEventListener("change", handler);
     onCleanup(() => mq.removeEventListener("change", handler));
-
-    // Auto-merge newly accessible orgs after re-auth redirect
-    const shouldMerge = sessionStorage.getItem(MERGE_ORGS_KEY);
-    if (shouldMerge) {
-      sessionStorage.removeItem(MERGE_ORGS_KEY);
-      void mergeNewOrgs();
-    }
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -205,6 +206,7 @@ export default function SettingsPage() {
   async function mergeNewOrgs() {
     const client = getClient();
     if (!client) return;
+    setMerging(true);
     const snapshot = [...config.selectedOrgs];
     try {
       const allOrgs = await fetchOrgs(client);
@@ -220,16 +222,27 @@ export default function SettingsPage() {
         console.info(`[settings] merged ${newOrgs.length} new org(s)`);
       }
     } catch {
-      // Non-fatal — user can manually manage orgs
+      pushNotification("org-sync", "Failed to sync organizations — try again or manage manually", "warning");
+    } finally {
+      setMerging(false);
     }
   }
 
-  function handleReAuth() {
-    setReauthing(true);
-    // Reset if navigation doesn't happen (e.g., beforeunload dialog blocks redirect)
-    setTimeout(() => setReauthing(false), 3000);
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
-    window.location.href = buildAuthorizeUrl({ returnTo: "/settings" });
+  function handleGrantOrgs() {
+    const url = buildOrgAccessUrl();
+    if (!isSafeGitHubUrl(url)) return;
+    openGitHubUrl(url);
+    // Remove any prior focus listener before adding a new one (dedup on rapid clicks)
+    if (pendingFocusHandler) {
+      window.removeEventListener("focus", pendingFocusHandler);
+    }
+    const onFocus = () => {
+      window.removeEventListener("focus", onFocus);
+      pendingFocusHandler = undefined;
+      void mergeNewOrgs();
+    };
+    pendingFocusHandler = onFocus;
+    window.addEventListener("focus", onFocus);
   }
 
   function handleOrgsChange(orgs: string[]) {
@@ -408,16 +421,16 @@ export default function SettingsPage() {
                     Organization Access
                   </p>
                   <p class="text-xs text-gray-500 dark:text-gray-400">
-                    Re-authorize with GitHub to grant access to additional organizations
+                    Manage organization access on GitHub — new orgs sync automatically when you return
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={handleReAuth}
-                  disabled={reauthing()}
+                  onClick={handleGrantOrgs}
+                  disabled={merging()}
                   class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                 >
-                  Grant more orgs
+                  {merging() ? "Syncing..." : "Grant more orgs"}
                 </button>
               </div>
             </div>
