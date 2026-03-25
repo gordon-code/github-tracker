@@ -42,9 +42,15 @@ vi.mock("../../src/app/services/github", () => ({
 // Mock errors lib — return empty by default
 vi.mock("../../src/app/lib/errors", () => ({
   getErrors: vi.fn().mockReturnValue([]),
+  getNotifications: vi.fn().mockReturnValue([]),
+  getUnreadCount: vi.fn().mockReturnValue(0),
+  markAllAsRead: vi.fn(),
   dismissError: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
   pushError: vi.fn(),
+  pushNotification: vi.fn(),
   clearErrors: vi.fn(),
+  clearNotifications: vi.fn(),
 }));
 
 // capturedFetchAll is populated by the createPollCoordinator mock each time

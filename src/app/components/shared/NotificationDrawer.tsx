@@ -4,16 +4,9 @@ import {
   markAllAsRead,
   clearNotifications,
   dismissError,
-  type NotificationSeverity,
 } from "../../lib/errors";
 import { relativeTime } from "../../lib/format";
-import { severityConfig } from "./ToastContainer";
-
-// Module-level muted sources — session only, resets on page reload
-export const mutedSources = new Set<string>();
-
-export type { NotificationSeverity };
-export { severityConfig };
+import { severityConfig, mutedSources } from "./ToastContainer";
 
 interface NotificationDrawerProps {
   open: boolean;

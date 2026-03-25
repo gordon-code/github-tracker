@@ -33,14 +33,31 @@ vi.mock("../../../src/app/services/github", () => ({
   getRateLimit: () => null,
 }));
 
+// Mock errors module so Header's notification imports work
+vi.mock("../../../src/app/lib/errors", () => ({
+  getUnreadCount: vi.fn(() => 0),
+  markAllAsRead: vi.fn(),
+  getNotifications: vi.fn(() => []),
+  clearNotifications: vi.fn(),
+  pushNotification: vi.fn(),
+  pushError: vi.fn(),
+  dismissError: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
+  getErrors: vi.fn(() => []),
+  clearErrors: vi.fn(),
+}));
+
 import Header from "../../../src/app/components/layout/Header";
 import * as authStore from "../../../src/app/stores/auth";
 import * as githubService from "../../../src/app/services/github";
+import * as errorsModule from "../../../src/app/lib/errors";
 import { render } from "@solidjs/testing-library";
 
 beforeEach(() => {
   mockNavigate.mockClear();
   vi.mocked(authStore.clearAuth).mockClear();
+  vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
+  vi.mocked(errorsModule.markAllAsRead).mockClear();
 });
 
 describe("Header", () => {
@@ -100,5 +117,36 @@ describe("Header", () => {
   it("renders logout button with correct aria-label", () => {
     render(() => <Header />);
     screen.getByLabelText("Sign out");
+  });
+
+  it("bell button renders with aria-label Notifications", () => {
+    render(() => <Header />);
+    expect(screen.getByLabelText("Notifications")).toBeDefined();
+  });
+
+  it("unread badge hidden when unread count is 0", () => {
+    vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
+    render(() => <Header />);
+    expect(screen.queryByText("1")).toBeNull();
+  });
+
+  it("unread badge shows count when getUnreadCount > 0", () => {
+    vi.mocked(errorsModule.getUnreadCount).mockReturnValue(3);
+    render(() => <Header />);
+    expect(screen.getByText("3")).toBeDefined();
+  });
+
+  it("badge shows 9+ when unread count exceeds 9", () => {
+    vi.mocked(errorsModule.getUnreadCount).mockReturnValue(10);
+    render(() => <Header />);
+    expect(screen.getByText("9+")).toBeDefined();
+  });
+
+  it("clicking bell button calls markAllAsRead", async () => {
+    const user = userEvent.setup();
+    render(() => <Header />);
+    const bellBtn = screen.getByLabelText("Notifications");
+    await user.click(bellBtn);
+    expect(errorsModule.markAllAsRead).toHaveBeenCalled();
   });
 });
