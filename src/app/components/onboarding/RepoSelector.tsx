@@ -35,6 +35,11 @@ export default function RepoSelector(props: RepoSelectorProps) {
   // Initialize org states and fetch repos on mount / when selectedOrgs change
   createEffect(() => {
     const orgs = props.selectedOrgs;
+    // Capture orgEntries synchronously so SolidJS tracks it as a reactive
+    // dependency. Reading it inside the async IIFE below would be fragile —
+    // it happens to work today (before any await) but would silently break
+    // if the check were moved after an await.
+    const preloadedEntries = props.orgEntries;
     if (orgs.length === 0) {
       setOrgStates([]);
       setLoadedCount(0);
@@ -71,8 +76,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
     // Fetch org type info first, then repos incrementally
     void (async () => {
       let entries: OrgEntry[];
-      if (props.orgEntries != null) {
-        entries = props.orgEntries;
+      if (preloadedEntries != null) {
+        entries = preloadedEntries;
       } else {
         try {
           entries = await fetchOrgs(client);
@@ -353,6 +358,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
                 >
                   <div
                     class="max-h-[300px] overflow-y-auto"
+                    role="region"
+                    aria-label={`${state.org} repositories`}
                     data-testid={`repo-scroll-${state.org}`}
                   >
                     <ul class="divide-y divide-gray-100 dark:divide-gray-700">
