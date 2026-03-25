@@ -396,78 +396,89 @@ async function graphqlSearchIssues(
     let cursor: string | null = null;
 
     while (true) {
-      let response: GraphQLIssueSearchResponse;
-      let isPartial = false;
       try {
-        response = await octokit.graphql<GraphQLIssueSearchResponse>(
-          ISSUES_SEARCH_QUERY,
-          { q: queryString, cursor }
-        );
-      } catch (err) {
-        // GraphqlResponseError contains partial data — extract valid nodes before recording error
-        const partial = extractGraphQLPartialData<GraphQLIssueSearchResponse>(err);
-        if (partial) {
-          response = partial;
-          isPartial = true;
-          const { message } = extractRejectionError(err);
-          errors.push({
-            repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-            statusCode: null,
-            message,
-            retryable: true,
+        let response: GraphQLIssueSearchResponse;
+        let isPartial = false;
+        try {
+          response = await octokit.graphql<GraphQLIssueSearchResponse>(
+            ISSUES_SEARCH_QUERY,
+            { q: queryString, cursor }
+          );
+        } catch (err) {
+          const partial = extractGraphQLPartialData<GraphQLIssueSearchResponse>(err);
+          if (partial) {
+            response = partial;
+            isPartial = true;
+            const { message } = extractRejectionError(err);
+            errors.push({
+              repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
+              statusCode: null,
+              message,
+              retryable: true,
+            });
+          } else {
+            const { statusCode, message } = extractRejectionError(err);
+            errors.push({
+              repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
+              statusCode,
+              message,
+              retryable: statusCode === null || statusCode >= 500,
+            });
+            break;
+          }
+        }
+
+        if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+        for (const node of response.search.nodes) {
+          if (!node || node.databaseId == null || !node.repository) continue;
+          if (seen.has(node.databaseId)) continue;
+          seen.add(node.databaseId);
+          issues.push({
+            id: node.databaseId,
+            number: node.number,
+            title: node.title,
+            state: node.state,
+            htmlUrl: node.url,
+            createdAt: node.createdAt,
+            updatedAt: node.updatedAt,
+            userLogin: node.author?.login ?? "",
+            userAvatarUrl: node.author?.avatarUrl ?? "",
+            labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+            assigneeLogins: node.assignees.nodes.map((a) => a.login),
+            repoFullName: node.repository.nameWithOwner,
+            comments: node.comments.totalCount,
           });
-        } else {
-          const { statusCode, message } = extractRejectionError(err);
-          errors.push({
-            repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-            statusCode,
-            message,
-            retryable: statusCode === null || statusCode >= 500,
-          });
+        }
+
+        if (isPartial) break;
+
+        if (issues.length >= 1000 && !capReached) {
+          capReached = true;
+          const total = response.search.issueCount;
+          console.warn(`[api] Issue search results capped at 1000 (${total} total)`);
+          pushNotification(
+            "search/issues",
+            `Issue search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
+            "warning"
+          );
           break;
         }
-      }
 
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-      for (const node of response.search.nodes) {
-        if (!node || node.databaseId == null || !node.repository) continue;
-        if (seen.has(node.databaseId)) continue;
-        seen.add(node.databaseId);
-        issues.push({
-          id: node.databaseId,
-          number: node.number,
-          title: node.title,
-          state: node.state,
-          htmlUrl: node.url,
-          createdAt: node.createdAt,
-          updatedAt: node.updatedAt,
-          userLogin: node.author?.login ?? "",
-          userAvatarUrl: node.author?.avatarUrl ?? "",
-          labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-          assigneeLogins: node.assignees.nodes.map((a) => a.login),
-          repoFullName: node.repository.nameWithOwner,
-          comments: node.comments.totalCount,
+        if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
+        cursor = response.search.pageInfo.endCursor;
+      } catch (err) {
+        // Catch-all for unexpected runtime errors (malformed response shapes, TypeErrors, etc.)
+        // Preserves any issues collected so far rather than losing the entire fetch
+        const { message } = extractRejectionError(err);
+        errors.push({
+          repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
+          statusCode: null,
+          message,
+          retryable: false,
         });
-      }
-
-      // Don't paginate after partial error — pageInfo may be unreliable
-      if (isPartial) break;
-
-      if (issues.length >= 1000 && !capReached) {
-        capReached = true;
-        const total = response.search.issueCount;
-        console.warn(`[api] Issue search results capped at 1000 (${total} total)`);
-        pushNotification(
-          "search/issues",
-          `Issue search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
-          "warning"
-        );
         break;
       }
-
-      if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
-      cursor = response.search.pageInfo.endCursor;
     }
   }
 
@@ -531,118 +542,125 @@ async function graphqlSearchPRs(
       let cursor: string | null = null;
 
       while (true) {
-        let response: GraphQLPRSearchResponse;
-        let isPartial = false;
         try {
-          response = await octokit.graphql<GraphQLPRSearchResponse>(
-            PR_SEARCH_QUERY,
-            { q: queryString, cursor }
-          );
-        } catch (err) {
-          const partial = extractGraphQLPartialData<GraphQLPRSearchResponse>(err);
-          if (partial) {
-            response = partial;
-            isPartial = true;
-            const { message } = extractRejectionError(err);
-            errors.push({
-              repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-              statusCode: null,
-              message,
-              retryable: true,
-            });
-          } else {
-            const { statusCode, message } = extractRejectionError(err);
-            errors.push({
-              repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-              statusCode,
-              message,
-              retryable: statusCode === null || statusCode >= 500,
-            });
-            break;
-          }
-        }
-
-        if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-        for (const node of response.search.nodes) {
-          if (!node || node.databaseId == null || !node.repository) continue;
-          if (prMap.has(node.databaseId)) continue;
-
-          const pendingLogins = node.reviewRequests.nodes
-            .map((n) => n.requestedReviewer?.login)
-            .filter((l): l is string => l != null);
-          const actualLogins = node.latestReviews.nodes
-            .map((n) => n.author?.login)
-            .filter((l): l is string => l != null);
-          // Normalize logins to lowercase to avoid case-sensitive duplicates
-          const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
-
-          const rawState =
-            node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
-          const checkStatus = mapCheckStatus(rawState);
-
-          // Store headRepository info for fork detection
-          if (node.headRepository) {
-            const parts = node.headRepository.nameWithOwner.split("/");
-            if (parts.length === 2) {
-              headRepoInfoMap.set(node.databaseId, {
-                owner: node.headRepository.owner.login,
-                repoName: parts[1],
+          let response: GraphQLPRSearchResponse;
+          let isPartial = false;
+          try {
+            response = await octokit.graphql<GraphQLPRSearchResponse>(
+              PR_SEARCH_QUERY,
+              { q: queryString, cursor }
+            );
+          } catch (err) {
+            const partial = extractGraphQLPartialData<GraphQLPRSearchResponse>(err);
+            if (partial) {
+              response = partial;
+              isPartial = true;
+              const { message } = extractRejectionError(err);
+              errors.push({
+                repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+                statusCode: null,
+                message,
+                retryable: true,
               });
             } else {
-              // Malformed nameWithOwner — treat as deleted fork (no fallback)
-              headRepoInfoMap.set(node.databaseId, null);
+              const { statusCode, message } = extractRejectionError(err);
+              errors.push({
+                repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+                statusCode,
+                message,
+                retryable: statusCode === null || statusCode >= 500,
+              });
+              break;
             }
-          } else {
-            headRepoInfoMap.set(node.databaseId, null);
           }
 
-          prMap.set(node.databaseId, {
-            id: node.databaseId,
-            number: node.number,
-            title: node.title,
-            state: node.state,
-            draft: node.isDraft,
-            htmlUrl: node.url,
-            createdAt: node.createdAt,
-            updatedAt: node.updatedAt,
-            userLogin: node.author?.login ?? "",
-            userAvatarUrl: node.author?.avatarUrl ?? "",
-            headSha: node.headRefOid,
-            headRef: node.headRefName,
-            baseRef: node.baseRefName,
-            assigneeLogins: node.assignees.nodes.map((a) => a.login),
-            reviewerLogins,
-            repoFullName: node.repository.nameWithOwner,
-            checkStatus,
-            additions: node.additions,
-            deletions: node.deletions,
-            changedFiles: node.changedFiles,
-            comments: node.comments.totalCount,
-            reviewThreads: node.reviewThreads.totalCount,
-            labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-            reviewDecision: mapReviewDecision(node.reviewDecision),
-            totalReviewCount: node.latestReviews.totalCount,
+          if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+          for (const node of response.search.nodes) {
+            if (!node || node.databaseId == null || !node.repository) continue;
+            if (prMap.has(node.databaseId)) continue;
+
+            const pendingLogins = node.reviewRequests.nodes
+              .map((n) => n.requestedReviewer?.login)
+              .filter((l): l is string => l != null);
+            const actualLogins = node.latestReviews.nodes
+              .map((n) => n.author?.login)
+              .filter((l): l is string => l != null);
+            const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
+
+            const rawState =
+              node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+            const checkStatus = mapCheckStatus(rawState);
+
+            if (node.headRepository) {
+              const parts = node.headRepository.nameWithOwner.split("/");
+              if (parts.length === 2) {
+                headRepoInfoMap.set(node.databaseId, {
+                  owner: node.headRepository.owner.login,
+                  repoName: parts[1],
+                });
+              } else {
+                headRepoInfoMap.set(node.databaseId, null);
+              }
+            } else {
+              headRepoInfoMap.set(node.databaseId, null);
+            }
+
+            prMap.set(node.databaseId, {
+              id: node.databaseId,
+              number: node.number,
+              title: node.title,
+              state: node.state,
+              draft: node.isDraft,
+              htmlUrl: node.url,
+              createdAt: node.createdAt,
+              updatedAt: node.updatedAt,
+              userLogin: node.author?.login ?? "",
+              userAvatarUrl: node.author?.avatarUrl ?? "",
+              headSha: node.headRefOid,
+              headRef: node.headRefName,
+              baseRef: node.baseRefName,
+              assigneeLogins: node.assignees.nodes.map((a) => a.login),
+              reviewerLogins,
+              repoFullName: node.repository.nameWithOwner,
+              checkStatus,
+              additions: node.additions,
+              deletions: node.deletions,
+              changedFiles: node.changedFiles,
+              comments: node.comments.totalCount,
+              reviewThreads: node.reviewThreads.totalCount,
+              labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+              reviewDecision: mapReviewDecision(node.reviewDecision),
+              totalReviewCount: node.latestReviews.totalCount,
+            });
+          }
+
+          if (isPartial) break;
+
+          if (prMap.size >= 1000 && !prCapReached) {
+            prCapReached = true;
+            const total = response.search.issueCount;
+            console.warn(`[api] PR search results capped at 1000 (${total} total)`);
+            pushNotification(
+              "search/prs",
+              `PR search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
+              "warning"
+            );
+            break;
+          }
+
+          if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
+          cursor = response.search.pageInfo.endCursor;
+        } catch (err) {
+          const { message } = extractRejectionError(err);
+          errors.push({
+            repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+            statusCode: null,
+            message,
+            retryable: false,
           });
-        }
-
-        // Don't paginate after partial error — pageInfo may be unreliable
-        if (isPartial) break;
-
-        if (prMap.size >= 1000 && !prCapReached) {
-          prCapReached = true;
-          const total = response.search.issueCount;
-          console.warn(`[api] PR search results capped at 1000 (${total} total)`);
-          pushNotification(
-            "search/prs",
-            `PR search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
-            "warning"
-          );
           break;
         }
-
-        if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
-        cursor = response.search.pageInfo.endCursor;
       }
     }
   }

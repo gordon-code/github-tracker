@@ -450,6 +450,25 @@ describe("fetchIssues", () => {
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
   });
 
+  it("catches unexpected response shapes without crashing", async () => {
+    // Return a malformed response missing search.nodes — would TypeError without catch-all
+    const octokit = makeIssueOctokit(async () => ({
+      search: { issueCount: 0, pageInfo: null, nodes: null },
+      rateLimit: null,
+    }));
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Function returns gracefully with an error, not a thrown TypeError
+    expect(result.issues).toEqual([]);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].retryable).toBe(false);
+  });
+
   it("throws when octokit is null", async () => {
     await expect(fetchIssues(null, [testRepo], "octocat")).rejects.toThrow(
       "No GitHub client available"
@@ -756,6 +775,23 @@ describe("fetchPullRequests", () => {
     expect(result.errors[0].message).toContain("Partial node resolution failure");
     // involves query: 1 call (threw partial, stopped). review-requested: 1 call = 2 total
     expect(octokit.graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it("catches unexpected PR response shapes without crashing", async () => {
+    const octokit = makePROctokit(async () => ({
+      search: { issueCount: 0, pageInfo: null, nodes: null },
+      rateLimit: null,
+    }));
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(result.pullRequests).toEqual([]);
+    expect(result.errors.length).toBeGreaterThanOrEqual(1);
+    expect(result.errors[0].retryable).toBe(false);
   });
 
   it("caps at 1000 PRs and warns via pushNotification", async () => {
