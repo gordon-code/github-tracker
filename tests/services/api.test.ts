@@ -9,19 +9,31 @@ import {
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
+import { pushNotification } from "../../src/app/lib/errors";
 
 import orgsFixture from "../fixtures/github-orgs.json";
 import reposFixture from "../fixtures/github-repos.json";
-import searchIssuesFixture from "../fixtures/github-search-issues.json";
-import searchPrsFixture from "../fixtures/github-search-prs.json";
-import prsFixture from "../fixtures/github-prs.json";
 import runsFixture from "../fixtures/github-runs.json";
+
+vi.mock("../../src/app/lib/errors", () => ({
+  pushNotification: vi.fn(),
+  pushError: vi.fn(),
+  getErrors: vi.fn().mockReturnValue([]),
+  dismissError: vi.fn(),
+  getNotifications: vi.fn().mockReturnValue([]),
+  getUnreadCount: vi.fn().mockReturnValue(0),
+  markAllAsRead: vi.fn(),
+}));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeOctokit(requestImpl: (route: string, params?: unknown) => Promise<unknown>) {
+function makeOctokit(
+  requestImpl: (route: string, params?: unknown) => Promise<unknown>,
+  graphqlImpl?: (query: string, variables?: unknown) => Promise<unknown>
+) {
   return {
     request: vi.fn(requestImpl),
+    graphql: vi.fn(graphqlImpl ?? (async () => ({}))),
     paginate: {
       iterator: vi.fn((route: string, params?: unknown) => {
         void params; // captured for test assertions
@@ -157,98 +169,86 @@ describe("fetchRepos", () => {
   });
 });
 
-// ── fetchIssues (Search API) ─────────────────────────────────────────────────
+// ── fetchIssues (GraphQL search) ─────────────────────────────────────────────
+
+const graphqlIssueNode = {
+  databaseId: 1347,
+  number: 1347,
+  title: "Found a bug",
+  state: "open",
+  url: "https://github.com/octocat/Hello-World/issues/1347",
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-02T00:00:00Z",
+  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
+  labels: { nodes: [{ name: "bug", color: "d73a4a" }] },
+  assignees: { nodes: [{ login: "octocat" }] },
+  repository: { nameWithOwner: "octocat/Hello-World" },
+  comments: { totalCount: 3 },
+};
+
+function makeGraphqlIssueResponse(nodes = [graphqlIssueNode], hasNextPage = false, issueCount?: number) {
+  return {
+    search: {
+      issueCount: issueCount ?? nodes.length,
+      pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null },
+      nodes,
+    },
+    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+  };
+}
 
 describe("fetchIssues", () => {
-  function makeSearchOctokit(searchData?: unknown) {
-    return {
-      request: vi.fn(async (route: string) => {
-        if (route === "GET /search/issues") {
-          return {
-            data: searchData ?? searchIssuesFixture,
-            headers: {},
-          };
-        }
-        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-      }),
-      paginate: { iterator: vi.fn() },
-    };
+  function makeIssueOctokit(graphqlImpl?: (query: string, variables?: unknown) => Promise<unknown>) {
+    return makeOctokit(async () => ({ data: [], headers: {} }), graphqlImpl ?? (async () => makeGraphqlIssueResponse()));
   }
 
-  it("returns issues from search results", async () => {
-    const octokit = makeSearchOctokit();
+  it("returns issues from GraphQL search results", async () => {
+    const octokit = makeIssueOctokit();
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    expect(result.issues.length).toBe(searchIssuesFixture.items.length);
-    expect(result.issues[0].id).toBe(searchIssuesFixture.items[0].id);
+    expect(result.issues.length).toBe(1);
+    expect(result.issues[0].id).toBe(1347);
     expect(result.errors).toEqual([]);
   });
 
-  it("uses the Search API with involves qualifier", async () => {
-    const octokit = makeSearchOctokit();
+  it("uses GraphQL search with involves qualifier", async () => {
+    const octokit = makeIssueOctokit();
     await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    expect(octokit.request).toHaveBeenCalledWith(
-      "GET /search/issues",
-      expect.objectContaining({
-        q: expect.stringContaining("involves:octocat"),
-      })
+    expect(octokit.graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ q: expect.stringContaining("involves:octocat") })
     );
-    expect(octokit.request).toHaveBeenCalledWith(
-      "GET /search/issues",
-      expect.objectContaining({
-        q: expect.stringContaining("is:issue"),
-      })
+    expect(octokit.graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ q: expect.stringContaining("is:issue") })
     );
   });
 
-  it("includes repo qualifiers in search query", async () => {
-    const octokit = makeSearchOctokit();
+  it("includes repo qualifiers in GraphQL search query", async () => {
+    const octokit = makeIssueOctokit();
     await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
       "octocat"
     );
 
-    expect(octokit.request).toHaveBeenCalledWith(
-      "GET /search/issues",
-      expect.objectContaining({
-        q: expect.stringContaining("repo:octocat/Hello-World"),
-      })
+    expect(octokit.graphql).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ q: expect.stringContaining("repo:octocat/Hello-World") })
     );
   });
 
-  it("filters out items with pull_request field", async () => {
-    const withPR = {
-      total_count: 2,
-      incomplete_results: false,
-      items: [
-        searchIssuesFixture.items[0],
-        { ...searchIssuesFixture.items[1], pull_request: { url: "https://..." } },
-      ],
-    };
-    const octokit = makeSearchOctokit(withPR);
-
-    const { issues } = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(issues.length).toBe(1);
-    expect(issues[0].id).toBe(searchIssuesFixture.items[0].id);
-  });
-
-  it("maps search result fields to camelCase issue shape", async () => {
-    const octokit = makeSearchOctokit();
+  it("maps GraphQL fields to camelCase issue shape", async () => {
+    const octokit = makeIssueOctokit();
     const { issues } = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [testRepo],
@@ -256,17 +256,18 @@ describe("fetchIssues", () => {
     );
 
     const issue = issues[0];
-    expect(issue.htmlUrl).toBeDefined();
-    expect(issue.createdAt).toBeDefined();
-    expect(issue.updatedAt).toBeDefined();
-    expect(issue.userLogin).toBeDefined();
-    expect(issue.userAvatarUrl).toBeDefined();
-    expect(issue.assigneeLogins).toBeDefined();
-    expect(issue.repoFullName).toBe("octocat/Hello-World");
+    expect(issue.id).toBe(1347); // databaseId → id
+    expect(issue.htmlUrl).toBe("https://github.com/octocat/Hello-World/issues/1347"); // url → htmlUrl
+    expect(issue.userLogin).toBe("octocat"); // author.login
+    expect(issue.userAvatarUrl).toBe("https://github.com/images/error/octocat_happy.gif"); // author.avatarUrl
+    expect(issue.repoFullName).toBe("octocat/Hello-World"); // repository.nameWithOwner
+    expect(issue.comments).toBe(3); // comments.totalCount
+    expect(issue.assigneeLogins).toEqual(["octocat"]);
+    expect(issue.labels).toEqual([{ name: "bug", color: "d73a4a" }]);
   });
 
   it("returns empty result when repos is empty", async () => {
-    const octokit = makeSearchOctokit();
+    const octokit = makeIssueOctokit();
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [],
@@ -275,52 +276,144 @@ describe("fetchIssues", () => {
 
     expect(result.issues).toEqual([]);
     expect(result.errors).toEqual([]);
-    expect(octokit.request).not.toHaveBeenCalled();
+    expect(octokit.graphql).not.toHaveBeenCalled();
   });
 
   it("batches repos into chunks of 30", async () => {
-    // Create 35 repos to force 2 batches
     const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
       owner: "org",
       name: `repo-${i}`,
       fullName: `org/repo-${i}`,
     }));
 
-    const octokit = makeSearchOctokit();
+    const octokit = makeIssueOctokit();
     await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       repos,
       "octocat"
     );
 
-    // Should make 2 search calls (30 + 5)
-    expect(octokit.request).toHaveBeenCalledTimes(2);
+    // Should make 2 GraphQL calls (30 + 5 repos)
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
   });
 
-  it("deduplicates issues across batches", async () => {
-    // Same item returned by both batch calls
-    const sameItem = searchIssuesFixture.items[0];
-    const searchData = {
-      total_count: 1,
-      incomplete_results: false,
-      items: [sameItem],
-    };
-
+  it("deduplicates issues across batches by databaseId", async () => {
     const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
       owner: "org",
       name: `repo-${i}`,
       fullName: `org/repo-${i}`,
     }));
 
-    const octokit = makeSearchOctokit(searchData);
+    // Both batches return the same databaseId
+    const octokit = makeIssueOctokit(async () => makeGraphqlIssueResponse([graphqlIssueNode]));
     const result = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       repos,
       "octocat"
     );
 
-    // Should deduplicate: only 1 issue even though returned by 2 batches
     expect(result.issues.length).toBe(1);
+  });
+
+  it("paginates GraphQL search across multiple pages", async () => {
+    let callCount = 0;
+    const octokit = makeIssueOctokit(async (_query, variables) => {
+      callCount++;
+      if (callCount === 1) {
+        // First page: has next page
+        expect((variables as Record<string, unknown>).cursor).toBeNull();
+        return makeGraphqlIssueResponse([{ ...graphqlIssueNode, databaseId: 1 }], true);
+      }
+      // Second page: last page
+      expect((variables as Record<string, unknown>).cursor).toBe("cursor1");
+      return makeGraphqlIssueResponse([{ ...graphqlIssueNode, databaseId: 2 }], false);
+    });
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
+    expect(result.issues.length).toBe(2);
+  });
+
+  it("caps at 1000 items and warns via pushNotification", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // Return 1000 items in first response with issueCount > 1000
+    const manyNodes = Array.from({ length: 1000 }, (_, i) => ({ ...graphqlIssueNode, databaseId: i + 1 }));
+    const octokit = makeIssueOctokit(async () => makeGraphqlIssueResponse(manyNodes, true, 1500));
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Stopped at 1000
+    expect(result.issues.length).toBe(1000);
+    // Only 1 graphql call (stopped before paginating)
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    // Warning notification sent
+    expect(pushNotification).toHaveBeenCalledWith(
+      "search",
+      expect.stringContaining("capped at 1,000"),
+      "warning"
+    );
+  });
+
+  it("handles null nodes in GraphQL search results", async () => {
+    const octokit = makeIssueOctokit(async () => ({
+      search: {
+        issueCount: 2,
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [graphqlIssueNode, null, { ...graphqlIssueNode, databaseId: 999 }],
+      },
+      rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+    }));
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(result.issues.length).toBe(2); // null filtered out
+  });
+
+  it("returns partial results and an error when second page throws mid-pagination", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    let callCount = 0;
+    const octokit = makeIssueOctokit(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // First page succeeds with more pages available
+        return makeGraphqlIssueResponse([{ ...graphqlIssueNode, databaseId: 1 }], true);
+      }
+      // Second page throws
+      throw new Error("GraphQL rate limit exceeded");
+    });
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Issues from the first page are returned
+    expect(result.issues.length).toBe(1);
+    expect(result.issues[0].id).toBe(1);
+
+    // An ApiError is included in the result's errors array
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("GraphQL rate limit exceeded");
+    expect(result.errors[0].repo).toBe("search-batch-1/1");
+
+    // pushNotification is NOT called (no 1000-item cap was reached)
+    expect(pushNotification).not.toHaveBeenCalled();
   });
 
   it("throws when octokit is null", async () => {
@@ -330,35 +423,61 @@ describe("fetchIssues", () => {
   });
 });
 
-// ── fetchPullRequests (Search API + individual PR detail) ────────────────────
+// ── fetchPullRequests (GraphQL search) ───────────────────────────────────────
+
+const graphqlPRNode = {
+  databaseId: 42,
+  number: 42,
+  title: "Add feature",
+  state: "open",
+  isDraft: false,
+  url: "https://github.com/octocat/Hello-World/pull/42",
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-02T00:00:00Z",
+  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
+  headRefOid: "abc123",
+  headRefName: "feature-branch",
+  baseRefName: "main",
+  headRepository: { owner: { login: "octocat" }, nameWithOwner: "octocat/Hello-World" },
+  repository: { nameWithOwner: "octocat/Hello-World" },
+  assignees: { nodes: [{ login: "octocat" }] },
+  reviewRequests: { nodes: [{ requestedReviewer: { login: "reviewer2" } }] },
+  labels: { nodes: [{ name: "feature", color: "a2eeef" }] },
+  additions: 100,
+  deletions: 20,
+  changedFiles: 5,
+  comments: { totalCount: 3 },
+  reviewThreads: { totalCount: 2 },
+  reviewDecision: "APPROVED",
+  latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+};
+
+function makeGraphqlPRResponse(nodes = [graphqlPRNode], hasNextPage = false) {
+  return {
+    search: {
+      issueCount: nodes.length,
+      pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null },
+      nodes,
+    },
+    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+  };
+}
 
 describe("fetchPullRequests", () => {
-  function makeOctokitForPRs() {
-    const request = vi.fn(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: searchPrsFixture, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-    const graphql = vi.fn(async () => ({
-      pr0: {
-        object: {
-          statusCheckRollup: { state: "SUCCESS" },
-        },
-        pullRequest: {
-          reviewDecision: "APPROVED",
-          latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
-        },
-      },
-    }));
-    return { request, graphql, paginate: { iterator: vi.fn() } };
+  function makePROctokit(graphqlImpl?: (query: string, variables?: unknown) => Promise<unknown>) {
+    return makeOctokit(
+      async () => ({ data: [], headers: {} }),
+      graphqlImpl ?? (async () => makeGraphqlPRResponse())
+    );
   }
 
-  it("uses search API with involves and review-requested qualifiers", async () => {
-    const octokit = makeOctokitForPRs();
+  it("uses GraphQL search with involves and review-requested qualifiers", async () => {
+    const calls: string[] = [];
+    const octokit = makePROctokit(async (_query, variables) => {
+      calls.push((variables as Record<string, unknown>).q as string);
+      return makeGraphqlPRResponse();
+    });
 
     await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -366,150 +485,13 @@ describe("fetchPullRequests", () => {
       "octocat"
     );
 
-    // Should make 2 search calls: involves + review-requested
-    const searchCalls = octokit.request.mock.calls.filter(
-      (c) => c[0] === "GET /search/issues"
-    );
-    expect(searchCalls.length).toBe(2);
-
-    const queries = searchCalls.map((c) => ((c as unknown[])[1] as { q: string }).q);
-    expect(queries.some((q) => q.includes("involves:octocat"))).toBe(true);
-    expect(queries.some((q) => q.includes("review-requested:octocat"))).toBe(true);
+    // 2 query types × 1 batch = 2 calls
+    expect(calls.some((q) => q.includes("involves:octocat"))).toBe(true);
+    expect(calls.some((q) => q.includes("review-requested:octocat"))).toBe(true);
   });
 
-  it("fetches full PR details for each search result", async () => {
-    const octokit = makeOctokitForPRs();
-
-    await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    const prDetailCalls = octokit.request.mock.calls.filter(
-      (c) => c[0] === "GET /repos/{owner}/{repo}/pulls/{pull_number}"
-    );
-    expect(prDetailCalls.length).toBe(1); // 1 unique PR in fixture
-  });
-
-  it("fetches check status via GraphQL batch call", async () => {
-    const octokit = makeOctokitForPRs();
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    // Should use GraphQL for check status, not REST
-    expect(octokit.graphql).toHaveBeenCalledTimes(1);
-    const graphqlQuery = (octokit.graphql.mock.calls as unknown[][])[0][0] as string;
-    expect(graphqlQuery).toContain("statusCheckRollup");
-
-    // No REST check status calls should be made
-    const restCheckCalls = octokit.request.mock.calls.filter(
-      (c) =>
-        c[0] === "GET /repos/{owner}/{repo}/commits/{ref}/status" ||
-        c[0] === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs"
-    );
-    expect(restCheckCalls.length).toBe(0);
-
-    // Check status should be mapped from GraphQL response
-    for (const pr of pullRequests) {
-      expect(["success", "failure", "pending", null]).toContain(pr.checkStatus);
-    }
-  });
-
-  it("maps GraphQL statusCheckRollup states correctly", async () => {
-    // Test FAILURE state
-    const octokitFailure = makeOctokitForPRs();
-    (octokitFailure as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: { statusCheckRollup: { state: "FAILURE" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    }));
-    const failResult = await fetchPullRequests(
-      octokitFailure as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-    expect(failResult.pullRequests[0].checkStatus).toBe("failure");
-
-    await clearCache();
-
-    // Test PENDING state
-    const octokitPending = makeOctokitForPRs();
-    (octokitPending as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: { statusCheckRollup: { state: "PENDING" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    }));
-    const pendResult = await fetchPullRequests(
-      octokitPending as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-    expect(pendResult.pullRequests[0].checkStatus).toBe("pending");
-
-    await clearCache();
-
-    // Test null (no checks)
-    const octokitNull = makeOctokitForPRs();
-    (octokitNull as Record<string, unknown>).graphql = vi.fn(async () => ({
-      pr0: { object: null, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    }));
-    const nullResult = await fetchPullRequests(
-      octokitNull as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-    expect(nullResult.pullRequests[0].checkStatus).toBeNull();
-  });
-
-  it("falls back to REST when GraphQL fails", async () => {
-    const octokit = makeOctokitForPRs();
-    (octokit as Record<string, unknown>).graphql = vi.fn(async () => {
-      throw new Error("GraphQL rate limited");
-    });
-    // Mock REST fallback endpoints
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (octokit.request as any).mockImplementation(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: searchPrsFixture, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
-        return { data: { state: "success", total_count: 1 }, headers: { etag: "etag-status" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
-        return { data: { check_runs: [{ status: "completed", conclusion: "success" }] }, headers: { etag: "etag-check-runs" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
-        return {
-          data: [
-            { user: { login: "reviewer1" }, state: "APPROVED" },
-          ],
-          headers: { etag: "etag-reviews" },
-        };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests.length).toBe(1);
-    // REST fallback should provide check status from /commits/{sha}/status
-    expect(pullRequests[0].checkStatus).toBe("success");
-    // REST fallback should derive review decision from /pulls/{number}/reviews
-    expect(pullRequests[0].reviewDecision).toBe("APPROVED");
-    // REST fallback should provide reviewer logins
-    expect(pullRequests[0].reviewerLogins).toContain("reviewer1");
-  });
-
-  it("maps PR detail fields to camelCase shape", async () => {
-    const octokit = makeOctokitForPRs();
+  it("maps GraphQL PR fields to camelCase shape", async () => {
+    const octokit = makePROctokit();
 
     const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -518,33 +500,55 @@ describe("fetchPullRequests", () => {
     );
 
     const pr = pullRequests[0];
-    expect(pr).toMatchObject({
-      id: expect.any(Number),
-      number: expect.any(Number),
-      title: expect.any(String),
-      state: expect.any(String),
-      draft: expect.any(Boolean),
-      htmlUrl: expect.any(String),
-      createdAt: expect.any(String),
-      updatedAt: expect.any(String),
-      userLogin: expect.any(String),
-      headSha: expect.any(String),
-      headRef: expect.any(String),
-      baseRef: expect.any(String),
-      repoFullName: expect.any(String),
-      additions: expect.any(Number),
-      deletions: expect.any(Number),
-      changedFiles: expect.any(Number),
-      comments: expect.any(Number),
-      reviewComments: expect.any(Number),
-      labels: expect.any(Array),
-      reviewDecision: "APPROVED",
-    });
+    expect(pr.id).toBe(42); // databaseId
+    expect(pr.draft).toBe(false); // isDraft
+    expect(pr.htmlUrl).toBe("https://github.com/octocat/Hello-World/pull/42"); // url
+    expect(pr.headSha).toBe("abc123"); // headRefOid
+    expect(pr.headRef).toBe("feature-branch"); // headRefName
+    expect(pr.baseRef).toBe("main"); // baseRefName
+    expect(pr.comments).toBe(3); // comments.totalCount
+    expect(pr.reviewThreads).toBe(2); // reviewThreads.totalCount
+    expect(pr.totalReviewCount).toBe(1); // latestReviews.totalCount
+    expect(pr.additions).toBe(100);
+    expect(pr.changedFiles).toBe(5);
+    expect(pr.repoFullName).toBe("octocat/Hello-World");
   });
 
-  it("deduplicates PRs found by both involves and review-requested", async () => {
-    // Both search queries return the same PR
-    const octokit = makeOctokitForPRs();
+  it("maps statusCheckRollup states correctly", async () => {
+    const states: Array<[string | null, string | null]> = [
+      ["SUCCESS", "success"],
+      ["FAILURE", "failure"],
+      ["ERROR", "failure"],
+      ["PENDING", "pending"],
+      ["EXPECTED", "pending"],
+      [null, null],
+    ];
+
+    for (const [rawState, expected] of states) {
+      await clearCache();
+      const node = {
+        ...graphqlPRNode,
+        databaseId: 100,
+        commits: { nodes: [{ commit: { statusCheckRollup: rawState ? { state: rawState } : null } }] },
+      } as typeof graphqlPRNode;
+      const octokit = makePROctokit(async () => makeGraphqlPRResponse([node]));
+      const { pullRequests } = await fetchPullRequests(
+        octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+        [testRepo],
+        "octocat"
+      );
+      expect(pullRequests[0].checkStatus).toBe(expected);
+    }
+  });
+
+  it("merges reviewRequests and latestReviews into reviewerLogins with Set dedup", async () => {
+    const nodeWithOverlap = {
+      ...graphqlPRNode,
+      databaseId: 200,
+      reviewRequests: { nodes: [{ requestedReviewer: { login: "shared" } }] },
+      latestReviews: { totalCount: 2, nodes: [{ author: { login: "shared" } }, { author: { login: "unique" } }] },
+    };
+    const octokit = makePROctokit(async () => makeGraphqlPRResponse([nodeWithOverlap]));
 
     const { pullRequests } = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -552,12 +556,143 @@ describe("fetchPullRequests", () => {
       "octocat"
     );
 
-    // Only 1 PR despite being found by potentially both search queries
+    // "shared" appears in both — should only appear once
+    expect(pullRequests[0].reviewerLogins).toEqual(expect.arrayContaining(["shared", "unique"]));
+    expect(pullRequests[0].reviewerLogins.filter((l) => l === "shared")).toHaveLength(1);
+  });
+
+  it("maps reviewDecision pass-through", async () => {
+    for (const decision of ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", null] as const) {
+      await clearCache();
+      const node = { ...graphqlPRNode, databaseId: 300, reviewDecision: decision } as typeof graphqlPRNode;
+      const octokit = makePROctokit(async () => makeGraphqlPRResponse([node]));
+      const { pullRequests } = await fetchPullRequests(
+        octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+        [testRepo],
+        "octocat"
+      );
+      expect(pullRequests[0].reviewDecision).toBe(decision);
+    }
+  });
+
+  it("deduplicates PRs from involves and review-requested by databaseId", async () => {
+    // Both query types return the same PR node
+    const octokit = makePROctokit(async () => makeGraphqlPRResponse([graphqlPRNode]));
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Only 1 PR even though returned by both involves + review-requested queries
     expect(pullRequests.length).toBe(1);
   });
 
+  it("detects fork PR and fires fallback query when checkStatus is null", async () => {
+    const forkNode = {
+      ...graphqlPRNode,
+      databaseId: 500,
+      // Head repo owner differs from base repo owner → fork
+      headRepository: { owner: { login: "fork-owner" }, nameWithOwner: "fork-owner/Hello-World" },
+      repository: { nameWithOwner: "octocat/Hello-World" },
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    } as unknown as typeof graphqlPRNode;
+
+    let graphqlCallCount = 0;
+    const octokit = makePROctokit(async () => {
+      graphqlCallCount++;
+      if (graphqlCallCount <= 2) {
+        // Primary search queries
+        return makeGraphqlPRResponse([forkNode]);
+      }
+      // Fork fallback query
+      return {
+        fork0: { object: { statusCheckRollup: { state: "SUCCESS" } } },
+        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      };
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Fork fallback was triggered
+    expect(graphqlCallCount).toBeGreaterThan(2);
+    // checkStatus populated from fork fallback
+    expect(pullRequests[0].checkStatus).toBe("success");
+  });
+
+  it("handles deleted fork (null headRepository) gracefully — no fallback", async () => {
+    const deletedForkNode = {
+      ...graphqlPRNode,
+      databaseId: 600,
+      headRepository: null,
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    } as unknown as typeof graphqlPRNode;
+    let graphqlCallCount = 0;
+    const octokit = makePROctokit(async () => {
+      graphqlCallCount++;
+      return makeGraphqlPRResponse([deletedForkNode]);
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // No extra graphql call for the fork fallback
+    expect(graphqlCallCount).toBe(2); // 2 query types × 1 batch
+    expect(pullRequests[0].checkStatus).toBeNull();
+  });
+
+  it("returns partial results and an error when second page throws mid-pagination", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // Track calls per query type: involves query fires first, then review-requested
+    // Each query type paginates independently. We want the involves query to:
+    //   page 1: success with hasNextPage=true
+    //   page 2: throw an error
+    // The review-requested query should succeed normally.
+    let involvesCallCount = 0;
+    const octokit = makePROctokit(async (_query, variables) => {
+      const q = (variables as Record<string, unknown>).q as string;
+      if (q.includes("involves:")) {
+        involvesCallCount++;
+        if (involvesCallCount === 1) {
+          // First page succeeds with more pages available
+          return makeGraphqlPRResponse([{ ...graphqlPRNode, databaseId: 101 }], true);
+        }
+        // Second page throws
+        throw new Error("GraphQL connection error");
+      }
+      // review-requested query returns empty — avoid duplicate databaseId confusion
+      return makeGraphqlPRResponse([]);
+    });
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // PR from the first page is returned
+    expect(result.pullRequests.some((pr) => pr.id === 101)).toBe(true);
+
+    // An ApiError is included in the result's errors array
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("GraphQL connection error");
+    expect(result.errors[0].repo).toBe("pr-search-batch-1/1");
+
+    // pushNotification is NOT called (no 1000-item cap was reached)
+    expect(pushNotification).not.toHaveBeenCalled();
+  });
+
   it("returns empty result when repos is empty", async () => {
-    const octokit = makeOctokitForPRs();
+    const octokit = makePROctokit();
     const result = await fetchPullRequests(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
       [],
@@ -565,6 +700,7 @@ describe("fetchPullRequests", () => {
     );
     expect(result.pullRequests).toEqual([]);
     expect(result.errors).toEqual([]);
+    expect(octokit.graphql).not.toHaveBeenCalled();
   });
 
   it("throws when octokit is null", async () => {
@@ -789,483 +925,6 @@ describe("fetchWorkflowRuns", () => {
   });
 });
 
-// ── searchAllPages pagination ─────────────────────────────────────────────────
-
-describe("searchAllPages (via fetchIssues)", () => {
-  // Build a search octokit whose response depends on the `page` param
-  function makePaginatingOctokit(totalCount: number, pageOneItems: number, pageTwoItems: number) {
-    let callCount = 0;
-    return {
-      request: vi.fn(async (_route: string, params?: Record<string, unknown>) => {
-        callCount++;
-        const page = (params?.page as number) ?? 1;
-        const items = Array.from({ length: page === 1 ? pageOneItems : pageTwoItems }, (_, i) => ({
-          id: (page - 1) * 100 + i + 1,
-          number: (page - 1) * 100 + i + 1,
-          title: `Issue ${(page - 1) * 100 + i + 1}`,
-          state: "open",
-          html_url: `https://github.com/org/repo/issues/${(page - 1) * 100 + i + 1}`,
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-          user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-          labels: [],
-          assignees: [],
-          repository_url: "https://api.github.com/repos/org/repo",
-        }));
-        return {
-          data: {
-            total_count: totalCount,
-            incomplete_results: false,
-            items,
-          },
-          headers: {},
-        };
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-  }
-
-  it("fetches both pages when total_count > 100 items", async () => {
-    // total_count: 150, page 1 returns 100 items, page 2 returns 50
-    const octokit = makePaginatingOctokit(150, 100, 50);
-    const repos: RepoRef[] = [{ owner: "org", name: "repo", fullName: "org/repo" }];
-
-    const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      repos,
-      "octocat"
-    );
-
-    // All 150 items should be returned (100 + 50)
-    expect(result.issues.length).toBe(150);
-    // Two pages should have been fetched
-    const searchCalls = octokit.request.mock.calls.filter(
-      (c) => c[0] === "GET /search/issues"
-    );
-    expect(searchCalls.length).toBe(2);
-  });
-
-  it("caps at 1000 items and warns when total_count > 1000", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    // Return 100 items per page, total_count = 2000
-    let callCount = 0;
-    const octokit = {
-      request: vi.fn(async (_route: string) => {
-        callCount++;
-        const items = Array.from({ length: 100 }, (_, i) => ({
-          id: (callCount - 1) * 100 + i + 1,
-          number: (callCount - 1) * 100 + i + 1,
-          title: `Issue ${(callCount - 1) * 100 + i + 1}`,
-          state: "open",
-          html_url: "https://github.com/org/repo/issues/1",
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-          user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-          labels: [],
-          assignees: [],
-          repository_url: "https://api.github.com/repos/org/repo",
-        }));
-        return {
-          data: { total_count: 2000, incomplete_results: false, items },
-          headers: {},
-        };
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    const repos: RepoRef[] = [{ owner: "org", name: "repo", fullName: "org/repo" }];
-    const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      repos,
-      "octocat"
-    );
-
-    // Should be capped at 1000 items (10 pages × 100)
-    expect(result.issues.length).toBe(1000);
-    // Should warn about the cap
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("capped at 1000")
-    );
-
-    warnSpy.mockRestore();
-  });
-
-  it("warns on incomplete_results: true", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    const octokit = {
-      request: vi.fn(async () => ({
-        data: {
-          total_count: 2,
-          incomplete_results: true,
-          items: [searchIssuesFixture.items[0]],
-        },
-        headers: {},
-      })),
-      paginate: { iterator: vi.fn() },
-    };
-
-    const repos: RepoRef[] = [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }];
-    await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      repos,
-      "octocat"
-    );
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("incomplete")
-    );
-
-    warnSpy.mockRestore();
-  });
-});
-
-// ── GraphQL ERROR and EXPECTED state mapping ──────────────────────────────────
-
-describe("batchFetchCheckStatuses state mapping (via fetchPullRequests)", () => {
-  function makeOctokitWithGraphQL(graphqlResponse: Record<string, unknown>) {
-    return {
-      request: vi.fn(async (route: string) => {
-        if (route === "GET /search/issues") {
-          return { data: searchPrsFixture, headers: {} };
-        }
-        if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-          return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-        }
-        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-      }),
-      graphql: vi.fn(async () => graphqlResponse),
-      paginate: { iterator: vi.fn() },
-    };
-  }
-
-  it('maps state "ERROR" to "failure"', async () => {
-    const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: { state: "ERROR" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    });
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].checkStatus).toBe("failure");
-  });
-
-  it('maps state "EXPECTED" to "pending"', async () => {
-    await clearCache();
-    const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: { state: "EXPECTED" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    });
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].checkStatus).toBe("pending");
-  });
-
-  it("maps statusCheckRollup: null (object exists but no rollup) to null", async () => {
-    await clearCache();
-    const octokit = makeOctokitWithGraphQL({
-      pr0: { object: { statusCheckRollup: null }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-    });
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].checkStatus).toBeNull();
-  });
-});
-
-// ── Partial batch failure ─────────────────────────────────────────────────────
-
-describe("batchedSearch partial batch failure (via fetchIssues)", () => {
-  it("returns items from successful chunks and errors from failed chunks", async () => {
-    // 35 repos → 2 chunks (30 + 5). First chunk rejects, second succeeds.
-    let callCount = 0;
-    const octokit = {
-      request: vi.fn(async () => {
-        callCount++;
-        if (callCount === 1) {
-          throw Object.assign(new Error("search timeout"), { status: 503 });
-        }
-        return {
-          data: {
-            total_count: 1,
-            incomplete_results: false,
-            items: [searchIssuesFixture.items[0]],
-          },
-          headers: {},
-        };
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
-      owner: "org",
-      name: `repo-${i}`,
-      fullName: `org/repo-${i}`,
-    }));
-
-    const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      repos,
-      "octocat"
-    );
-
-    // Items from the successful chunk (chunk 2) should be present
-    expect(result.issues.length).toBeGreaterThan(0);
-    // Error from the failed chunk (chunk 1) should be reported
-    expect(result.errors.length).toBe(1);
-    expect(result.errors[0].repo).toContain("search-batch-1/2");
-    // Total items less than if both succeeded
-    expect(result.issues.length).toBeLessThan(35);
-  });
-});
-
-// ── GraphQL batch boundary (51 PRs → 2 chunks) ───────────────────────────────
-
-describe("batchFetchCheckStatuses with 51 PRs (2 GraphQL chunks)", () => {
-  it("calls GraphQL twice and maps all 51 results correctly", async () => {
-    // Build 51 unique search items (as PRs)
-    const prSearchItems = Array.from({ length: 51 }, (_, i) => ({
-      id: 2000 + i,
-      number: 100 + i,
-      title: `PR ${i}`,
-      state: "open",
-      html_url: `https://github.com/octocat/Hello-World/pull/${100 + i}`,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-      user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-      labels: [],
-      assignees: [],
-      repository_url: "https://api.github.com/repos/octocat/Hello-World",
-      pull_request: { url: `https://api.github.com/repos/octocat/Hello-World/pulls/${100 + i}` },
-    }));
-
-    const prDetail = {
-      ...prsFixture[0],
-    };
-
-    let graphqlCallCount = 0;
-
-    const octokit = {
-      request: vi.fn(async (route: string, params?: Record<string, unknown>) => {
-        if (route === "GET /search/issues") {
-          return {
-            data: {
-              total_count: 51,
-              incomplete_results: false,
-              items: prSearchItems,
-            },
-            headers: {},
-          };
-        }
-        if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-          const num = (params?.pull_number as number) ?? 100;
-          return {
-            data: {
-              ...prDetail,
-              id: 2000 + (num - 100),
-              number: num,
-              head: {
-                ...prDetail.head,
-                sha: `sha-${num}`,
-              },
-            },
-            headers: { etag: `etag-pr-${num}` },
-          };
-        }
-        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-      }),
-      graphql: vi.fn(async (_query: string, variables: Record<string, unknown>) => {
-        graphqlCallCount++;
-        // Build a response with all prN keys present in this chunk
-        const response: Record<string, unknown> = {};
-        // Count how many prN aliases are in variables
-        const indices = Object.keys(variables)
-          .filter((k) => k.startsWith("owner"))
-          .map((k) => parseInt(k.replace("owner", ""), 10));
-        for (const i of indices) {
-          response[`pr${i}`] = { object: { statusCheckRollup: { state: "SUCCESS" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } };
-        }
-        return response;
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    // GraphQL should have been called twice (50 + 1)
-    expect(graphqlCallCount).toBe(2);
-    // All 51 PRs should be returned
-    expect(pullRequests.length).toBe(51);
-    // All should have success check status
-    for (const pr of pullRequests) {
-      expect(pr.checkStatus).toBe("success");
-    }
-  });
-});
-
-// ── qa-9: REST fallback CHANGES_REQUESTED and REVIEW_REQUIRED branches ────────
-
-describe("REST fallback review decision (via fetchPullRequests)", () => {
-  function makeOctokitWithRestFallback(reviews: { user: { login: string } | null; state: string }[]) {
-    const request = vi.fn(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: searchPrsFixture, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
-        return { data: { state: "success", total_count: 1 }, headers: { etag: "etag-status" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
-        // Return empty check runs so we don't interfere with review decision testing
-        return { data: { check_runs: [] }, headers: { etag: "etag-check-runs" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
-        return { data: reviews, headers: { etag: "etag-reviews" } };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-    // GraphQL always fails to force REST fallback
-    const graphql = vi.fn(async () => {
-      throw new Error("GraphQL unavailable");
-    });
-    return { request, graphql, paginate: { iterator: vi.fn() } };
-  }
-
-  it("REST fallback: single CHANGES_REQUESTED review → reviewDecision === CHANGES_REQUESTED", async () => {
-    await clearCache();
-    const reviews = [
-      { user: { login: "reviewer1" }, state: "CHANGES_REQUESTED" },
-    ];
-    const octokit = makeOctokitWithRestFallback(reviews);
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].reviewDecision).toBe("CHANGES_REQUESTED");
-  });
-
-  it("REST fallback: CHANGES_REQUESTED wins over APPROVED from another reviewer", async () => {
-    await clearCache();
-    const reviews = [
-      { user: { login: "reviewer1" }, state: "APPROVED" },
-      { user: { login: "reviewer2" }, state: "CHANGES_REQUESTED" },
-    ];
-    const octokit = makeOctokitWithRestFallback(reviews);
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].reviewDecision).toBe("CHANGES_REQUESTED");
-  });
-
-  it("REST fallback: mix of COMMENTED reviews (no APPROVED or CHANGES_REQUESTED) → REVIEW_REQUIRED", async () => {
-    await clearCache();
-    const reviews = [
-      { user: { login: "reviewer1" }, state: "COMMENTED" },
-      { user: { login: "reviewer2" }, state: "COMMENTED" },
-    ];
-    const octokit = makeOctokitWithRestFallback(reviews);
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].reviewDecision).toBe("REVIEW_REQUIRED");
-  });
-
-  it("REST fallback: APPROVED from reviewer + COMMENTED from another → REVIEW_REQUIRED (not all approved)", async () => {
-    await clearCache();
-    const reviews = [
-      { user: { login: "reviewer1" }, state: "APPROVED" },
-      { user: { login: "reviewer2" }, state: "COMMENTED" },
-    ];
-    const octokit = makeOctokitWithRestFallback(reviews);
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].reviewDecision).toBe("REVIEW_REQUIRED");
-  });
-
-  it("REST fallback: no reviews → reviewDecision === null", async () => {
-    await clearCache();
-    const octokit = makeOctokitWithRestFallback([]);
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests[0].reviewDecision).toBeNull();
-  });
-});
-
-// ── REST fallback: no CI configured → checkStatus null ────────────────────────
-
-describe("REST fallback no-CI detection (via fetchPullRequests)", () => {
-  it("REST fallback: no legacy statuses (total_count:0) and no check runs → checkStatus === null", async () => {
-    await clearCache();
-    const request = vi.fn(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: searchPrsFixture, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
-        return { data: { state: "pending", total_count: 0 }, headers: { etag: "etag-status" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
-        return { data: { check_runs: [] }, headers: { etag: "etag-check-runs" } };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews") {
-        return { data: [], headers: { etag: "etag-reviews" } };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-    const graphql = vi.fn(async () => { throw new Error("GraphQL unavailable"); });
-    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(pullRequests.length).toBe(1);
-    expect(pullRequests[0].checkStatus).toBeNull();
-  });
-});
 
 // ── qa-10: Empty userLogin short-circuit ──────────────────────────────────────
 
@@ -1390,262 +1049,5 @@ describe("fetchWorkflowRuns pagination", () => {
 
     // Only 1 page request should be made
     expect(requestCount).toBe(1);
-  });
-});
-
-// ── qa-1: Fork PR path in GraphQL batch ───────────────────────────────────────
-
-describe("batchFetchCheckStatuses fork PR path (via fetchPullRequests)", () => {
-  it("queries statusCheckRollup from base repo for fork PRs", async () => {
-    await clearCache();
-
-    // Search returns a PR whose base repo is "octocat/Hello-World"
-    const forkSearchData = {
-      total_count: 1,
-      incomplete_results: false,
-      items: [
-        {
-          id: 3001,
-          number: 42,
-          title: "Fork PR",
-          state: "open",
-          html_url: "https://github.com/octocat/Hello-World/pull/42",
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-          user: { login: "fork-user", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-          labels: [],
-          assignees: [],
-          repository_url: "https://api.github.com/repos/octocat/Hello-World",
-          pull_request: { url: "https://api.github.com/repos/octocat/Hello-World/pulls/42" },
-          draft: false,
-        },
-      ],
-    };
-
-    // PR detail: head.repo.full_name is the fork, NOT the base repo
-    const forkPrDetail = {
-      ...prsFixture[0],
-      id: 3001,
-      number: 42,
-      head: {
-        sha: "forksha1234567890abcdef1234567890abcdef12",
-        ref: "feat/fork-branch",
-        repo: {
-          full_name: "fork-user/Hello-World", // fork!
-        },
-      },
-    };
-
-    let capturedQuery = "";
-    const graphql = vi.fn(async (query: string, variables: Record<string, unknown>) => {
-      capturedQuery = query;
-      // Base repo alias includes both statusCheckRollup and pullRequest data
-      const response: Record<string, unknown> = {};
-      const indices = Object.keys(variables)
-        .filter((k) => k.startsWith("owner"))
-        .map((k) => parseInt(k.replace("owner", ""), 10));
-      for (const i of indices) {
-        response[`pr${i}`] = {
-          object: {
-            statusCheckRollup: { state: "SUCCESS" },
-          },
-          pullRequest: {
-            reviewDecision: "APPROVED",
-            latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
-          },
-        };
-      }
-      return response;
-    });
-
-    const request = vi.fn(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: forkSearchData, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: forkPrDetail, headers: { etag: "etag-fork-pr" } };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-
-    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
-
-    const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    // GraphQL should NOT have a prHead0 alias — base repo has the check suites
-    expect(capturedQuery).not.toContain("prHead0");
-    // No headOwner/headRepo variables needed
-    expect(graphql).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        owner0: "octocat",
-        repo0: "Hello-World",
-      })
-    );
-    // checkStatus comes from the base repo's statusCheckRollup
-    expect(pullRequests).toHaveLength(1);
-    expect(pullRequests[0].checkStatus).toBe("success");
-    expect(pullRequests[0].reviewDecision).toBe("APPROVED");
-  });
-});
-
-// ── qa-2: Deleted fork (null head.repo) ───────────────────────────────────────
-
-describe("fetchPullRequests with null head.repo (deleted fork)", () => {
-  it("returns the PR without error and uses base repo full_name as fallback", async () => {
-    await clearCache();
-
-    const deletedForkPrDetail = {
-      ...prsFixture[0],
-      id: 4001,
-      number: 55,
-      head: {
-        sha: "deadbeef1234567890abcdef1234567890abcdef",
-        ref: "feat/deleted-fork",
-        repo: null, // deleted fork
-      },
-    };
-
-    const deletedForkSearchData = {
-      total_count: 1,
-      incomplete_results: false,
-      items: [
-        {
-          id: 4001,
-          number: 55,
-          title: "Deleted Fork PR",
-          state: "open",
-          html_url: "https://github.com/octocat/Hello-World/pull/55",
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-          user: { login: "gone-user", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-          labels: [],
-          assignees: [],
-          repository_url: "https://api.github.com/repos/octocat/Hello-World",
-          pull_request: { url: "https://api.github.com/repos/octocat/Hello-World/pulls/55" },
-          draft: false,
-        },
-      ],
-    };
-
-    const graphql = vi.fn(async (_query: string, variables: Record<string, unknown>) => {
-      const response: Record<string, unknown> = {};
-      const indices = Object.keys(variables)
-        .filter((k) => k.startsWith("owner"))
-        .map((k) => parseInt(k.replace("owner", ""), 10));
-      for (const i of indices) {
-        response[`pr${i}`] = {
-          object: { statusCheckRollup: { state: "SUCCESS" } },
-          pullRequest: {
-            reviewDecision: null,
-            latestReviews: { totalCount: 0, nodes: [] },
-          },
-        };
-      }
-      return response;
-    });
-
-    const request = vi.fn(async (route: string) => {
-      if (route === "GET /search/issues") {
-        return { data: deletedForkSearchData, headers: {} };
-      }
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        return { data: deletedForkPrDetail, headers: { etag: "etag-deleted-fork" } };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
-
-    const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
-
-    const { pullRequests, errors } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    // Must not error out
-    expect(errors.filter((e) => e.repo === "pr-detail")).toHaveLength(0);
-    // PR must be returned
-    expect(pullRequests).toHaveLength(1);
-    // Base repo full_name is used as fallback for head.repo.full_name
-    expect(pullRequests[0].repoFullName).toBe("octocat/Hello-World");
-  });
-});
-
-// ── Query-aware search mock verification ──────────────────────────────────────
-
-describe("search query qualifiers", () => {
-  it("fetchIssues sends is:issue qualifier (not is:pr)", async () => {
-    const octokit = {
-      request: vi.fn(async (route: string, params?: Record<string, unknown>) => {
-        if (route === "GET /search/issues") {
-          const q = (params?.q as string) ?? "";
-          // Return matching items only for issue queries so we can verify
-          return {
-            data: {
-              total_count: q.includes("is:issue") ? 1 : 0,
-              incomplete_results: false,
-              items: q.includes("is:issue") ? [searchIssuesFixture.items[0]] : [],
-            },
-            headers: {},
-          };
-        }
-        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-      }),
-      paginate: { iterator: vi.fn() },
-    };
-
-    await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    const calls = octokit.request.mock.calls.filter((c) => c[0] === "GET /search/issues");
-    expect(calls.length).toBeGreaterThan(0);
-    for (const call of calls) {
-      const q = ((call as unknown[])[1] as { q: string }).q;
-      expect(q).toContain("is:issue");
-      expect(q).not.toContain("is:pr");
-      expect(q).toContain("repo:octocat/Hello-World");
-    }
-  });
-
-  it("fetchPullRequests sends is:pr qualifier (not is:issue)", async () => {
-    const octokit = {
-      request: vi.fn(async (route: string) => {
-        if (route === "GET /search/issues") {
-          return { data: searchPrsFixture, headers: {} };
-        }
-        if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-          return { data: prsFixture[0], headers: { etag: "etag-pr-detail" } };
-        }
-        return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-      }),
-      graphql: vi.fn(async () => ({
-        pr0: { object: { statusCheckRollup: { state: "SUCCESS" } }, pullRequest: { reviewDecision: null, latestReviews: { totalCount: 0, nodes: [] } } },
-      })),
-      paginate: { iterator: vi.fn() },
-    };
-
-    await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    const searchCalls = octokit.request.mock.calls.filter(
-      (c) => c[0] === "GET /search/issues"
-    );
-    expect(searchCalls.length).toBe(2);
-    for (const call of searchCalls) {
-      const q = ((call as unknown[])[1] as { q: string }).q;
-      expect(q).toContain("is:pr");
-      expect(q).toContain("repo:octocat/Hello-World");
-    }
   });
 });

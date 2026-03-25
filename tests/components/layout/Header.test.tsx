@@ -29,8 +29,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
 // Mock github service
 vi.mock("../../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
-  getSearchRateLimit: () => null,
-  getRateLimit: () => null,
+  getGraphqlRateLimit: () => null,
 }));
 
 // Mock errors module so Header's notification imports work

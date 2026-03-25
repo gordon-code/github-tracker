@@ -16,17 +16,19 @@ async function setupAuth(page: Page) {
       },
     })
   );
-  await page.route("https://api.github.com/search/issues*", (route) =>
-    route.fulfill({
-      status: 200,
-      json: { total_count: 0, incomplete_results: false, items: [] },
-    })
-  );
   await page.route("https://api.github.com/notifications*", (route) =>
     route.fulfill({ status: 200, json: [] })
   );
   await page.route("https://api.github.com/graphql", (route) =>
-    route.fulfill({ status: 200, json: { data: {} } })
+    route.fulfill({
+      status: 200,
+      json: {
+        data: {
+          search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        },
+      },
+    })
   );
 
   await page.addInitScript(() => {

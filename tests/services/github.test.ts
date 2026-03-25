@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getRateLimit, getClient, initClientWatcher } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -257,49 +257,6 @@ describe("cachedRequest", () => {
   });
 });
 
-// ── getRateLimit ─────────────────────────────────────────────────────────────
-
-describe("getRateLimit", () => {
-  beforeEach(async () => {
-    await clearCache();
-    vi.resetAllMocks();
-  });
-
-  it("returns null before any requests", () => {
-    // Note: rate limit signal is module-level and may be set from prior tests.
-    // This test just verifies the function is callable.
-    const rl = getRateLimit();
-    // Either null or a valid object
-    expect(rl === null || (typeof rl === "object" && "remaining" in rl)).toBe(true);
-  });
-
-  it("returns rate limit info after a successful request", async () => {
-    const resetTs = Math.floor(Date.now() / 1000) + 3600;
-    const mockOctokit = {
-      request: vi.fn().mockResolvedValue({
-        data: [],
-        headers: {
-          etag: "etag-rl",
-          "x-ratelimit-remaining": "3999",
-          "x-ratelimit-reset": String(resetTs),
-        },
-        status: 200,
-      }),
-    };
-
-    await cachedRequest(
-      mockOctokit as unknown as ReturnType<typeof createGitHubClient>,
-      "test:ratelimit-update",
-      "GET /user/orgs",
-      {}
-    );
-
-    const rl = getRateLimit();
-    expect(rl).not.toBeNull();
-    expect(rl!.remaining).toBe(3999);
-    expect(rl!.resetAt).toBeInstanceOf(Date);
-  });
-});
 
 // ── getClient / initClientWatcher ────────────────────────────────────────────
 

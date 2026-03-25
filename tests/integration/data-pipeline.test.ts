@@ -2,12 +2,12 @@
  * True data pipeline integration test.
  *
  * Exercises the full fetch → cachedRequest → IDB → return pipeline.
- * Only the HTTP layer (octokit.request) is mocked.
+ * Only the HTTP layer (octokit.request / octokit.graphql) is mocked.
  * Cache (cachedFetch, cachedRequest) and IDB (via fake-indexeddb) are real.
  *
  * Pipeline under test:
  *   fetchWorkflowRuns → cachedRequest → cachedFetch → IDB (fake-indexeddb)
- *   fetchIssues       → batchedSearch → octokit.request (search API, no IDB)
+ *   fetchIssues       → graphqlSearchIssues → octokit.graphql (no IDB)
  */
 import "fake-indexeddb/auto"; // Must be first import
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
@@ -37,31 +37,47 @@ const rawRun = {
   updated_at: "2024-01-15T09:10:00Z",
 };
 
-const rawSearchIssue = {
-  id: 1,
+const graphqlIssueNode = {
+  databaseId: 1,
   number: 1347,
   title: "Found a bug",
   state: "open",
-  html_url: "https://github.com/octocat/Hello-World/issues/1347",
-  created_at: "2024-01-01T00:00:00Z",
-  updated_at: "2024-01-02T00:00:00Z",
-  user: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" },
-  labels: [{ name: "bug", color: "d73a4a" }],
-  assignees: [{ login: "octocat" }],
-  repository_url: "https://api.github.com/repos/octocat/Hello-World",
-  // No pull_request field → this is an issue
+  url: "https://github.com/octocat/Hello-World/issues/1347",
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-02T00:00:00Z",
+  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
+  labels: { nodes: [{ name: "bug", color: "d73a4a" }] },
+  assignees: { nodes: [{ login: "octocat" }] },
+  repository: { nameWithOwner: "octocat/Hello-World" },
+  comments: { totalCount: 0 },
 };
+
+function makeGraphqlSearchResponse(nodes = [graphqlIssueNode]) {
+  return {
+    search: {
+      issueCount: nodes.length,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes,
+    },
+    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+  };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 type OctokitLike = {
   request: ReturnType<typeof vi.fn>;
+  graphql: ReturnType<typeof vi.fn>;
   paginate: { iterator: ReturnType<typeof vi.fn> };
 };
 
-function makeOctokit(requestImpl: (route: string, params?: unknown) => Promise<unknown>): OctokitLike {
+function makeOctokit(
+  requestImpl: (route: string, params?: unknown) => Promise<unknown>,
+  graphqlImpl?: (query: string, variables?: unknown) => Promise<unknown>
+): OctokitLike {
   return {
     request: vi.fn(requestImpl),
+    graphql: vi.fn(graphqlImpl ?? (async () => makeGraphqlSearchResponse([]))),
     paginate: { iterator: vi.fn() },
   };
 }
@@ -246,25 +262,16 @@ describe("data pipeline: fetch → IDB cache → return", () => {
   });
 });
 
-describe("data pipeline: search API (no IDB cache) → return", () => {
+describe("data pipeline: GraphQL search (no IDB cache) → return", () => {
   /**
-   * Search API does not use IDB — verifies the fetch→transform pipeline
-   * without the cache layer. Two calls always hit the API.
+   * GraphQL search does not use IDB — verifies the fetch→transform pipeline
+   * without the cache layer. Two calls always hit the GraphQL API.
    */
-  it("fresh fetch: search results are mapped and returned correctly", async () => {
-    const octokit = makeOctokit(async (route) => {
-      if (route === "GET /search/issues") {
-        return {
-          data: {
-            total_count: 1,
-            incomplete_results: false,
-            items: [rawSearchIssue],
-          },
-          headers: {},
-        };
-      }
-      return { data: { total_count: 0, incomplete_results: false, items: [] }, headers: {} };
-    });
+  it("fresh fetch: GraphQL search results are mapped and returned correctly", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: [], headers: {} }),
+      async () => makeGraphqlSearchResponse([graphqlIssueNode])
+    );
 
     const { issues, errors } = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -274,7 +281,7 @@ describe("data pipeline: search API (no IDB cache) → return", () => {
 
     expect(errors).toEqual([]);
     expect(issues).toHaveLength(1);
-    expect(issues[0].id).toBe(1);
+    expect(issues[0].id).toBe(1); // databaseId
     expect(issues[0].title).toBe("Found a bug");
     expect(issues[0].userLogin).toBe("octocat");
     expect(issues[0].labels).toEqual([{ name: "bug", color: "d73a4a" }]);
@@ -282,11 +289,11 @@ describe("data pipeline: search API (no IDB cache) → return", () => {
     expect(issues[0].repoFullName).toBe("octocat/Hello-World");
   });
 
-  it("second fetch always calls API again (search is not cached in IDB)", async () => {
-    const octokit = makeOctokit(async () => ({
-      data: { total_count: 1, incomplete_results: false, items: [rawSearchIssue] },
-      headers: {},
-    }));
+  it("second fetch calls GraphQL again (search is not cached in IDB)", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: [], headers: {} }),
+      async () => makeGraphqlSearchResponse([graphqlIssueNode])
+    );
 
     await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -299,19 +306,20 @@ describe("data pipeline: search API (no IDB cache) → return", () => {
       "octocat"
     );
 
-    // Two calls, two API hits — no IDB caching for search
-    expect(octokit.request).toHaveBeenCalledTimes(2);
+    // Two calls, two GraphQL hits — no IDB caching for search
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
 
-    // Also verify nothing written to IDB (search doesn't use cachedRequest)
+    // Verify nothing written to IDB (GraphQL search doesn't use cachedRequest)
     const entry = await getCacheEntry("search:octocat/Hello-World:issues");
     expect(entry).toBeUndefined();
   });
 
-  it("search API error is returned as ApiError without throwing", async () => {
+  it("GraphQL search error is returned as ApiError without throwing", async () => {
     const err503 = Object.assign(new Error("Service Unavailable"), { status: 503 });
-    const octokit = makeOctokit(async () => {
-      throw err503;
-    });
+    const octokit = makeOctokit(
+      async () => ({ data: [], headers: {} }),
+      async () => { throw err503; }
+    );
 
     const { issues, errors } = await fetchIssues(
       octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
@@ -322,8 +330,6 @@ describe("data pipeline: search API (no IDB cache) → return", () => {
     expect(issues).toEqual([]);
     expect(errors).toHaveLength(1);
     expect(errors[0].statusCode).toBe(503);
-    // 503 has no statusCode >= 500 branch... let's check
-    // batchedSearch wraps chunk rejections: statusCode 503 → retryable (null or >=500)
     expect(errors[0].retryable).toBe(true);
   });
 });

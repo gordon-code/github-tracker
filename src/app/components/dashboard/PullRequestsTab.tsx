@@ -349,7 +349,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 createdAt={pr.createdAt}
                                 url={pr.htmlUrl}
                                 labels={pr.labels}
-                                commentCount={pr.comments + pr.reviewComments}
+                                commentCount={pr.comments + pr.reviewThreads}
                                 onIgnore={() => handleIgnore(pr)}
                                 density={config.viewDensity}
                               >
