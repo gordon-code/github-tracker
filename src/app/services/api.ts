@@ -414,7 +414,7 @@ async function graphqlSearchIssues(
         break;
       }
 
-      if (!response.search.pageInfo.hasNextPage) break;
+      if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
       cursor = response.search.pageInfo.endCursor;
     }
   }
@@ -518,11 +518,15 @@ async function graphqlSearchPRs(
           // Store headRepository info for fork detection
           if (node.headRepository) {
             const parts = node.headRepository.nameWithOwner.split("/");
-            if (parts.length !== 2) continue;
-            headRepoInfoMap.set(node.databaseId, {
-              owner: node.headRepository.owner.login,
-              repoName: parts[1],
-            });
+            if (parts.length === 2) {
+              headRepoInfoMap.set(node.databaseId, {
+                owner: node.headRepository.owner.login,
+                repoName: parts[1],
+              });
+            } else {
+              // Malformed nameWithOwner — treat as deleted fork (no fallback)
+              headRepoInfoMap.set(node.databaseId, null);
+            }
           } else {
             headRepoInfoMap.set(node.databaseId, null);
           }
@@ -568,7 +572,7 @@ async function graphqlSearchPRs(
           break;
         }
 
-        if (!response.search.pageInfo.hasNextPage) break;
+        if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
         cursor = response.search.pageInfo.endCursor;
       }
     }
