@@ -13,7 +13,7 @@ import {
   resetEmptyActionRepos,
 } from "./api";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, clearErrors, getErrors } from "../lib/errors";
+import { pushError, pushNotification, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,7 @@ function resetPollState(): void {
   _notifGateDisabled = false;
   _resetNotificationState();
   resetEmptyActionRepos();
+  resetNotificationState();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
@@ -97,7 +98,7 @@ async function hasNotificationChanges(): Promise<boolean> {
       (err as { status?: number }).status === 403
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
-      pushError("notifications", "Notifications API returned 403 — check that the notifications scope is granted", false);
+      pushNotification("notifications", "Notifications API returned 403 — check that the notifications scope is granted", "warning");
       _notifGateDisabled = true;
     }
     return true;
@@ -209,6 +210,9 @@ export async function fetchAllData(): Promise<DashboardData> {
 const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
+// Sources managed by the poll coordinator — used for reconciliation
+const POLL_MANAGED_SOURCES = new Set(["poll", "search", "graphql", "rate-limit", "notifications"]);
+
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
   return Math.max(intervalMs + jitter, 1000);
@@ -239,31 +243,38 @@ export function createPollCoordinator(
   async function doFetch(): Promise<void> {
     if (destroyed || isRefreshing()) return;
     setIsRefreshing(true);
+
+    // Snapshot sources of notifications from previous cycle (for reconciliation)
+    const previousSources = new Set(
+      getNotifications()
+        .filter((n) => POLL_MANAGED_SOURCES.has(n.source) || n.source.includes("/"))
+        .map((n) => n.source)
+    );
+    startCycleTracking();
+
     try {
-      // Snapshot previous errors before clearing so they can be restored on skip.
-      // Clear before fetchAll so informational pushError calls during the fetch survive.
-      const previousErrors = getErrors();
-      clearErrors();
       const data = await fetchAll();
-      // When notifications gate determined nothing changed, restore previous errors
-      // (the repos that were failing are still failing) and skip all processing.
-      if (data.skipped) {
-        for (const err of previousErrors) {
-          pushError(err.source, err.message, err.retryable);
-        }
-        return;
-      }
+      if (data.skipped) return; // finally handles endCycleTracking + setIsRefreshing
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally
       for (const err of data.errors) {
         pushError(err.repo, err.message, err.retryable);
+      }
+      // Reconcile: dismiss notifications for sources that didn't push this cycle
+      const pushedThisCycle = endCycleTracking();
+      for (const source of previousSources) {
+        if (!pushedThisCycle.has(source)) {
+          dismissNotificationBySource(source);
+        }
       }
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
       pushError("poll", message, true);
+      // No reconciliation on catch — can't know what resolved
     } finally {
+      endCycleTracking(); // Safe to call twice (returns empty Set if already ended)
       setIsRefreshing(false);
     }
   }

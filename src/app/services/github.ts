@@ -5,7 +5,7 @@ import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
-import { pushError } from "../lib/errors";
+import { pushNotification } from "../lib/errors";
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
         console.warn(
           `[github] Rate limit hit for ${options.method} ${options.url}. Retry after ${retryAfter}s.`
         );
-        pushError("rate-limit", `Rate limit hit — retrying in ${retryAfter}s`, true);
+        pushNotification("rate-limit", `Rate limit hit — retrying in ${retryAfter}s`, "warning", true);
         return retryCount < 1;
       },
       onSecondaryRateLimit: (
@@ -85,7 +85,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
         console.warn(
           `[github] Secondary rate limit for ${options.method} ${options.url}. Retry after ${retryAfter}s.`
         );
-        pushError("rate-limit", `Secondary rate limit — retrying in ${retryAfter}s. Consider reducing tracked repos.`, true);
+        pushNotification("rate-limit", `Secondary rate limit — retrying in ${retryAfter}s. Consider reducing tracked repos.`, "warning", true);
         return retryCount < 1;
       },
     },

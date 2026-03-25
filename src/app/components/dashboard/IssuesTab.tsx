@@ -2,11 +2,10 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilterField } from "../../stores/view";
-import type { Issue, ApiError } from "../../services/api";
+import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
 import SortIcon from "../shared/SortIcon";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -19,7 +18,6 @@ import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/group
 export interface IssuesTabProps {
   issues: Issue[];
   loading?: boolean;
-  errors?: ApiError[];
   userLogin: string;
 }
 
@@ -162,8 +160,6 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
-
       {/* Column headers */}
       <div
         role="rowgroup"

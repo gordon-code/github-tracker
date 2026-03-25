@@ -41,8 +41,18 @@ vi.mock("../../src/app/lib/notifications", () => ({
 // Mock errors store
 vi.mock("../../src/app/lib/errors", () => ({
   pushError: vi.fn(),
+  pushNotification: vi.fn(),
   clearErrors: vi.fn(),
+  clearNotifications: vi.fn(),
   getErrors: vi.fn(() => []),
+  getNotifications: vi.fn(() => []),
+  dismissNotificationBySource: vi.fn(),
+  startCycleTracking: vi.fn(),
+  endCycleTracking: vi.fn(() => new Set()),
+  resetNotificationState: vi.fn(),
+  addMutedSource: vi.fn(),
+  isMuted: vi.fn(() => false),
+  clearMutedSources: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -496,7 +506,7 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
 
     const { getClient } = await import("../../src/app/services/github");
     const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const { pushError } = await import("../../src/app/lib/errors");
+    const { pushNotification } = await import("../../src/app/lib/errors");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
     vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
@@ -514,11 +524,11 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     mockOctokit.request.mockRejectedValueOnce({ status: 403 });
     await fetchAllData();
 
-    // Gate received 403 → _notifGateDisabled = true → pushError called
-    expect(pushError).toHaveBeenCalledWith(
+    // Gate received 403 → _notifGateDisabled = true → pushNotification called
+    expect(pushNotification).toHaveBeenCalledWith(
       "notifications",
       expect.stringContaining("403"),
-      false
+      "warning"
     );
 
     // Third call — gate should be DISABLED, no notifications request

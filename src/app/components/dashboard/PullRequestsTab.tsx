@@ -2,13 +2,12 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
-import type { PullRequest, ApiError } from "../../services/api";
+import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import SortIcon from "../shared/SortIcon";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -22,7 +21,6 @@ import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/group
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
   loading?: boolean;
-  errors?: ApiError[];
   userLogin: string;
 }
 
@@ -244,8 +242,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
-
       {/* Column headers */}
       <div
         role="rowgroup"

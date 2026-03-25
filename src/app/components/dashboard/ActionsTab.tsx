@@ -1,11 +1,10 @@
 import { createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
-import type { WorkflowRun, ApiError } from "../../services/api";
+import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -14,7 +13,6 @@ import ChevronIcon from "../shared/ChevronIcon";
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
-  errors?: ApiError[];
 }
 
 interface WorkflowGroup {
@@ -199,13 +197,10 @@ export default function ActionsTab(props: ActionsTabProps) {
         <SkeletonRows label="Loading workflow runs" />
       </Show>
 
-      {/* Error */}
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
-
       {/* Empty */}
       <Show
         when={
-          !props.loading && (!props.errors || props.errors.length === 0) && repoGroups().length === 0
+          !props.loading && repoGroups().length === 0
         }
       >
         <div class="p-8 text-center text-gray-500 dark:text-gray-400">

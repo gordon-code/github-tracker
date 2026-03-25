@@ -3,7 +3,7 @@ import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
-import type { PullRequest, ApiError } from "../../src/app/services/api";
+import type { PullRequest } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { makePullRequest, resetViewStore } from "../helpers/index";
 import { updateConfig, resetConfig } from "../../src/app/stores/config";
@@ -34,24 +34,6 @@ describe("PullRequestsTab", () => {
     const status = screen.getByRole("status");
     expect(status).toBeDefined();
     expect(screen.queryByText(/No open pull requests/i)).toBeNull();
-  });
-
-  it("shows error banners for each ApiError", () => {
-    const errors: ApiError[] = [
-      { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
-      { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
-    ];
-    render(() => <PullRequestsTab pullRequests={[]} errors={errors} userLogin="" />);
-    screen.getByText(/Server error/i);
-    screen.getByText(/Forbidden/i);
-  });
-
-  it("shows '(will retry)' for retryable errors", () => {
-    const errors: ApiError[] = [
-      { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
-    ];
-    render(() => <PullRequestsTab pullRequests={[]} errors={errors} userLogin="" />);
-    screen.getByText(/will retry/i);
   });
 
   it("filters out ignored PRs", () => {
