@@ -224,7 +224,13 @@ describe("DashboardPage — data flow", () => {
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Actions"));
     await waitFor(() => {
-      // ActionsTab shows workflow names as group headers (may appear in header button + run row)
+      // ActionsTab shows repo group header (collapsed by default)
+      expect(screen.getByText("owner/repo")).toBeTruthy();
+    });
+    // Expand the repo group to see workflow cards
+    await user.click(screen.getByText("owner/repo"));
+    await waitFor(() => {
+      // Workflow cards visible after expansion
       expect(screen.getAllByText("CI pipeline").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Deploy job").length).toBeGreaterThan(0);
     });

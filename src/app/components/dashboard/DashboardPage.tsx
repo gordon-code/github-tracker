@@ -186,46 +186,50 @@ export default function DashboardPage() {
         />
 
         <main class="flex-1 overflow-auto">
-          <Switch>
-            <Match when={activeTab() === "issues"}>
-              <IssuesTab
-                issues={dashboardData.issues}
-                loading={dashboardData.loading}
-                userLogin={userLogin()}
-              />
-            </Match>
-            <Match when={activeTab() === "pullRequests"}>
-              <PullRequestsTab
-                pullRequests={dashboardData.pullRequests}
-                loading={dashboardData.loading}
-                userLogin={userLogin()}
-              />
-            </Match>
-            <Match when={activeTab() === "actions"}>
-              <ActionsTab
-                workflowRuns={dashboardData.workflowRuns}
-                loading={dashboardData.loading}
-              />
-            </Match>
-          </Switch>
+          <div class="max-w-6xl mx-auto w-full px-4">
+            <Switch>
+              <Match when={activeTab() === "issues"}>
+                <IssuesTab
+                  issues={dashboardData.issues}
+                  loading={dashboardData.loading}
+                  userLogin={userLogin()}
+                />
+              </Match>
+              <Match when={activeTab() === "pullRequests"}>
+                <PullRequestsTab
+                  pullRequests={dashboardData.pullRequests}
+                  loading={dashboardData.loading}
+                  userLogin={userLogin()}
+                />
+              </Match>
+              <Match when={activeTab() === "actions"}>
+                <ActionsTab
+                  workflowRuns={dashboardData.workflowRuns}
+                  loading={dashboardData.loading}
+                />
+              </Match>
+            </Switch>
+          </div>
         </main>
 
-        <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-center gap-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
-          <a
-            href="https://github.com/gordon-code/github-tracker"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="hover:text-gray-600 dark:hover:text-gray-300"
-          >
-            Source
-          </a>
-          <span aria-hidden="true">&middot;</span>
-          <a
-            href="/privacy"
-            class="hover:text-gray-600 dark:hover:text-gray-300"
-          >
-            Privacy
-          </a>
+        <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
+          <div class="max-w-6xl mx-auto w-full px-4 flex items-center justify-center gap-3">
+            <a
+              href="https://github.com/gordon-code/github-tracker"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              Source
+            </a>
+            <span aria-hidden="true">&middot;</span>
+            <a
+              href="/privacy"
+              class="hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              Privacy
+            </a>
+          </div>
         </footer>
       </div>
     </div>

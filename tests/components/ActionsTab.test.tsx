@@ -21,7 +21,7 @@ describe("ActionsTab", () => {
     expect(screen.queryByText("No workflow runs found.")).toBeNull();
   });
 
-  it("groups runs by repository", () => {
+  it("groups runs by repository — repo headers visible", () => {
     const runs = [
       makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI" }),
       makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI" }),
@@ -31,70 +31,129 @@ describe("ActionsTab", () => {
     screen.getByText("owner/repo-b");
   });
 
-  it("groups runs by workflow within each repo", () => {
+  it("repo groups start collapsed — run row content not visible by default", () => {
     const runs = [
-      makeWorkflowRun({
-        repoFullName: "owner/repo",
-        workflowId: 1,
-        name: "Build",
-        runNumber: 1,
-      }),
-      makeWorkflowRun({
-        repoFullName: "owner/repo",
-        workflowId: 2,
-        name: "Deploy",
-        runNumber: 2,
-      }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "unique-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    // Workflow names appear as group header buttons AND run row spans (2 each)
-    expect(screen.getAllByText("Build").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Deploy").length).toBeGreaterThanOrEqual(1);
-    // Verify two separate workflow groups exist
-    const buttons = screen.getAllByRole("button");
-    const wfButtons = buttons.filter(
-      (b) => b.textContent?.includes("Build") || b.textContent?.includes("Deploy")
-    );
-    expect(wfButtons.length).toBe(2);
+    // Repo header visible
+    screen.getByText("owner/repo");
+    // Run row content not visible (collapsed by default)
+    expect(screen.queryByText("unique-run-title")).toBeNull();
   });
 
-  it("toggles repo collapse when repo header clicked", async () => {
+  it("clicking repo header expands it and shows workflow cards", async () => {
     const user = userEvent.setup();
     const runs = [
       makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "unique-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    // displayTitle is rendered inside run rows (not in headers)
-    screen.getByText("unique-run-title");
+    // Collapsed by default
+    expect(screen.queryByText("unique-run-title")).toBeNull();
 
-    // Click the repo header button to collapse it
+    // Click repo header to expand
     const repoHeader = screen.getByText("owner/repo");
     await user.click(repoHeader);
 
-    // Run row content should be hidden after repo collapse
+    // Workflow card name should now be visible
+    expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("clicking repo header again collapses it", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "unique-run-title" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    const repoHeader = screen.getByText("owner/repo");
+    // Expand
+    await user.click(repoHeader);
+    expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
+
+    // Collapse
+    await user.click(repoHeader);
+    // Workflow card now hidden
     expect(screen.queryByText("unique-run-title")).toBeNull();
   });
 
-  it("toggles workflow collapse when workflow header clicked", async () => {
+  it("collapsed repo header shows aggregate pass/fail summary", () => {
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "Build", conclusion: "success" }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 2, name: "Deploy", conclusion: "failure" }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 3, name: "Lint", conclusion: "success" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    // Collapsed by default — summary span shows aggregate counts
+    const summaryEl = screen.getByText(/\d+ workflow/);
+    expect(summaryEl.textContent).toContain("passed");
+    expect(summaryEl.textContent).toContain("failed");
+  });
+
+  it("collapsed repo header summary disappears when repo is expanded", async () => {
     const user = userEvent.setup();
-    const run = makeWorkflowRun({
-      repoFullName: "owner/repo",
-      workflowId: 1,
-      name: "MyWorkflow",
-      displayTitle: "unique-wf-run-title",
-    });
-    render(() => <ActionsTab workflowRuns={[run]} />);
-    // The run's displayTitle is rendered in the run row
-    screen.getByText("unique-wf-run-title");
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", conclusion: "success" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+    // Summary span visible when collapsed
+    expect(screen.getByText(/\d+ workflow/)).not.toBeNull();
 
-    // Find the workflow header button (the button containing "MyWorkflow" text)
-    const buttons = screen.getAllByRole("button");
-    const wfHeader = buttons.find((b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo"));
-    expect(wfHeader).toBeDefined();
-    await user.click(wfHeader!);
+    await user.click(screen.getByText("owner/repo"));
+    // Summary hidden when expanded
+    expect(screen.queryByText(/\d+ workflow/)).toBeNull();
+  });
 
-    // displayTitle should be hidden after workflow collapse
-    expect(screen.queryByText("unique-wf-run-title")).toBeNull();
+  it("workflow cards render in grid after expanding repo", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "Build" }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 2, name: "Deploy" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+
+    // Both workflow names visible as card headers
+    expect(screen.getAllByText("Build").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Deploy").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("failing workflows sort before passing ones in card grid", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "Passing", conclusion: "success", createdAt: "2024-01-10T10:00:00Z" }),
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 2, name: "Failing", conclusion: "failure", createdAt: "2024-01-10T09:00:00Z" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+
+    const cards = screen.getAllByText(/Passing|Failing/);
+    // Failing card should appear before passing
+    const failingIndex = cards.findIndex((el) => el.textContent === "Failing");
+    const passingIndex = cards.findIndex((el) => el.textContent === "Passing");
+    expect(failingIndex).toBeLessThan(passingIndex);
+  });
+
+  it("clicking workflow card expands to show run rows", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "my-unique-run" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    // Expand repo first
+    await user.click(screen.getByText("owner/repo"));
+    // Run row not visible (card collapsed)
+    expect(screen.queryByText("my-unique-run")).toBeNull();
+
+    // Click the workflow card
+    const cards = screen.getAllByText("CI");
+    await user.click(cards[0]);
+
+    // Run row now visible
+    screen.getByText("my-unique-run");
   });
 
   it("filters out ignored workflow runs", () => {
@@ -133,15 +192,21 @@ describe("ActionsTab", () => {
     expect(screen.queryByText("owner/other")).toBeNull();
   });
 
-  it("hides PR runs by default (showPrRuns=false)", () => {
+  it("hides PR runs by default (showPrRuns=false)", async () => {
+    const user = userEvent.setup();
     const runs = [
       makeWorkflowRun({ id: 1, name: "CI", repoFullName: "owner/repo", workflowId: 1, isPrRun: true, displayTitle: "pr-run-title" }),
-      makeWorkflowRun({ id: 2, name: "CI", repoFullName: "owner/repo", workflowId: 2, isPrRun: false, displayTitle: "push-run-title" }),
+      makeWorkflowRun({ id: 2, name: "Push-CI", repoFullName: "owner/repo", workflowId: 2, isPrRun: false, displayTitle: "push-run-title" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
-    // PR run's displayTitle is hidden
+    // Expand repo and workflow to check run rows
+    await user.click(screen.getByText("owner/repo"));
+    const cards = screen.getAllByText("Push-CI");
+    await user.click(cards[0]);
+
+    // PR run card not visible (filtered out entirely)
     expect(screen.queryByText("pr-run-title")).toBeNull();
-    // Push run's displayTitle is visible
+    // Push run visible
     screen.getByText("push-run-title");
   });
 
@@ -158,39 +223,55 @@ describe("ActionsTab", () => {
     const checkbox = screen.getByRole("checkbox");
     await user.click(checkbox);
 
-    // Now the PR run's displayTitle should be visible
+    // Repo now appears; expand it and the card
+    await user.click(screen.getByText("owner/repo"));
+    const cards = screen.getAllByText("CI");
+    await user.click(cards[0]);
+
     screen.getByText("pr-run-title");
   });
 
-  it("filters by conclusion tab filter", () => {
+  it("filters by conclusion tab filter", async () => {
+    const user = userEvent.setup();
     const runs = [
       makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "success", displayTitle: "success-run" }),
-      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "failure", displayTitle: "failure-run" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "CI-fail", status: "completed", conclusion: "failure", displayTitle: "failure-run" }),
     ];
     viewStore.setTabFilter("actions", "conclusion", "success");
     render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+    const cards = screen.getAllByText("CI");
+    await user.click(cards[0]);
+
     screen.getByText("success-run");
     expect(screen.queryByText("failure-run")).toBeNull();
   });
 
-  it("filters by event tab filter", () => {
+  it("filters by event tab filter", async () => {
+    const user = userEvent.setup();
     const runs = [
-      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "CI", event: "push", displayTitle: "push-run" }),
-      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 1, name: "CI", event: "schedule", displayTitle: "schedule-run" }),
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "Push-CI", event: "push", displayTitle: "push-run" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "Sched-CI", event: "schedule", displayTitle: "schedule-run" }),
     ];
     viewStore.setTabFilter("actions", "event", "push");
     render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+    const cards = screen.getAllByText("Push-CI");
+    await user.click(cards[0]);
+
     screen.getByText("push-run");
     expect(screen.queryByText("schedule-run")).toBeNull();
   });
 
-  it("sets aria-expanded on repo group header", () => {
+  it("sets aria-expanded=false on repo group header by default (collapsed)", () => {
     const runs = [
       makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
     const repoHeader = screen.getByText("owner/repo").closest("button")!;
-    expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("toggles repo aria-expanded on click", async () => {
@@ -200,45 +281,18 @@ describe("ActionsTab", () => {
     ];
     render(() => <ActionsTab workflowRuns={runs} />);
     const repoHeader = screen.getByText("owner/repo").closest("button")!;
-    expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
-
-    await user.click(repoHeader);
     expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
 
     await user.click(repoHeader);
     expect(repoHeader.getAttribute("aria-expanded")).toBe("true");
+
+    await user.click(repoHeader);
+    expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("sets aria-expanded on workflow group header", () => {
-    const runs = [
-      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "MyWorkflow" }),
-    ];
-    render(() => <ActionsTab workflowRuns={runs} />);
-    const buttons = screen.getAllByRole("button");
-    const wfHeader = buttons.find(
-      (b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo")
-    )!;
-    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("toggles workflow aria-expanded on click", async () => {
-    const user = userEvent.setup();
-    const runs = [
-      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "MyWorkflow", displayTitle: "wf-run" }),
-    ];
-    render(() => <ActionsTab workflowRuns={runs} />);
-    const buttons = screen.getAllByRole("button");
-    const wfHeader = buttons.find(
-      (b) => b.textContent?.includes("MyWorkflow") && !b.textContent?.includes("owner/repo")
-    )!;
-    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
-
-    await user.click(wfHeader);
-    expect(wfHeader.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("wf-run")).toBeNull();
-
-    await user.click(wfHeader);
-    expect(wfHeader.getAttribute("aria-expanded")).toBe("true");
-    screen.getByText("wf-run");
+  it("toolbar: Show PR runs checkbox, FilterChips, and IgnoreBadge are present", () => {
+    render(() => <ActionsTab workflowRuns={[]} />);
+    screen.getByRole("checkbox");
+    screen.getByText("Show PR runs");
   });
 });

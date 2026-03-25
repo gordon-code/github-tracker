@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
-import WorkflowRunRow from "./WorkflowRunRow";
+import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
@@ -75,6 +75,19 @@ function groupRuns(runs: WorkflowRun[]): RepoGroup[] {
   return result;
 }
 
+function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
+  return [...workflows].sort((a, b) => {
+    const priorityOf = (wf: WorkflowGroup): number => {
+      const latest = wf.runs[0];
+      if (!latest) return 2;
+      if (latest.conclusion === "failure") return 0;
+      if (latest.status === "in_progress") return 1;
+      return 2;
+    };
+    return priorityOf(a) - priorityOf(b);
+  });
+}
+
 const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
 const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
 
@@ -103,15 +116,15 @@ const actionsFilterGroups: FilterChipGroupDef[] = [
 ];
 
 export default function ActionsTab(props: ActionsTabProps) {
-  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
-  const [collapsedWorkflows, setCollapsedWorkflows] = createStore<Record<string, boolean>>({});
+  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
+  const [expandedWorkflows, setExpandedWorkflows] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos(repoFullName, (v) => !v);
+    setExpandedRepos(repoFullName, (v) => !v);
   }
 
   function toggleWorkflow(key: string) {
-    setCollapsedWorkflows(key, (v) => !v);
+    setExpandedWorkflows(key, (v) => !v);
   }
 
   function handleIgnore(run: WorkflowRun) {
@@ -212,59 +225,68 @@ export default function ActionsTab(props: ActionsTabProps) {
       <Show when={repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
-            const isRepoCollapsed = () =>
-              collapsedRepos[repoGroup.repoFullName];
+            const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+
+            const sortedWorkflows = createMemo(() =>
+              sortWorkflowsByStatus(repoGroup.workflows)
+            );
+
+            const collapsedSummary = createMemo(() => {
+              const wfs = repoGroup.workflows;
+              const total = wfs.length;
+              let passed = 0;
+              let failed = 0;
+              for (const wf of wfs) {
+                const latest = wf.runs[0];
+                if (latest?.conclusion === "success") passed++;
+                else if (latest?.conclusion === "failure") failed++;
+              }
+              const parts: string[] = [];
+              if (passed > 0) parts.push(`${passed} passed`);
+              if (failed > 0) parts.push(`${failed} failed`);
+              return `${total} workflow${total !== 1 ? "s" : ""}: ${parts.join(", ")}`;
+            });
 
             return (
               <div class="bg-white dark:bg-gray-900">
                 {/* Repo header */}
                 <button
                   onClick={() => toggleRepo(repoGroup.repoFullName)}
-                  aria-expanded={!isRepoCollapsed()}
+                  aria-expanded={isExpanded()}
                   class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
-                  <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                  <ChevronIcon size="md" rotated={!isExpanded()} />
                   {repoGroup.repoFullName}
+                  <Show when={!isExpanded()}>
+                    <span class="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                      {collapsedSummary()}
+                    </span>
+                  </Show>
                 </button>
 
-                {/* Workflow groups */}
-                <Show when={!isRepoCollapsed()}>
-                  <For each={repoGroup.workflows}>
-                    {(wfGroup) => {
-                      const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
-                      const isWfCollapsed = () =>
-                        collapsedWorkflows[wfKey];
+                {/* Workflow cards grid */}
+                <Show when={isExpanded()}>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3">
+                    <For each={sortedWorkflows()}>
+                      {(wfGroup) => {
+                        const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
+                        const isWfExpanded = () => !!expandedWorkflows[wfKey];
 
-                      return (
-                        <div class="border-l-2 border-gray-100 dark:border-gray-800 ml-4">
-                          {/* Workflow header */}
-                          <button
-                            onClick={() => toggleWorkflow(wfKey)}
-                            aria-expanded={!isWfCollapsed()}
-                            class="w-full flex items-center gap-2 px-4 py-1.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                          >
-                            <ChevronIcon size="sm" rotated={isWfCollapsed()} />
-                            {wfGroup.workflowName}
-                          </button>
-
-                          {/* Runs */}
-                          <Show when={!isWfCollapsed()}>
-                            <div class="divide-y divide-gray-50 dark:divide-gray-800/50">
-                              <For each={wfGroup.runs}>
-                                {(run) => (
-                                  <WorkflowRunRow
-                                    run={run}
-                                    onIgnore={handleIgnore}
-                                    density={config.viewDensity}
-                                  />
-                                )}
-                              </For>
-                            </div>
-                          </Show>
-                        </div>
-                      );
-                    }}
-                  </For>
+                        return (
+                          <div class={isWfExpanded() ? "col-span-full" : ""}>
+                            <WorkflowSummaryCard
+                              workflowName={wfGroup.workflowName}
+                              runs={wfGroup.runs}
+                              expanded={isWfExpanded()}
+                              onToggle={() => toggleWorkflow(wfKey)}
+                              onIgnoreRun={handleIgnore}
+                              density={config.viewDensity}
+                            />
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
                 </Show>
               </div>
             );
