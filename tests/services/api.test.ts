@@ -572,8 +572,10 @@ describe("fetchPullRequests", () => {
       ["SUCCESS", "success"],
       ["FAILURE", "failure"],
       ["ERROR", "failure"],
+      ["ACTION_REQUIRED", "failure"],
       ["PENDING", "pending"],
       ["EXPECTED", "pending"],
+      ["QUEUED", "pending"],
       [null, null],
     ];
 
@@ -908,6 +910,52 @@ describe("fetchPullRequests", () => {
       expect.stringContaining("capped at 1,000"),
       "warning"
     );
+  });
+
+  it("fork fallback handles >50 fork PRs across multiple batches", async () => {
+    // Create 55 fork PRs — should split into 50 + 5 fork fallback batches
+    const forkNodes = Array.from({ length: 55 }, (_, i) => ({
+      ...graphqlPRNode,
+      databaseId: 2000 + i,
+      headRepository: { owner: { login: "fork-owner" }, nameWithOwner: `fork-owner/repo-${i}` },
+      repository: { nameWithOwner: "octocat/Hello-World" },
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    })) as unknown as (typeof graphqlPRNode)[];
+
+    let graphqlCallCount = 0;
+    const octokit = makePROctokit(async (_query, variables) => {
+      graphqlCallCount++;
+      const q = (variables as Record<string, unknown>).q as string | undefined;
+      if (q) {
+        // Primary search queries return all 55 fork PRs (involves only)
+        if (q.includes("involves:")) return makeGraphqlPRResponse(forkNodes);
+        return makeGraphqlPRResponse([]);
+      }
+      // Fork fallback queries
+      const response: Record<string, unknown> = {
+        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      };
+      const indices = Object.keys(variables as Record<string, unknown>)
+        .filter((k) => k.startsWith("owner"))
+        .map((k) => parseInt(k.replace("owner", ""), 10));
+      for (const i of indices) {
+        response[`fork${i}`] = { object: { statusCheckRollup: { state: "SUCCESS" } } };
+      }
+      return response;
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // All 55 PRs should have check status resolved from fork fallback
+    const forkPRs = pullRequests.filter((pr) => pr.id >= 2000 && pr.id < 2055);
+    expect(forkPRs.length).toBe(55);
+    for (const pr of forkPRs) {
+      expect(pr.checkStatus).toBe("success");
+    }
   });
 
   it("returns empty result when repos is empty", async () => {

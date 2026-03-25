@@ -173,10 +173,10 @@ function extractRejectionError(reason: unknown): { statusCode: number | null; me
 }
 
 /**
- * Extracts partial data from a GraphqlResponseError (thrown when response contains both data and errors).
- * Returns the data if available, null otherwise.
+ * Extracts partial data from a GraphqlResponseError for search queries.
+ * Only matches responses containing a `search` key (issues/PRs search shape).
  */
-function extractGraphQLPartialData<T>(err: unknown): T | null {
+function extractSearchPartialData<T>(err: unknown): T | null {
   if (
     err &&
     typeof err === "object" &&
@@ -189,6 +189,9 @@ function extractGraphQLPartialData<T>(err: unknown): T | null {
   }
   return null;
 }
+
+const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const VALID_LOGIN = /^[A-Za-z0-9\[\]-]+$/;
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -273,7 +276,7 @@ interface GraphQLPRSearchResponse {
 }
 
 interface ForkCandidate {
-  pr: PullRequest;
+  databaseId: number;
   headOwner: string;
   headRepo: string;
   sha: string;
@@ -370,116 +373,157 @@ const PR_SEARCH_QUERY = `
 
 // ── GraphQL search functions ──────────────────────────────────────────────────
 
+interface SearchPageResult<T> {
+  issueCount: number;
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  nodes: (T | null)[];
+}
+
+/**
+ * Paginates a single GraphQL search query string, collecting results via a
+ * caller-provided `processNode` callback. Handles partial errors, cap enforcement,
+ * and rate limit tracking. Returns the count of items added by processNode.
+ */
+async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: { remaining: number; resetAt: string } }, TNode>(
+  octokit: GitHubOctokit,
+  query: string,
+  queryString: string,
+  batchLabel: string,
+  errors: ApiError[],
+  processNode: (node: TNode) => boolean, // returns true if node was added (for cap counting)
+  currentCount: () => number,
+  cap: number,
+): Promise<{ capReached: boolean }> {
+  let cursor: string | null = null;
+  let capReached = false;
+
+  while (true) {
+    try {
+      let response: TResponse;
+      let isPartial = false;
+      try {
+        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor });
+      } catch (err) {
+        const partial = extractSearchPartialData<TResponse>(err);
+        if (partial) {
+          response = partial;
+          isPartial = true;
+          const { message } = extractRejectionError(err);
+          errors.push({ repo: batchLabel, statusCode: null, message, retryable: true });
+        } else {
+          const { statusCode, message } = extractRejectionError(err);
+          errors.push({
+            repo: batchLabel,
+            statusCode,
+            message,
+            retryable: statusCode === null || statusCode >= 500,
+          });
+          break;
+        }
+      }
+
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+      for (const node of response.search.nodes) {
+        if (currentCount() >= cap) {
+          capReached = true;
+          break;
+        }
+        if (!node) continue;
+        processNode(node);
+      }
+
+      if (capReached) {
+        return { capReached: true };
+      }
+
+      if (isPartial) break;
+
+      if (currentCount() >= cap) {
+        return { capReached: true };
+      }
+
+      if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
+      cursor = response.search.pageInfo.endCursor;
+    } catch (err) {
+      const { message } = extractRejectionError(err);
+      errors.push({ repo: batchLabel, statusCode: null, message, retryable: false });
+      break;
+    }
+  }
+
+  return { capReached };
+}
+
+function buildRepoQualifiers(repos: RepoRef[]): string {
+  return repos
+    .filter((r) => VALID_REPO_NAME.test(r.fullName))
+    .map((r) => `repo:${r.fullName}`)
+    .join(" ");
+}
+
 /**
  * Fetches open issues via GraphQL search, using cursor-based pagination.
- * Batches repos into chunks of SEARCH_REPO_BATCH_SIZE to keep query length safe.
- * Updates the GraphQL rate limit signal after each page.
+ * Batches repos into chunks of SEARCH_REPO_BATCH_SIZE and runs chunks in parallel.
  */
 async function graphqlSearchIssues(
   octokit: GitHubOctokit,
   repos: RepoRef[],
   userLogin: string
 ): Promise<FetchIssuesResult> {
+  if (!VALID_LOGIN.test(userLogin)) return { issues: [], errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
+
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
   const seen = new Set<number>();
   const issues: Issue[] = [];
   const errors: ApiError[] = [];
+  const CAP = 1000;
 
-  let capReached = false;
-
-  for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-    if (capReached) break;
-    const chunk = chunks[chunkIdx];
-    const repoQualifiers = chunk.map((r) => `repo:${r.fullName}`).join(" ");
+  const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+    const repoQualifiers = buildRepoQualifiers(chunk);
     const queryString = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
 
-    let cursor: string | null = null;
-
-    while (true) {
-      try {
-        let response: GraphQLIssueSearchResponse;
-        let isPartial = false;
-        try {
-          response = await octokit.graphql<GraphQLIssueSearchResponse>(
-            ISSUES_SEARCH_QUERY,
-            { q: queryString, cursor }
-          );
-        } catch (err) {
-          const partial = extractGraphQLPartialData<GraphQLIssueSearchResponse>(err);
-          if (partial) {
-            response = partial;
-            isPartial = true;
-            const { message } = extractRejectionError(err);
-            errors.push({
-              repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-              statusCode: null,
-              message,
-              retryable: true,
-            });
-          } else {
-            const { statusCode, message } = extractRejectionError(err);
-            errors.push({
-              repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-              statusCode,
-              message,
-              retryable: statusCode === null || statusCode >= 500,
-            });
-            break;
-          }
-        }
-
-        if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-        for (const node of response.search.nodes) {
-          if (!node || node.databaseId == null || !node.repository) continue;
-          if (seen.has(node.databaseId)) continue;
-          seen.add(node.databaseId);
-          issues.push({
-            id: node.databaseId,
-            number: node.number,
-            title: node.title,
-            state: node.state,
-            htmlUrl: node.url,
-            createdAt: node.createdAt,
-            updatedAt: node.updatedAt,
-            userLogin: node.author?.login ?? "",
-            userAvatarUrl: node.author?.avatarUrl ?? "",
-            labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-            assigneeLogins: node.assignees.nodes.map((a) => a.login),
-            repoFullName: node.repository.nameWithOwner,
-            comments: node.comments.totalCount,
-          });
-        }
-
-        if (isPartial) break;
-
-        if (issues.length >= 1000 && !capReached) {
-          capReached = true;
-          const total = response.search.issueCount;
-          console.warn(`[api] Issue search results capped at 1000 (${total} total)`);
-          pushNotification(
-            "search/issues",
-            `Issue search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
-            "warning"
-          );
-          break;
-        }
-
-        if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
-        cursor = response.search.pageInfo.endCursor;
-      } catch (err) {
-        // Catch-all for unexpected runtime errors (malformed response shapes, TypeErrors, etc.)
-        // Preserves any issues collected so far rather than losing the entire fetch
-        const { message } = extractRejectionError(err);
-        errors.push({
-          repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-          statusCode: null,
-          message,
-          retryable: false,
+    await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+      octokit, ISSUES_SEARCH_QUERY, queryString,
+      `search-batch-${chunkIdx + 1}/${chunks.length}`,
+      errors,
+      (node) => {
+        if (node.databaseId == null || !node.repository) return false;
+        if (seen.has(node.databaseId)) return false;
+        seen.add(node.databaseId);
+        issues.push({
+          id: node.databaseId,
+          number: node.number,
+          title: node.title,
+          state: node.state,
+          htmlUrl: node.url,
+          createdAt: node.createdAt,
+          updatedAt: node.updatedAt,
+          userLogin: node.author?.login ?? "",
+          userAvatarUrl: node.author?.avatarUrl ?? "",
+          labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+          assigneeLogins: node.assignees.nodes.map((a) => a.login),
+          repoFullName: node.repository.nameWithOwner,
+          comments: node.comments.totalCount,
         });
-        break;
-      }
+        return true;
+      },
+      () => issues.length,
+      CAP,
+    );
+  }));
+
+  for (const result of chunkResults) {
+    if (result.status === "rejected") {
+      const { statusCode, message } = extractRejectionError(result.reason);
+      errors.push({ repo: "search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
+  }
+
+  if (issues.length >= CAP) {
+    console.warn(`[api] Issue search results capped at ${CAP}`);
+    pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
+    issues.splice(CAP);
   }
 
   return { issues, errors };
@@ -489,8 +533,8 @@ async function graphqlSearchIssues(
  * Maps a GraphQL statusCheckRollup state string to the app's CheckStatus type.
  */
 function mapCheckStatus(state: string | null | undefined): CheckStatus["status"] {
-  if (state === "FAILURE" || state === "ERROR") return "failure";
-  if (state === "PENDING" || state === "EXPECTED") return "pending";
+  if (state === "FAILURE" || state === "ERROR" || state === "ACTION_REQUIRED") return "failure";
+  if (state === "PENDING" || state === "EXPECTED" || state === "QUEUED") return "pending";
   if (state === "SUCCESS") return "success";
   return null;
 }
@@ -514,175 +558,119 @@ function mapReviewDecision(
 /**
  * Fetches open PRs via GraphQL search with two queries (involves + review-requested),
  * deduplicates by databaseId, and handles fork PR statusCheckRollup fallback.
+ * Chunks run in parallel; fork fallback batches run in parallel.
  */
 async function graphqlSearchPRs(
   octokit: GitHubOctokit,
   repos: RepoRef[],
   userLogin: string
 ): Promise<FetchPullRequestsResult> {
+  if (!VALID_LOGIN.test(userLogin)) return { pullRequests: [], errors: [{ repo: "pr-search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
+
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
   const prMap = new Map<number, PullRequest>();
-  // Side-channel: store headRepository info for fork detection
-  const headRepoInfoMap = new Map<number, { owner: string; repoName: string } | null>();
+  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
   const errors: ApiError[] = [];
-  let prCapReached = false;
+  const CAP = 1000;
 
-  // Run involves and review-requested searches across all repo chunks
-  for (const queryType of [
+  function processPRNode(node: GraphQLPRNode): boolean {
+    if (node.databaseId == null || !node.repository) return false;
+    if (prMap.has(node.databaseId)) return false;
+
+    const pendingLogins = node.reviewRequests.nodes
+      .map((n) => n.requestedReviewer?.login)
+      .filter((l): l is string => l != null);
+    const actualLogins = node.latestReviews.nodes
+      .map((n) => n.author?.login)
+      .filter((l): l is string => l != null);
+    const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
+
+    const rawState = node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+
+    // Store fork info for fallback detection
+    if (node.headRepository) {
+      const parts = node.headRepository.nameWithOwner.split("/");
+      if (parts.length === 2) {
+        forkInfoMap.set(node.databaseId, { owner: node.headRepository.owner.login, repoName: parts[1] });
+      }
+    }
+
+    prMap.set(node.databaseId, {
+      id: node.databaseId,
+      number: node.number,
+      title: node.title,
+      state: node.state,
+      draft: node.isDraft,
+      htmlUrl: node.url,
+      createdAt: node.createdAt,
+      updatedAt: node.updatedAt,
+      userLogin: node.author?.login ?? "",
+      userAvatarUrl: node.author?.avatarUrl ?? "",
+      headSha: node.headRefOid,
+      headRef: node.headRefName,
+      baseRef: node.baseRefName,
+      assigneeLogins: node.assignees.nodes.map((a) => a.login),
+      reviewerLogins,
+      repoFullName: node.repository.nameWithOwner,
+      checkStatus: mapCheckStatus(rawState),
+      additions: node.additions,
+      deletions: node.deletions,
+      changedFiles: node.changedFiles,
+      comments: node.comments.totalCount,
+      reviewThreads: node.reviewThreads.totalCount,
+      labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+      reviewDecision: mapReviewDecision(node.reviewDecision),
+      totalReviewCount: node.latestReviews.totalCount,
+    });
+    return true;
+  }
+
+  // Run involves and review-requested searches across all repo chunks in parallel
+  const queryTypes = [
     `is:pr is:open involves:${userLogin}`,
     `is:pr is:open review-requested:${userLogin}`,
-  ]) {
-    if (prCapReached) break;
-    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-      if (prCapReached) break;
-      const chunk = chunks[chunkIdx];
-      const repoQualifiers = chunk.map((r) => `repo:${r.fullName}`).join(" ");
+  ];
+
+  const allTasks = queryTypes.flatMap((queryType) =>
+    chunks.map(async (chunk, chunkIdx) => {
+      const repoQualifiers = buildRepoQualifiers(chunk);
       const queryString = `${queryType} ${repoQualifiers}`;
+      await paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
+        octokit, PR_SEARCH_QUERY, queryString,
+        `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+        errors, processPRNode, () => prMap.size, CAP,
+      );
+    })
+  );
 
-      let cursor: string | null = null;
-
-      while (true) {
-        try {
-          let response: GraphQLPRSearchResponse;
-          let isPartial = false;
-          try {
-            response = await octokit.graphql<GraphQLPRSearchResponse>(
-              PR_SEARCH_QUERY,
-              { q: queryString, cursor }
-            );
-          } catch (err) {
-            const partial = extractGraphQLPartialData<GraphQLPRSearchResponse>(err);
-            if (partial) {
-              response = partial;
-              isPartial = true;
-              const { message } = extractRejectionError(err);
-              errors.push({
-                repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-                statusCode: null,
-                message,
-                retryable: true,
-              });
-            } else {
-              const { statusCode, message } = extractRejectionError(err);
-              errors.push({
-                repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-                statusCode,
-                message,
-                retryable: statusCode === null || statusCode >= 500,
-              });
-              break;
-            }
-          }
-
-          if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-          for (const node of response.search.nodes) {
-            if (!node || node.databaseId == null || !node.repository) continue;
-            if (prMap.has(node.databaseId)) continue;
-
-            const pendingLogins = node.reviewRequests.nodes
-              .map((n) => n.requestedReviewer?.login)
-              .filter((l): l is string => l != null);
-            const actualLogins = node.latestReviews.nodes
-              .map((n) => n.author?.login)
-              .filter((l): l is string => l != null);
-            const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
-
-            const rawState =
-              node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
-            const checkStatus = mapCheckStatus(rawState);
-
-            if (node.headRepository) {
-              const parts = node.headRepository.nameWithOwner.split("/");
-              if (parts.length === 2) {
-                headRepoInfoMap.set(node.databaseId, {
-                  owner: node.headRepository.owner.login,
-                  repoName: parts[1],
-                });
-              } else {
-                headRepoInfoMap.set(node.databaseId, null);
-              }
-            } else {
-              headRepoInfoMap.set(node.databaseId, null);
-            }
-
-            prMap.set(node.databaseId, {
-              id: node.databaseId,
-              number: node.number,
-              title: node.title,
-              state: node.state,
-              draft: node.isDraft,
-              htmlUrl: node.url,
-              createdAt: node.createdAt,
-              updatedAt: node.updatedAt,
-              userLogin: node.author?.login ?? "",
-              userAvatarUrl: node.author?.avatarUrl ?? "",
-              headSha: node.headRefOid,
-              headRef: node.headRefName,
-              baseRef: node.baseRefName,
-              assigneeLogins: node.assignees.nodes.map((a) => a.login),
-              reviewerLogins,
-              repoFullName: node.repository.nameWithOwner,
-              checkStatus,
-              additions: node.additions,
-              deletions: node.deletions,
-              changedFiles: node.changedFiles,
-              comments: node.comments.totalCount,
-              reviewThreads: node.reviewThreads.totalCount,
-              labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-              reviewDecision: mapReviewDecision(node.reviewDecision),
-              totalReviewCount: node.latestReviews.totalCount,
-            });
-          }
-
-          if (isPartial) break;
-
-          if (prMap.size >= 1000 && !prCapReached) {
-            prCapReached = true;
-            const total = response.search.issueCount;
-            console.warn(`[api] PR search results capped at 1000 (${total} total)`);
-            pushNotification(
-              "search/prs",
-              `PR search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
-              "warning"
-            );
-            break;
-          }
-
-          if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
-          cursor = response.search.pageInfo.endCursor;
-        } catch (err) {
-          const { message } = extractRejectionError(err);
-          errors.push({
-            repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-            statusCode: null,
-            message,
-            retryable: false,
-          });
-          break;
-        }
-      }
+  const taskResults = await Promise.allSettled(allTasks);
+  for (const result of taskResults) {
+    if (result.status === "rejected") {
+      const { statusCode, message } = extractRejectionError(result.reason);
+      errors.push({ repo: "pr-search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }
 
-  // Fork PR fallback: for PRs where checkStatus is null AND headRepository owner
-  // differs from base repo owner, query the head repo's commit statusCheckRollup.
-  // GitHub copies fork PR commits into base repo (refs/pull/N/head), so most PRs
-  // resolve via the base repo. The fallback handles cases where CI runs only on the fork.
-  const forkCandidates: ForkCandidate[] = [];
+  if (prMap.size >= CAP) {
+    console.warn(`[api] PR search results capped at ${CAP}`);
+    pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
+  }
 
+  // Fork PR fallback: for PRs with null checkStatus where head repo owner differs from base
+  const forkCandidates: ForkCandidate[] = [];
   for (const [databaseId, pr] of prMap) {
-    if (pr.checkStatus !== null) continue; // already resolved
-    const headInfo = headRepoInfoMap.get(databaseId);
-    if (!headInfo) continue; // null headRepository — deleted fork, skip
+    if (pr.checkStatus !== null) continue;
+    const headInfo = forkInfoMap.get(databaseId);
+    if (!headInfo) continue;
     const baseOwner = pr.repoFullName.split("/")[0].toLowerCase();
-    if (headInfo.owner.toLowerCase() === baseOwner) continue; // not a fork
-    forkCandidates.push({ pr, headOwner: headInfo.owner, headRepo: headInfo.repoName, sha: pr.headSha });
+    if (headInfo.owner.toLowerCase() === baseOwner) continue;
+    forkCandidates.push({ databaseId, headOwner: headInfo.owner, headRepo: headInfo.repoName, sha: pr.headSha });
   }
 
   if (forkCandidates.length > 0) {
     const forkChunks = chunkArray(forkCandidates, GRAPHQL_CHECK_BATCH_SIZE);
-    for (const forkChunk of forkChunks) {
+    // Run fork fallback batches in parallel
+    await Promise.allSettled(forkChunks.map(async (forkChunk) => {
       const varDefs: string[] = [];
       const variables: Record<string, string> = {};
       const fragments: string[] = [];
@@ -712,25 +700,18 @@ async function graphqlSearchPRs(
         for (let i = 0; i < forkChunk.length; i++) {
           const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
           const state = data?.object?.statusCheckRollup?.state ?? null;
-          const candidate = forkChunk[i];
-          const pr = prMap.get(candidate.pr.id);
-          if (pr) {
-            pr.checkStatus = mapCheckStatus(state);
-          }
+          const pr = prMap.get(forkChunk[i].databaseId);
+          if (pr) pr.checkStatus = mapCheckStatus(state);
         }
       } catch (err) {
         console.warn("[api] Fork PR statusCheckRollup fallback failed:", err);
-        pushNotification(
-          "graphql",
-          "Fork PR check status unavailable — CI status may be missing for some PRs",
-          "warning"
-        );
-        // Leave checkStatus as null for affected PRs — degraded, not broken
+        pushNotification("graphql", "Fork PR check status unavailable — CI status may be missing for some PRs", "warning");
       }
-    }
+    }));
   }
 
   const pullRequests = [...prMap.values()];
+  if (pullRequests.length >= CAP) pullRequests.splice(CAP);
   return { pullRequests, errors };
 }
 
