@@ -14,10 +14,12 @@ beforeEach(() => {
   clearNotifications();
   clearMutedSources();
   vi.useFakeTimers();
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function renderDrawer(open = true, onClose = vi.fn()) {

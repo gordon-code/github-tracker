@@ -132,6 +132,7 @@ export default function Header() {
         </button>
 
         <button
+          type="button"
           onClick={handleLogout}
           class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0"
           aria-label="Sign out"
