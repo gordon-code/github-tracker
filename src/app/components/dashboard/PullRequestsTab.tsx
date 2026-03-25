@@ -8,7 +8,6 @@ import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import SortIcon from "../shared/SortIcon";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -244,8 +243,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
-
       {/* Column headers */}
       <div
         role="rowgroup"

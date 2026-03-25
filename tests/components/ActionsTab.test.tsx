@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
-import type { ApiError } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { makeWorkflowRun, resetViewStore } from "../helpers/index";
 
@@ -20,14 +19,6 @@ describe("ActionsTab", () => {
     render(() => <ActionsTab workflowRuns={[]} loading={true} />);
     screen.getByRole("status", { name: /Loading workflow runs/i });
     expect(screen.queryByText("No workflow runs found.")).toBeNull();
-  });
-
-  it("shows error banners when errors provided", () => {
-    const errors: ApiError[] = [
-      { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: false },
-    ];
-    render(() => <ActionsTab workflowRuns={[]} errors={errors} />);
-    screen.getByText(/Server error/i);
   });
 
   it("groups runs by repository", () => {

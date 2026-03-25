@@ -6,7 +6,6 @@ import type { Issue, ApiError } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
 import SortIcon from "../shared/SortIcon";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -162,8 +161,6 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
-
       {/* Column headers */}
       <div
         role="rowgroup"

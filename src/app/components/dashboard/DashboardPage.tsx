@@ -11,8 +11,6 @@ import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
-import { getErrors, dismissError } from "../../lib/errors";
-import ErrorBannerList from "../shared/ErrorBannerList";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -189,12 +187,6 @@ export default function DashboardPage() {
           isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
           lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
           onRefresh={() => _coordinator()?.manualRefresh()}
-        />
-
-        {/* Global error banner */}
-        <ErrorBannerList
-          errors={getErrors().map((e) => ({ source: e.source, message: e.message, retryable: e.retryable }))}
-          onDismiss={(index) => dismissError(getErrors()[index].id)}
         />
 
         <main class="flex-1 overflow-auto">

@@ -3,7 +3,7 @@ import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
-import type { Issue, ApiError } from "../../src/app/services/api";
+import type { Issue } from "../../src/app/services/api";
 import { makeIssue, resetViewStore } from "../helpers/index";
 import * as viewStore from "../../src/app/stores/view";
 import { updateConfig, resetConfig } from "../../src/app/stores/config";
@@ -35,24 +35,6 @@ describe("IssuesTab", () => {
     expect(status).toBeDefined();
     // Issue list should not render during loading
     expect(screen.queryByText(/No open issues/i)).toBeNull();
-  });
-
-  it("shows error banners for each ApiError", () => {
-    const errors: ApiError[] = [
-      { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
-      { repo: "owner/other", statusCode: 403, message: "Forbidden", retryable: false },
-    ];
-    render(() => <IssuesTab issues={[]} errors={errors} userLogin="" />);
-    screen.getByText(/Server error/i);
-    screen.getByText(/Forbidden/i);
-  });
-
-  it("shows '(will retry)' for retryable errors", () => {
-    const errors: ApiError[] = [
-      { repo: "owner/repo", statusCode: 500, message: "Server error", retryable: true },
-    ];
-    render(() => <IssuesTab issues={[]} errors={errors} userLogin="" />);
-    screen.getByText(/will retry/i);
   });
 
   it("filters out ignored issues", () => {

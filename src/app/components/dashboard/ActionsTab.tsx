@@ -5,7 +5,6 @@ import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
 import WorkflowRunRow from "./WorkflowRunRow";
 import IgnoreBadge from "./IgnoreBadge";
-import ErrorBannerList from "../shared/ErrorBannerList";
 import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -198,9 +197,6 @@ export default function ActionsTab(props: ActionsTabProps) {
       <Show when={props.loading && props.workflowRuns.length === 0}>
         <SkeletonRows label="Loading workflow runs" />
       </Show>
-
-      {/* Error */}
-      <ErrorBannerList errors={props.errors?.map((e) => ({ source: e.repo, message: e.message, retryable: e.retryable }))} />
 
       {/* Empty */}
       <Show
