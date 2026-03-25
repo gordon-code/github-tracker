@@ -198,6 +198,24 @@ describe("OnboardingWizard", () => {
     );
   });
 
+  it("on finish: flushes config to localStorage", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      "github-tracker:config",
+      expect.any(String)
+    );
+  });
+
   it("on finish: navigates to /dashboard via window.location.replace", async () => {
     const user = userEvent.setup();
     vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);

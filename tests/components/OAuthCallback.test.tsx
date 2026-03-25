@@ -198,7 +198,7 @@ describe("OAuthCallback", () => {
   });
 
   it("shows CSRF error when state param does not match sessionStorage", async () => {
-    sessionStorage.setItem("github-tracker:oauth-state", "expected-state");
+    sessionStorage.setItem(OAUTH_STATE_KEY, "expected-state");
     setWindowSearch({ code: "fakecode", state: "wrong-state" });
 
     renderCallback();
