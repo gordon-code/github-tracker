@@ -143,6 +143,16 @@ export default function ToastContainer() {
       });
       scheduleAutoDismiss(notif);
     }
+
+    // Prune stale entries from tracking Maps (IDs/sources no longer in store)
+    const currentIds = new Set(notifs.map(n => n.id));
+    for (const id of seenTimestamps.keys()) {
+      if (!currentIds.has(id)) seenTimestamps.delete(id);
+    }
+    const currentSources = new Set(notifs.map(n => n.source));
+    for (const source of lastToastedAt.keys()) {
+      if (!currentSources.has(source)) lastToastedAt.delete(source);
+    }
   });
 
   onCleanup(() => {

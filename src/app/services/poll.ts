@@ -209,6 +209,9 @@ export async function fetchAllData(): Promise<DashboardData> {
 const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
+// Sources managed by the poll coordinator — used for reconciliation
+const POLL_MANAGED_SOURCES = new Set(["poll", "search", "graphql", "rate-limit", "notifications"]);
+
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
   return Math.max(intervalMs + jitter, 1000);
@@ -236,8 +239,6 @@ export function createPollCoordinator(
   let hiddenAt: number | null = null;
   let destroyed = false;
 
-  // Sources managed by the poll coordinator — used for reconciliation
-  const POLL_MANAGED_SOURCES = new Set(["poll", "search", "graphql", "rate-limit", "notifications"]);
 
   async function doFetch(): Promise<void> {
     if (destroyed || isRefreshing()) return;

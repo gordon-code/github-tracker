@@ -31,6 +31,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
       }
       setClosing(false);
       setVisible(true);
+      queueMicrotask(() => closeButtonRef?.focus());
     } else {
       if (visible()) {
         setClosing(true);

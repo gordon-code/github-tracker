@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
 import { getCoreRateLimit, getSearchRateLimit } from "../../services/github";
@@ -23,6 +23,8 @@ export default function Header() {
       setDrawerOpen(false);
     }
   }
+
+  const unreadCount = createMemo(() => getUnreadCount());
 
   const coreRL = () => getCoreRateLimit();
   const searchRL = () => getSearchRateLimit();
@@ -119,9 +121,9 @@ export default function Header() {
           >
             <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
           </svg>
-          <Show when={getUnreadCount() > 0}>
+          <Show when={unreadCount() > 0}>
             <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-              {getUnreadCount() > 9 ? "9+" : getUnreadCount()}
+              {unreadCount() > 9 ? "9+" : unreadCount()}
             </span>
           </Show>
         </button>
