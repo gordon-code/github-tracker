@@ -132,6 +132,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
     const client = getClient();
     if (!client) return;
 
+    const version = effectVersion;
+
     setOrgStates((prev) =>
       prev.map((s) =>
         s.org === org ? { ...s, loading: true, error: null } : s
@@ -143,6 +145,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
     void fetchRepos(client, org, type)
       .then((repos) => {
+        if (version !== effectVersion) return;
         setOrgStates((prev) =>
           prev.map((s) =>
             s.org === org ? { ...s, repos, loading: false, error: null } : s
@@ -150,6 +153,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
         );
       })
       .catch((err) => {
+        if (version !== effectVersion) return;
         const message =
           err instanceof Error ? err.message : "Failed to load repositories";
         setOrgStates((prev) =>
@@ -370,7 +374,6 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     class="max-h-[300px] overflow-y-auto"
                     role="region"
                     aria-label={`${state().org} repositories`}
-                    data-testid={`repo-scroll-${state().org}`}
                   >
                     <ul class="divide-y divide-gray-100 dark:divide-gray-700">
                       <Index each={visible()}>

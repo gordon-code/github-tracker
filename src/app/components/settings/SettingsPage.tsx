@@ -205,18 +205,19 @@ export default function SettingsPage() {
   async function mergeNewOrgs() {
     const client = getClient();
     if (!client) return;
+    const snapshot = [...config.selectedOrgs];
     try {
       const allOrgs = await fetchOrgs(client);
       // Case-insensitive comparison — GitHub logins are case-insensitive
-      const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+      const currentSet = new Set(snapshot.map((o) => o.toLowerCase()));
       const newOrgs = allOrgs
         .map((o) => o.login)
         .filter((login) => !currentSet.has(login.toLowerCase()));
       if (newOrgs.length > 0) {
-        const merged = [...config.selectedOrgs, ...newOrgs];
+        const merged = [...snapshot, ...newOrgs];
         setLocalOrgs(merged);
         saveWithFeedback({ selectedOrgs: merged });
-        console.info(`[settings] merged ${newOrgs.length} new org(s): ${newOrgs.join(", ")}`);
+        console.info(`[settings] merged ${newOrgs.length} new org(s)`);
       }
     } catch {
       // Non-fatal — user can manually manage orgs
@@ -421,25 +422,27 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div class="border-t border-gray-100 pt-3 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  {localRepos().length} selected
-                </p>
-                <Show when={localRepos().length > 50}>
-                  <p class="text-xs text-amber-600 dark:text-amber-400">
-                    Tracking {localRepos().length} repos will use significant API quota per poll cycle
+            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {localRepos().length} selected
                   </p>
-                </Show>
+                  <Show when={localRepos().length > 50}>
+                    <p class="text-xs text-amber-600 dark:text-amber-400">
+                      Tracking {localRepos().length} repos will use significant API quota per poll cycle
+                    </p>
+                  </Show>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRepoPanelOpen((v) => !v)}
+                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Manage Repositories
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setRepoPanelOpen((v) => !v)}
-                class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                Manage Repositories
-              </button>
             </div>
             <Show when={repoPanelOpen()}>
               <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">

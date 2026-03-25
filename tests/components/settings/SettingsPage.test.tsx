@@ -33,7 +33,7 @@ vi.mock("../../../src/app/stores/cache", () => ({
 }));
 
 vi.mock("../../../src/app/services/github", () => ({
-  getClient: () => ({}),
+  getClient: vi.fn(() => ({})),
 }));
 
 vi.mock("../../../src/app/services/api", () => ({
@@ -143,7 +143,6 @@ describe("SettingsPage — rendering", () => {
   it("renders a back to dashboard link", () => {
     renderSettings();
     const backLink = screen.getByRole("link", { name: /back to dashboard/i });
-    expect(backLink).toBeDefined();
     expect(backLink.getAttribute("href")).toBe("/dashboard");
   });
 
@@ -193,8 +192,7 @@ describe("SettingsPage — rendering", () => {
 describe("SettingsPage — Refresh interval", () => {
   it("shows current refresh interval value", () => {
     renderSettings();
-    const select = screen.getByDisplayValue("5 minutes (default)");
-    expect(select).toBeDefined();
+    screen.getByDisplayValue("5 minutes (default)");
   });
 
   it("changing refresh interval calls updateConfig", async () => {
@@ -284,6 +282,8 @@ describe("SettingsPage — GitHub Actions", () => {
     expect(workflowInput).toBeDefined();
   });
 
+  // NumberInput uses onInput — fireEvent.input sets the value atomically, while
+  // userEvent.type fires per-keystroke triggering intermediate valid values.
   it("changing max workflows per repo updates config", () => {
     renderSettings();
     const inputs = screen.getAllByRole("spinbutton");
@@ -557,14 +557,18 @@ describe("SettingsPage — Re-auth button", () => {
     vi.unstubAllEnvs();
   });
 
-  it("'Grant more orgs' button is disabled after click (reentrancy guard)", async () => {
-    const user = userEvent.setup();
+  it("'Grant more orgs' button is disabled after click and re-enables after timeout", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
     expect(btn.hasAttribute("disabled")).toBe(true);
+    vi.advanceTimersByTime(3000);
+    expect(btn.hasAttribute("disabled")).toBe(false);
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 });
 
@@ -613,6 +617,30 @@ describe("SettingsPage — Auto-merge orgs on mount", () => {
   it("does not call fetchOrgs when MERGE_ORGS_KEY is not in sessionStorage", () => {
     // No MERGE_ORGS_KEY set
     renderSettings();
+    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+  });
+
+  it("silently handles fetchOrgs rejection without breaking", async () => {
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    updateConfig({ selectedOrgs: ["existing-org"] });
+    vi.mocked(apiModule.fetchOrgs).mockRejectedValue(new Error("Network error"));
+    renderSettings();
+    await waitFor(() => {
+      expect(apiModule.fetchOrgs).toHaveBeenCalled();
+    });
+    // Config unchanged — error was swallowed
+    expect(config.selectedOrgs).toEqual(["existing-org"]);
+  });
+
+  it("skips merge when getClient returns null", async () => {
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    const github = await import("../../../src/app/services/github");
+    vi.mocked(github.getClient).mockReturnValueOnce(null);
+    renderSettings();
+    // MERGE_ORGS_KEY still removed synchronously before mergeNewOrgs
+    await waitFor(() => {
+      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
+    });
     expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
   });
 });

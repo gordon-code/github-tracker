@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   generateOAuthState,
   buildAuthorizeUrl,
+  sanitizeReturnTo,
   OAUTH_STATE_KEY,
   OAUTH_RETURN_TO_KEY,
 } from "../../src/app/lib/oauth";
@@ -93,6 +94,34 @@ describe("oauth helpers", () => {
     it("URL points to GitHub authorize endpoint", () => {
       const url = buildAuthorizeUrl();
       expect(url).toContain("https://github.com/login/oauth/authorize");
+    });
+  });
+
+  describe("sanitizeReturnTo", () => {
+    it("accepts internal paths", () => {
+      expect(sanitizeReturnTo("/settings")).toBe("/settings");
+      expect(sanitizeReturnTo("/dashboard")).toBe("/dashboard");
+      expect(sanitizeReturnTo("/")).toBe("/");
+    });
+
+    it("rejects absolute URLs", () => {
+      expect(sanitizeReturnTo("https://evil.com")).toBe("/");
+    });
+
+    it("rejects protocol-relative URLs", () => {
+      expect(sanitizeReturnTo("//evil.com")).toBe("/");
+    });
+
+    it("rejects javascript: URIs", () => {
+      expect(sanitizeReturnTo("javascript:alert(1)")).toBe("/");
+    });
+
+    it("returns / for null", () => {
+      expect(sanitizeReturnTo(null)).toBe("/");
+    });
+
+    it("returns / for empty string", () => {
+      expect(sanitizeReturnTo("")).toBe("/");
     });
   });
 });

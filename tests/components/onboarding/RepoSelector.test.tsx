@@ -313,7 +313,7 @@ describe("RepoSelector", () => {
     expect(orgHeaders[1].textContent).toBe("active-org");
   });
 
-  it("each org group has a scroll container with data-testid=repo-scroll-{org}", async () => {
+  it("each org group has a scrollable region with aria-label", async () => {
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       if (org === "myorg") return Promise.resolve(myorgRepos);
       return Promise.resolve(otherorgRepos);
@@ -325,8 +325,8 @@ describe("RepoSelector", () => {
       screen.getByText("repo-a");
       screen.getByText("repo-c");
     });
-    expect(screen.getByTestId("repo-scroll-myorg")).toBeDefined();
-    expect(screen.getByTestId("repo-scroll-otherog")).toBeDefined();
+    screen.getByRole("region", { name: "myorg repositories" });
+    screen.getByRole("region", { name: "otherog repositories" });
   });
 
   it("scroll container has max-h-[300px] and overflow-y-auto classes", async () => {
@@ -337,8 +337,28 @@ describe("RepoSelector", () => {
     await waitFor(() => {
       screen.getByText("repo-a");
     });
-    const scrollContainer = screen.getByTestId("repo-scroll-myorg");
+    const scrollContainer = screen.getByRole("region", { name: "myorg repositories" });
     expect(scrollContainer.classList.contains("max-h-[300px]")).toBe(true);
     expect(scrollContainer.classList.contains("overflow-y-auto")).toBe(true);
+  });
+
+  it("skips internal fetchOrgs when orgEntries prop is provided", async () => {
+    vi.mocked(api.fetchOrgs).mockClear();
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    const preloaded = [
+      { login: "myorg", avatarUrl: "", type: "org" as const },
+    ];
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        orgEntries={preloaded}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+    expect(api.fetchOrgs).not.toHaveBeenCalled();
   });
 });

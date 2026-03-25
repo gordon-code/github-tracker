@@ -373,26 +373,6 @@ describe("OAuthCallback", () => {
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
 
-  // Verify the returnTo validation logic directly — the navigate() call itself
-  // cannot be intercepted due to SolidJS router limitations (partial mock of
-  // @solidjs/router renders empty div — project gotcha), but we can verify
-  // the logic by testing the validation conditions match the implementation.
-  it("returnTo validation accepts internal paths and rejects external URLs", () => {
-    // This tests the SAME validation logic used on OAuthCallback line 67-70:
-    // returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
-    const validate = (returnTo: string | null) =>
-      returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
-        ? returnTo
-        : "/";
-
-    expect(validate("/settings")).toBe("/settings");
-    expect(validate("/dashboard")).toBe("/dashboard");
-    expect(validate("/")).toBe("/");
-    expect(validate("https://evil.com")).toBe("/");
-    expect(validate("//evil.com")).toBe("/");
-    expect(validate("javascript:alert(1)")).toBe("/");
-    expect(validate(null)).toBe("/");
-    expect(validate("")).toBe("/");
-  });
+  // returnTo validation is tested via sanitizeReturnTo in tests/lib/oauth.test.ts
 
 });

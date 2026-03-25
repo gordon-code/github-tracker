@@ -117,7 +117,42 @@ describe("OnboardingWizard", () => {
     vi.mocked(apiModule.fetchOrgs).mockReturnValue(new Promise(() => {}));
     render(() => <OnboardingWizard />);
     await waitFor(() => {
-      expect(screen.getByTestId("loading-spinner")).toBeDefined();
+      screen.getByTestId("loading-spinner");
+    });
+  });
+
+  it("redirects to /dashboard when onboardingComplete is already true", async () => {
+    Object.assign(configStore.config, { onboardingComplete: true });
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      expect(window.location.replace).toHaveBeenCalledWith("/dashboard");
+    });
+    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+    Object.assign(configStore.config, { onboardingComplete: false });
+  });
+
+  it("retry clears error and shows RepoSelector on success", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs)
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByText("Retry");
+    });
+    await user.click(screen.getByText("Retry"));
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    expect(screen.queryByText(/Network error/i)).toBeNull();
+  });
+
+  it("shows error when getClient returns null", async () => {
+    const { getClient } = await import("../../../src/app/services/github");
+    vi.mocked(getClient).mockReturnValueOnce(null);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByText(/No GitHub client available/i);
     });
   });
 

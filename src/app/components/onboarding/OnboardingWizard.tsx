@@ -121,7 +121,7 @@ export default function OnboardingWizard() {
               type="button"
               onClick={handleFinish}
               disabled={selectedRepos().length === 0}
-              class="ml-auto rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+              class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
             >
               {selectedRepos().length === 0
                 ? "Finish Setup"

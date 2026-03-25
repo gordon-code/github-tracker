@@ -10,6 +10,12 @@ export function generateOAuthState(): string {
     .replace(/=/g, "");
 }
 
+export function sanitizeReturnTo(returnTo: string | null): string {
+  return returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+    ? returnTo
+    : "/";
+}
+
 export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
   const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID as string;
   const state = generateOAuthState();
