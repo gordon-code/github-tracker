@@ -4,6 +4,7 @@ import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { buildOrgAccessUrl } from "../../lib/oauth";
+import { openGitHubUrl } from "../../lib/url";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
@@ -227,7 +228,7 @@ export default function SettingsPage() {
   }
 
   function handleGrantOrgs() {
-    window.open(buildOrgAccessUrl(), "_blank", "noopener");
+    openGitHubUrl(buildOrgAccessUrl());
     // Remove any prior focus listener before adding a new one (dedup on rapid clicks)
     if (pendingFocusHandler) {
       window.removeEventListener("focus", pendingFocusHandler);

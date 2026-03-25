@@ -41,6 +41,10 @@ vi.mock("../../../src/app/services/api", () => ({
   fetchRepos: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../../../src/app/lib/url", () => ({
+  openGitHubUrl: vi.fn(),
+}));
+
 // ── Imports after mocks ───────────────────────────────────────────────────────
 
 import { render } from "@solidjs/testing-library";
@@ -51,6 +55,7 @@ import * as cacheStore from "../../../src/app/stores/cache";
 import * as apiModule from "../../../src/app/services/api";
 import { updateConfig, config } from "../../../src/app/stores/config";
 import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
+import * as urlModule from "../../../src/app/lib/url";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -526,25 +531,19 @@ describe("SettingsPage — Grant more orgs button", () => {
     screen.getByRole("button", { name: "Grant more orgs" });
   });
 
-  it("clicking 'Grant more orgs' opens GitHub app settings in new tab", async () => {
+  it("clicking 'Grant more orgs' opens GitHub app settings via openGitHubUrl", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(openSpy).toHaveBeenCalledWith(
-      buildOrgAccessUrl(),
-      "_blank",
-      "noopener",
-    );
+    expect(urlModule.openGitHubUrl).toHaveBeenCalledWith(buildOrgAccessUrl());
     vi.unstubAllEnvs();
   });
 
   it("clicking 'Grant more orgs' registers a focus listener for auto-merge", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    vi.spyOn(window, "open").mockImplementation(() => null);
     const addSpy = vi.spyOn(window, "addEventListener");
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
@@ -553,10 +552,27 @@ describe("SettingsPage — Grant more orgs button", () => {
     vi.unstubAllEnvs();
   });
 
+  it("shows 'Syncing...' on button while merging and reverts after", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    updateConfig({ selectedOrgs: [] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([]);
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Syncing..." })).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Grant more orgs" })).toBeDefined();
+    });
+    vi.unstubAllEnvs();
+  });
+
   it("auto-merges new orgs when window regains focus after granting", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    vi.spyOn(window, "open").mockImplementation(() => null);
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
       { login: "existing-org", avatarUrl: "", type: "org" },
@@ -580,7 +596,6 @@ describe("SettingsPage — Grant more orgs button", () => {
   it("silently handles fetchOrgs rejection on focus without breaking", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    vi.spyOn(window, "open").mockImplementation(() => null);
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockRejectedValue(new Error("Network error"));
     renderSettings();
@@ -597,7 +612,6 @@ describe("SettingsPage — Grant more orgs button", () => {
   it("skips merge on focus when getClient returns null", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    vi.spyOn(window, "open").mockImplementation(() => null);
     const github = await import("../../../src/app/services/github");
     vi.mocked(github.getClient).mockReturnValue(null);
     renderSettings();
