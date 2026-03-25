@@ -161,6 +161,7 @@ export default function SettingsPage() {
   // Save indicator
   const [showSaved, setShowSaved] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingFocusHandler: (() => void) | undefined;
 
   function saveWithFeedback(patch: Parameters<typeof updateConfig>[0]) {
     updateConfig(patch);
@@ -169,7 +170,12 @@ export default function SettingsPage() {
     saveTimer = setTimeout(() => setShowSaved(false), 1500);
   }
 
-  onCleanup(() => clearTimeout(saveTimer));
+  onCleanup(() => {
+    clearTimeout(saveTimer);
+    if (pendingFocusHandler) {
+      window.removeEventListener("focus", pendingFocusHandler);
+    }
+  });
 
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
@@ -222,13 +228,17 @@ export default function SettingsPage() {
 
   function handleGrantOrgs() {
     window.open(buildOrgAccessUrl(), "_blank", "noopener");
-    // Auto-merge newly accessible orgs when user returns from GitHub settings
+    // Remove any prior focus listener before adding a new one (dedup on rapid clicks)
+    if (pendingFocusHandler) {
+      window.removeEventListener("focus", pendingFocusHandler);
+    }
     const onFocus = () => {
       window.removeEventListener("focus", onFocus);
+      pendingFocusHandler = undefined;
       void mergeNewOrgs();
     };
+    pendingFocusHandler = onFocus;
     window.addEventListener("focus", onFocus);
-    onCleanup(() => window.removeEventListener("focus", onFocus));
   }
 
   function handleOrgsChange(orgs: string[]) {
