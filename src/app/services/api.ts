@@ -736,14 +736,11 @@ export async function fetchRepos(
   return repos;
 }
 
-// ── Step 3: fetchIssues (Search API) ─────────────────────────────────────────
+// ── Step 3: fetchIssues (GraphQL Search) ─────────────────────────────────────
 
 /**
  * Fetches open issues across repos where the user is involved (author, assignee,
- * mentioned, or commenter) using the GitHub Search API.
- *
- * Before: 3 API calls per repo (creator/assignee/mentioned) = 225 calls for 75 repos.
- * After:  ~3 search calls total (batched in chunks of 30 repos).
+ * mentioned, or commenter) using GraphQL search queries, batched in chunks of 30 repos.
  */
 export interface FetchIssuesResult {
   issues: Issue[];
