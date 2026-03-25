@@ -160,6 +160,16 @@ export default function ToastContainer() {
     for (const source of lastToastedAt.keys()) {
       if (!currentSources.has(source)) lastToastedAt.delete(source);
     }
+    // Remove visible toasts whose notifications were dismissed from the store
+    for (const id of visibleToasts().keys()) {
+      if (!currentIds.has(id)) {
+        const t = timeouts.get(id);
+        if (t !== undefined) { clearTimeout(t); timeouts.delete(id); }
+        const dt = dismissingTimeouts.get(id);
+        if (dt !== undefined) { clearTimeout(dt); dismissingTimeouts.delete(id); }
+        removeToast(id);
+      }
+    }
   });
 
   onCleanup(() => {
