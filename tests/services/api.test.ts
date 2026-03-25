@@ -358,7 +358,7 @@ describe("fetchIssues", () => {
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
     // Warning notification sent
     expect(pushNotification).toHaveBeenCalledWith(
-      "search",
+      "search/issues",
       expect.stringContaining("capped at 1,000"),
       "warning"
     );

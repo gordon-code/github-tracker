@@ -172,6 +172,24 @@ function extractRejectionError(reason: unknown): { statusCode: number | null; me
   return { statusCode, message };
 }
 
+/**
+ * Extracts partial data from a GraphqlResponseError (thrown when response contains both data and errors).
+ * Returns the data if available, null otherwise.
+ */
+function extractGraphQLPartialData<T>(err: unknown): T | null {
+  if (
+    err &&
+    typeof err === "object" &&
+    "data" in err &&
+    err.data &&
+    typeof err.data === "object" &&
+    "search" in err.data
+  ) {
+    return err.data as T;
+  }
+  return null;
+}
+
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -369,14 +387,28 @@ async function graphqlSearchIssues(
           { q: queryString, cursor }
         );
       } catch (err) {
-        const { statusCode, message } = extractRejectionError(err);
+        // GraphqlResponseError contains partial data — extract valid nodes before recording error
+        const partial = extractGraphQLPartialData<GraphQLIssueSearchResponse>(err);
+        if (partial) {
+          response = partial;
+        } else {
+          const { statusCode, message } = extractRejectionError(err);
+          errors.push({
+            repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
+            statusCode,
+            message,
+            retryable: statusCode === null || statusCode >= 500,
+          });
+          break;
+        }
+        const { message } = extractRejectionError(err);
         errors.push({
           repo: `search-batch-${chunkIdx + 1}/${chunks.length}`,
-          statusCode,
+          statusCode: null,
           message,
-          retryable: statusCode === null || statusCode >= 500,
+          retryable: true,
         });
-        break;
+        // Continue processing partial data below — don't break
       }
 
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
@@ -407,7 +439,7 @@ async function graphqlSearchIssues(
         const total = response.search.issueCount;
         console.warn(`[api] Issue search results capped at 1000 (${total} total)`);
         pushNotification(
-          "search",
+          "search/issues",
           `Issue search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
           "warning"
         );
@@ -486,14 +518,26 @@ async function graphqlSearchPRs(
             { q: queryString, cursor }
           );
         } catch (err) {
-          const { statusCode, message } = extractRejectionError(err);
+          const partial = extractGraphQLPartialData<GraphQLPRSearchResponse>(err);
+          if (partial) {
+            response = partial;
+          } else {
+            const { statusCode, message } = extractRejectionError(err);
+            errors.push({
+              repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+              statusCode,
+              message,
+              retryable: statusCode === null || statusCode >= 500,
+            });
+            break;
+          }
+          const { message } = extractRejectionError(err);
           errors.push({
             repo: `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-            statusCode,
+            statusCode: null,
             message,
-            retryable: statusCode === null || statusCode >= 500,
+            retryable: true,
           });
-          break;
         }
 
         if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
@@ -565,7 +609,7 @@ async function graphqlSearchPRs(
           const total = response.search.issueCount;
           console.warn(`[api] PR search results capped at 1000 (${total} total)`);
           pushNotification(
-            "search",
+            "search/prs",
             `PR search results capped at 1,000 of ${total.toLocaleString()} total — some items are hidden`,
             "warning"
           );
@@ -648,7 +692,7 @@ async function graphqlSearchPRs(
       } catch (err) {
         console.warn("[api] Fork PR statusCheckRollup fallback failed:", err);
         pushNotification(
-          "fork-check-fallback",
+          "graphql",
           "Fork PR check status unavailable — CI status may be missing for some PRs",
           "warning"
         );
