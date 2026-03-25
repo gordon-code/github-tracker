@@ -702,6 +702,96 @@ describe("fetchPullRequests", () => {
     expect(pullRequests[0].checkStatus).toBeNull();
   });
 
+  it("preserves PR when headRepository.nameWithOwner is malformed", async () => {
+    const malformedNode = {
+      ...graphqlPRNode,
+      databaseId: 700,
+      headRepository: {
+        owner: { login: "fork-owner" },
+        nameWithOwner: "no-slash-here", // malformed — missing "/"
+      },
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    } as unknown as typeof graphqlPRNode;
+    const octokit = makePROctokit(async () => makeGraphqlPRResponse([malformedNode]));
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // PR is NOT silently dropped — it's returned with null checkStatus
+    expect(pullRequests.length).toBe(1);
+    expect(pullRequests[0].id).toBe(700);
+    expect(pullRequests[0].checkStatus).toBeNull();
+  });
+
+  it("stops pagination when hasNextPage is true but endCursor is null", async () => {
+    let callCount = 0;
+    const octokit = makePROctokit(async () => {
+      callCount++;
+      return {
+        search: {
+          issueCount: 100,
+          pageInfo: { hasNextPage: true, endCursor: null }, // degenerate response
+          nodes: [{ ...graphqlPRNode, databaseId: callCount }],
+        },
+        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      };
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Should NOT loop infinitely — breaks after first page per query type
+    expect(pullRequests.length).toBeGreaterThan(0);
+    // 2 query types × 1 page each (stopped by null endCursor) = 2 calls
+    expect(callCount).toBe(2);
+  });
+
+  it("surfaces pushNotification when fork fallback query fails", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // PR with fork head that differs from base owner
+    const forkNode = {
+      ...graphqlPRNode,
+      databaseId: 800,
+      headRepository: {
+        owner: { login: "fork-user" },
+        nameWithOwner: "fork-user/some-repo",
+      },
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    } as unknown as typeof graphqlPRNode;
+
+    let callCount = 0;
+    const octokit = makePROctokit(async () => {
+      callCount++;
+      if (callCount <= 2) {
+        // First 2 calls: involves + review-requested search queries
+        return makeGraphqlPRResponse([forkNode]);
+      }
+      // 3rd call: fork fallback query — throw to simulate failure
+      throw new Error("Fork repo not accessible");
+    });
+
+    const { pullRequests } = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(pullRequests.length).toBe(1);
+    expect(pullRequests[0].checkStatus).toBeNull(); // fallback failed, stays null
+    expect(pushNotification).toHaveBeenCalledWith(
+      "graphql",
+      expect.stringContaining("Fork PR check status unavailable"),
+      "warning"
+    );
+  });
+
   it("returns partial results and an error when second page throws mid-pagination", async () => {
     vi.mocked(pushNotification).mockClear();
 
