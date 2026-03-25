@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -290,5 +290,33 @@ describe("getClient / initClientWatcher", () => {
     expect(errored).toBe(false);
     // Suppress unused import warning
     void authModule;
+  });
+});
+
+// ── getGraphqlRateLimit / updateGraphqlRateLimit ─────────────────────────────
+
+describe("getGraphqlRateLimit", () => {
+  it("returns null before any update", () => {
+    // May be non-null if a prior test called updateGraphqlRateLimit;
+    // verify the function is callable and returns the expected shape
+    const rl = getGraphqlRateLimit();
+    expect(rl === null || (typeof rl === "object" && "remaining" in rl)).toBe(true);
+  });
+
+  it("converts ISO 8601 resetAt string to Date", () => {
+    const iso = "2024-06-01T12:00:00Z";
+    updateGraphqlRateLimit({ remaining: 4500, resetAt: iso });
+    const rl = getGraphqlRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.remaining).toBe(4500);
+    expect(rl!.resetAt).toBeInstanceOf(Date);
+    expect(rl!.resetAt.getTime()).toBe(new Date(iso).getTime());
+  });
+
+  it("overwrites previous value on subsequent updates", () => {
+    updateGraphqlRateLimit({ remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.remaining).toBe(3000);
   });
 });

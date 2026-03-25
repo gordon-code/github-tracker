@@ -453,10 +453,10 @@ const graphqlPRNode = {
   commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
 };
 
-function makeGraphqlPRResponse(nodes = [graphqlPRNode], hasNextPage = false) {
+function makeGraphqlPRResponse(nodes = [graphqlPRNode], hasNextPage = false, issueCount?: number) {
   return {
     search: {
-      issueCount: nodes.length,
+      issueCount: issueCount ?? nodes.length,
       pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null },
       nodes,
     },
@@ -689,6 +689,32 @@ describe("fetchPullRequests", () => {
 
     // pushNotification is NOT called (no 1000-item cap was reached)
     expect(pushNotification).not.toHaveBeenCalled();
+  });
+
+  it("caps at 1000 PRs and warns via pushNotification", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    const manyNodes = Array.from({ length: 1000 }, (_, i) => ({ ...graphqlPRNode, databaseId: i + 1 }));
+    const octokit = makePROctokit(async (_query, variables) => {
+      const q = (variables as Record<string, unknown>).q as string;
+      if (q.includes("involves:")) {
+        return makeGraphqlPRResponse(manyNodes, true, 1500);
+      }
+      return makeGraphqlPRResponse([]);
+    });
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(result.pullRequests.length).toBe(1000);
+    expect(pushNotification).toHaveBeenCalledWith(
+      "search/prs",
+      expect.stringContaining("capped at 1,000"),
+      "warning"
+    );
   });
 
   it("returns empty result when repos is empty", async () => {

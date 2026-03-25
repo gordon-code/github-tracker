@@ -272,6 +272,22 @@ interface GraphQLPRSearchResponse {
   rateLimit?: { remaining: number; resetAt: string };
 }
 
+interface ForkCandidate {
+  pr: PullRequest;
+  headOwner: string;
+  headRepo: string;
+  sha: string;
+}
+
+interface ForkRepoResult {
+  object: { statusCheckRollup: { state: string } | null } | null;
+}
+
+interface ForkQueryResponse {
+  rateLimit?: { remaining: number; resetAt: string };
+  [key: string]: ForkRepoResult | { remaining: number; resetAt: string } | undefined | null;
+}
+
 // ── GraphQL search query constants ───────────────────────────────────────────
 
 const ISSUES_SEARCH_QUERY = `
@@ -626,12 +642,6 @@ async function graphqlSearchPRs(
   // differs from base repo owner, query the head repo's commit statusCheckRollup.
   // GitHub copies fork PR commits into base repo (refs/pull/N/head), so most PRs
   // resolve via the base repo. The fallback handles cases where CI runs only on the fork.
-  interface ForkCandidate {
-    pr: PullRequest;
-    headOwner: string;
-    headRepo: string;
-    sha: string;
-  }
   const forkCandidates: ForkCandidate[] = [];
 
   for (const [databaseId, pr] of prMap) {
@@ -669,14 +679,6 @@ async function graphqlSearchPRs(
       const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
 
       try {
-        interface ForkRepoResult {
-          object: { statusCheckRollup: { state: string } | null } | null;
-        }
-        interface ForkQueryResponse {
-          rateLimit?: { remaining: number; resetAt: string };
-          [key: string]: ForkRepoResult | { remaining: number; resetAt: string } | undefined | null;
-        }
-
         const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
         if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { remaining: number; resetAt: string });
 

@@ -103,6 +103,17 @@ describe("Header", () => {
     vi.mocked(githubService.getCoreRateLimit).mockRestore();
   });
 
+  it("shows GraphQL rate limit with label when available", () => {
+    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
+      remaining: 4800,
+      resetAt: new Date("2024-01-10T09:00:00Z"),
+    });
+    render(() => <Header />);
+    screen.getByText(/GraphQL/);
+    screen.getByText(/4800\/5k\/hr/);
+    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
+  });
+
   it("does not show rate limit when not available", () => {
     render(() => <Header />);
     expect(screen.queryByText(/\/5k\/hr/)).toBeNull();

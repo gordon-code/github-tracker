@@ -32,9 +32,14 @@ const rawRun = {
   head_sha: "abc1234",
   head_branch: "main",
   run_number: 1,
+  run_attempt: 1,
   html_url: "https://github.com/octocat/Hello-World/actions/runs/9001",
   created_at: "2024-01-15T09:00:00Z",
   updated_at: "2024-01-15T09:10:00Z",
+  run_started_at: "2024-01-15T09:00:00Z",
+  completed_at: "2024-01-15T09:10:00Z",
+  display_title: "CI",
+  actor: { login: "octocat", avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4" },
 };
 
 const graphqlIssueNode = {
