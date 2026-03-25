@@ -5,9 +5,9 @@ import {
   pushNotification,
   clearNotifications,
   markAllAsRead,
+  mutedSources,
 } from "../../../src/app/lib/errors";
 import NotificationDrawer from "../../../src/app/components/shared/NotificationDrawer";
-import { mutedSources } from "../../../src/app/components/shared/ToastContainer";
 
 beforeEach(() => {
   clearNotifications();

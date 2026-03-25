@@ -45,6 +45,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   dismissNotificationBySource: vi.fn(),
   getErrors: vi.fn(() => []),
   clearErrors: vi.fn(),
+  mutedSources: new Set(),
 }));
 
 import Header from "../../../src/app/components/layout/Header";

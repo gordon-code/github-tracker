@@ -4,9 +4,10 @@ import {
   markAllAsRead,
   clearNotifications,
   dismissError,
+  mutedSources,
 } from "../../lib/errors";
 import { relativeTime } from "../../lib/format";
-import { severityConfig, mutedSources } from "./ToastContainer";
+import { severityConfig } from "./ToastContainer";
 
 interface NotificationDrawerProps {
   open: boolean;
@@ -19,8 +20,8 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
   let closeTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
   let closeButtonRef: HTMLButtonElement | undefined;
 
-  const animDelay = () =>
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const animDelay = reducedMotion ? 0 : 300;
 
   createEffect(() => {
     if (props.open) {
@@ -38,7 +39,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
         closeTimeoutHandle = setTimeout(() => {
           setVisible(false);
           closeTimeoutHandle = undefined;
-        }, animDelay());
+        }, animDelay);
       }
     }
   });

@@ -13,8 +13,7 @@ import {
   resetEmptyActionRepos,
 } from "./api";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, pushNotification, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, clearNotifications } from "../lib/errors";
-import { mutedSources } from "../components/shared/ToastContainer";
+import { pushError, pushNotification, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,8 +44,7 @@ function resetPollState(): void {
   _notifGateDisabled = false;
   _resetNotificationState();
   resetEmptyActionRepos();
-  clearNotifications();
-  mutedSources.clear();
+  resetNotificationState();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)

@@ -51,6 +51,7 @@ vi.mock("../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
   clearErrors: vi.fn(),
   clearNotifications: vi.fn(),
+  mutedSources: new Set(),
 }));
 
 // capturedFetchAll is populated by the createPollCoordinator mock each time

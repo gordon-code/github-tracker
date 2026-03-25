@@ -95,8 +95,17 @@ export function getErrors(): AppNotification[] {
   return notifications();
 }
 
+// Muted sources — suppress toasts for these sources after "Dismiss all"
+// Session-only, reset on page reload and on logout (via resetNotificationState)
+export const mutedSources = new Set<string>();
+
 export function clearNotifications(): void {
   setNotifications([]);
+}
+
+export function resetNotificationState(): void {
+  setNotifications([]);
+  mutedSources.clear();
 }
 
 // Backward-compat alias

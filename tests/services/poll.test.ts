@@ -18,6 +18,9 @@ vi.mock("../../src/app/lib/errors", () => ({
   startCycleTracking: () => mockStartCycleTracking(),
   endCycleTracking: () => mockEndCycleTracking(),
   pushNotification: vi.fn(),
+  clearNotifications: vi.fn(),
+  resetNotificationState: vi.fn(),
+  mutedSources: new Set(),
 }));
 
 // Mock notifications so doFetch doesn't fail on detectNewItems

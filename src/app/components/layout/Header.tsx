@@ -108,9 +108,12 @@ export default function Header() {
 
         {/* Bell icon with unread badge */}
         <button
+          type="button"
           onClick={toggleDrawer}
           class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0 relative"
-          aria-label="Notifications"
+          aria-label={unreadCount() > 0 ? `Notifications, ${unreadCount()} unread` : "Notifications"}
+          aria-expanded={drawerOpen()}
+          aria-haspopup="dialog"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"

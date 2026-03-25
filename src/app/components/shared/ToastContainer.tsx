@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, onCleanup } from "solid-js";
 import {
   getNotifications,
+  mutedSources,
   type AppNotification,
   type NotificationSeverity,
 } from "../../lib/errors";
@@ -50,10 +51,6 @@ export function severityConfig(severity: NotificationSeverity): SeverityConfig {
   }
 }
 
-// Module-level muted sources — session only, resets on page reload
-// Populated by NotificationDrawer's "Dismiss all" action
-export const mutedSources = new Set<string>();
-
 interface ToastItem {
   notification: AppNotification;
   dismissing: boolean;
@@ -72,8 +69,8 @@ export default function ToastContainer() {
   const dismissingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   const COOLDOWN_MS = 60_000;
-  const animDelay = () =>
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const animDelay = reducedMotion ? 0 : 300;
 
   function removeToast(id: string) {
     setVisibleToasts((prev) => {
@@ -99,7 +96,7 @@ export default function ToastContainer() {
     const t = setTimeout(() => {
       dismissingTimeouts.delete(id);
       removeToast(id);
-    }, animDelay());
+    }, animDelay);
     dismissingTimeouts.set(id, t);
   }
 
@@ -178,7 +175,7 @@ export default function ToastContainer() {
   });
 
   return (
-    <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-96">
+    <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96" aria-live="assertive" aria-atomic="false">
       <For each={[...visibleToasts().values()]}>
         {(item) => {
           const cfg = severityConfig(item.notification.severity);
