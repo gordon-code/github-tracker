@@ -31,6 +31,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
   const [filter, setFilter] = createSignal("");
   const [orgStates, setOrgStates] = createSignal<OrgRepoState[]>([]);
   const [loadedCount, setLoadedCount] = createSignal(0);
+  let effectVersion = 0;
 
   // Initialize org states and fetch repos on mount / when selectedOrgs change
   createEffect(() => {
@@ -40,6 +41,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
     // it happens to work today (before any await) but would silently break
     // if the check were moved after an await.
     const preloadedEntries = props.orgEntries;
+    // Version counter: if selectedOrgs changes while fetches are in-flight,
+    // stale callbacks check this and bail out instead of writing to state.
+    const version = ++effectVersion;
     if (orgs.length === 0) {
       setOrgStates([]);
       setLoadedCount(0);
@@ -86,6 +90,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
         }
       }
 
+      if (version !== effectVersion) return;
+
       const typeMap = new Map<string, "org" | "user">(
         entries.map((e) => [e.login, e.type])
       );
@@ -95,12 +101,14 @@ export default function RepoSelector(props: RepoSelectorProps) {
         const type = typeMap.get(org) ?? "org";
         try {
           const repos = await fetchRepos(client, org, type);
+          if (version !== effectVersion) return;
           setOrgStates((prev) =>
             prev.map((s) =>
               s.org === org ? { ...s, type, repos, loading: false } : s
             )
           );
         } catch (err) {
+          if (version !== effectVersion) return;
           const message =
             err instanceof Error ? err.message : "Failed to load repositories";
           setOrgStates((prev) =>
@@ -111,7 +119,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
             )
           );
         } finally {
-          setLoadedCount((c) => c + 1);
+          if (version === effectVersion) {
+            setLoadedCount((c) => c + 1);
+          }
         }
       });
 

@@ -41,6 +41,10 @@ export default function OnboardingWizard() {
   }
 
   onMount(() => {
+    if (config.onboardingComplete) {
+      window.location.replace("/dashboard");
+      return;
+    }
     void loadOrgs();
   });
 
