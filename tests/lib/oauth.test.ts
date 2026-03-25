@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   generateOAuthState,
   buildAuthorizeUrl,
+  buildOrgAccessUrl,
   sanitizeReturnTo,
   OAUTH_STATE_KEY,
   OAUTH_RETURN_TO_KEY,
@@ -94,6 +95,15 @@ describe("oauth helpers", () => {
     it("URL points to GitHub authorize endpoint", () => {
       const url = buildAuthorizeUrl();
       expect(url).toContain("https://github.com/login/oauth/authorize");
+    });
+  });
+
+  describe("buildOrgAccessUrl", () => {
+    it("returns GitHub connections URL with client ID", () => {
+      const url = buildOrgAccessUrl();
+      expect(url).toBe(
+        "https://github.com/settings/connections/applications/test-client-id"
+      );
     });
   });
 

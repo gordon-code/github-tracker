@@ -50,7 +50,7 @@ import * as authStore from "../../../src/app/stores/auth";
 import * as cacheStore from "../../../src/app/stores/cache";
 import * as apiModule from "../../../src/app/services/api";
 import { updateConfig, config } from "../../../src/app/stores/config";
-import { MERGE_ORGS_KEY, OAUTH_STATE_KEY } from "../../../src/app/lib/oauth";
+import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,7 +104,6 @@ beforeEach(() => {
     selectedRepos: [],
   });
 
-  // Clear sessionStorage — re-auth tests set MERGE_ORGS_KEY and OAUTH_STATE_KEY
   sessionStorage.clear();
 
   // Mock window.location with both reload and href
@@ -521,126 +520,93 @@ describe("SettingsPage — Theme application", () => {
   });
 });
 
-describe("SettingsPage — Re-auth button", () => {
+describe("SettingsPage — Grant more orgs button", () => {
   it("renders 'Grant more orgs' button in Organizations & Repositories section", () => {
     renderSettings();
     screen.getByRole("button", { name: "Grant more orgs" });
   });
 
-  it("clicking 'Grant more orgs' sets MERGE_ORGS_KEY in sessionStorage", async () => {
+  it("clicking 'Grant more orgs' opens GitHub app settings in new tab", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBe("true");
+    expect(openSpy).toHaveBeenCalledWith(
+      buildOrgAccessUrl(),
+      "_blank",
+      "noopener",
+    );
     vi.unstubAllEnvs();
   });
 
-  it("clicking 'Grant more orgs' sets window.location.href to GitHub authorize URL", async () => {
+  it("clicking 'Grant more orgs' registers a focus listener for auto-merge", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    vi.spyOn(window, "open").mockImplementation(() => null);
+    const addSpy = vi.spyOn(window, "addEventListener");
     renderSettings();
     const btn = screen.getByRole("button", { name: "Grant more orgs" });
     await user.click(btn);
-    expect(window.location.href).toContain("https://github.com/login/oauth/authorize");
+    expect(addSpy).toHaveBeenCalledWith("focus", expect.any(Function));
     vi.unstubAllEnvs();
   });
 
-  it("clicking 'Grant more orgs' also sets OAUTH_STATE_KEY in sessionStorage", async () => {
+  it("auto-merges new orgs when window regains focus after granting", async () => {
     const user = userEvent.setup();
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
-    await user.click(btn);
-    expect(sessionStorage.getItem(OAUTH_STATE_KEY)).toBeTruthy();
-    vi.unstubAllEnvs();
-  });
-
-  it("'Grant more orgs' button is disabled after click and re-enables after timeout", async () => {
-    vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
-    await user.click(btn);
-    expect(btn.hasAttribute("disabled")).toBe(true);
-    vi.advanceTimersByTime(3000);
-    expect(btn.hasAttribute("disabled")).toBe(false);
-    vi.unstubAllEnvs();
-    vi.useRealTimers();
-  });
-});
-
-describe("SettingsPage — Auto-merge orgs on mount", () => {
-  it("calls fetchOrgs and merges new orgs when MERGE_ORGS_KEY is in sessionStorage", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    vi.spyOn(window, "open").mockImplementation(() => null);
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
       { login: "existing-org", avatarUrl: "", type: "org" },
       { login: "new-org", avatarUrl: "", type: "org" },
     ]);
     renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    // Simulate user returning from GitHub settings tab
+    window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(apiModule.fetchOrgs).toHaveBeenCalled();
     });
     await waitFor(() => {
       expect(config.selectedOrgs).toContain("new-org");
-    });
-  });
-
-  it("preserves existing selectedOrgs when merging", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
-    updateConfig({ selectedOrgs: ["existing-org"] });
-    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
-      { login: "existing-org", avatarUrl: "", type: "org" },
-      { login: "new-org", avatarUrl: "", type: "org" },
-    ]);
-    renderSettings();
-    await waitFor(() => {
       expect(config.selectedOrgs).toContain("existing-org");
     });
+    vi.unstubAllEnvs();
   });
 
-  it("removes MERGE_ORGS_KEY from sessionStorage after processing", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
-    updateConfig({ selectedOrgs: [] });
-    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
-      { login: "new-org", avatarUrl: "", type: "org" },
-    ]);
-    renderSettings();
-    await waitFor(() => {
-      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
-    });
-  });
-
-  it("does not call fetchOrgs when MERGE_ORGS_KEY is not in sessionStorage", () => {
-    // No MERGE_ORGS_KEY set
-    renderSettings();
-    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
-  });
-
-  it("silently handles fetchOrgs rejection without breaking", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+  it("silently handles fetchOrgs rejection on focus without breaking", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    vi.spyOn(window, "open").mockImplementation(() => null);
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockRejectedValue(new Error("Network error"));
     renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(apiModule.fetchOrgs).toHaveBeenCalled();
     });
-    // Config unchanged — error was swallowed
     expect(config.selectedOrgs).toEqual(["existing-org"]);
+    vi.unstubAllEnvs();
   });
 
-  it("skips merge when getClient returns null", async () => {
-    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+  it("skips merge on focus when getClient returns null", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    vi.spyOn(window, "open").mockImplementation(() => null);
     const github = await import("../../../src/app/services/github");
-    vi.mocked(github.getClient).mockReturnValueOnce(null);
+    vi.mocked(github.getClient).mockReturnValue(null);
     renderSettings();
-    // MERGE_ORGS_KEY still removed synchronously before mergeNewOrgs
-    await waitFor(() => {
-      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
-    });
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    window.dispatchEvent(new Event("focus"));
+    // Give mergeNewOrgs time to bail out
+    await new Promise((r) => setTimeout(r, 50));
     expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 });

@@ -1,6 +1,5 @@
 export const OAUTH_STATE_KEY = "github-tracker:oauth-state";
 export const OAUTH_RETURN_TO_KEY = "github-tracker:oauth-return-to";
-export const MERGE_ORGS_KEY = "github-tracker:merge-orgs";
 
 export function generateOAuthState(): string {
   const stateBytes = crypto.getRandomValues(new Uint8Array(16));
@@ -35,4 +34,9 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
     state,
   });
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
+export function buildOrgAccessUrl(): string {
+  const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID as string;
+  return `https://github.com/settings/connections/applications/${clientId}`;
 }
