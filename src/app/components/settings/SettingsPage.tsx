@@ -225,6 +225,8 @@ export default function SettingsPage() {
 
   function handleReAuth() {
     setReauthing(true);
+    // Reset if navigation doesn't happen (e.g., beforeunload dialog blocks redirect)
+    setTimeout(() => setReauthing(false), 3000);
     sessionStorage.setItem(MERGE_ORGS_KEY, "true");
     window.location.href = buildAuthorizeUrl({ returnTo: "/settings" });
   }

@@ -189,7 +189,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const q = () => filter().toLowerCase().trim();
+  const q = createMemo(() => filter().toLowerCase().trim());
 
   function filteredReposForOrg(state: OrgRepoState): RepoEntry[] {
     const query = q();
