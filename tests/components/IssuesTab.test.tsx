@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
@@ -86,31 +86,34 @@ describe("IssuesTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("changes sort order when a column header is clicked", async () => {
-    const user = userEvent.setup();
+  it("renders SortDropdown in the toolbar", () => {
+    render(() => <IssuesTab issues={[]} userLogin="" />);
+    const select = screen.getByRole("combobox", { name: /sort by/i });
+    expect(select).toBeDefined();
+  });
+
+  it("SortDropdown contains all sortable fields", () => {
+    render(() => <IssuesTab issues={[]} userLogin="" />);
+    const select = screen.getByRole("combobox", { name: /sort by/i }) as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues.some((v) => v.startsWith("repo:"))).toBe(true);
+    expect(optionValues.some((v) => v.startsWith("title:"))).toBe(true);
+    expect(optionValues.some((v) => v.startsWith("author:"))).toBe(true);
+    expect(optionValues.some((v) => v.startsWith("comments:"))).toBe(true);
+    expect(optionValues.some((v) => v.startsWith("createdAt:"))).toBe(true);
+    expect(optionValues.some((v) => v.startsWith("updatedAt:"))).toBe(true);
+  });
+
+  it("changes sort order when SortDropdown selection changes", () => {
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} userLogin="" />);
 
-    const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    await user.click(titleHeader);
+    const select = screen.getByRole("combobox", { name: /sort by/i });
+    fireEvent.change(select, { target: { value: "title:desc" } });
 
     expect(setSortSpy).toHaveBeenCalledWith("issues", "title", "desc");
     setSortSpy.mockRestore();
-  });
-
-  it("toggles sort direction on second click of same column", async () => {
-    const user = userEvent.setup();
-    const issues = [makeIssue({ title: "Issue A" })];
-    render(() => <IssuesTab issues={issues} userLogin="" />);
-
-    const titleHeader = screen.getByLabelText(/Sort by Title/i);
-    // First click: title was not active, so sets desc
-    await user.click(titleHeader);
-    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "desc" });
-    // Second click on same column: toggles to asc
-    await user.click(titleHeader);
-    expect(viewStore.viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "asc" });
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -120,13 +123,16 @@ describe("IssuesTab", () => {
     expect(screen.queryByLabelText("Next page")).toBeNull();
   });
 
-  it("renders column headers for all sortable fields", () => {
-    render(() => <IssuesTab issues={[]} userLogin="" />);
-    screen.getByLabelText("Sort by Repo");
-    screen.getByLabelText("Sort by Title");
-    screen.getByLabelText("Sort by Author");
-    screen.getByLabelText("Sort by Created");
-    screen.getByLabelText("Sort by Updated");
+  it("first repo group auto-expands on initial mount", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue in first repo", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Issue in second repo", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // First group should be expanded — items visible
+    screen.getByText("Issue in first repo");
+    // Second group starts collapsed — items hidden
+    expect(screen.queryByText("Issue in second repo")).toBeNull();
   });
 
   it("filters by role tab filter", () => {
@@ -162,11 +168,6 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Discussed Issue")).toBeNull();
   });
 
-  it("renders Comments column header", () => {
-    render(() => <IssuesTab issues={[]} userLogin="" />);
-    screen.getByLabelText("Sort by Comments");
-  });
-
   it("groups issues by repo with collapsible headers", () => {
     const issues = [
       makeIssue({ id: 1, title: "Issue in repo A", repoFullName: "org/repo-a" }),
@@ -174,30 +175,48 @@ describe("IssuesTab", () => {
       makeIssue({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
     ];
     render(() => <IssuesTab issues={issues} userLogin="" />);
+    // Both repo headers visible
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
+    // First group (repo-a) is auto-expanded — items visible
     screen.getByText("Issue in repo A");
     screen.getByText("Another in repo A");
-    screen.getByText("Issue in repo B");
+    // Second group (repo-b) starts collapsed — items hidden
+    expect(screen.queryByText("Issue in repo B")).toBeNull();
   });
 
-  it("collapses a repo group when header is clicked", async () => {
+  it("collapses the first auto-expanded repo group when header is clicked", async () => {
     const user = userEvent.setup();
     const issues = [
       makeIssue({ id: 1, title: "Visible issue", repoFullName: "org/repo-a" }),
-      makeIssue({ id: 2, title: "Other repo issue", repoFullName: "org/repo-b" }),
     ];
     render(() => <IssuesTab issues={issues} userLogin="" />);
+    // First group is auto-expanded
     screen.getByText("Visible issue");
 
-    const repoHeader = screen.getByText("org/repo-a");
+    const repoHeader = screen.getByText("org/repo-a").closest("button")!;
     await user.click(repoHeader);
 
     expect(screen.queryByText("Visible issue")).toBeNull();
-    screen.getByText("Other repo issue");
   });
 
-  it("sets aria-expanded on repo group headers", () => {
+  it("expands a collapsed repo group when header is clicked", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "First repo issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Second repo issue", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // Second group starts collapsed
+    expect(screen.queryByText("Second repo issue")).toBeNull();
+
+    const repoBHeader = screen.getByText("org/repo-b").closest("button")!;
+    await user.click(repoBHeader);
+
+    screen.getByText("Second repo issue");
+  });
+
+  it("sets aria-expanded=true on the first (auto-expanded) repo group header", () => {
     const issues = [
       makeIssue({ id: 1, title: "Test issue", repoFullName: "org/repo-a" }),
     ];
@@ -206,7 +225,17 @@ describe("IssuesTab", () => {
     expect(header.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("toggles aria-expanded to false on collapse and back to true on re-expand", async () => {
+  it("sets aria-expanded=false on subsequent (collapsed) repo group headers", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "First", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Second", repoFullName: "org/repo-b" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const headerB = screen.getByText("org/repo-b").closest("button")!;
+    expect(headerB.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("toggles aria-expanded when clicking repo group headers", async () => {
     const user = userEvent.setup();
     const issues = [
       makeIssue({ id: 1, title: "Toggle issue", repoFullName: "org/repo-a" }),
@@ -214,6 +243,7 @@ describe("IssuesTab", () => {
     render(() => <IssuesTab issues={issues} userLogin="" />);
     const header = screen.getByText("org/repo-a").closest("button")!;
 
+    // Initially auto-expanded
     expect(header.getAttribute("aria-expanded")).toBe("true");
     await user.click(header);
     expect(header.getAttribute("aria-expanded")).toBe("false");
@@ -222,6 +252,85 @@ describe("IssuesTab", () => {
     await user.click(header);
     expect(header.getAttribute("aria-expanded")).toBe("true");
     screen.getByText("Toggle issue");
+  });
+
+  it("shows item count in collapsed repo group header", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Issue 1", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Issue 2", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 3, title: "Issue 3", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+
+    // Collapse the auto-expanded group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    screen.getByText("3 issues");
+  });
+
+  it("shows singular 'issue' for a group with one item when collapsed", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Only issue", repoFullName: "org/repo-a" }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    screen.getByText("1 issue");
+  });
+
+  it("shows role summary badges in collapsed repo group header", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo-a", userLogin: "alice", assigneeLogins: [] }),
+      makeIssue({ id: 2, title: "My second issue", repoFullName: "org/repo-a", userLogin: "alice", assigneeLogins: [] }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+
+    // Collapse the auto-expanded group
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+
+    // Should show author role badge with count
+    screen.getByText("author x2");
+  });
+
+  it("hides summary metadata when repo group is expanded", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a", userLogin: "alice", assigneeLogins: [] }),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+
+    // Group starts expanded — no summary count visible
+    expect(screen.queryByText("1 issue")).toBeNull();
+
+    // Collapse — summary appears
+    const header = screen.getByText("org/repo-a").closest("button")!;
+    await user.click(header);
+    screen.getByText("1 issue");
+
+    // Expand again — summary disappears
+    await user.click(header);
+    expect(screen.queryByText("1 issue")).toBeNull();
+  });
+
+  it("IgnoreBadge renders in the toolbar", () => {
+    const issue = makeIssue({ id: 77, title: "To ignore" });
+    viewStore.ignoreItem({
+      id: "77",
+      type: "issue",
+      repo: issue.repoFullName,
+      title: issue.title,
+      ignoredAt: Date.now(),
+    });
+    render(() => <IssuesTab issues={[issue]} userLogin="" />);
+    // IgnoreBadge shows count of ignored items
+    screen.getByText(/1 ignored/i);
   });
 
   it("paginates repo groups across pages", async () => {
@@ -247,7 +356,7 @@ describe("IssuesTab", () => {
     screen.getByText(/Page 2 of 2/);
   });
 
-  it("preserves collapse state across filter changes", async () => {
+  it("preserves expand state across filter changes", async () => {
     const user = userEvent.setup();
     const issues = [
       makeIssue({ id: 1, title: "Alice issue", repoFullName: "org/repo-a", userLogin: "alice" }),
@@ -255,7 +364,7 @@ describe("IssuesTab", () => {
     ];
     render(() => <IssuesTab issues={issues} userLogin="alice" />);
 
-    // Collapse repo-a
+    // First group (repo-a) is auto-expanded, collapse it
     const repoHeader = screen.getByText("org/repo-a").closest("button")!;
     await user.click(repoHeader);
     expect(screen.queryByText("Alice issue")).toBeNull();
@@ -273,8 +382,10 @@ describe("IssuesTab", () => {
     viewStore.resetTabFilter("issues", "role");
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
+    // repo-a stays collapsed (was collapsed before filter applied)
     expect(screen.queryByText("Alice issue")).toBeNull();
-    screen.getByText("Bob issue");
+    // repo-b is collapsed (never expanded), so Bob issue is also hidden
+    expect(screen.queryByText("Bob issue")).toBeNull();
   });
 
   it("resets page when data shrinks below current page", async () => {

@@ -127,17 +127,15 @@ beforeEach(async () => {
 describe("DashboardPage — tab switching", () => {
   it("renders IssuesTab by default", () => {
     render(() => <DashboardPage />);
-    // IssuesTab column headers are always rendered (even while loading)
-    screen.getByLabelText("Sort by Title");
+    // IssuesTab renders a SortDropdown with aria-label="Sort by"
+    screen.getByLabelText("Sort by");
   });
 
   it("switches to PullRequestsTab when Pull Requests tab is clicked", async () => {
     const user = userEvent.setup();
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Pull Requests"));
-    // PullRequestsTab renders its own "Sort by Title" column header
-    screen.getByLabelText("Sort by Title");
-    // The PR tab button is now active
+    // PullRequestsTab tab is now active
     const prButton = screen.getByText("Pull Requests").closest("button");
     expect(prButton?.getAttribute("aria-current")).toBe("page");
   });

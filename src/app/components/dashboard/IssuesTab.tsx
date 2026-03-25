@@ -5,7 +5,8 @@ import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTab
 import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
-import SortIcon from "../shared/SortIcon";
+import SortDropdown from "../shared/SortDropdown";
+import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
@@ -42,12 +43,21 @@ const issueFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
+const sortOptions: SortOption[] = [
+  { label: "Repo", field: "repo", type: "text" },
+  { label: "Title", field: "title", type: "text" },
+  { label: "Author", field: "author", type: "text" },
+  { label: "Comments", field: "comments", type: "number" },
+  { label: "Created", field: "createdAt", type: "date" },
+  { label: "Updated", field: "updatedAt", type: "date" },
+];
+
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
-  const [collapsedRepos, setCollapsedRepos] = createStore<Record<string, boolean>>({});
+  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
 
   function toggleRepo(repoFullName: string) {
-    setCollapsedRepos(repoFullName, (v) => !v);
+    setExpandedRepos(repoFullName, (v) => !v);
   }
 
   const sortPref = createMemo(() => {
@@ -131,10 +141,17 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (page() > max) setPage(max);
   });
 
-  function handleSort(field: SortField) {
-    const current = sortPref();
-    const direction =
-      current.field === field && current.direction === "desc" ? "asc" : "desc";
+  // Auto-expand first group on initial mount
+  let hasAutoExpanded = false;
+  createEffect(() => {
+    const groups = pageGroups();
+    if (!hasAutoExpanded && groups.length > 0) {
+      hasAutoExpanded = true;
+      setExpandedRepos(groups[0].repoFullName, true);
+    }
+  });
+
+  function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("issues", field, direction);
     setPage(0);
   }
@@ -149,47 +166,16 @@ export default function IssuesTab(props: IssuesTabProps) {
     });
   }
 
-  const columnHeaders: { label: string; field: SortField }[] = [
-    { label: "Repo", field: "repo" },
-    { label: "Title", field: "title" },
-    { label: "Author", field: "author" },
-    { label: "Comments", field: "comments" },
-    { label: "Created", field: "createdAt" },
-    { label: "Updated", field: "updatedAt" },
-  ];
-
   return (
     <div class="flex flex-col h-full">
-      {/* Column headers */}
-      <div
-        role="rowgroup"
-        class="flex items-center gap-2 px-4 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-400 select-none"
-      >
-        <For each={columnHeaders}>
-          {(col) => (
-            <button
-              onClick={() => handleSort(col.field)}
-              class="hover:text-gray-900 dark:hover:text-gray-100 transition-colors focus:outline-none focus:underline"
-              aria-label={`Sort by ${col.label}`}
-            >
-              {col.label}
-              <SortIcon
-                active={sortPref().field === col.field}
-                direction={sortPref().direction}
-              />
-            </button>
-          )}
-        </For>
-
-        <div class="flex-1" />
-        <IgnoreBadge
-          items={viewState.ignoredItems.filter((i) => i.type === "issue")}
-          onUnignore={unignoreItem}
+      {/* Sort dropdown + filter chips + ignore badge toolbar */}
+      <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <SortDropdown
+          options={sortOptions}
+          value={sortPref().field}
+          direction={sortPref().direction}
+          onChange={handleSort}
         />
-      </div>
-
-      {/* Filter chips */}
-      <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
         <FilterChips
           groups={issueFilterGroups}
           values={viewState.tabFilters.issues}
@@ -205,6 +191,11 @@ export default function IssuesTab(props: IssuesTabProps) {
             resetAllTabFilters("issues");
             setPage(0);
           }}
+        />
+        <div class="flex-1" />
+        <IgnoreBadge
+          items={viewState.ignoredItems.filter((i) => i.type === "issue")}
+          onUnignore={unignoreItem}
         />
       </div>
 
@@ -243,18 +234,48 @@ export default function IssuesTab(props: IssuesTabProps) {
           <div class="divide-y divide-gray-100 dark:divide-gray-800">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isRepoCollapsed = () => collapsedRepos[repoGroup.repoFullName];
+                const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+
+                const roleSummary = createMemo(() => {
+                  const counts: Record<string, number> = {};
+                  for (const item of repoGroup.items) {
+                    const m = issueMeta().get(item.id);
+                    if (m) {
+                      for (const role of m.roles) {
+                        counts[role] = (counts[role] || 0) + 1;
+                      }
+                    }
+                  }
+                  return Object.entries(counts);
+                });
+
                 return (
                   <div class="bg-white dark:bg-gray-900">
                     <button
                       onClick={() => toggleRepo(repoGroup.repoFullName)}
-                      aria-expanded={!isRepoCollapsed()}
+                      aria-expanded={isExpanded()}
                       class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                     >
-                      <ChevronIcon size="md" rotated={isRepoCollapsed()} />
+                      <ChevronIcon size="md" rotated={!isExpanded()} />
                       {repoGroup.repoFullName}
+                      <Show when={!isExpanded()}>
+                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                          <For each={roleSummary()}>
+                            {([role, count]) => (
+                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                role === "author" ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" :
+                                role === "assignee" ? "bg-cyan-100 dark:bg-cyan-900 text-cyan-700 dark:text-cyan-300" :
+                                "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                              }`}>
+                                {role} x{count}
+                              </span>
+                            )}
+                          </For>
+                        </span>
+                      </Show>
                     </button>
-                    <Show when={!isRepoCollapsed()}>
+                    <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
                         <For each={repoGroup.items}>
                           {(issue) => (
