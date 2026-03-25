@@ -256,7 +256,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   <ChevronIcon size="md" rotated={!isExpanded()} />
                   {repoGroup.repoFullName}
                   <Show when={!isExpanded()}>
-                    <span class="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                    <span class="ml-auto text-xs font-normal text-gray-500 dark:text-gray-400">
                       {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
                       <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
                         {": "}

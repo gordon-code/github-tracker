@@ -186,7 +186,7 @@ export default function DashboardPage() {
         />
 
         <main class="flex-1 overflow-auto">
-          <div class="max-w-6xl mx-auto w-full px-4">
+          <div class="max-w-6xl mx-auto w-full">
             <Switch>
               <Match when={activeTab() === "issues"}>
                 <IssuesTab
