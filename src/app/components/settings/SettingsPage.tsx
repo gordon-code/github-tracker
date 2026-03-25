@@ -3,6 +3,9 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
+import { buildAuthorizeUrl, MERGE_ORGS_KEY } from "../../lib/oauth";
+import { fetchOrgs } from "../../services/api";
+import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import type { RepoRef } from "../../services/api";
@@ -150,6 +153,7 @@ export default function SettingsPage() {
   const [confirmClearCache, setConfirmClearCache] = createSignal(false);
   const [confirmReset, setConfirmReset] = createSignal(false);
   const [cacheClearing, setCacheClearing] = createSignal(false);
+  const [reauthing, setReauthing] = createSignal(false);
   const [notifPermission, setNotifPermission] = createSignal<NotificationPermission>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
@@ -187,9 +191,43 @@ export default function SettingsPage() {
     };
     mq.addEventListener("change", handler);
     onCleanup(() => mq.removeEventListener("change", handler));
+
+    // Auto-merge newly accessible orgs after re-auth redirect
+    const shouldMerge = sessionStorage.getItem(MERGE_ORGS_KEY);
+    if (shouldMerge) {
+      sessionStorage.removeItem(MERGE_ORGS_KEY);
+      void mergeNewOrgs();
+    }
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  async function mergeNewOrgs() {
+    const client = getClient();
+    if (!client) return;
+    try {
+      const allOrgs = await fetchOrgs(client);
+      // Case-insensitive comparison — GitHub logins are case-insensitive
+      const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+      const newOrgs = allOrgs
+        .map((o) => o.login)
+        .filter((login) => !currentSet.has(login.toLowerCase()));
+      if (newOrgs.length > 0) {
+        const merged = [...config.selectedOrgs, ...newOrgs];
+        setLocalOrgs(merged);
+        saveWithFeedback({ selectedOrgs: merged });
+        console.info(`[settings] merged ${newOrgs.length} new org(s): ${newOrgs.join(", ")}`);
+      }
+    } catch {
+      // Non-fatal — user can manually manage orgs
+    }
+  }
+
+  function handleReAuth() {
+    setReauthing(true);
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    window.location.href = buildAuthorizeUrl({ returnTo: "/settings" });
+  }
 
   function handleOrgsChange(orgs: string[]) {
     setLocalOrgs(orgs);
@@ -359,6 +397,27 @@ export default function SettingsPage() {
                 />
               </div>
             </Show>
+
+            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    Organization Access
+                  </p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    Re-authorize with GitHub to grant access to additional organizations
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReAuth}
+                  disabled={reauthing()}
+                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Grant more orgs
+                </button>
+              </div>
+            </div>
 
             <div class="border-t border-gray-100 pt-3 dark:border-gray-700 flex items-center justify-between">
               <div>

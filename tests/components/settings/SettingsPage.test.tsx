@@ -48,7 +48,9 @@ import { MemoryRouter, Route } from "@solidjs/router";
 import SettingsPage from "../../../src/app/components/settings/SettingsPage";
 import * as authStore from "../../../src/app/stores/auth";
 import * as cacheStore from "../../../src/app/stores/cache";
+import * as apiModule from "../../../src/app/services/api";
 import { updateConfig, config } from "../../../src/app/stores/config";
+import { MERGE_ORGS_KEY, OAUTH_STATE_KEY } from "../../../src/app/lib/oauth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -102,10 +104,18 @@ beforeEach(() => {
     selectedRepos: [],
   });
 
-  // Mock window.location.reload
+  // Clear sessionStorage — re-auth tests set MERGE_ORGS_KEY and OAUTH_STATE_KEY
+  sessionStorage.clear();
+
+  // Mock window.location with both reload and href
   Object.defineProperty(window, "location", {
-    value: { ...window.location, reload: vi.fn() },
+    configurable: true,
     writable: true,
+    value: {
+      reload: vi.fn(),
+      href: "",
+      origin: "http://localhost",
+    },
   });
 
   // Clear localStorage
@@ -508,5 +518,101 @@ describe("SettingsPage — Theme application", () => {
     updateConfig({ theme: "system" });
     renderSettings();
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+});
+
+describe("SettingsPage — Re-auth button", () => {
+  it("renders 'Grant more orgs' button in Organizations & Repositories section", () => {
+    renderSettings();
+    screen.getByRole("button", { name: "Grant more orgs" });
+  });
+
+  it("clicking 'Grant more orgs' sets MERGE_ORGS_KEY in sessionStorage", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBe("true");
+    vi.unstubAllEnvs();
+  });
+
+  it("clicking 'Grant more orgs' sets window.location.href to GitHub authorize URL", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    expect(window.location.href).toContain("https://github.com/login/oauth/authorize");
+    vi.unstubAllEnvs();
+  });
+
+  it("clicking 'Grant more orgs' also sets OAUTH_STATE_KEY in sessionStorage", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    expect(sessionStorage.getItem(OAUTH_STATE_KEY)).toBeTruthy();
+    vi.unstubAllEnvs();
+  });
+
+  it("'Grant more orgs' button is disabled after click (reentrancy guard)", async () => {
+    const user = userEvent.setup();
+    vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+    renderSettings();
+    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    await user.click(btn);
+    expect(btn.hasAttribute("disabled")).toBe(true);
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("SettingsPage — Auto-merge orgs on mount", () => {
+  it("calls fetchOrgs and merges new orgs when MERGE_ORGS_KEY is in sessionStorage", async () => {
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    updateConfig({ selectedOrgs: ["existing-org"] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
+      { login: "existing-org", avatarUrl: "", type: "org" },
+      { login: "new-org", avatarUrl: "", type: "org" },
+    ]);
+    renderSettings();
+    await waitFor(() => {
+      expect(apiModule.fetchOrgs).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(config.selectedOrgs).toContain("new-org");
+    });
+  });
+
+  it("preserves existing selectedOrgs when merging", async () => {
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    updateConfig({ selectedOrgs: ["existing-org"] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
+      { login: "existing-org", avatarUrl: "", type: "org" },
+      { login: "new-org", avatarUrl: "", type: "org" },
+    ]);
+    renderSettings();
+    await waitFor(() => {
+      expect(config.selectedOrgs).toContain("existing-org");
+    });
+  });
+
+  it("removes MERGE_ORGS_KEY from sessionStorage after processing", async () => {
+    sessionStorage.setItem(MERGE_ORGS_KEY, "true");
+    updateConfig({ selectedOrgs: [] });
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue([
+      { login: "new-org", avatarUrl: "", type: "org" },
+    ]);
+    renderSettings();
+    await waitFor(() => {
+      expect(sessionStorage.getItem(MERGE_ORGS_KEY)).toBeNull();
+    });
+  });
+
+  it("does not call fetchOrgs when MERGE_ORGS_KEY is not in sessionStorage", () => {
+    // No MERGE_ORGS_KEY set
+    renderSettings();
+    expect(apiModule.fetchOrgs).not.toHaveBeenCalled();
   });
 });

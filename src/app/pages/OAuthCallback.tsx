@@ -1,6 +1,7 @@
 import { createSignal, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { setAuth, validateToken, clearAuth } from "../stores/auth";
+import { OAUTH_STATE_KEY, OAUTH_RETURN_TO_KEY } from "../lib/oauth";
 
 interface TokenResponse {
   access_token: string;
@@ -19,8 +20,12 @@ export default function OAuthCallback() {
     const stateFromUrl = params.get("state");
 
     // Retrieve and immediately clear stored state (single-use, SDR-002)
-    const storedState = sessionStorage.getItem("github-tracker:oauth-state");
-    sessionStorage.removeItem("github-tracker:oauth-state");
+    const storedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+
+    // Read and clear returnTo before CSRF check — always consumed, even on failure
+    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
 
     // Validate state before anything else (CSRF protection)
     if (!stateFromUrl || !storedState || stateFromUrl !== storedState) {
@@ -58,7 +63,12 @@ export default function OAuthCallback() {
         return;
       }
 
-      navigate("/", { replace: true });
+      // Only allow internal paths (prevent open redirect)
+      const target =
+        returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+          ? returnTo
+          : "/";
+      navigate(target, { replace: true });
     } catch {
       setError("A network error occurred. Please try again.");
     }

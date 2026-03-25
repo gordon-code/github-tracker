@@ -14,6 +14,7 @@ import FilterInput from "../shared/FilterInput";
 
 interface RepoSelectorProps {
   selectedOrgs: string[];
+  orgEntries?: OrgEntry[]; // Pre-fetched org entries — skip internal fetchOrgs when provided
   selected: RepoRef[];
   onChange: (selected: RepoRef[]) => void;
 }
@@ -69,15 +70,19 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
     // Fetch org type info first, then repos incrementally
     void (async () => {
-      let orgEntries: OrgEntry[] = [];
-      try {
-        orgEntries = await fetchOrgs(client);
-      } catch {
-        // If fetchOrgs fails, treat all as "org" type
+      let entries: OrgEntry[];
+      if (props.orgEntries != null) {
+        entries = props.orgEntries;
+      } else {
+        try {
+          entries = await fetchOrgs(client);
+        } catch {
+          entries = [];
+        }
       }
 
       const typeMap = new Map<string, "org" | "user">(
-        orgEntries.map((e) => [e.login, e.type])
+        entries.map((e) => [e.login, e.type])
       );
 
       // Fetch repos for each org independently so results trickle in
@@ -346,36 +351,41 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     </p>
                   }
                 >
-                  <ul class="divide-y divide-gray-100 dark:divide-gray-700">
-                    <Index each={visible()}>
-                      {(repo) => {
-                        return (
-                          <li>
-                            <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                              <input
-                                type="checkbox"
-                                checked={isSelected(repo().fullName)}
-                                onChange={() => toggleRepo(repo())}
-                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
-                              />
-                              <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2">
-                                  <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                                    {repo().name}
-                                  </span>
-                                  <Show when={repo().pushedAt}>
-                                    <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
-                                      {relativeTime(repo().pushedAt!)}
+                  <div
+                    class="max-h-[300px] overflow-y-auto"
+                    data-testid={`repo-scroll-${state.org}`}
+                  >
+                    <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+                      <Index each={visible()}>
+                        {(repo) => {
+                          return (
+                            <li>
+                              <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected(repo().fullName)}
+                                  onChange={() => toggleRepo(repo())}
+                                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
+                                />
+                                <div class="min-w-0 flex-1">
+                                  <div class="flex items-center gap-2">
+                                    <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                      {repo().name}
                                     </span>
-                                  </Show>
+                                    <Show when={repo().pushedAt}>
+                                      <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                                        {relativeTime(repo().pushedAt!)}
+                                      </span>
+                                    </Show>
+                                  </div>
                                 </div>
-                              </div>
-                            </label>
-                          </li>
-                        );
-                      }}
-                    </Index>
-                  </ul>
+                              </label>
+                            </li>
+                          );
+                        }}
+                      </Index>
+                    </ul>
+                  </div>
                 </Show>
               </Show>
             </div>

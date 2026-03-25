@@ -312,4 +312,33 @@ describe("RepoSelector", () => {
     expect(orgHeaders[0].textContent).toBe("stale-org");
     expect(orgHeaders[1].textContent).toBe("active-org");
   });
+
+  it("each org group has a scroll container with data-testid=repo-scroll-{org}", async () => {
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "myorg") return Promise.resolve(myorgRepos);
+      return Promise.resolve(otherorgRepos);
+    });
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg", "otherog"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("repo-a");
+      screen.getByText("repo-c");
+    });
+    expect(screen.getByTestId("repo-scroll-myorg")).toBeDefined();
+    expect(screen.getByTestId("repo-scroll-otherog")).toBeDefined();
+  });
+
+  it("scroll container has max-h-[300px] and overflow-y-auto classes", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+    const scrollContainer = screen.getByTestId("repo-scroll-myorg");
+    expect(scrollContainer.classList.contains("max-h-[300px]")).toBe(true);
+    expect(scrollContainer.classList.contains("overflow-y-auto")).toBe(true);
+  });
 });
