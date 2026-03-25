@@ -3,12 +3,19 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import {
   pushNotification,
   clearNotifications,
+  addMutedSource,
+  clearMutedSources,
+  dismissError,
+  getNotifications,
 } from "../../../src/app/lib/errors";
 import ToastContainer from "../../../src/app/components/shared/ToastContainer";
 
 beforeEach(() => {
   clearNotifications();
+  clearMutedSources();
   vi.useFakeTimers();
+  // Ensure matchMedia returns non-reduced-motion (animDelay=300)
+  vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
 
 afterEach(() => {
@@ -127,5 +134,30 @@ describe("ToastContainer", () => {
     // Push again — should show toast now
     pushNotification("api", "Third error", "error");
     expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+  });
+
+  it("muted source suppresses toast", () => {
+    const { container } = render(() => <ToastContainer />);
+    addMutedSource("api");
+    pushNotification("api", "Muted error", "error");
+    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+  });
+
+  it("toast removed when notification dismissed from store during animation", () => {
+    const { container } = render(() => <ToastContainer />);
+    pushNotification("api", "Error", "error");
+    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+
+    // Start dismiss animation
+    const dismissBtn = screen.getByLabelText("Dismiss notification");
+    fireEvent.click(dismissBtn);
+    expect(container.querySelector("[role='alert']")?.className).toContain("animate-toast-out");
+
+    // While animation is in progress, dismiss from store externally
+    const notifId = getNotifications()[0].id;
+    dismissError(notifId);
+
+    // Toast should be removed immediately (store pruning path)
+    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
   });
 });

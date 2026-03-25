@@ -240,7 +240,6 @@ export function createPollCoordinator(
   let hiddenAt: number | null = null;
   let destroyed = false;
 
-
   async function doFetch(): Promise<void> {
     if (destroyed || isRefreshing()) return;
     setIsRefreshing(true);

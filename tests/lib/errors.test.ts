@@ -10,8 +10,12 @@ import {
   markAllAsRead,
   clearErrors,
   clearNotifications,
+  resetNotificationState,
   startCycleTracking,
   endCycleTracking,
+  addMutedSource,
+  isMuted,
+  clearMutedSources,
 } from "../../src/app/lib/errors";
 import { createRoot } from "solid-js";
 
@@ -19,6 +23,7 @@ import { createRoot } from "solid-js";
 // to prevent state leaking between tests.
 beforeEach(() => {
   clearErrors();
+  clearMutedSources();
   // Also end any stale cycle tracking
   endCycleTracking();
 });
@@ -343,6 +348,59 @@ describe("cycle tracking", () => {
       pushNotification("a", "msg", "info");
       const result = endCycleTracking();
       expect(result.size).toBe(0);
+      dispose();
+    });
+  });
+
+  it("startCycleTracking called twice discards first tracking set", () => {
+    createRoot((dispose) => {
+      startCycleTracking();
+      pushNotification("a", "msg1", "info");
+      startCycleTracking(); // replaces tracking set — "a" is lost
+      pushNotification("b", "msg2", "warning");
+      const tracked = endCycleTracking();
+      expect(tracked.has("b")).toBe(true);
+      expect(tracked.has("a")).toBe(false);
+      dispose();
+    });
+  });
+});
+
+describe("resetNotificationState", () => {
+  it("clears both notifications and muted sources", () => {
+    createRoot((dispose) => {
+      pushNotification("api", "Error", "error");
+      addMutedSource("api");
+      expect(getNotifications()).toHaveLength(1);
+      expect(isMuted("api")).toBe(true);
+
+      resetNotificationState();
+
+      expect(getNotifications()).toHaveLength(0);
+      expect(isMuted("api")).toBe(false);
+      dispose();
+    });
+  });
+});
+
+describe("mutedSources", () => {
+  it("addMutedSource and isMuted work together", () => {
+    createRoot((dispose) => {
+      expect(isMuted("api")).toBe(false);
+      addMutedSource("api");
+      expect(isMuted("api")).toBe(true);
+      expect(isMuted("search")).toBe(false);
+      dispose();
+    });
+  });
+
+  it("clearMutedSources resets all muted sources", () => {
+    createRoot((dispose) => {
+      addMutedSource("api");
+      addMutedSource("search");
+      clearMutedSources();
+      expect(isMuted("api")).toBe(false);
+      expect(isMuted("search")).toBe(false);
       dispose();
     });
   });

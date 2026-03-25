@@ -1,12 +1,10 @@
 import { createEffect, createSignal, For, onCleanup } from "solid-js";
 import {
   getNotifications,
-  mutedSources,
+  isMuted,
   type AppNotification,
   type NotificationSeverity,
 } from "../../lib/errors";
-
-// Severity configuration — shared with NotificationDrawer (imported there after C4)
 export interface SeverityConfig {
   path: string;
   secondaryPath?: string;
@@ -134,7 +132,7 @@ export default function ToastContainer() {
       // Check suppression conditions
       const lastToasted = lastToastedAt.get(notif.source);
       const inCooldown = lastToasted !== undefined && Date.now() - lastToasted < COOLDOWN_MS;
-      const muted = mutedSources.has(notif.source);
+      const muted = isMuted(notif.source);
 
       if (inCooldown || muted) continue;
 
@@ -182,7 +180,11 @@ export default function ToastContainer() {
           return (
             <div
               role="alert"
-              class={`flex items-start gap-3 rounded-lg border p-3 shadow-lg ${cfg.bgClass} ${cfg.textClass} ${cfg.borderColorClass} ${item.dismissing ? "animate-toast-out" : "animate-toast-in"}`}
+              class={`flex items-start gap-3 rounded-lg border p-3 shadow-lg ${cfg.bgClass} ${cfg.textClass} ${cfg.borderColorClass}`}
+              classList={{
+                "animate-toast-in": !item.dismissing,
+                "animate-toast-out": item.dismissing,
+              }}
             >
               <svg
                 class={`h-5 w-5 shrink-0 ${cfg.iconClass}`}
@@ -202,6 +204,7 @@ export default function ToastContainer() {
                 )}
               </span>
               <button
+                type="button"
                 onClick={() => dismissToast(item.notification.id)}
                 class="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
                 aria-label="Dismiss notification"

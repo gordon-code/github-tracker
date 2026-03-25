@@ -8,7 +8,7 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import { config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
-import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../services/api";
+import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 
@@ -20,7 +20,6 @@ interface DashboardStore {
   issues: Issue[];
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
-  errors: ApiError[];
   loading: boolean;
   lastRefreshedAt: Date | null;
 }
@@ -29,7 +28,6 @@ const initialDashboardState: DashboardStore = {
   issues: [],
   pullRequests: [],
   workflowRuns: [],
-  errors: [],
   loading: true,
   lastRefreshedAt: null,
 };
@@ -49,7 +47,6 @@ function loadCachedDashboard(): DashboardStore {
       issues: parsed.issues as Issue[],
       pullRequests: parsed.pullRequests as PullRequest[],
       workflowRuns: parsed.workflowRuns as WorkflowRun[],
-      errors: [],
       loading: false,
       lastRefreshedAt: typeof parsed.lastRefreshedAt === "string" ? new Date(parsed.lastRefreshedAt) : null,
     };
@@ -91,7 +88,6 @@ async function pollFetch(): Promise<DashboardData> {
         issues: data.issues,
         pullRequests: data.pullRequests,
         workflowRuns: data.workflowRuns,
-        errors: data.errors,
         loading: false,
         lastRefreshedAt: now,
       });
@@ -195,7 +191,6 @@ export default function DashboardPage() {
               <IssuesTab
                 issues={dashboardData.issues}
                 loading={dashboardData.loading}
-                errors={dashboardData.errors}
                 userLogin={userLogin()}
               />
             </Match>
@@ -203,7 +198,6 @@ export default function DashboardPage() {
               <PullRequestsTab
                 pullRequests={dashboardData.pullRequests}
                 loading={dashboardData.loading}
-                errors={dashboardData.errors}
                 userLogin={userLogin()}
               />
             </Match>
@@ -211,7 +205,6 @@ export default function DashboardPage() {
               <ActionsTab
                 workflowRuns={dashboardData.workflowRuns}
                 loading={dashboardData.loading}
-                errors={dashboardData.errors}
               />
             </Match>
           </Switch>

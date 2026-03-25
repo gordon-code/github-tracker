@@ -50,7 +50,9 @@ vi.mock("../../src/app/lib/errors", () => ({
   startCycleTracking: vi.fn(),
   endCycleTracking: vi.fn(() => new Set()),
   resetNotificationState: vi.fn(),
-  mutedSources: new Set(),
+  addMutedSource: vi.fn(),
+  isMuted: vi.fn(() => false),
+  clearMutedSources: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -45,7 +45,9 @@ vi.mock("../../../src/app/lib/errors", () => ({
   dismissNotificationBySource: vi.fn(),
   getErrors: vi.fn(() => []),
   clearErrors: vi.fn(),
-  mutedSources: new Set(),
+  addMutedSource: vi.fn(),
+  isMuted: vi.fn(() => false),
+  clearMutedSources: vi.fn(),
 }));
 
 import Header from "../../../src/app/components/layout/Header";
@@ -149,5 +151,26 @@ describe("Header", () => {
     const bellBtn = screen.getByLabelText("Notifications");
     await user.click(bellBtn);
     expect(errorsModule.markAllAsRead).toHaveBeenCalled();
+  });
+
+  it("bell button aria-expanded toggles on click", async () => {
+    const user = userEvent.setup();
+    render(() => <Header />);
+    const bellBtn = screen.getByLabelText("Notifications");
+    expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
+    await user.click(bellBtn);
+    expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("clicking bell twice closes the drawer", async () => {
+    const user = userEvent.setup();
+    render(() => <Header />);
+    const bellBtn = screen.getByLabelText("Notifications");
+    await user.click(bellBtn);
+    expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
+    await user.click(bellBtn);
+    expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
+    // markAllAsRead called only once (on open, not on close)
+    expect(errorsModule.markAllAsRead).toHaveBeenCalledTimes(1);
   });
 });

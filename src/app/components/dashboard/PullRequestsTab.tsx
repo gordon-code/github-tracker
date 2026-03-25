@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
-import type { PullRequest, ApiError } from "../../services/api";
+import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
@@ -21,7 +21,6 @@ import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/group
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
   loading?: boolean;
-  errors?: ApiError[];
   userLogin: string;
 }
 

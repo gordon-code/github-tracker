@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
 import { getCoreRateLimit, getSearchRateLimit } from "../../services/github";
@@ -15,16 +15,16 @@ export default function Header() {
     navigate("/login");
   }
 
-  function toggleDrawer() {
+  function handleBellClick() {
     if (!drawerOpen()) {
-      markAllAsRead();
       setDrawerOpen(true);
+      markAllAsRead();
     } else {
       setDrawerOpen(false);
     }
   }
 
-  const unreadCount = createMemo(() => getUnreadCount());
+  const unreadCount = () => getUnreadCount();
 
   const coreRL = () => getCoreRateLimit();
   const searchRL = () => getSearchRateLimit();
@@ -109,7 +109,7 @@ export default function Header() {
         {/* Bell icon with unread badge */}
         <button
           type="button"
-          onClick={toggleDrawer}
+          onClick={handleBellClick}
           class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0 relative"
           aria-label={unreadCount() > 0 ? `Notifications, ${unreadCount()} unread` : "Notifications"}
           aria-expanded={drawerOpen()}

@@ -5,13 +5,14 @@ import {
   pushNotification,
   clearNotifications,
   markAllAsRead,
-  mutedSources,
+  isMuted,
+  clearMutedSources,
 } from "../../../src/app/lib/errors";
 import NotificationDrawer from "../../../src/app/components/shared/NotificationDrawer";
 
 beforeEach(() => {
   clearNotifications();
-  mutedSources.clear();
+  clearMutedSources();
   vi.useFakeTimers();
 });
 
@@ -101,8 +102,8 @@ describe("NotificationDrawer", () => {
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.getByText("No notifications")).toBeDefined();
     // Sources are muted
-    expect(mutedSources.has("api")).toBe(true);
-    expect(mutedSources.has("search")).toBe(true);
+    expect(isMuted("api")).toBe(true);
+    expect(isMuted("search")).toBe(true);
   });
 
   it("calls onClose when overlay backdrop is clicked", () => {

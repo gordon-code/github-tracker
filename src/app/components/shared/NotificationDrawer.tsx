@@ -1,10 +1,10 @@
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import {
   getNotifications,
   markAllAsRead,
   clearNotifications,
   dismissError,
-  mutedSources,
+  addMutedSource,
 } from "../../lib/errors";
 import { relativeTime } from "../../lib/format";
 import { severityConfig } from "./ToastContainer";
@@ -58,9 +58,11 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
     onCleanup(() => document.removeEventListener("keydown", handler));
   });
 
+  const sortedNotifications = createMemo(() => getNotifications().slice().reverse());
+
   function handleDismissAll() {
     const current = getNotifications();
-    for (const n of current) mutedSources.add(n.source);
+    for (const n of current) addMutedSource(n.source);
     clearNotifications();
   }
 
@@ -94,18 +96,21 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
               Notifications
             </h2>
             <button
+              type="button"
               onClick={markAllAsRead}
               class="text-sm text-blue-500 hover:text-blue-700 dark:hover:text-blue-300"
             >
               Mark all as read
             </button>
             <button
+              type="button"
               onClick={handleDismissAll}
               class="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               Dismiss all
             </button>
             <button
+              type="button"
               ref={closeButtonRef}
               onClick={props.onClose}
               aria-label="Close notifications"
@@ -124,7 +129,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
           {/* Notification list */}
           <div class="flex-1 overflow-y-auto">
             <Show
-              when={getNotifications().length > 0}
+              when={sortedNotifications().length > 0}
               fallback={
                 <div class="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
                   No notifications
@@ -132,7 +137,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
               }
             >
               <ul>
-                <For each={getNotifications().slice().reverse()}>
+                <For each={sortedNotifications()}>
                   {(notif) => {
                     const cfg = severityConfig(notif.severity);
                     return (
@@ -168,6 +173,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
                           </p>
                         </div>
                         <button
+                          type="button"
                           onClick={() => dismissError(notif.id)}
                           aria-label="Dismiss notification"
                           class="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mt-0.5"
