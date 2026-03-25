@@ -50,8 +50,9 @@ export function severityConfig(severity: NotificationSeverity): SeverityConfig {
   }
 }
 
-// Import mutedSources from NotificationDrawer — shared session-only mute set
-import { mutedSources } from "./NotificationDrawer";
+// Module-level muted sources — session only, resets on page reload
+// Populated by NotificationDrawer's "Dismiss all" action
+export const mutedSources = new Set<string>();
 
 interface ToastItem {
   notification: AppNotification;
