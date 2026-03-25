@@ -5,10 +5,19 @@ import { createPollCoordinator, type DashboardData } from "../../src/app/service
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
+const mockDismissNotificationBySource = vi.fn();
+const mockStartCycleTracking = vi.fn();
+const mockEndCycleTracking = vi.fn(() => new Set<string>());
+const mockGetNotifications = vi.fn(() => [] as import("../../src/app/lib/errors").AppNotification[]);
 vi.mock("../../src/app/lib/errors", () => ({
   pushError: (...args: unknown[]) => mockPushError(...args),
   clearErrors: vi.fn(),
   getErrors: vi.fn(() => []),
+  getNotifications: () => mockGetNotifications(),
+  dismissNotificationBySource: (source: string) => mockDismissNotificationBySource(source),
+  startCycleTracking: () => mockStartCycleTracking(),
+  endCycleTracking: () => mockEndCycleTracking(),
+  pushNotification: vi.fn(),
 }));
 
 // Mock notifications so doFetch doesn't fail on detectNewItems
@@ -64,6 +73,11 @@ describe("createPollCoordinator", () => {
       writable: true,
       configurable: true,
     });
+    // Reset new mock functions
+    mockDismissNotificationBySource.mockClear();
+    mockStartCycleTracking.mockClear();
+    mockEndCycleTracking.mockClear().mockReturnValue(new Set<string>());
+    mockGetNotifications.mockClear().mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -387,24 +401,10 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  // ── qa-3: doFetch error-restore-on-skip ──────────────────────────────────────
+  // ── qa-3: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
 
-  it("restores previous errors via pushError when fetchAll returns skipped:true", async () => {
+  it("skipped fetch does NOT call pushError for previous errors (no restore logic)", async () => {
     mockPushError.mockClear();
-
-    const previousError = {
-      id: "err1",
-      source: "graphql",
-      message: "Rate limited",
-      timestamp: Date.now(),
-      retryable: true,
-      severity: "error" as const,
-      read: false,
-    };
-
-    // Swap getErrors to return a pre-existing error for this test
-    const { getErrors } = await import("../../src/app/lib/errors");
-    vi.mocked(getErrors).mockReturnValue([previousError]);
 
     const skippedData: DashboardData = {
       issues: [],
@@ -422,17 +422,95 @@ describe("createPollCoordinator", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      // pushError must have been called to restore the previous error
-      expect(mockPushError).toHaveBeenCalledWith(
-        previousError.source,
-        previousError.message,
-        previousError.retryable
-      );
+      // No pushError calls on skip — notifications persist naturally
+      expect(mockPushError).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  // ── qa-3b: reconciliation — resolved error is dismissed ───────────────────────
+
+  it("dismisses resolved errors: source in previous cycle but not pushed in current cycle", async () => {
+    mockPushError.mockClear();
+    mockDismissNotificationBySource.mockClear();
+
+    // Simulate "graphql" was present in previous cycle
+    mockGetNotifications.mockReturnValue([
+      { id: "n1", source: "graphql", message: "Rate limited", timestamp: Date.now(), retryable: true, severity: "error" as const, read: false },
+    ]);
+    // endCycleTracking returns only "poll" — "graphql" was NOT pushed this cycle
+    mockEndCycleTracking.mockReturnValue(new Set(["poll"]));
+
+    const fetchAll = vi.fn().mockResolvedValue(emptyData);
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockDismissNotificationBySource).toHaveBeenCalledWith("graphql");
       dispose();
     });
 
-    // Restore getErrors to default for other tests
-    vi.mocked(getErrors).mockReturnValue([]);
+    mockGetNotifications.mockReturnValue([]);
+    mockEndCycleTracking.mockReturnValue(new Set());
+  });
+
+  // ── qa-3c: reconciliation — persistent error not dismissed ────────────────────
+
+  it("does not dismiss persistent errors pushed in both cycles", async () => {
+    mockDismissNotificationBySource.mockClear();
+
+    // "graphql" in previous cycle
+    mockGetNotifications.mockReturnValue([
+      { id: "n1", source: "graphql", message: "Rate limited", timestamp: Date.now(), retryable: true, severity: "error" as const, read: false },
+    ]);
+    // endCycleTracking includes "graphql" — it was pushed this cycle too
+    mockEndCycleTracking.mockReturnValue(new Set(["graphql"]));
+
+    const fetchAll = vi.fn().mockResolvedValue(emptyData);
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockDismissNotificationBySource).not.toHaveBeenCalledWith("graphql");
+      dispose();
+    });
+
+    mockGetNotifications.mockReturnValue([]);
+    mockEndCycleTracking.mockReturnValue(new Set());
+  });
+
+  // ── qa-3d: endCycleTracking called on skipped path ────────────────────────────
+
+  it("endCycleTracking is called on skipped path (no tracking state leak)", async () => {
+    mockEndCycleTracking.mockClear();
+    mockStartCycleTracking.mockClear();
+
+    const skippedData: DashboardData = {
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+      skipped: true,
+    };
+    const fetchAll = vi.fn().mockResolvedValue(skippedData);
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // startCycleTracking called, endCycleTracking called in finally
+      expect(mockStartCycleTracking).toHaveBeenCalled();
+      expect(mockEndCycleTracking).toHaveBeenCalled();
+      dispose();
+    });
   });
 
   // ── qa-11: Jitter test with fixed Math.random to make interval deterministic ──
