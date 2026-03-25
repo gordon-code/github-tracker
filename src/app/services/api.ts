@@ -1,5 +1,4 @@
-import { getClient, cachedRequest, updateRateLimitFromHeaders } from "./github";
-import { evictByPrefix } from "../stores/cache";
+import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import { pushNotification } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -62,7 +61,7 @@ export interface PullRequest {
   deletions: number;
   changedFiles: number;
   comments: number;
-  reviewComments: number;
+  reviewThreads: number;
   labels: { name: string; color: string }[];
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   totalReviewCount: number;
@@ -117,28 +116,6 @@ interface RawRepo {
   pushed_at: string | null;
 }
 
-interface RawPullRequest {
-  id: number;
-  number: number;
-  title: string;
-  state: string;
-  draft: boolean;
-  html_url: string;
-  created_at: string;
-  updated_at: string;
-  user: { login: string; avatar_url: string } | null;
-  head: { sha: string; ref: string; repo: { full_name: string } | null };
-  base: { ref: string };
-  assignees: { login: string }[];
-  requested_reviewers: { login: string }[];
-  additions: number;
-  deletions: number;
-  changed_files: number;
-  comments: number;
-  review_comments: number;
-  labels: { name: string; color: string }[];
-}
-
 interface RawWorkflowRun {
   id: number;
   name: string;
@@ -159,49 +136,14 @@ interface RawWorkflowRun {
   actor: { login: string } | null;
 }
 
-// ── Search API types ─────────────────────────────────────────────────────────
-
-interface RawSearchResponse {
-  total_count: number;
-  incomplete_results: boolean;
-  items: RawSearchItem[];
-}
-
-interface RawSearchItem {
-  id: number;
-  number: number;
-  title: string;
-  state: string;
-  html_url: string;
-  created_at: string;
-  updated_at: string;
-  user: { login: string; avatar_url: string } | null;
-  labels: { name: string; color: string }[];
-  assignees: { login: string }[];
-  // Search API returns repository_url (string), NOT repository (object).
-  // We parse full_name from the URL in getRepoFullName().
-  repository_url?: string;
-  pull_request?: unknown;
-  comments: number;
-}
-
-/** Extract "owner/repo" from "https://api.github.com/repos/owner/repo" */
-function getRepoFullName(item: RawSearchItem): string | null {
-  const url = item.repository_url;
-  if (!url) return null;
-  const match = url.match(/\/repos\/([^/]+\/[^/]+)$/);
-  return match ? match[1] : null;
-}
-
 // ── Constants ────────────────────────────────────────────────────────────────
 
 // Batch repos into chunks for search queries (keeps URL length manageable)
 const SEARCH_REPO_BATCH_SIZE = 30;
 
-// Max PRs per GraphQL batch. Each alias fetches statusCheckRollup + pullRequest
-// (reviewDecision + latestReviews(first:15)). Cost: ~16 nodes/alias = ~800 pts/batch.
-// At 6 polls/hr (10min interval): ~4800 pts/hr against 5000/hr GraphQL budget.
-// Do not increase batch size or latestReviews.first without recalculating.
+// Max fork PRs per GraphQL batch for the statusCheckRollup fallback query.
+// Each alias looks up a single commit in the fork repo. Kept conservatively small
+// to avoid hitting query complexity limits when many fork PRs need fallback.
 const GRAPHQL_CHECK_BATCH_SIZE = 50;
 
 // Repos confirmed to have zero workflow runs — skipped on subsequent polls.
@@ -230,6 +172,27 @@ function extractRejectionError(reason: unknown): { statusCode: number | null; me
   return { statusCode, message };
 }
 
+/**
+ * Extracts partial data from a GraphqlResponseError for search queries.
+ * Only matches responses containing a `search` key (issues/PRs search shape).
+ */
+function extractSearchPartialData<T>(err: unknown): T | null {
+  if (
+    err &&
+    typeof err === "object" &&
+    "data" in err &&
+    err.data &&
+    typeof err.data === "object" &&
+    "search" in err.data
+  ) {
+    return err.data as T;
+  }
+  return null;
+}
+
+const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const VALID_LOGIN = /^[A-Za-z0-9\[\]-]+$/;
+
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -238,108 +201,533 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
+type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
+
+// ── GraphQL search types ─────────────────────────────────────────────────────
+
+interface GraphQLIssueNode {
+  databaseId: number;
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  author: { login: string; avatarUrl: string } | null;
+  labels: { nodes: { name: string; color: string }[] };
+  assignees: { nodes: { login: string }[] };
+  repository: { nameWithOwner: string } | null;
+  comments: { totalCount: number };
+}
+
+interface GraphQLIssueSearchResponse {
+  search: {
+    issueCount: number;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: (GraphQLIssueNode | null)[];
+  };
+  rateLimit?: { remaining: number; resetAt: string };
+}
+
+interface GraphQLPRNode {
+  databaseId: number;
+  number: number;
+  title: string;
+  state: string;
+  isDraft: boolean;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  author: { login: string; avatarUrl: string } | null;
+  headRefOid: string;
+  headRefName: string;
+  baseRefName: string;
+  headRepository: { owner: { login: string }; nameWithOwner: string } | null;
+  repository: { nameWithOwner: string } | null;
+  assignees: { nodes: { login: string }[] };
+  reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
+  labels: { nodes: { name: string; color: string }[] };
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  comments: { totalCount: number };
+  reviewThreads: { totalCount: number };
+  reviewDecision: string | null;
+  latestReviews: {
+    totalCount: number;
+    nodes: { author: { login: string } | null }[];
+  };
+  commits: {
+    nodes: {
+      commit: {
+        statusCheckRollup: { state: string } | null;
+      };
+    }[];
+  };
+}
+
+interface GraphQLPRSearchResponse {
+  search: {
+    issueCount: number;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: (GraphQLPRNode | null)[];
+  };
+  rateLimit?: { remaining: number; resetAt: string };
+}
+
+interface ForkCandidate {
+  databaseId: number;
+  headOwner: string;
+  headRepo: string;
+  sha: string;
+}
+
+interface ForkRepoResult {
+  object: { statusCheckRollup: { state: string } | null } | null;
+}
+
+interface ForkQueryResponse {
+  rateLimit?: { remaining: number; resetAt: string };
+  [key: string]: ForkRepoResult | { remaining: number; resetAt: string } | undefined | null;
+}
+
+// ── GraphQL search query constants ───────────────────────────────────────────
+
+const ISSUES_SEARCH_QUERY = `
+  query($q: String!, $cursor: String) {
+    search(query: $q, type: ISSUE, first: 100, after: $cursor) {
+      issueCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ... on Issue {
+          databaseId
+          number
+          title
+          state
+          url
+          createdAt
+          updatedAt
+          author { login avatarUrl }
+          labels(first: 20) { nodes { name color } }
+          assignees(first: 20) { nodes { login } }
+          repository { nameWithOwner }
+          comments { totalCount }
+        }
+      }
+    }
+    rateLimit { remaining resetAt }
+  }
+`;
+
+const PR_SEARCH_QUERY = `
+  query($q: String!, $cursor: String) {
+    # GitHub search API uses type: ISSUE for both issues and PRs
+    search(query: $q, type: ISSUE, first: 100, after: $cursor) {
+      issueCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ... on PullRequest {
+          databaseId
+          number
+          title
+          state
+          isDraft
+          url
+          createdAt
+          updatedAt
+          author { login avatarUrl }
+          headRefOid
+          headRefName
+          baseRefName
+          headRepository { owner { login } nameWithOwner }
+          repository { nameWithOwner }
+          assignees(first: 20) { nodes { login } }
+          reviewRequests(first: 20) {
+            # Team reviewers are excluded (only User fragment matched)
+            nodes { requestedReviewer { ... on User { login } } }
+          }
+          labels(first: 20) { nodes { name color } }
+          additions
+          deletions
+          changedFiles
+          comments { totalCount }
+          reviewThreads { totalCount }
+          reviewDecision
+          latestReviews(first: 15) {
+            totalCount
+            nodes { author { login } }
+          }
+          commits(last: 1) {
+            nodes {
+              commit {
+                statusCheckRollup { state }
+              }
+            }
+          }
+        }
+      }
+    }
+    rateLimit { remaining resetAt }
+  }
+`;
+
+// ── GraphQL search functions ──────────────────────────────────────────────────
+
+interface SearchPageResult<T> {
+  issueCount: number;
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  nodes: (T | null)[];
+}
+
 /**
- * Paginated search. Returns up to 1000 items per query.
- * Search API has its own rate limit: 30 req/min (separate from core 5000/hr).
- * Does NOT use IDB caching — search results are volatile and the poll interval
- * already gates how often we call.
+ * Paginates a single GraphQL search query string, collecting results via a
+ * caller-provided `processNode` callback. Handles partial errors, cap enforcement,
+ * and rate limit tracking. Returns the count of items added by processNode.
  */
-async function searchAllPages(
-  octokit: NonNullable<ReturnType<typeof getClient>>,
-  query: string
-): Promise<RawSearchItem[]> {
-  const items: RawSearchItem[] = [];
-  let page = 1;
-  const perPage = 100;
+async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: { remaining: number; resetAt: string } }, TNode>(
+  octokit: GitHubOctokit,
+  query: string,
+  queryString: string,
+  batchLabel: string,
+  errors: ApiError[],
+  processNode: (node: TNode) => boolean, // returns true if node was added (for cap counting)
+  currentCount: () => number,
+  cap: number,
+): Promise<{ capReached: boolean }> {
+  let cursor: string | null = null;
+  let capReached = false;
 
   while (true) {
-    const response = await octokit.request("GET /search/issues", {
-      q: query,
-      per_page: perPage,
-      page,
-      sort: "updated",
-      order: "desc",
-    });
-
-    updateRateLimitFromHeaders(response.headers as Record<string, string>, "search");
-    const data = response.data as unknown as RawSearchResponse;
-    items.push(...data.items);
-
-    if (
-      items.length >= data.total_count ||
-      items.length >= 1000 ||
-      data.items.length < perPage
-    ) {
-      if (data.incomplete_results) {
-        console.warn(
-          `[api] Search results incomplete for: ${query.slice(0, 80)}…`
-        );
-        pushNotification("search", "Search results may be incomplete — GitHub returned partial data", "warning");
+    try {
+      let response: TResponse;
+      let isPartial = false;
+      try {
+        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor });
+      } catch (err) {
+        const partial = extractSearchPartialData<TResponse>(err);
+        if (partial) {
+          response = partial;
+          isPartial = true;
+          const { message } = extractRejectionError(err);
+          errors.push({ repo: batchLabel, statusCode: null, message, retryable: true });
+        } else {
+          const { statusCode, message } = extractRejectionError(err);
+          errors.push({
+            repo: batchLabel,
+            statusCode,
+            message,
+            retryable: statusCode === null || statusCode >= 500,
+          });
+          break;
+        }
       }
-      if (items.length >= 1000 && data.total_count > 1000) {
-        console.warn(
-          `[api] Search results capped at 1000 (${data.total_count} total) for: ${query.slice(0, 80)}…`
-        );
-        pushNotification("search", `Search results capped at 1,000 of ${data.total_count.toLocaleString()} total — some items are hidden`, "warning");
+
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+      for (const node of response.search.nodes) {
+        if (currentCount() >= cap) {
+          capReached = true;
+          break;
+        }
+        if (!node) continue;
+        processNode(node);
       }
+
+      if (capReached) {
+        return { capReached: true };
+      }
+
+      if (isPartial) break;
+
+      if (currentCount() >= cap) {
+        return { capReached: true };
+      }
+
+      if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
+      cursor = response.search.pageInfo.endCursor;
+    } catch (err) {
+      const { message } = extractRejectionError(err);
+      errors.push({ repo: batchLabel, statusCode: null, message, retryable: false });
       break;
     }
-    page++;
   }
 
-  return items;
+  return { capReached };
+}
+
+function buildRepoQualifiers(repos: RepoRef[]): string {
+  return repos
+    .filter((r) => VALID_REPO_NAME.test(r.fullName))
+    .map((r) => `repo:${r.fullName}`)
+    .join(" ");
 }
 
 /**
- * Runs a search query across batched repo qualifiers, deduplicating results.
- * Splits repos into chunks of SEARCH_REPO_BATCH_SIZE to keep query length safe.
+ * Fetches open issues via GraphQL search, using cursor-based pagination.
+ * Batches repos into chunks of SEARCH_REPO_BATCH_SIZE and runs chunks in parallel.
  */
-interface BatchSearchResult {
-  items: RawSearchItem[];
-  errors: ApiError[];
+async function graphqlSearchIssues(
+  octokit: GitHubOctokit,
+  repos: RepoRef[],
+  userLogin: string
+): Promise<FetchIssuesResult> {
+  if (!VALID_LOGIN.test(userLogin)) return { issues: [], errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
+
+  const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
+  const seen = new Set<number>();
+  const issues: Issue[] = [];
+  const errors: ApiError[] = [];
+  const CAP = 1000;
+
+  const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+    const repoQualifiers = buildRepoQualifiers(chunk);
+    const queryString = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
+
+    await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+      octokit, ISSUES_SEARCH_QUERY, queryString,
+      `search-batch-${chunkIdx + 1}/${chunks.length}`,
+      errors,
+      (node) => {
+        if (node.databaseId == null || !node.repository) return false;
+        if (seen.has(node.databaseId)) return false;
+        seen.add(node.databaseId);
+        issues.push({
+          id: node.databaseId,
+          number: node.number,
+          title: node.title,
+          state: node.state,
+          htmlUrl: node.url,
+          createdAt: node.createdAt,
+          updatedAt: node.updatedAt,
+          userLogin: node.author?.login ?? "",
+          userAvatarUrl: node.author?.avatarUrl ?? "",
+          labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+          assigneeLogins: node.assignees.nodes.map((a) => a.login),
+          repoFullName: node.repository.nameWithOwner,
+          comments: node.comments.totalCount,
+        });
+        return true;
+      },
+      () => issues.length,
+      CAP,
+    );
+  }));
+
+  for (const result of chunkResults) {
+    if (result.status === "rejected") {
+      const { statusCode, message } = extractRejectionError(result.reason);
+      errors.push({ repo: "search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
+    }
+  }
+
+  if (issues.length >= CAP) {
+    console.warn(`[api] Issue search results capped at ${CAP}`);
+    pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
+    issues.splice(CAP);
+  }
+
+  return { issues, errors };
 }
 
-async function batchedSearch(
-  octokit: NonNullable<ReturnType<typeof getClient>>,
-  baseQuery: string,
-  repos: RepoRef[]
-): Promise<BatchSearchResult> {
-  if (repos.length === 0) return { items: [], errors: [] };
+/**
+ * Maps a GraphQL statusCheckRollup state string to the app's CheckStatus type.
+ */
+function mapCheckStatus(state: string | null | undefined): CheckStatus["status"] {
+  if (state === "FAILURE" || state === "ERROR" || state === "ACTION_REQUIRED") return "failure";
+  if (state === "PENDING" || state === "EXPECTED" || state === "QUEUED") return "pending";
+  if (state === "SUCCESS") return "success";
+  return null;
+}
 
-  // Run search batches sequentially to avoid exceeding the 30 req/min search rate limit.
-  // With multiple search types (issues, PR involves, PR review-requested) running concurrently,
-  // parallel batches can quickly exhaust the shared search budget.
+/**
+ * Maps a GraphQL reviewDecision string to the typed union or null.
+ */
+function mapReviewDecision(
+  raw: string | null | undefined
+): "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null {
+  if (
+    raw === "APPROVED" ||
+    raw === "CHANGES_REQUESTED" ||
+    raw === "REVIEW_REQUIRED"
+  ) {
+    return raw;
+  }
+  return null;
+}
+
+/**
+ * Fetches open PRs via GraphQL search with two queries (involves + review-requested),
+ * deduplicates by databaseId, and handles fork PR statusCheckRollup fallback.
+ * Chunks run in parallel; fork fallback batches run in parallel.
+ */
+async function graphqlSearchPRs(
+  octokit: GitHubOctokit,
+  repos: RepoRef[],
+  userLogin: string
+): Promise<FetchPullRequestsResult> {
+  if (!VALID_LOGIN.test(userLogin)) return { pullRequests: [], errors: [{ repo: "pr-search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
+
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
-  const results: PromiseSettledResult<RawSearchItem[]>[] = [];
-  for (const chunk of chunks) {
-    const repoQualifiers = chunk.map((r) => `repo:${r.fullName}`).join(" ");
-    const result = await Promise.allSettled([searchAllPages(octokit, `${baseQuery} ${repoQualifiers}`)]);
-    results.push(result[0]);
-  }
-  const seen = new Set<number>();
-  const items: RawSearchItem[] = [];
+  const prMap = new Map<number, PullRequest>();
+  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
   const errors: ApiError[] = [];
+  const CAP = 1000;
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result.status !== "fulfilled") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({
-        repo: `search-batch-${i + 1}/${chunks.length}`,
-        statusCode,
-        message,
-        retryable: statusCode === null || statusCode >= 500,
-      });
-      continue;
+  function processPRNode(node: GraphQLPRNode): boolean {
+    if (node.databaseId == null || !node.repository) return false;
+    if (prMap.has(node.databaseId)) return false;
+
+    const pendingLogins = node.reviewRequests.nodes
+      .map((n) => n.requestedReviewer?.login)
+      .filter((l): l is string => l != null);
+    const actualLogins = node.latestReviews.nodes
+      .map((n) => n.author?.login)
+      .filter((l): l is string => l != null);
+    const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
+
+    const rawState = node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+
+    // Store fork info for fallback detection
+    if (node.headRepository) {
+      const parts = node.headRepository.nameWithOwner.split("/");
+      if (parts.length === 2) {
+        forkInfoMap.set(node.databaseId, { owner: node.headRepository.owner.login, repoName: parts[1] });
+      }
     }
-    for (const item of result.value) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      items.push(item);
+
+    prMap.set(node.databaseId, {
+      id: node.databaseId,
+      number: node.number,
+      title: node.title,
+      state: node.state,
+      draft: node.isDraft,
+      htmlUrl: node.url,
+      createdAt: node.createdAt,
+      updatedAt: node.updatedAt,
+      userLogin: node.author?.login ?? "",
+      userAvatarUrl: node.author?.avatarUrl ?? "",
+      headSha: node.headRefOid,
+      headRef: node.headRefName,
+      baseRef: node.baseRefName,
+      assigneeLogins: node.assignees.nodes.map((a) => a.login),
+      reviewerLogins,
+      repoFullName: node.repository.nameWithOwner,
+      checkStatus: mapCheckStatus(rawState),
+      additions: node.additions,
+      deletions: node.deletions,
+      changedFiles: node.changedFiles,
+      comments: node.comments.totalCount,
+      reviewThreads: node.reviewThreads.totalCount,
+      labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+      reviewDecision: mapReviewDecision(node.reviewDecision),
+      totalReviewCount: node.latestReviews.totalCount,
+    });
+    return true;
+  }
+
+  // Run involves and review-requested searches across all repo chunks in parallel
+  const queryTypes = [
+    `is:pr is:open involves:${userLogin}`,
+    `is:pr is:open review-requested:${userLogin}`,
+  ];
+
+  const allTasks = queryTypes.flatMap((queryType) =>
+    chunks.map(async (chunk, chunkIdx) => {
+      const repoQualifiers = buildRepoQualifiers(chunk);
+      const queryString = `${queryType} ${repoQualifiers}`;
+      await paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
+        octokit, PR_SEARCH_QUERY, queryString,
+        `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
+        errors, processPRNode, () => prMap.size, CAP,
+      );
+    })
+  );
+
+  const taskResults = await Promise.allSettled(allTasks);
+  for (const result of taskResults) {
+    if (result.status === "rejected") {
+      const { statusCode, message } = extractRejectionError(result.reason);
+      errors.push({ repo: "pr-search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }
 
-  return { items, errors };
+  if (prMap.size >= CAP) {
+    console.warn(`[api] PR search results capped at ${CAP}`);
+    pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
+  }
+
+  // Fork PR fallback: for PRs with null checkStatus where head repo owner differs from base
+  const forkCandidates: ForkCandidate[] = [];
+  for (const [databaseId, pr] of prMap) {
+    if (pr.checkStatus !== null) continue;
+    const headInfo = forkInfoMap.get(databaseId);
+    if (!headInfo) continue;
+    const baseOwner = pr.repoFullName.split("/")[0].toLowerCase();
+    if (headInfo.owner.toLowerCase() === baseOwner) continue;
+    forkCandidates.push({ databaseId, headOwner: headInfo.owner, headRepo: headInfo.repoName, sha: pr.headSha });
+  }
+
+  if (forkCandidates.length > 0) {
+    const forkChunks = chunkArray(forkCandidates, GRAPHQL_CHECK_BATCH_SIZE);
+    // Run fork fallback batches in parallel
+    await Promise.allSettled(forkChunks.map(async (forkChunk) => {
+      const varDefs: string[] = [];
+      const variables: Record<string, string> = {};
+      const fragments: string[] = [];
+
+      for (let i = 0; i < forkChunk.length; i++) {
+        varDefs.push(`$owner${i}: String!`, `$repo${i}: String!`, `$sha${i}: String!`);
+        variables[`owner${i}`] = forkChunk[i].headOwner;
+        variables[`repo${i}`] = forkChunk[i].headRepo;
+        variables[`sha${i}`] = forkChunk[i].sha;
+        fragments.push(
+          `fork${i}: repository(owner: $owner${i}, name: $repo${i}) {
+            object(expression: $sha${i}) {
+              ... on Commit {
+                statusCheckRollup { state }
+              }
+            }
+          }`
+        );
+      }
+
+      const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
+
+      try {
+        const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
+        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { remaining: number; resetAt: string });
+
+        for (let i = 0; i < forkChunk.length; i++) {
+          const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
+          const state = data?.object?.statusCheckRollup?.state ?? null;
+          const pr = prMap.get(forkChunk[i].databaseId);
+          if (pr) pr.checkStatus = mapCheckStatus(state);
+        }
+      } catch (err) {
+        // Extract partial data from GraphqlResponseError — some fork aliases may have resolved
+        const partialData = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+          ? err.data as Record<string, ForkRepoResult | null | undefined>
+          : null;
+
+        if (partialData) {
+          for (let i = 0; i < forkChunk.length; i++) {
+            const data = partialData[`fork${i}`];
+            if (!data) continue;
+            const state = data.object?.statusCheckRollup?.state ?? null;
+            const pr = prMap.get(forkChunk[i].databaseId);
+            if (pr) pr.checkStatus = mapCheckStatus(state);
+          }
+        }
+
+        console.warn("[api] Fork PR statusCheckRollup fallback partially failed:", err);
+        pushNotification("graphql", "Fork PR check status unavailable — CI status may be missing for some PRs", "warning");
+      }
+    }));
+  }
+
+  const pullRequests = [...prMap.values()];
+  if (pullRequests.length >= CAP) pullRequests.splice(CAP);
+  return { pullRequests, errors };
 }
 
 // ── Step 1: fetchOrgs ────────────────────────────────────────────────────────
@@ -390,17 +778,6 @@ export async function fetchRepos(
 
   const repos: RepoEntry[] = [];
 
-  function collectRepos(page: RawRepo[], into: RepoEntry[]): void {
-    for (const repo of page) {
-      into.push({
-        owner: repo.owner.login,
-        name: repo.name,
-        fullName: repo.full_name,
-        pushedAt: repo.pushed_at ?? null,
-      });
-    }
-  }
-
   if (type === "org") {
     for await (const response of octokit.paginate.iterator(`GET /orgs/{org}/repos`, {
       org: orgOrUser,
@@ -408,7 +785,9 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
-      collectRepos(response.data as RawRepo[], repos);
+      for (const repo of response.data as RawRepo[]) {
+        repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
+      }
     }
   } else {
     for await (const response of octokit.paginate.iterator(`GET /user/repos`, {
@@ -417,21 +796,20 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
-      collectRepos(response.data as RawRepo[], repos);
+      for (const repo of response.data as RawRepo[]) {
+        repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
+      }
     }
   }
 
   return repos;
 }
 
-// ── Step 3: fetchIssues (Search API) ─────────────────────────────────────────
+// ── Step 3: fetchIssues (GraphQL Search) ─────────────────────────────────────
 
 /**
  * Fetches open issues across repos where the user is involved (author, assignee,
- * mentioned, or commenter) using the GitHub Search API.
- *
- * Before: 3 API calls per repo (creator/assignee/mentioned) = 225 calls for 75 repos.
- * After:  ~3 search calls total (batched in chunks of 30 repos).
+ * mentioned, or commenter) using GraphQL search queries, batched in chunks of 30 repos.
  */
 export interface FetchIssuesResult {
   issues: Issue[];
@@ -445,329 +823,11 @@ export async function fetchIssues(
 ): Promise<FetchIssuesResult> {
   if (!octokit) throw new Error("No GitHub client available");
   if (repos.length === 0 || !userLogin) return { issues: [], errors: [] };
-
-  const { items, errors } = await batchedSearch(
-    octokit,
-    `is:issue is:open involves:${userLogin}`,
-    repos
-  );
-
-  const issues = items
-    .filter((item) => item.pull_request === undefined && getRepoFullName(item) != null)
-    .map((item) => ({
-      id: item.id,
-      number: item.number,
-      title: item.title,
-      state: item.state,
-      htmlUrl: item.html_url,
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      userLogin: item.user?.login ?? "",
-      userAvatarUrl: item.user?.avatar_url ?? "",
-      labels: item.labels.map((l) => ({ name: l.name, color: l.color })),
-      assigneeLogins: item.assignees.map((a) => a.login),
-      repoFullName: getRepoFullName(item)!,
-      comments: item.comments,
-    }));
-
-  return { issues, errors };
+  return graphqlSearchIssues(octokit, repos, userLogin);
 }
 
-// ── Step 4: fetchPullRequests (Search API + GraphQL check status) ─────────────
+// ── Step 4: fetchPullRequests (GraphQL search) ───────────────────────────────
 
-interface CheckStatusResult {
-  checkStatus: CheckStatus["status"];
-  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
-  actualReviewerLogins: string[];
-  totalReviewCount: number;
-}
-
-type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
-
-/**
- * REST fallback for check status + reviews when GraphQL is unavailable.
- * Uses the core REST rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
- * All requests go through cachedRequest for ETag-based caching.
- *
- * Fetches both the legacy Status API and the Check Runs API in parallel, then
- * combines their results so GitHub Actions workflows (which use Check Runs) are
- * correctly reflected. This makes REST a full-fidelity fallback for GraphQL.
- */
-async function restFallbackCheckStatuses(
-  octokit: GitHubOctokit,
-  prs: { owner: string; repo: string; sha: string; prNumber: number }[],
-  results: Map<string, CheckStatusResult>
-): Promise<void> {
-  // Process in chunks of 10 to avoid overwhelming the browser's 6-connection limit
-  const REST_CONCURRENCY = 10;
-  const chunks = chunkArray(prs, REST_CONCURRENCY);
-  for (const chunk of chunks) {
-    const tasks = chunk.map(async (pr) => {
-      const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
-      try {
-        // Fetch legacy Status API, Check Runs API, and PR reviews in parallel
-        const [statusResult, checkRunsResult, reviewsResult] = await Promise.all([
-          cachedRequest(
-            octokit,
-            `rest-status:${key}`,
-            "GET /repos/{owner}/{repo}/commits/{ref}/status",
-            { owner: pr.owner, repo: pr.repo, ref: pr.sha }
-          ),
-          cachedRequest(
-            octokit,
-            `rest-check-runs:${key}`,
-            "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-            { owner: pr.owner, repo: pr.repo, ref: pr.sha }
-          ),
-          cachedRequest(
-            octokit,
-            `rest-reviews:${pr.owner}/${pr.repo}:${pr.prNumber}`,
-            "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-            { owner: pr.owner, repo: pr.repo, pull_number: pr.prNumber }
-          ),
-        ]);
-
-        const statusData = statusResult.data as { state: string; total_count: number };
-        const checkRunsData = checkRunsResult.data as {
-          check_runs: { status: string; conclusion: string | null }[];
-        };
-        const reviews = reviewsResult.data as { user: { login: string } | null; state: string }[];
-
-        // Derive combined check status from both endpoints.
-        // Status API returns state:"pending" with total_count:0 when no statuses exist.
-        // Check Runs API returns an empty array when no check runs exist.
-        // If BOTH are empty → no CI configured → null.
-        const noLegacyStatuses = statusData.total_count === 0;
-        const noCheckRuns = checkRunsData.check_runs.length === 0;
-
-        let checkStatus: CheckStatus["status"];
-        if (noLegacyStatuses && noCheckRuns) {
-          checkStatus = null;
-        } else {
-          const legacyFailed =
-            statusData.state === "failure" || statusData.state === "error";
-          const checkRunFailed = checkRunsData.check_runs.some(
-            (cr) => cr.conclusion === "failure" || cr.conclusion === "timed_out" || cr.conclusion === "cancelled"
-          );
-
-          if (legacyFailed || checkRunFailed) {
-            checkStatus = "failure";
-          } else {
-            const legacySuccess = statusData.state === "success" || noLegacyStatuses;
-            const allCheckRunsComplete = noCheckRuns ||
-              checkRunsData.check_runs.every((cr) => cr.status === "completed");
-            const allCheckRunsSuccess = checkRunsData.check_runs.every(
-              (cr) => cr.conclusion === "success" || cr.conclusion === "skipped" || cr.conclusion === "neutral"
-            );
-
-            if (legacySuccess && allCheckRunsComplete && allCheckRunsSuccess) {
-              checkStatus = "success";
-            } else {
-              checkStatus = "pending";
-            }
-          }
-        }
-
-        // Derive review decision from latest review per author.
-        // Include COMMENTED to make REVIEW_REQUIRED reachable (comments without approval).
-        const latestByAuthor = new Map<string, string>();
-        for (const review of reviews) {
-          if (review.user?.login && (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED" || review.state === "COMMENTED")) {
-            latestByAuthor.set(review.user.login.toLowerCase(), review.state);
-          }
-        }
-        let reviewDecision: CheckStatusResult["reviewDecision"] = null;
-        if (latestByAuthor.size > 0) {
-          const states = [...latestByAuthor.values()];
-          if (states.some((s) => s === "CHANGES_REQUESTED")) reviewDecision = "CHANGES_REQUESTED";
-          else if (states.every((s) => s === "APPROVED")) reviewDecision = "APPROVED";
-          else reviewDecision = "REVIEW_REQUIRED";
-        }
-
-        const actualReviewerLogins = reviews
-          .filter((r) => r.user?.login)
-          .map((r) => r.user!.login);
-        // Deduplicate reviewer logins
-        const uniqueReviewers = [...new Set(actualReviewerLogins)];
-
-        results.set(key, { checkStatus, reviewDecision, actualReviewerLogins: uniqueReviewers, totalReviewCount: reviews.length });
-      } catch (err) {
-        console.warn(`[api] REST fallback failed for ${key}:`, err);
-        results.set(key, { checkStatus: null, reviewDecision: null, actualReviewerLogins: [], totalReviewCount: 0 });
-      }
-    });
-
-    await Promise.allSettled(tasks);
-  }
-}
-
-/**
- * Batches check status lookups into a single GraphQL call using
- * `statusCheckRollup.state`, which combines both legacy commit status API
- * and modern check runs into one field.
- *
- * Replaces 2N REST calls (commit status + check runs) with 1 GraphQL call.
- * Uses parameterized variables to prevent injection.
- *
- * For fork PRs, `pr.head.sha` exists only in the fork repo, not the base repo.
- * The `object(expression:)` lookup must use the head repo (fork), while
- * `pullRequest(number:)` must use the base repo. We handle this by emitting a
- * separate `objRepo${i}` alias pointing at the head repo when it differs from
- * the base repo, and reusing the base repo alias otherwise.
- */
-async function batchFetchCheckStatuses(
-  octokit: NonNullable<ReturnType<typeof getClient>>,
-  prs: { owner: string; repo: string; sha: string; prNumber: number }[]
-): Promise<Map<string, CheckStatusResult>> {
-  if (prs.length === 0) return new Map();
-
-  const results = new Map<string, CheckStatusResult>();
-  const failedKeys = new Set<string>();
-  const failedPrs: typeof prs = [];
-
-  // Batch into chunks and run in parallel
-  const chunks = chunkArray(prs, GRAPHQL_CHECK_BATCH_SIZE);
-
-  const chunkTasks = chunks.map(async (chunk) => {
-    const varDefs: string[] = [];
-    const variables: Record<string, string | number> = {};
-    const fragments: string[] = [];
-
-    for (let i = 0; i < chunk.length; i++) {
-      varDefs.push(
-        `$owner${i}: String!`,
-        `$repo${i}: String!`,
-        `$sha${i}: String!`,
-        `$prNum${i}: Int!`
-      );
-      variables[`owner${i}`] = chunk[i].owner;
-      variables[`repo${i}`] = chunk[i].repo;
-      variables[`sha${i}`] = chunk[i].sha;
-      variables[`prNum${i}`] = chunk[i].prNumber;
-
-      // GitHub copies fork PR head commits into the base repo (refs/pull/N/head),
-      // and CI check suites are associated with the base repo — so always query
-      // statusCheckRollup from the base repo, even for fork PRs.
-      fragments.push(
-        `pr${i}: repository(owner: $owner${i}, name: $repo${i}) {
-            object(expression: $sha${i}) {
-              ... on Commit {
-                statusCheckRollup {
-                  state
-                }
-              }
-            }
-            pullRequest(number: $prNum${i}) {
-              reviewDecision
-              latestReviews(first: 15) {
-                totalCount
-                nodes {
-                  author {
-                    login
-                  }
-                }
-              }
-            }
-          }`
-      );
-    }
-
-    const query = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
-
-    try {
-      interface GraphQLRepoResult {
-        object: {
-          statusCheckRollup: { state: string } | null;
-        } | null;
-        pullRequest: {
-          reviewDecision: string | null;
-          latestReviews: {
-            totalCount: number;
-            nodes: { author: { login: string } | null }[];
-          };
-        } | null;
-      }
-      interface GraphQLRateLimit {
-        remaining: number;
-        resetAt: string;
-      }
-
-      const response = (await octokit.graphql(query, variables)) as
-        Record<string, GraphQLRepoResult | null> & { rateLimit?: GraphQLRateLimit };
-
-      // Log GraphQL rate limit for debugging but don't overwrite the REST
-      // rate limit signal — they're separate pools and REST is the bottleneck
-      if (response.rateLimit) {
-        console.debug("[api] GraphQL rate limit remaining:", response.rateLimit.remaining);
-      }
-
-      for (let i = 0; i < chunk.length; i++) {
-        const data = response[`pr${i}`] as GraphQLRepoResult | null;
-        const state = data?.object?.statusCheckRollup?.state ?? null;
-        const key = `${chunk[i].owner}/${chunk[i].repo}:${chunk[i].sha}`;
-
-        let checkStatus: CheckStatus["status"];
-        if (state === "FAILURE" || state === "ERROR") {
-          checkStatus = "failure";
-        } else if (state === "PENDING" || state === "EXPECTED") {
-          checkStatus = "pending";
-        } else if (state === "SUCCESS") {
-          checkStatus = "success";
-        } else {
-          checkStatus = null;
-        }
-
-        const rawReviewDecision = data?.pullRequest?.reviewDecision ?? null;
-        const reviewDecision =
-          rawReviewDecision === "APPROVED" ||
-          rawReviewDecision === "CHANGES_REQUESTED" ||
-          rawReviewDecision === "REVIEW_REQUIRED"
-            ? rawReviewDecision
-            : null;
-
-        const actualReviewerLogins = (data?.pullRequest?.latestReviews?.nodes ?? [])
-          .filter((n) => n.author?.login)
-          .map((n) => n.author!.login);
-        const totalReviewCount = data?.pullRequest?.latestReviews?.totalCount ?? 0;
-
-        results.set(key, { checkStatus, reviewDecision, actualReviewerLogins, totalReviewCount });
-      }
-    } catch (err) {
-      console.warn("[api] GraphQL check status batch failed:", err);
-      // Track failed PRs for cache lookup / REST fallback
-      for (const pr of chunk) {
-        const key = `${pr.owner}/${pr.repo}:${pr.sha}`;
-        failedKeys.add(key);
-        failedPrs.push(pr);
-      }
-    }
-  });
-
-  await Promise.allSettled(chunkTasks);
-
-  // Tier 2: REST fallback for ALL failed PRs (not just cache misses).
-  // REST uses the core rate limit (5000/hr, separate from GraphQL 5000 pts/hr).
-  // ETag caching via cachedRequest means unchanged PRs return 304 (free).
-  if (failedPrs.length > 0) {
-    pushNotification("graphql", `Fetching check/review data via REST for ${failedPrs.length} PR(s) — GraphQL rate limited`, "info", true);
-    await restFallbackCheckStatuses(octokit, failedPrs, results);
-  }
-
-  return results;
-}
-
-/**
- * Fetches open PRs involving the user using the GitHub Search API.
- * Two search queries cover all involvement types:
- * - `involves:user` → author, assignee, mentioned, commenter
- * - `review-requested:user` → requested reviewer (not covered by `involves`)
- *
- * For each found PR, fetches full PR details (head SHA, reviewers) via REST,
- * then batches ALL check statuses into a single GraphQL call.
- *
- * Before: 1 API call per repo (list all PRs) + 2 per involved PR = 75+2N for 75 repos.
- * After:  ~6 search + N PR detail + 1 GraphQL = 7+N.
- */
 export interface FetchPullRequestsResult {
   pullRequests: PullRequest[];
   errors: ApiError[];
@@ -780,136 +840,7 @@ export async function fetchPullRequests(
 ): Promise<FetchPullRequestsResult> {
   if (!octokit) throw new Error("No GitHub client available");
   if (repos.length === 0 || !userLogin) return { pullRequests: [], errors: [] };
-
-  const allErrors: ApiError[] = [];
-
-  // Two searches: involves (author/assignee/mentioned/commenter) + review-requested.
-  // Run sequentially to share the 30 req/min search rate limit with issue searches.
-  const [involvedResult] = await Promise.allSettled([
-    batchedSearch(octokit, `is:pr is:open involves:${userLogin}`, repos),
-  ]);
-  const [reviewResult] = await Promise.allSettled([
-    batchedSearch(
-      octokit,
-      `is:pr is:open review-requested:${userLogin}`,
-      repos
-    ),
-  ]);
-
-  // Merge and deduplicate by ID, collect search errors
-  const seen = new Set<number>();
-  const uniqueItems: RawSearchItem[] = [];
-
-  for (const result of [involvedResult, reviewResult]) {
-    if (result.status !== "fulfilled") continue;
-    allErrors.push(...result.value.errors);
-    for (const item of result.value.items) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      uniqueItems.push(item);
-    }
-  }
-
-  // Fetch full PR details for each (head SHA, branch info, reviewers)
-  // Process in chunks of 10 to avoid unbounded concurrency
-  const PR_DETAIL_CONCURRENCY = 10;
-  const validItems = uniqueItems.filter((item) => {
-    const fullName = getRepoFullName(item);
-    return fullName != null && fullName.includes("/");
-  });
-  const prDetailChunks = chunkArray(validItems, PR_DETAIL_CONCURRENCY);
-  const prDetails: PromiseSettledResult<{ pr: RawPullRequest; repoFullName: string }>[] = [];
-
-  for (const chunk of prDetailChunks) {
-    const chunkTasks = chunk.map(async (item) => {
-      const repoFullName = getRepoFullName(item)!;
-      const [owner, name] = repoFullName.split("/");
-
-      const result = await cachedRequest(
-        octokit,
-        `pr-detail:${repoFullName}:${item.number}`,
-        "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-        { owner, repo: name, pull_number: item.number }
-      );
-
-      return { pr: result.data as RawPullRequest, repoFullName };
-    });
-
-    const chunkResults = await Promise.allSettled(chunkTasks);
-    prDetails.push(...chunkResults);
-  }
-
-  for (const result of prDetails) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      allErrors.push({ repo: "pr-detail", statusCode, message, retryable: true });
-    }
-  }
-
-  const successfulPRs = prDetails
-    .filter(
-      (r): r is PromiseFulfilledResult<{
-        pr: RawPullRequest;
-        repoFullName: string;
-      }> => r.status === "fulfilled"
-    )
-    .map((r) => r.value);
-
-  // Batch ALL check statuses into a single GraphQL call.
-  // statusCheckRollup is always queried from the base repo — GitHub copies fork PR
-  // head commits into the base repo (refs/pull/N/head) and CI check suites are
-  // associated with the base repo.
-  const checkInputs = successfulPRs.map(({ pr, repoFullName }) => {
-    const [owner, repo] = repoFullName.split("/");
-    return { owner, repo, sha: pr.head.sha, prNumber: pr.number };
-  });
-
-  const checkStatuses = await batchFetchCheckStatuses(octokit, checkInputs);
-
-  // Build final PR objects
-  const pullRequests = successfulPRs.map(({ pr, repoFullName }) => {
-    const result = checkStatuses.get(`${repoFullName}:${pr.head.sha}`);
-    const requestedReviewerLogins = pr.requested_reviewers.map((r) => r.login);
-    const actualReviewerLogins = result?.actualReviewerLogins ?? [];
-    const reviewerLogins = [...new Set([...requestedReviewerLogins, ...actualReviewerLogins])];
-    return {
-      id: pr.id,
-      number: pr.number,
-      title: pr.title,
-      state: pr.state,
-      draft: pr.draft,
-      htmlUrl: pr.html_url,
-      createdAt: pr.created_at,
-      updatedAt: pr.updated_at,
-      userLogin: pr.user?.login ?? "",
-      userAvatarUrl: pr.user?.avatar_url ?? "",
-      headSha: pr.head.sha,
-      headRef: pr.head.ref,
-      baseRef: pr.base.ref,
-      assigneeLogins: pr.assignees.map((a) => a.login),
-      reviewerLogins,
-      repoFullName,
-      checkStatus: result?.checkStatus ?? null,
-      additions: pr.additions,
-      deletions: pr.deletions,
-      changedFiles: pr.changed_files,
-      comments: pr.comments,
-      reviewComments: pr.review_comments,
-      labels: pr.labels.map((l) => ({ name: l.name, color: l.color })),
-      reviewDecision: result?.reviewDecision ?? null,
-      totalReviewCount: result?.totalReviewCount ?? 0,
-    };
-  });
-
-  // Evict stale PR detail cache entries for PRs no longer in the active set
-  const activeKeys = new Set(
-    uniqueItems.filter((item) => getRepoFullName(item) != null).map((item) => `pr-detail:${getRepoFullName(item)!}:${item.number}`)
-  );
-  evictByPrefix("pr-detail:", activeKeys).catch(() => {
-    // Non-fatal — eviction failure shouldn't block the result
-  });
-
-  return { pullRequests, errors: allErrors };
+  return graphqlSearchPRs(octokit, repos, userLogin);
 }
 
 // ── Step 5: fetchWorkflowRuns (single endpoint per repo) ─────────────────────
@@ -999,11 +930,8 @@ export async function fetchWorkflowRuns(
       latestAt: runs.reduce((max, r) => r.updated_at > max ? r.updated_at : max, ""),
     }));
     workflowEntries.sort((a, b) => a.latestAt > b.latestAt ? -1 : a.latestAt < b.latestAt ? 1 : 0);
-    const topWorkflows = workflowEntries
-      .slice(0, maxWorkflows);
-
     // Take most recent M runs per workflow
-    for (const { runs: workflowRuns } of topWorkflows) {
+    for (const { runs: workflowRuns } of workflowEntries.slice(0, maxWorkflows)) {
       const sorted = workflowRuns.sort(
         (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );

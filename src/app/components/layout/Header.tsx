@@ -1,7 +1,7 @@
 import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
-import { getCoreRateLimit, getSearchRateLimit } from "../../services/github";
+import { getCoreRateLimit, getGraphqlRateLimit } from "../../services/github";
 import { getUnreadCount, markAllAsRead } from "../../lib/errors";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
@@ -27,7 +27,7 @@ export default function Header() {
   const unreadCount = () => getUnreadCount();
 
   const coreRL = () => getCoreRateLimit();
-  const searchRL = () => getSearchRateLimit();
+  const graphqlRL = () => getGraphqlRateLimit();
 
   function formatLimit(remaining: number, limit: number, unit: string): string {
     const k = limit >= 1000 ? `${limit / 1000}k` : String(limit);
@@ -43,7 +43,7 @@ export default function Header() {
 
         <div class="flex-1" />
 
-        <Show when={coreRL() || searchRL()}>
+        <Show when={coreRL() || graphqlRL()}>
           <div class="flex items-center gap-2 shrink-0">
             <span class="text-xs font-medium text-gray-400 dark:text-gray-500">Rate Limits</span>
             <div class="flex flex-col items-end text-xs tabular-nums leading-tight gap-0.5">
@@ -57,13 +57,13 @@ export default function Header() {
                   </span>
                 )}
               </Show>
-              <Show when={searchRL()}>
+              <Show when={graphqlRL()}>
                 {(rl) => (
                   <span
-                    class={rl().remaining < 5 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
-                    title={`Search rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
+                    class={rl().remaining < 500 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
+                    title={`GraphQL rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
                   >
-                    {formatLimit(rl().remaining, 30, "min")}
+                    GraphQL {formatLimit(rl().remaining, 5000, "hr")}
                   </span>
                 )}
               </Show>

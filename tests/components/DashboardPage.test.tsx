@@ -35,8 +35,7 @@ vi.mock("../../src/app/stores/auth", () => ({
 // Mock github service (used by Header)
 vi.mock("../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
-  getSearchRateLimit: () => null,
-  getRateLimit: () => null,
+  getGraphqlRateLimit: () => null,
 }));
 
 // Mock errors lib — return empty by default

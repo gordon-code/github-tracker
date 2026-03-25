@@ -29,8 +29,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
 // Mock github service
 vi.mock("../../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
-  getSearchRateLimit: () => null,
-  getRateLimit: () => null,
+  getGraphqlRateLimit: () => null,
 }));
 
 // Mock errors module so Header's notification imports work
@@ -102,6 +101,39 @@ describe("Header", () => {
     render(() => <Header />);
     screen.getByText("4567/5k/hr");
     vi.mocked(githubService.getCoreRateLimit).mockRestore();
+  });
+
+  it("shows GraphQL rate limit with label when available", () => {
+    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
+      remaining: 4800,
+      resetAt: new Date("2024-01-10T09:00:00Z"),
+    });
+    render(() => <Header />);
+    screen.getByText(/GraphQL/);
+    screen.getByText(/4800\/5k\/hr/);
+    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
+  });
+
+  it("shows amber warning when GraphQL rate limit is below 500", () => {
+    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
+      remaining: 499,
+      resetAt: new Date("2024-01-10T09:00:00Z"),
+    });
+    render(() => <Header />);
+    const el = screen.getByText(/499\/5k\/hr/);
+    expect(el.className).toContain("text-amber-600");
+    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
+  });
+
+  it("shows normal color when GraphQL rate limit is at 500", () => {
+    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
+      remaining: 500,
+      resetAt: new Date("2024-01-10T09:00:00Z"),
+    });
+    render(() => <Header />);
+    const el = screen.getByText(/500\/5k\/hr/);
+    expect(el.className).toContain("text-gray-500");
+    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
   });
 
   it("does not show rate limit when not available", () => {

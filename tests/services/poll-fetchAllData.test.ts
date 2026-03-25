@@ -580,3 +580,48 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     expect(fetchWorkflowRuns).toHaveBeenCalled();
   });
 });
+
+// ── qa-4: Concurrency verification ────────────────────────────────────────────
+
+describe("fetchAllData — parallel execution", () => {
+  it("initiates all three fetches before any resolves", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+
+    const callOrder: string[] = [];
+    const resolvers: Array<(v: unknown) => void> = [];
+
+    // Each mock records when it's called but doesn't resolve until manually triggered
+    vi.mocked(fetchIssues).mockImplementation(() => {
+      callOrder.push("issues-start");
+      return new Promise((resolve) => { resolvers.push(() => resolve(emptyIssueResult)); });
+    });
+    vi.mocked(fetchPullRequests).mockImplementation(() => {
+      callOrder.push("prs-start");
+      return new Promise((resolve) => { resolvers.push(() => resolve(emptyPrResult)); });
+    });
+    vi.mocked(fetchWorkflowRuns).mockImplementation(() => {
+      callOrder.push("runs-start");
+      return new Promise((resolve) => { resolvers.push(() => resolve(emptyRunResult)); });
+    });
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    const promise = fetchAllData();
+
+    // Yield to allow Promise.allSettled to initiate all three
+    await new Promise((r) => setTimeout(r, 0));
+
+    // All three should have been called BEFORE any resolved
+    expect(callOrder).toEqual(["issues-start", "prs-start", "runs-start"]);
+    expect(resolvers.length).toBe(3);
+
+    // Now resolve all
+    for (const resolve of resolvers) resolve(undefined);
+    await promise;
+  });
+});

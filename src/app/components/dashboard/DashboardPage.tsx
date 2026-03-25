@@ -14,7 +14,7 @@ import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../sto
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 interface DashboardStore {
   issues: Issue[];

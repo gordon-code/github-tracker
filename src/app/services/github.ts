@@ -23,37 +23,31 @@ interface RateLimitInfo {
 // ── Rate limit signals ───────────────────────────────────────────────────────
 
 const [_coreRateLimit, _setCoreRateLimit] = createSignal<RateLimitInfo | null>(null);
-const [_searchRateLimit, _setSearchRateLimit] = createSignal<RateLimitInfo | null>(null);
+const [_graphqlRateLimit, _setGraphqlRateLimit] = createSignal<RateLimitInfo | null>(null);
 
 export function getCoreRateLimit(): RateLimitInfo | null {
   return _coreRateLimit();
 }
 
-export function getSearchRateLimit(): RateLimitInfo | null {
-  return _searchRateLimit();
+export function getGraphqlRateLimit(): RateLimitInfo | null {
+  return _graphqlRateLimit();
 }
 
-/** @deprecated Use getCoreRateLimit() instead */
-export function getRateLimit(): RateLimitInfo | null {
-  return _coreRateLimit();
+export function updateGraphqlRateLimit(rateLimit: { remaining: number; resetAt: string }): void {
+  _setGraphqlRateLimit({
+    remaining: rateLimit.remaining,
+    resetAt: new Date(rateLimit.resetAt), // ISO 8601 string → Date
+  });
 }
 
-export function updateRateLimitFromHeaders(
-  headers: Record<string, string>,
-  resource: "core" | "search" = "core"
-): void {
+export function updateRateLimitFromHeaders(headers: Record<string, string>): void {
   const remaining = headers["x-ratelimit-remaining"];
   const reset = headers["x-ratelimit-reset"];
   if (remaining !== undefined && reset !== undefined) {
-    const info = {
+    _setCoreRateLimit({
       remaining: parseInt(remaining, 10),
       resetAt: new Date(parseInt(reset, 10) * 1000),
-    };
-    if (resource === "search") {
-      _setSearchRateLimit(info);
-    } else {
-      _setCoreRateLimit(info);
-    }
+    });
   }
 }
 
@@ -117,8 +111,7 @@ export async function cachedRequest(
   cacheKey: string,
   route: string,
   params?: Record<string, unknown>,
-  maxAge?: number,
-  resource: "core" | "search" = "core"
+  maxAge?: number
 ): Promise<{ data: unknown; fromCache: boolean }> {
   return cachedFetch(cacheKey, async (cached: ConditionalHeaders) => {
     const conditionalHeaders: Record<string, string> = {};
@@ -138,7 +131,7 @@ export async function cachedRequest(
       const response = await octokit.request(route, requestParams);
       const headers = response.headers as Record<string, string>;
 
-      updateRateLimitFromHeaders(headers, resource);
+      updateRateLimitFromHeaders(headers);
 
       return {
         data: response.data as unknown,

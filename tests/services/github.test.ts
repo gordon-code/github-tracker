@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getRateLimit, getClient, initClientWatcher } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -257,49 +257,6 @@ describe("cachedRequest", () => {
   });
 });
 
-// ── getRateLimit ─────────────────────────────────────────────────────────────
-
-describe("getRateLimit", () => {
-  beforeEach(async () => {
-    await clearCache();
-    vi.resetAllMocks();
-  });
-
-  it("returns null before any requests", () => {
-    // Note: rate limit signal is module-level and may be set from prior tests.
-    // This test just verifies the function is callable.
-    const rl = getRateLimit();
-    // Either null or a valid object
-    expect(rl === null || (typeof rl === "object" && "remaining" in rl)).toBe(true);
-  });
-
-  it("returns rate limit info after a successful request", async () => {
-    const resetTs = Math.floor(Date.now() / 1000) + 3600;
-    const mockOctokit = {
-      request: vi.fn().mockResolvedValue({
-        data: [],
-        headers: {
-          etag: "etag-rl",
-          "x-ratelimit-remaining": "3999",
-          "x-ratelimit-reset": String(resetTs),
-        },
-        status: 200,
-      }),
-    };
-
-    await cachedRequest(
-      mockOctokit as unknown as ReturnType<typeof createGitHubClient>,
-      "test:ratelimit-update",
-      "GET /user/orgs",
-      {}
-    );
-
-    const rl = getRateLimit();
-    expect(rl).not.toBeNull();
-    expect(rl!.remaining).toBe(3999);
-    expect(rl!.resetAt).toBeInstanceOf(Date);
-  });
-});
 
 // ── getClient / initClientWatcher ────────────────────────────────────────────
 
@@ -333,5 +290,33 @@ describe("getClient / initClientWatcher", () => {
     expect(errored).toBe(false);
     // Suppress unused import warning
     void authModule;
+  });
+});
+
+// ── getGraphqlRateLimit / updateGraphqlRateLimit ─────────────────────────────
+
+describe("getGraphqlRateLimit", () => {
+  it("returns null before any update", () => {
+    // May be non-null if a prior test called updateGraphqlRateLimit;
+    // verify the function is callable and returns the expected shape
+    const rl = getGraphqlRateLimit();
+    expect(rl === null || (typeof rl === "object" && "remaining" in rl)).toBe(true);
+  });
+
+  it("converts ISO 8601 resetAt string to Date", () => {
+    const iso = "2024-06-01T12:00:00Z";
+    updateGraphqlRateLimit({ remaining: 4500, resetAt: iso });
+    const rl = getGraphqlRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.remaining).toBe(4500);
+    expect(rl!.resetAt).toBeInstanceOf(Date);
+    expect(rl!.resetAt.getTime()).toBe(new Date(iso).getTime());
+  });
+
+  it("overwrites previous value on subsequent updates", () => {
+    updateGraphqlRateLimit({ remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.remaining).toBe(3000);
   });
 });

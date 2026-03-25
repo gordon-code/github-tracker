@@ -48,7 +48,7 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
     deletions: 0,
     changedFiles: 0,
     comments: 0,
-    reviewComments: 0,
+    reviewThreads: 0,
     labels: [],
     reviewDecision: null,
     totalReviewCount: 0,

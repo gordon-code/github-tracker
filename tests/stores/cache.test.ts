@@ -7,7 +7,6 @@ import {
   deleteCacheEntry,
   clearCache,
   evictStaleEntries,
-  evictByPrefix,
   cachedFetch,
 } from "../../src/app/stores/cache";
 
@@ -200,64 +199,6 @@ describe("evictStaleEntries", () => {
 
     const count = await evictStaleEntries(24 * 60 * 60 * 1000);
     expect(count).toBe(2);
-  });
-});
-
-// ── qa-8: evictByPrefix ──────────────────────────────────────────────────────
-
-describe("evictByPrefix", () => {
-  it("deletes prefix entries not in keepKeys, retains kept and non-prefix entries", async () => {
-    // Seed two "pr-detail:" entries and one non-prefixed entry
-    await setCacheEntry("pr-detail:octocat/Hello-World:42", { pr: 42 }, "etag-42");
-    await setCacheEntry("pr-detail:octocat/Hello-World:99", { pr: 99 }, "etag-99");
-    await setCacheEntry("other:key", { other: true }, "etag-other");
-
-    // Keep pr-detail:octocat/Hello-World:42 but evict :99
-    const keepKeys = new Set(["pr-detail:octocat/Hello-World:42"]);
-    const count = await evictByPrefix("pr-detail:", keepKeys);
-
-    // Only :99 should have been evicted
-    expect(count).toBe(1);
-    // Kept prefix entry must still exist
-    expect(await getCacheEntry("pr-detail:octocat/Hello-World:42")).toBeDefined();
-    // Evicted prefix entry must be gone
-    expect(await getCacheEntry("pr-detail:octocat/Hello-World:99")).toBeUndefined();
-    // Non-prefix entry must be untouched
-    expect(await getCacheEntry("other:key")).toBeDefined();
-  });
-
-  it("evicts all prefix entries when keepKeys is empty", async () => {
-    await setCacheEntry("pr-detail:a/b:1", { pr: 1 }, null);
-    await setCacheEntry("pr-detail:a/b:2", { pr: 2 }, null);
-    await setCacheEntry("keep:this", { keep: true }, null);
-
-    const count = await evictByPrefix("pr-detail:", new Set());
-
-    expect(count).toBe(2);
-    expect(await getCacheEntry("pr-detail:a/b:1")).toBeUndefined();
-    expect(await getCacheEntry("pr-detail:a/b:2")).toBeUndefined();
-    expect(await getCacheEntry("keep:this")).toBeDefined();
-  });
-
-  it("returns 0 when no entries match the prefix", async () => {
-    await setCacheEntry("other:entry", { data: true }, null);
-
-    const count = await evictByPrefix("pr-detail:", new Set());
-
-    expect(count).toBe(0);
-    expect(await getCacheEntry("other:entry")).toBeDefined();
-  });
-
-  it("returns 0 when all prefix entries are in keepKeys", async () => {
-    await setCacheEntry("pr-detail:x/y:1", { pr: 1 }, null);
-    await setCacheEntry("pr-detail:x/y:2", { pr: 2 }, null);
-
-    const keepKeys = new Set(["pr-detail:x/y:1", "pr-detail:x/y:2"]);
-    const count = await evictByPrefix("pr-detail:", keepKeys);
-
-    expect(count).toBe(0);
-    expect(await getCacheEntry("pr-detail:x/y:1")).toBeDefined();
-    expect(await getCacheEntry("pr-detail:x/y:2")).toBeDefined();
   });
 });
 

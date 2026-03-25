@@ -143,27 +143,19 @@ export async function fetchAllData(): Promise<DashboardData> {
   // would cause unchanged items to vanish from the display. ETag caching already
   // handles the "nothing changed" case for workflow runs (304 = free).
 
-  // Search-based fetches (issues, PRs) run sequentially to stay within the
-  // 30 req/min search rate limit. Workflow runs use the core API (5000/hr)
-  // so they run in parallel with the search calls.
-  const runsPromise = fetchWorkflowRuns(
-    octokit,
-    repos,
-    config.maxWorkflowsPerRepo,
-    config.maxRunsPerWorkflow
-  );
-
-  // Issues first, then PRs — both use the search API's shared 30/min budget
-  const issueResult = await Promise.allSettled([fetchIssues(octokit, repos, userLogin)]);
-  const prResult = await Promise.allSettled([fetchPullRequests(octokit, repos, userLogin)]);
-  const runResult = await Promise.allSettled([runsPromise]);
+  // Issues + PRs use GraphQL (5000 pts/hr), workflow runs use REST core (5000/hr) — all parallel
+  const [issueResult, prResult, runResult] = await Promise.allSettled([
+    fetchIssues(octokit, repos, userLogin),
+    fetchPullRequests(octokit, repos, userLogin),
+    fetchWorkflowRuns(octokit, repos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
+  ]);
 
   // Collect top-level errors (total function failures)
   const topLevelErrors: ApiError[] = [];
   const settled: [PromiseSettledResult<unknown>, string][] = [
-    [issueResult[0], "issues"],
-    [prResult[0], "pull-requests"],
-    [runResult[0], "workflow-runs"],
+    [issueResult, "issues"],
+    [prResult, "pull-requests"],
+    [runResult, "workflow-runs"],
   ];
   for (const [result, label] of settled) {
     if (result.status === "rejected") {
@@ -177,9 +169,9 @@ export async function fetchAllData(): Promise<DashboardData> {
   }
 
   // Extract data and per-batch errors from successful results
-  const issueData = issueResult[0].status === "fulfilled" ? issueResult[0].value : null;
-  const prData = prResult[0].status === "fulfilled" ? prResult[0].value : null;
-  const runData = runResult[0].status === "fulfilled" ? runResult[0].value : null;
+  const issueData = issueResult.status === "fulfilled" ? issueResult.value : null;
+  const prData = prResult.status === "fulfilled" ? prResult.value : null;
+  const runData = runResult.status === "fulfilled" ? runResult.value : null;
 
   // Merge all error sources: top-level failures + per-batch partial failures
   const errors = [
@@ -211,7 +203,7 @@ const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // Sources managed by the poll coordinator — used for reconciliation
-const POLL_MANAGED_SOURCES = new Set(["poll", "search", "graphql", "rate-limit", "notifications"]);
+const POLL_MANAGED_SOURCES = new Set(["poll", "graphql", "rate-limit", "notifications", "search/issues", "search/prs"]);
 
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
