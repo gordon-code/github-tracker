@@ -84,6 +84,10 @@ export default function ToastContainer() {
   }
 
   function startDismissAnimation(id: string) {
+    // Guard: if already dismissing, don't create a duplicate timeout
+    const existing = dismissingTimeouts.get(id);
+    if (existing !== undefined) return;
+
     // Switch to dismiss animation
     setVisibleToasts((prev) => {
       const next = new Map(prev);
@@ -92,7 +96,10 @@ export default function ToastContainer() {
       return next;
     });
     // Remove after animation
-    const t = setTimeout(() => removeToast(id), animDelay());
+    const t = setTimeout(() => {
+      dismissingTimeouts.delete(id);
+      removeToast(id);
+    }, animDelay());
     dismissingTimeouts.set(id, t);
   }
 

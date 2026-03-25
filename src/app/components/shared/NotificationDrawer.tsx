@@ -79,6 +79,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
         {/* Drawer panel */}
         <div
           role="dialog"
+          aria-modal="true"
           aria-label="Notifications"
           class="fixed top-0 right-0 h-full w-80 sm:w-96 bg-white dark:bg-gray-800 shadow-xl z-[71] flex flex-col"
           classList={{
