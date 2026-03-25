@@ -416,6 +416,40 @@ describe("fetchIssues", () => {
     expect(pushNotification).not.toHaveBeenCalled();
   });
 
+  it("extracts partial data from GraphqlResponseError and stops pagination", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    // Simulate a GraphqlResponseError: has .data with valid nodes + errors
+    const partialError = Object.assign(new Error("Some nodes failed to resolve"), {
+      data: {
+        search: {
+          issueCount: 5,
+          pageInfo: { hasNextPage: true, endCursor: "cursor-partial" },
+          nodes: [{ ...graphqlIssueNode, databaseId: 42 }, null],
+        },
+        rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      },
+    });
+    const octokit = makeIssueOctokit(async () => {
+      throw partialError;
+    });
+
+    const result = await fetchIssues(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    // Valid node from partial data is returned
+    expect(result.issues.length).toBe(1);
+    expect(result.issues[0].id).toBe(42);
+    // Error is recorded
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("Some nodes failed to resolve");
+    // Only 1 graphql call — did NOT try to paginate after partial error
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when octokit is null", async () => {
     await expect(fetchIssues(null, [testRepo], "octocat")).rejects.toThrow(
       "No GitHub client available"
@@ -689,6 +723,39 @@ describe("fetchPullRequests", () => {
 
     // pushNotification is NOT called (no 1000-item cap was reached)
     expect(pushNotification).not.toHaveBeenCalled();
+  });
+
+  it("extracts partial PR data from GraphqlResponseError and stops pagination", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    const partialError = Object.assign(new Error("Partial node resolution failure"), {
+      data: {
+        search: {
+          issueCount: 3,
+          pageInfo: { hasNextPage: true, endCursor: "cursor-partial" },
+          nodes: [{ ...graphqlPRNode, databaseId: 77 }],
+        },
+        rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      },
+    });
+    const octokit = makePROctokit(async (_query, variables) => {
+      const q = (variables as Record<string, unknown>).q as string;
+      if (q.includes("involves:")) throw partialError;
+      return makeGraphqlPRResponse([]);
+    });
+
+    const result = await fetchPullRequests(
+      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      [testRepo],
+      "octocat"
+    );
+
+    expect(result.pullRequests.length).toBe(1);
+    expect(result.pullRequests[0].id).toBe(77);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("Partial node resolution failure");
+    // involves query: 1 call (threw partial, stopped). review-requested: 1 call = 2 total
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
   });
 
   it("caps at 1000 PRs and warns via pushNotification", async () => {
