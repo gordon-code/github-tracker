@@ -2,7 +2,6 @@ import {
   createSignal,
   createEffect,
   createMemo,
-  For,
   Show,
   Index,
 } from "solid-js";
@@ -290,23 +289,24 @@ export default function RepoSelector(props: RepoSelectorProps) {
         </div>
       </Show>
 
-      {/* Per-org repo lists */}
-      <For each={sortedOrgStates()}>
+      {/* Per-org repo lists — Index (not For) avoids tearing down every org's
+           DOM subtree when a single org's state updates via setOrgStates(prev.map(...)) */}
+      <Index each={sortedOrgStates()}>
         {(state) => {
-          const visible = createMemo(() => filteredReposForOrg(state));
+          const visible = createMemo(() => filteredReposForOrg(state()));
 
           return (
             <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
               {/* Org header */}
               <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800/60">
                 <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  {state.org}
+                  {state().org}
                 </span>
-                <Show when={!state.loading && !state.error}>
+                <Show when={!state().loading && !state().error}>
                   <div class="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => selectAllInOrg(state)}
+                      onClick={() => selectAllInOrg(state())}
                       disabled={
                         visible().length === 0 ||
                         visible().every((r) => isSelected(r.fullName))
@@ -318,7 +318,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     <span class="text-gray-300 dark:text-gray-600">·</span>
                     <button
                       type="button"
-                      onClick={() => deselectAllInOrg(state)}
+                      onClick={() => deselectAllInOrg(state())}
                       disabled={
                         visible().length === 0 ||
                         visible().every((r) => !isSelected(r.fullName))
@@ -332,21 +332,21 @@ export default function RepoSelector(props: RepoSelectorProps) {
               </div>
 
               {/* Loading state for this org */}
-              <Show when={state.loading}>
+              <Show when={state().loading}>
                 <div class="flex justify-center py-6">
                   <LoadingSpinner size="sm" label="Loading..." />
                 </div>
               </Show>
 
               {/* Error state for this org */}
-              <Show when={!state.loading && state.error !== null}>
+              <Show when={!state().loading && state().error !== null}>
                 <div class="flex items-center justify-between px-4 py-3">
                   <span class="text-sm text-red-600 dark:text-red-400">
-                    {state.error}
+                    {state().error}
                   </span>
                   <button
                     type="button"
-                    onClick={() => retryOrg(state.org)}
+                    onClick={() => retryOrg(state().org)}
                     class="ml-3 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
                   >
                     Retry
@@ -355,7 +355,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
               </Show>
 
               {/* Repo list */}
-              <Show when={!state.loading && state.error === null}>
+              <Show when={!state().loading && state().error === null}>
                 <Show
                   when={visible().length > 0}
                   fallback={
@@ -369,8 +369,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
                   <div
                     class="max-h-[300px] overflow-y-auto"
                     role="region"
-                    aria-label={`${state.org} repositories`}
-                    data-testid={`repo-scroll-${state.org}`}
+                    aria-label={`${state().org} repositories`}
+                    data-testid={`repo-scroll-${state().org}`}
                   >
                     <ul class="divide-y divide-gray-100 dark:divide-gray-700">
                       <Index each={visible()}>
@@ -408,7 +408,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
             </div>
           );
         }}
-      </For>
+      </Index>
 
       {/* Total count */}
       <Show when={!isLoadingAny() && props.selected.length > 0}>
