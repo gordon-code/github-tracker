@@ -513,7 +513,7 @@ describe("SettingsPage — Data: Sign out", () => {
 
 // Theme application tests removed — theme is now handled by createEffect in App.tsx, not SettingsPage
 
-describe("SettingsPage — Grant more orgs button", () => {
+describe("SettingsPage — Manage org access button", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
   });
@@ -521,24 +521,24 @@ describe("SettingsPage — Grant more orgs button", () => {
     vi.unstubAllEnvs();
   });
 
-  it("renders 'Grant more orgs' button in Organizations & Repositories section", () => {
+  it("renders 'Manage org access' button in Organizations & Repositories section", () => {
     renderSettings();
-    screen.getByRole("button", { name: "Grant more orgs" });
+    screen.getByRole("button", { name: "Manage org access" });
   });
 
-  it("clicking 'Grant more orgs' opens GitHub app settings via openGitHubUrl", async () => {
+  it("clicking 'Manage org access' opens GitHub app settings via openGitHubUrl", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     expect(urlModule.openGitHubUrl).toHaveBeenCalledWith(buildOrgAccessUrl());
   });
 
-  it("clicking 'Grant more orgs' registers a focus listener for auto-merge", async () => {
+  it("clicking 'Manage org access' registers a focus listener for auto-merge", async () => {
     const user = userEvent.setup();
     const addSpy = vi.spyOn(window, "addEventListener");
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     expect(addSpy).toHaveBeenCalledWith("focus", expect.any(Function));
   });
@@ -551,7 +551,7 @@ describe("SettingsPage — Grant more orgs button", () => {
       new Promise((r) => { resolveFetch = r as (v: never[]) => void; })
     );
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
@@ -560,7 +560,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     });
     resolveFetch([]);
     await waitFor(() => {
-      const restored = screen.getByRole("button", { name: "Grant more orgs" });
+      const restored = screen.getByRole("button", { name: "Manage org access" });
       expect(restored.hasAttribute("disabled")).toBe(false);
     });
   });
@@ -573,7 +573,7 @@ describe("SettingsPage — Grant more orgs button", () => {
       { login: "new-org", avatarUrl: "", type: "org" },
     ]);
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
@@ -591,7 +591,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     updateConfig({ selectedOrgs: ["existing-org"] });
     vi.mocked(apiModule.fetchOrgs).mockRejectedValue(new Error("Network error"));
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
@@ -612,7 +612,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     const github = await import("../../../src/app/services/github");
     vi.mocked(github.getClient).mockReturnValueOnce(null);
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     window.dispatchEvent(new Event("focus"));
     await new Promise((r) => setTimeout(r, 50));
@@ -623,7 +623,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     const user = userEvent.setup();
     const removeSpy = vi.spyOn(window, "removeEventListener");
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     await user.click(btn);
     const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
@@ -634,7 +634,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     const user = userEvent.setup();
     const removeSpy = vi.spyOn(window, "removeEventListener");
     const { unmount } = renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     unmount();
     const focusRemoves = removeSpy.mock.calls.filter(([evt]) => evt === "focus");
@@ -646,7 +646,7 @@ describe("SettingsPage — Grant more orgs button", () => {
     updateConfig({ selectedOrgs: [] });
     vi.mocked(apiModule.fetchOrgs).mockResolvedValue([]);
     renderSettings();
-    const btn = screen.getByRole("button", { name: "Grant more orgs" });
+    const btn = screen.getByRole("button", { name: "Manage org access" });
     await user.click(btn);
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {

@@ -266,7 +266,7 @@ export default function SettingsPage() {
                     Organization Access
                   </p>
                   <p class="text-xs text-base-content/60">
-                    Manage organization access on GitHub — new orgs sync automatically when you return
+                    Request access for restricted orgs on GitHub — new orgs sync when you return
                   </p>
                 </div>
                 <button
@@ -275,7 +275,7 @@ export default function SettingsPage() {
                   disabled={merging()}
                   class="btn btn-sm btn-outline"
                 >
-                  {merging() ? "Syncing..." : "Grant more orgs"}
+                  {merging() ? "Syncing..." : "Manage org access"}
                 </button>
               </div>
             </div>

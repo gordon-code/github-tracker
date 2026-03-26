@@ -99,25 +99,9 @@ describe("oauth helpers", () => {
   });
 
   describe("buildOrgAccessUrl", () => {
-    it("returns GitHub connections URL with client ID", () => {
+    it("returns GitHub authorized apps settings URL", () => {
       const url = buildOrgAccessUrl();
-      expect(url).toBe(
-        "https://github.com/settings/connections/applications/test-client-id"
-      );
-    });
-
-    it("throws for undefined client ID", () => {
-      vi.stubEnv("VITE_GITHUB_CLIENT_ID", "");
-      expect(() => buildOrgAccessUrl()).toThrow("Invalid VITE_GITHUB_CLIENT_ID");
-      vi.unstubAllEnvs();
-      vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
-    });
-
-    it("throws for client ID with path traversal characters", () => {
-      vi.stubEnv("VITE_GITHUB_CLIENT_ID", "../../../evil");
-      expect(() => buildOrgAccessUrl()).toThrow("Invalid VITE_GITHUB_CLIENT_ID");
-      vi.unstubAllEnvs();
-      vi.stubEnv("VITE_GITHUB_CLIENT_ID", "test-client-id");
+      expect(url).toBe("https://github.com/settings/applications");
     });
   });
 
