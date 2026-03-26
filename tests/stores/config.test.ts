@@ -40,7 +40,7 @@ describe("ConfigSchema", () => {
     expect(result.notifications.issues).toBe(true);
     expect(result.notifications.pullRequests).toBe(true);
     expect(result.notifications.workflowRuns).toBe(true);
-    expect(result.theme).toBe("system");
+    expect(result.theme).toBe("light");
     expect(result.viewDensity).toBe("comfortable");
     expect(result.itemsPerPage).toBe(25);
     expect(result.defaultTab).toBe("issues");
@@ -52,7 +52,7 @@ describe("ConfigSchema", () => {
     const result = ConfigSchema.parse({ refreshInterval: 600 });
     expect(result.refreshInterval).toBe(600);
     expect(result.maxWorkflowsPerRepo).toBe(5);
-    expect(result.theme).toBe("system");
+    expect(result.theme).toBe("light");
   });
 
   it("throws on invalid refreshInterval (below min)", () => {
@@ -89,7 +89,7 @@ describe("loadConfig", () => {
   it("returns defaults when localStorage is empty", () => {
     const cfg = loadConfig();
     expect(cfg.refreshInterval).toBe(300);
-    expect(cfg.theme).toBe("system");
+    expect(cfg.theme).toBe("light");
   });
 
   it("returns stored config when valid data exists", () => {
@@ -113,7 +113,7 @@ describe("loadConfig", () => {
     );
     const cfg = loadConfig();
     expect(cfg.refreshInterval).toBe(300);
-    expect(cfg.theme).toBe("system");
+    expect(cfg.theme).toBe("light");
   });
 });
 
@@ -134,7 +134,7 @@ describe("updateConfig", () => {
       const { cfg, update } = makeStore();
       update({ refreshInterval: 600 });
       expect(cfg.refreshInterval).toBe(600);
-      expect(cfg.theme).toBe("system");
+      expect(cfg.theme).toBe("light");
       expect(cfg.maxWorkflowsPerRepo).toBe(5);
       dispose();
     });

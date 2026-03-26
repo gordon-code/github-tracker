@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@plugin "daisyui" {
+  themes: light --default, dark, nord, dracula, synthwave, corporate, cupcake, forest, coffee, dim;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Notification animations ──────────────────────────────────────────────── */

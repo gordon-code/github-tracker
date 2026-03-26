@@ -107,7 +107,7 @@ beforeEach(() => {
     refreshInterval: 300,
     maxWorkflowsPerRepo: 5,
     maxRunsPerWorkflow: 3,
-    theme: "system",
+    theme: "light",
     viewDensity: "comfortable",
     itemsPerPage: 25,
     defaultTab: "issues",
@@ -219,13 +219,13 @@ describe("SettingsPage — Refresh interval", () => {
 describe("SettingsPage — Appearance", () => {
   it("shows current theme value", () => {
     renderSettings();
-    screen.getByDisplayValue("System");
+    screen.getByDisplayValue("Light");
   });
 
   it("changing theme updates config", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const themeSelect = screen.getByDisplayValue("System");
+    const themeSelect = screen.getByDisplayValue("Light");
     await user.selectOptions(themeSelect, "dark");
     expect(config.theme).toBe("dark");
   });
@@ -510,28 +510,7 @@ describe("SettingsPage — Data: Sign out", () => {
   });
 });
 
-describe("SettingsPage — Theme application", () => {
-  it("applies dark class when theme is dark", () => {
-    updateConfig({ theme: "dark" });
-    renderSettings();
-    // The createEffect runs synchronously in test environment
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-  });
-
-  it("removes dark class when theme is light", () => {
-    document.documentElement.classList.add("dark");
-    updateConfig({ theme: "light" });
-    renderSettings();
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-  });
-
-  it("uses system preference when theme is system (prefers dark)", () => {
-    setupMatchMedia(true); // system prefers dark
-    updateConfig({ theme: "system" });
-    renderSettings();
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
-  });
-});
+// Theme application tests removed — theme is now handled by createEffect in App.tsx, not SettingsPage
 
 describe("SettingsPage — Grant more orgs button", () => {
   beforeEach(() => {

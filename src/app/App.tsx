@@ -1,7 +1,7 @@
 import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken } from "./stores/auth";
-import { config, initConfigPersistence } from "./stores/config";
+import { config, initConfigPersistence, DARK_THEMES } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
@@ -35,7 +35,7 @@ function AuthGuard(props: { children: JSX.Element }) {
     <Show
       when={!validating()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
             class="animate-spin h-8 w-8 text-gray-400"
             xmlns="http://www.w3.org/2000/svg"
@@ -80,7 +80,7 @@ function RootRedirect() {
     <Show
       when={!validating()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
             class="animate-spin h-8 w-8 text-gray-400"
             xmlns="http://www.w3.org/2000/svg"
@@ -117,6 +117,17 @@ function RootRedirect() {
 }
 
 export default function App() {
+  createEffect(() => {
+    const theme = config.theme;
+    document.documentElement.setAttribute("data-theme", theme);
+    // Bridge: set .dark class for components still using dark: prefix during migration
+    if (DARK_THEMES.has(theme)) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  });
+
   onMount(() => {
     // All reactive init functions must be called inside the component tree
     initConfigPersistence();

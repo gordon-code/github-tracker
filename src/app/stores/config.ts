@@ -4,6 +4,10 @@ import { createEffect } from "solid-js";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
 
+export const THEME_OPTIONS = ["light", "dark", "nord", "dracula", "synthwave", "corporate", "cupcake", "forest", "coffee", "dim"] as const;
+export type ThemeId = (typeof THEME_OPTIONS)[number];
+export const DARK_THEMES: ReadonlySet<ThemeId> = new Set(["dark", "dracula", "synthwave", "forest", "coffee", "dim"]);
+
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z
@@ -26,7 +30,7 @@ export const ConfigSchema = z.object({
       workflowRuns: z.boolean().default(true),
     })
     .default({ enabled: false, issues: true, pullRequests: true, workflowRuns: true }),
-  theme: z.enum(["light", "dark", "system"]).default("system"),
+  theme: z.enum(THEME_OPTIONS).default("light"),
   viewDensity: z.enum(["compact", "comfortable"]).default("comfortable"),
   itemsPerPage: z.number().min(10).max(100).default(25),
   defaultTab: z.enum(["issues", "pullRequests", "actions"]).default("issues"),
@@ -41,6 +45,11 @@ export function loadConfig(): Config {
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (raw === null) return ConfigSchema.parse({});
     const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && "theme" in parsed) {
+      if (!THEME_OPTIONS.includes((parsed as Record<string, unknown>).theme as typeof THEME_OPTIONS[number])) {
+        (parsed as Record<string, unknown>).theme = "light";
+      }
+    }
     const result = ConfigSchema.safeParse(parsed);
     if (result.success) return result.data;
     return ConfigSchema.parse({});

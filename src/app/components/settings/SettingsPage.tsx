@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, onMount, onCleanup, JSX } from "solid-js";
+import { createSignal, Show, onCleanup, JSX } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
@@ -11,24 +11,6 @@ import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import type { RepoRef } from "../../services/api";
-
-// ── Theme application ──────────────────────────────────────────────────────
-
-function applyTheme(theme: "light" | "dark" | "system"): void {
-  const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else if (theme === "light") {
-    root.classList.remove("dark");
-  } else {
-    // system
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  }
-}
 
 // ── Section wrapper ────────────────────────────────────────────────────────
 
@@ -183,24 +165,6 @@ export default function SettingsPage() {
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
 
-  // Apply theme reactively
-  createEffect(() => {
-    const theme = config.theme;
-    applyTheme(theme);
-  });
-
-  // System preference listener (only active when theme === "system")
-  onMount(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => {
-      if (config.theme === "system") {
-        applyTheme("system");
-      }
-    };
-    mq.addEventListener("change", handler);
-    onCleanup(() => mq.removeEventListener("change", handler));
-  });
-
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   async function mergeNewOrgs() {
@@ -340,9 +304,16 @@ export default function SettingsPage() {
   ];
 
   const themeOptions = [
-    { value: "system" as const, label: "System" },
     { value: "light" as const, label: "Light" },
     { value: "dark" as const, label: "Dark" },
+    { value: "nord" as const, label: "Nord" },
+    { value: "dracula" as const, label: "Dracula" },
+    { value: "synthwave" as const, label: "Synthwave" },
+    { value: "corporate" as const, label: "Corporate" },
+    { value: "cupcake" as const, label: "Cupcake" },
+    { value: "forest" as const, label: "Forest" },
+    { value: "coffee" as const, label: "Coffee" },
+    { value: "dim" as const, label: "Dim" },
   ];
 
   const densityOptions = [
