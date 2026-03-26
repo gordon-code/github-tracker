@@ -8,8 +8,8 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import { config, setConfig } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
-import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
-import { fetchOrgs } from "../../services/api";
+import type { Issue, PullRequest, WorkflowRun, RepoRef } from "../../services/api";
+import { fetchOrgs, fetchRepos } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
@@ -156,22 +156,46 @@ export default function DashboardPage() {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
 
-    // Auto-sync orgs on dashboard load — picks up newly accessible orgs
-    // after re-auth, scope changes, or org policy updates
+    // Auto-sync orgs + repos on dashboard load — picks up newly accessible orgs
+    // after re-auth, scope changes, or org policy updates. Also discovers repos
+    // for new orgs so they appear in the dashboard immediately.
     const client = getClient();
     if (client && config.onboardingComplete) {
-      void fetchOrgs(client).then((allOrgs) => {
-        const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
-        const newOrgs = allOrgs
-          .map((o) => o.login)
-          .filter((login) => !currentSet.has(login.toLowerCase()));
-        if (newOrgs.length > 0) {
-          setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgs]);
-          console.info(`[dashboard] auto-synced ${newOrgs.length} new org(s)`);
+      void (async () => {
+        try {
+          const allOrgs = await fetchOrgs(client);
+          const currentOrgSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+          const newOrgLogins = allOrgs
+            .map((o) => o.login)
+            .filter((login) => !currentOrgSet.has(login.toLowerCase()));
+          if (newOrgLogins.length === 0) return;
+
+          // Add new orgs
+          setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgLogins]);
+
+          // Discover repos for each new org
+          const currentRepoSet = new Set(config.selectedRepos.map((r) => r.fullName.toLowerCase()));
+          const newRepos: RepoRef[] = [];
+          await Promise.allSettled(
+            newOrgLogins.map(async (org) => {
+              const orgType = allOrgs.find((o) => o.login.toLowerCase() === org.toLowerCase())?.type === "user" ? "user" as const : "org" as const;
+              const repos = await fetchRepos(client, org, orgType);
+              for (const repo of repos) {
+                if (!currentRepoSet.has(repo.fullName.toLowerCase())) {
+                  newRepos.push({ owner: repo.owner, name: repo.name, fullName: repo.fullName });
+                }
+              }
+            })
+          );
+
+          if (newRepos.length > 0) {
+            setConfig("selectedRepos", [...config.selectedRepos, ...newRepos]);
+          }
+          console.info(`[dashboard] auto-synced ${newOrgLogins.length} org(s), ${newRepos.length} repo(s)`);
+        } catch {
+          // Non-fatal — org/repo sync failure doesn't block dashboard
         }
-      }).catch(() => {
-        // Non-fatal — org sync failure doesn't block dashboard
-      });
+      })();
     }
 
     onCleanup(() => {
