@@ -174,7 +174,7 @@ export default function DashboardPage() {
       {/* Offset for fixed header */}
       <div class="pt-14 flex flex-col h-screen">
         {/* Single constrained panel: tabs + filters + content */}
-        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 border-x border-base-300 bg-base-100 shadow-sm">
+        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 bg-base-100 shadow-lg border-x border-base-300">
           <TabBar
             activeTab={activeTab()}
             onTabChange={handleTabChange}

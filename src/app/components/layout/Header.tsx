@@ -36,7 +36,7 @@ export default function Header() {
 
   return (
     <>
-      <header class="navbar fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300 min-h-14">
+      <header class="navbar fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300 shadow-sm min-h-14">
         <div class="max-w-6xl mx-auto w-full flex items-center gap-4 px-4">
         <span class="font-semibold text-base-content text-lg shrink-0">
           GitHub Tracker

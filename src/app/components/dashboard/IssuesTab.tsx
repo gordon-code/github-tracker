@@ -254,7 +254,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                     <button
                       onClick={() => toggleRepo(repoGroup.repoFullName)}
                       aria-expanded={isExpanded()}
-                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-base-content bg-base-200 border-b border-base-300 hover:bg-base-300 transition-colors"
+                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
                     >
                       <ChevronIcon size="md" rotated={!isExpanded()} />
                       {repoGroup.repoFullName}
