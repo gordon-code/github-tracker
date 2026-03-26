@@ -1,4 +1,5 @@
-import { For } from "solid-js";
+import { Tabs } from "@kobalte/core/tabs";
+import { Show } from "solid-js";
 
 export type TabId = "issues" | "pullRequests" | "actions";
 
@@ -14,54 +15,33 @@ interface TabBarProps {
   counts?: TabCounts;
 }
 
-interface Tab {
-  id: TabId;
-  label: string;
-}
-
-const TABS: Tab[] = [
-  { id: "issues", label: "Issues" },
-  { id: "pullRequests", label: "Pull Requests" },
-  { id: "actions", label: "Actions" },
-];
-
 export default function TabBar(props: TabBarProps) {
   return (
-    <nav
-      class="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4"
-      aria-label="Dashboard tabs"
-    >
-      <For each={TABS}>
-        {(tab) => {
-          const count = () => props.counts?.[tab.id];
-          const isActive = () => props.activeTab === tab.id;
-
-          return (
-            <button
-              onClick={() => props.onTabChange(tab.id)}
-              class={`relative flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                isActive()
-                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                  : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600"
-              }`}
-              aria-current={isActive() ? "page" : undefined}
-            >
-              {tab.label}
-              {count() !== undefined && (
-                <span
-                  class={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-medium min-w-[1.25rem] ${
-                    isActive()
-                      ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                  }`}
-                >
-                  {count()}
-                </span>
-              )}
-            </button>
-          );
-        }}
-      </For>
-    </nav>
+    <Tabs value={props.activeTab} onChange={(val) => props.onTabChange(val as TabId)}>
+      <div class="border-b border-base-300">
+        <div class="max-w-6xl mx-auto w-full px-4">
+          <Tabs.List class="tabs tabs-border">
+            <Tabs.Trigger value="issues" class="tab data-[selected]:tab-active">
+              Issues
+              <Show when={props.counts?.issues !== undefined}>
+                <span class="badge badge-sm ml-1">{props.counts?.issues}</span>
+              </Show>
+            </Tabs.Trigger>
+            <Tabs.Trigger value="pullRequests" class="tab data-[selected]:tab-active">
+              Pull Requests
+              <Show when={props.counts?.pullRequests !== undefined}>
+                <span class="badge badge-sm ml-1">{props.counts?.pullRequests}</span>
+              </Show>
+            </Tabs.Trigger>
+            <Tabs.Trigger value="actions" class="tab data-[selected]:tab-active">
+              Actions
+              <Show when={props.counts?.actions !== undefined}>
+                <span class="badge badge-sm ml-1">{props.counts?.actions}</span>
+              </Show>
+            </Tabs.Trigger>
+          </Tabs.List>
+        </div>
+      </div>
+    </Tabs>
   );
 }

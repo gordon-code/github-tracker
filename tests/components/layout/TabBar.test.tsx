@@ -15,27 +15,25 @@ describe("TabBar", () => {
     screen.getByText("Actions");
   });
 
-  it("highlights active tab with aria-current='page'", () => {
+  it("highlights active tab with aria-selected='true'", () => {
     const onTabChange = vi.fn();
     render(() => (
       <TabBar activeTab="pullRequests" onTabChange={onTabChange} />
     ));
-    const buttons = screen.getAllByRole("button");
-    const prButton = buttons.find((b) => b.textContent?.includes("Pull Requests"));
-    expect(prButton).toBeDefined();
-    expect(prButton!.getAttribute("aria-current")).toBe("page");
+    const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+    expect(prTab).toBeDefined();
+    expect(prTab.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("does not set aria-current on inactive tabs", () => {
+  it("does not set aria-selected on inactive tabs", () => {
     const onTabChange = vi.fn();
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
-    const buttons = screen.getAllByRole("button");
-    const prButton = buttons.find((b) => b.textContent?.includes("Pull Requests"));
-    const actionsButton = buttons.find((b) => b.textContent?.includes("Actions"));
-    expect(prButton!.getAttribute("aria-current")).toBeNull();
-    expect(actionsButton!.getAttribute("aria-current")).toBeNull();
+    const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+    const actionsTab = screen.getByRole("tab", { name: /Actions/ });
+    expect(prTab.getAttribute("aria-selected")).toBe("false");
+    expect(actionsTab.getAttribute("aria-selected")).toBe("false");
   });
 
   it("calls onTabChange with 'issues' when Issues tab clicked", async () => {
@@ -44,9 +42,8 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="pullRequests" onTabChange={onTabChange} />
     ));
-    const buttons = screen.getAllByRole("button");
-    const issuesButton = buttons.find((b) => b.textContent?.includes("Issues"));
-    await user.click(issuesButton!);
+    const issuesTab = screen.getByRole("tab", { name: /Issues/ });
+    await user.click(issuesTab);
     expect(onTabChange).toHaveBeenCalledWith("issues");
   });
 
@@ -56,9 +53,8 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
-    const buttons = screen.getAllByRole("button");
-    const prButton = buttons.find((b) => b.textContent?.includes("Pull Requests"));
-    await user.click(prButton!);
+    const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+    await user.click(prTab);
     expect(onTabChange).toHaveBeenCalledWith("pullRequests");
   });
 
@@ -68,9 +64,8 @@ describe("TabBar", () => {
     render(() => (
       <TabBar activeTab="issues" onTabChange={onTabChange} />
     ));
-    const buttons = screen.getAllByRole("button");
-    const actionsButton = buttons.find((b) => b.textContent?.includes("Actions"));
-    await user.click(actionsButton!);
+    const actionsTab = screen.getByRole("tab", { name: /Actions/ });
+    await user.click(actionsTab);
     expect(onTabChange).toHaveBeenCalledWith("actions");
   });
 

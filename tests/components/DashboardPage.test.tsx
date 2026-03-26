@@ -137,7 +137,7 @@ describe("DashboardPage — tab switching", () => {
     await user.click(screen.getByText("Pull Requests"));
     // PullRequestsTab tab is now active
     const prButton = screen.getByText("Pull Requests").closest("button");
-    expect(prButton?.getAttribute("aria-current")).toBe("page");
+    expect(prButton?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("switches to ActionsTab when Actions tab is clicked", async () => {
@@ -147,21 +147,21 @@ describe("DashboardPage — tab switching", () => {
     // ActionsTab renders a "Show PR runs" checkbox — unique to that tab
     screen.getByText("Show PR runs");
     const actionsButton = screen.getByText("Actions").closest("button");
-    expect(actionsButton?.getAttribute("aria-current")).toBe("page");
+    expect(actionsButton?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("Issues tab button has aria-current=page on initial render", () => {
+  it("Issues tab button has aria-selected=true on initial render", () => {
     render(() => <DashboardPage />);
     const issuesButton = screen.getByText("Issues").closest("button");
-    expect(issuesButton?.getAttribute("aria-current")).toBe("page");
+    expect(issuesButton?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("clicking a tab removes aria-current from previous tab", async () => {
+  it("clicking a tab removes aria-selected from previous tab", async () => {
     const user = userEvent.setup();
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Pull Requests"));
     const issuesButton = screen.getByText("Issues").closest("button");
-    expect(issuesButton?.getAttribute("aria-current")).toBeNull();
+    expect(issuesButton?.getAttribute("aria-selected")).toBe("false");
   });
 });
 
