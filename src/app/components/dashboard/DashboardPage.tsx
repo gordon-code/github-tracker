@@ -168,13 +168,13 @@ export default function DashboardPage() {
   const userLogin = createMemo(() => user()?.login ?? "");
 
   return (
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div class="min-h-screen bg-base-200">
       <Header />
 
       {/* Offset for fixed header */}
       <div class="pt-14 flex flex-col h-screen">
         {/* Single constrained panel: tabs + filters + content */}
-        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 border-x border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 border-x border-base-300 bg-base-100">
           <TabBar
             activeTab={activeTab()}
             onTabChange={handleTabChange}
@@ -213,20 +213,20 @@ export default function DashboardPage() {
           </main>
         </div>
 
-        <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
+        <footer class="border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50 shrink-0">
           <div class="max-w-6xl mx-auto w-full px-4 flex items-center justify-center gap-3">
             <a
               href="https://github.com/gordon-code/github-tracker"
               target="_blank"
               rel="noopener noreferrer"
-              class="hover:text-gray-600 dark:hover:text-gray-300"
+              class="link link-hover"
             >
               Source
             </a>
             <span aria-hidden="true">&middot;</span>
             <a
               href="/privacy"
-              class="hover:text-gray-600 dark:hover:text-gray-300"
+              class="link link-hover"
             >
               Privacy
             </a>

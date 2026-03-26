@@ -178,15 +178,15 @@ export default function ActionsTab(props: ActionsTabProps) {
   const repoGroups = createMemo(() => groupRuns(filteredRuns()));
 
   return (
-    <div class="divide-y divide-gray-100 dark:divide-gray-800">
+    <div class="divide-y divide-base-300">
       {/* Toolbar */}
-      <div class="flex flex-wrap items-center gap-3 px-4 py-2 bg-white dark:bg-gray-900">
-        <label class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 bg-base-100">
+        <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={viewState.showPrRuns}
             onChange={(e) => setViewState("showPrRuns", e.currentTarget.checked)}
-            class="rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-500"
+            class="checkbox checkbox-sm checkbox-primary"
           />
           Show PR runs
         </label>
@@ -215,7 +215,7 @@ export default function ActionsTab(props: ActionsTabProps) {
           !props.loading && repoGroups().length === 0
         }
       >
-        <div class="p-8 text-center text-gray-500 dark:text-gray-400">
+        <div class="p-8 text-center text-base-content/50">
           <p class="text-sm">No workflow runs found.</p>
         </div>
       </Show>
@@ -246,17 +246,17 @@ export default function ActionsTab(props: ActionsTabProps) {
             });
 
             return (
-              <div class="bg-white dark:bg-gray-900">
+              <div class="bg-base-100">
                 {/* Repo header */}
                 <button
                   onClick={() => toggleRepo(repoGroup.repoFullName)}
                   aria-expanded={isExpanded()}
-                  class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-base-content bg-base-200 hover:bg-base-300 transition-colors"
                 >
                   <ChevronIcon size="md" rotated={!isExpanded()} />
                   {repoGroup.repoFullName}
                   <Show when={!isExpanded()}>
-                    <span class="ml-auto text-xs font-normal text-gray-500 dark:text-gray-400">
+                    <span class="ml-auto text-xs font-normal text-base-content/60">
                       {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
                       <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
                         {": "}
@@ -267,7 +267,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                           {", "}
                         </Show>
                         <Show when={collapsedSummary().failed > 0}>
-                          <span class="text-red-600 dark:text-red-400 font-medium">{collapsedSummary().failed} failed</span>
+                          <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
                         </Show>
                         <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
                           {", "}
