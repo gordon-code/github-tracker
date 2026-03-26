@@ -32,6 +32,7 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
     // repo: read issues/PRs; read:org: list orgs; notifications: gate
     scope: "repo read:org notifications",
     state,
+    prompt: "select_account",
   });
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }

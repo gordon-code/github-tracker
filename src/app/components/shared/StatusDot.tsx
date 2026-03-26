@@ -1,5 +1,7 @@
+import { Show } from "solid-js";
+
 export interface StatusDotProps {
-  status: "success" | "pending" | "failure" | "error" | null;
+  status: "success" | "pending" | "failure" | "error" | "conflict" | null;
 }
 
 const STATUS_CONFIG = {
@@ -23,13 +25,18 @@ const STATUS_CONFIG = {
     label: "Checks failing",
     pulse: false,
   },
+  conflict: {
+    bg: "bg-warning/60",
+    label: "Checks blocked by merge conflict",
+    pulse: false,
+  },
 } as const;
 
 export default function StatusDot(props: StatusDotProps) {
   const cfg = () =>
     props.status !== null
       ? STATUS_CONFIG[props.status]
-      : { bg: "bg-base-300", label: "No checks", pulse: false };
+      : { bg: "bg-base-content/20", label: "No checks", pulse: false };
 
   return (
     <span
@@ -38,11 +45,11 @@ export default function StatusDot(props: StatusDotProps) {
       title={cfg().label}
       aria-label={cfg().label}
     >
-      {cfg().pulse && (
+      <Show when={cfg().pulse}>
         <span
           class={`absolute inline-flex h-full w-full rounded-full ${cfg().bg} animate-slow-pulse`}
         />
-      )}
+      </Show>
       <span
         class={`relative inline-flex rounded-full ${cfg().bg}`}
         style={{ width: "8px", height: "8px" }}

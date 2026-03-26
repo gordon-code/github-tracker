@@ -13,7 +13,7 @@ const PullRequestFiltersSchema = z.object({
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]).default("all"),
   draft: z.enum(["all", "draft", "ready"]).default("all"),
-  checkStatus: z.enum(["all", "success", "failure", "pending", "none"]).default("all"),
+  checkStatus: z.enum(["all", "success", "failure", "pending", "conflict", "none"]).default("all"),
   sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL"]).default("all"),
 });
 
