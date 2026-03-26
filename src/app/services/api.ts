@@ -588,9 +588,14 @@ async function graphqlSearchPRs(
     const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
 
     let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
-    // When checks are null but PR has merge conflicts, CI is blocked on conflict resolution
-    if (checkStatus === null && node.mergeStateStatus === "DIRTY") {
+    // mergeStateStatus overrides checkStatus when it indicates action is needed
+    const mss = node.mergeStateStatus;
+    if (mss === "DIRTY" || mss === "BEHIND" || mss === "BLOCKED") {
       checkStatus = "conflict";
+    } else if (mss === "UNSTABLE") {
+      checkStatus = "failure";
+    } else if (mss === "UNKNOWN" && checkStatus === null) {
+      checkStatus = null; // no-op, kept explicit for clarity
     }
 
     // Store fork info for fallback detection

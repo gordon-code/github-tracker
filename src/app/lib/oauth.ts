@@ -37,13 +37,16 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }
 
+const VALID_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+
 /**
- * Links to the user's Authorized OAuth Apps page where they can see per-org
- * access status and request access for orgs with OAuth restrictions enabled.
- *
- * OAuth Apps don't have per-org installation like GitHub Apps — access depends
- * on org restriction policies. Users can request access from this page.
+ * Links to the per-app authorization page where users can see org access
+ * status and request access for orgs with OAuth restrictions enabled.
  */
 export function buildOrgAccessUrl(): string {
-  return "https://github.com/settings/applications";
+  const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID as string;
+  if (!clientId || !VALID_CLIENT_ID_RE.test(clientId)) {
+    throw new Error("Invalid VITE_GITHUB_CLIENT_ID");
+  }
+  return `https://github.com/settings/connections/applications/${clientId}`;
 }
