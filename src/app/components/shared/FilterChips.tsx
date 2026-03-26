@@ -27,16 +27,16 @@ export default function FilterChips(props: FilterChipsProps) {
 
           return (
             <div class="flex items-center gap-1">
-              <span class="text-xs text-gray-500 dark:text-gray-400 mr-1">{group.label}:</span>
+              <span class="text-xs text-base-content/50 mr-1">{group.label}:</span>
               <div role="group" aria-label={group.label}>
                 <button
                   type="button"
                   onClick={() => props.onChange(group.field, "all")}
                   aria-pressed={current() === "all"}
-                  class={`rounded-full text-xs px-2 py-0.5 cursor-pointer transition-colors ${
+                  class={`badge cursor-pointer transition-colors ${
                     current() === "all"
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                      ? "badge-primary"
+                      : "badge-outline"
                   }`}
                 >
                   All
@@ -47,10 +47,10 @@ export default function FilterChips(props: FilterChipsProps) {
                       type="button"
                       onClick={() => props.onChange(group.field, opt.value)}
                       aria-pressed={current() === opt.value}
-                      class={`rounded-full text-xs px-2 py-0.5 cursor-pointer transition-colors ${
+                      class={`badge cursor-pointer transition-colors ${
                         current() === opt.value
-                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-                          : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                          ? "badge-primary"
+                          : "badge-outline"
                       }`}
                     >
                       {opt.label}
@@ -63,7 +63,7 @@ export default function FilterChips(props: FilterChipsProps) {
                   type="button"
                   onClick={() => props.onReset(group.field)}
                   aria-label={`Reset ${group.label} filter`}
-                  class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 ml-0.5"
+                  class="btn btn-ghost btn-xs ml-0.5"
                 >
                   ×
                 </button>
@@ -76,7 +76,7 @@ export default function FilterChips(props: FilterChipsProps) {
         <button
           type="button"
           onClick={props.onResetAll}
-          class="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+          class="btn btn-ghost btn-xs"
         >
           Reset all
         </button>

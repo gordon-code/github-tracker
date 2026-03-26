@@ -36,17 +36,17 @@ export default function FilterInput(props: FilterInputProps) {
         value={value()}
         onInput={handleInput}
         placeholder={props.placeholder ?? "Filter..."}
-        class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-8 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:focus:border-blue-400 dark:focus:ring-blue-400"
+        class="input input-sm w-full pr-8"
       />
       {value() && (
         <button
           type="button"
           onClick={handleClear}
           aria-label="Clear filter"
-          class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+          class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1/2 -translate-y-1/2"
         >
           <svg
-            class="h-4 w-4"
+            class="h-3 w-3"
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
             fill="currentColor"

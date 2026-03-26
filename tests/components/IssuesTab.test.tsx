@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import IssuesTab from "../../src/app/components/dashboard/IssuesTab";
@@ -88,29 +88,33 @@ describe("IssuesTab", () => {
 
   it("renders SortDropdown in the toolbar", () => {
     render(() => <IssuesTab issues={[]} userLogin="" />);
-    const select = screen.getByRole("combobox", { name: /sort by/i });
-    expect(select).toBeDefined();
+    const trigger = screen.getByRole("button", { name: /sort by/i });
+    expect(trigger).toBeDefined();
   });
 
-  it("SortDropdown contains all sortable fields", () => {
+  it("SortDropdown contains all sortable fields", async () => {
+    const user = userEvent.setup();
     render(() => <IssuesTab issues={[]} userLogin="" />);
-    const select = screen.getByRole("combobox", { name: /sort by/i }) as HTMLSelectElement;
-    const optionValues = Array.from(select.options).map((o) => o.value);
-    expect(optionValues.some((v) => v.startsWith("repo:"))).toBe(true);
-    expect(optionValues.some((v) => v.startsWith("title:"))).toBe(true);
-    expect(optionValues.some((v) => v.startsWith("author:"))).toBe(true);
-    expect(optionValues.some((v) => v.startsWith("comments:"))).toBe(true);
-    expect(optionValues.some((v) => v.startsWith("createdAt:"))).toBe(true);
-    expect(optionValues.some((v) => v.startsWith("updatedAt:"))).toBe(true);
+    await user.click(screen.getByRole("button", { name: /sort by/i }));
+    const opts = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(opts.some((v) => v.toLowerCase().includes("repo"))).toBe(true);
+    expect(opts.some((v) => v.toLowerCase().includes("title"))).toBe(true);
+    expect(opts.some((v) => v.toLowerCase().includes("author"))).toBe(true);
+    expect(opts.some((v) => v.toLowerCase().includes("comments"))).toBe(true);
+    expect(opts.some((v) => v.toLowerCase().includes("created"))).toBe(true);
+    expect(opts.some((v) => v.toLowerCase().includes("updated"))).toBe(true);
   });
 
-  it("changes sort order when SortDropdown selection changes", () => {
+  it("changes sort order when SortDropdown selection changes", async () => {
+    const user = userEvent.setup();
     const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
     const issues = [makeIssue({ title: "Issue A" })];
     render(() => <IssuesTab issues={issues} userLogin="" />);
 
-    const select = screen.getByRole("combobox", { name: /sort by/i });
-    fireEvent.change(select, { target: { value: "title:desc" } });
+    await user.click(screen.getByRole("button", { name: /sort by/i }));
+    const titleDesc = screen.getAllByRole("option").find((o) => o.textContent?.includes("Title") && o.textContent?.includes("(Z-A)"));
+    expect(titleDesc).toBeDefined();
+    await user.click(titleDesc!);
 
     expect(setSortSpy).toHaveBeenCalledWith("issues", "title", "desc");
     setSortSpy.mockRestore();

@@ -1,4 +1,5 @@
-import { For } from "solid-js";
+import { createMemo } from "solid-js";
+import { Select } from "@kobalte/core/select";
 
 export interface SortOption {
   label: string;
@@ -13,6 +14,11 @@ interface SortDropdownProps {
   onChange: (field: string, direction: "asc" | "desc") => void;
 }
 
+interface FlatOption {
+  value: string;
+  label: string;
+}
+
 function suffixFor(type: SortOption["type"], dir: "asc" | "desc"): string {
   if (type === "date") return dir === "desc" ? "(newest first)" : "(oldest first)";
   if (type === "text") return dir === "asc" ? "(A-Z)" : "(Z-A)";
@@ -20,10 +26,17 @@ function suffixFor(type: SortOption["type"], dir: "asc" | "desc"): string {
 }
 
 export default function SortDropdown(props: SortDropdownProps) {
+  const flatOptions = createMemo<FlatOption[]>(() =>
+    props.options.flatMap((opt) => [
+      { value: `${opt.field}:desc`, label: `${opt.label} ${suffixFor(opt.type, "desc")}` },
+      { value: `${opt.field}:asc`, label: `${opt.label} ${suffixFor(opt.type, "asc")}` },
+    ])
+  );
+
   const selected = () => `${props.value}:${props.direction}`;
 
-  function handleChange(e: Event) {
-    const val = (e.currentTarget as HTMLSelectElement).value;
+  function handleChange(val: string | null) {
+    if (!val) return;
     const lastColon = val.lastIndexOf(":");
     const field = val.slice(0, lastColon);
     const dir = val.slice(lastColon + 1) as "asc" | "desc";
@@ -31,24 +44,33 @@ export default function SortDropdown(props: SortDropdownProps) {
   }
 
   return (
-    <select
-      aria-label="Sort by"
-      value={selected()}
-      onChange={handleChange}
-      class="text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    <Select
+      options={flatOptions()}
+      optionValue="value"
+      optionTextValue="label"
+      value={flatOptions().find((o) => o.value === selected()) ?? null}
+      onChange={(opt) => handleChange(opt?.value ?? null)}
+      itemComponent={(itemProps) => (
+        <Select.Item
+          item={itemProps.item}
+          class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+        >
+          <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+        </Select.Item>
+      )}
     >
-      <For each={props.options}>
-        {(opt) => (
-          <>
-            <option value={`${opt.field}:desc`}>
-              {opt.label} {suffixFor(opt.type, "desc")}
-            </option>
-            <option value={`${opt.field}:asc`}>
-              {opt.label} {suffixFor(opt.type, "asc")}
-            </option>
-          </>
-        )}
-      </For>
-    </select>
+      <Select.Trigger
+        aria-label="Sort by"
+        class="btn btn-sm btn-outline w-auto min-w-[180px] justify-between"
+      >
+        <Select.Value<FlatOption>>{(state) => state.selectedOption()?.label ?? "Sort by"}</Select.Value>
+        <Select.Icon class="ml-2">▾</Select.Icon>
+      </Select.Trigger>
+      <Select.Portal>
+        <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+          <Select.Listbox />
+        </Select.Content>
+      </Select.Portal>
+    </Select>
   );
 }

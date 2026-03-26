@@ -86,12 +86,13 @@ describe("PullRequestsTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("renders SortDropdown with all sort options", () => {
+  it("renders SortDropdown with all sort options", async () => {
+    const user = userEvent.setup();
     render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    const dropdown = screen.getByLabelText("Sort by") as HTMLSelectElement;
-    expect(dropdown).toBeDefined();
-    // Check all sort fields appear as options
-    const optionText = Array.from(dropdown.options).map((o) => o.text);
+    const trigger = screen.getByRole("button", { name: /Sort by/ });
+    expect(trigger).toBeDefined();
+    await user.click(trigger);
+    const optionText = screen.getAllByRole("option").map((o) => o.textContent ?? "");
     expect(optionText.some((t) => t.includes("Repo"))).toBe(true);
     expect(optionText.some((t) => t.includes("Title"))).toBe(true);
     expect(optionText.some((t) => t.includes("Author"))).toBe(true);
@@ -108,8 +109,10 @@ describe("PullRequestsTab", () => {
     const prs = [makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })];
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
 
-    const dropdown = screen.getByLabelText("Sort by");
-    await user.selectOptions(dropdown, "title:desc");
+    await user.click(screen.getByRole("button", { name: /Sort by/ }));
+    const titleDesc = screen.getAllByRole("option").find((o) => o.textContent?.includes("Title") && o.textContent?.includes("(Z-A)"));
+    expect(titleDesc).toBeDefined();
+    await user.click(titleDesc!);
 
     expect(setSortSpy).toHaveBeenCalledWith("pullRequests", "title", "desc");
     setSortSpy.mockRestore();
