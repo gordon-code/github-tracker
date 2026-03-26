@@ -5,10 +5,10 @@ import userEvent from "@testing-library/user-event";
 // Mock config store
 const mockSetConfig = vi.fn();
 vi.mock("../../../src/app/stores/config", () => ({
-  config: { theme: "light" },
+  config: { theme: "auto" },
   setConfig: (...args: unknown[]) => mockSetConfig(...args),
-  THEME_OPTIONS: ["light", "dark", "nord", "dracula", "synthwave", "corporate", "cupcake", "forest", "coffee", "dim"] as const,
-  DARK_THEMES: new Set(["dark", "dracula", "synthwave", "forest", "coffee", "dim"]),
+  THEME_OPTIONS: ["auto", "corporate", "cupcake", "light", "nord", "dim", "dracula", "dark", "forest"] as const,
+  DARK_THEMES: new Set(["dim", "dracula", "dark", "forest"]),
 }));
 
 import ThemePicker from "../../../src/app/components/settings/ThemePicker";
@@ -20,13 +20,14 @@ beforeEach(() => {
 describe("ThemePicker", () => {
   it("renders a button for each theme option", () => {
     render(() => <ThemePicker />);
-    // 10 themes defined in THEME_OPTIONS
+    // 8 concrete themes + 1 auto banner = 9 buttons
     const buttons = screen.getAllByRole("button");
-    expect(buttons.length).toBe(10);
+    expect(buttons.length).toBe(9);
   });
 
   it("renders theme buttons with correct aria-labels", () => {
     render(() => <ThemePicker />);
+    screen.getByRole("button", { name: "Theme: auto (follows system)" });
     screen.getByRole("button", { name: "Theme: light" });
     screen.getByRole("button", { name: "Theme: dark" });
     screen.getByRole("button", { name: "Theme: nord" });
@@ -34,8 +35,8 @@ describe("ThemePicker", () => {
 
   it("marks current theme as aria-pressed=true", () => {
     render(() => <ThemePicker />);
-    const lightBtn = screen.getByRole("button", { name: "Theme: light" });
-    expect(lightBtn.getAttribute("aria-pressed")).toBe("true");
+    const autoBtn = screen.getByRole("button", { name: "Theme: auto (follows system)" });
+    expect(autoBtn.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("marks non-current themes as aria-pressed=false", () => {

@@ -1,7 +1,7 @@
 import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken } from "./stores/auth";
-import { config, initConfigPersistence } from "./stores/config";
+import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
@@ -118,10 +118,19 @@ function RootRedirect() {
 
 export default function App() {
   createEffect(() => {
-    document.documentElement.setAttribute("data-theme", config.theme);
+    document.documentElement.setAttribute("data-theme", resolveTheme(config.theme));
   });
 
   onMount(() => {
+    // Listen for system theme changes so "auto" reacts immediately
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemThemeChange = () => {
+      if (config.theme === "auto") {
+        document.documentElement.setAttribute("data-theme", resolveTheme("auto"));
+      }
+    };
+    mq.addEventListener("change", onSystemThemeChange);
+
     // All reactive init functions must be called inside the component tree
     initConfigPersistence();
     initViewPersistence();

@@ -4,9 +4,18 @@ import { createEffect } from "solid-js";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
 
-export const THEME_OPTIONS = ["light", "dark", "nord", "dracula", "synthwave", "corporate", "cupcake", "forest", "coffee", "dim"] as const;
+// Light themes first, then dark themes. "auto" uses system preference (corporate/dim).
+export const THEME_OPTIONS = ["auto", "corporate", "cupcake", "light", "nord", "dim", "dracula", "dark", "forest"] as const;
 export type ThemeId = (typeof THEME_OPTIONS)[number];
-export const DARK_THEMES: ReadonlySet<ThemeId> = new Set(["dark", "dracula", "synthwave", "forest", "coffee", "dim"]);
+export const DARK_THEMES: ReadonlySet<string> = new Set(["dim", "dracula", "dark", "forest"]);
+export const AUTO_LIGHT_THEME = "corporate" as const;
+export const AUTO_DARK_THEME = "dim" as const;
+
+export function resolveTheme(theme: ThemeId): string {
+  if (theme !== "auto") return theme;
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return prefersDark ? AUTO_DARK_THEME : AUTO_LIGHT_THEME;
+}
 
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
@@ -30,7 +39,7 @@ export const ConfigSchema = z.object({
       workflowRuns: z.boolean().default(true),
     })
     .default({ enabled: false, issues: true, pullRequests: true, workflowRuns: true }),
-  theme: z.enum(THEME_OPTIONS).default("light"),
+  theme: z.enum(THEME_OPTIONS).default("auto"),
   viewDensity: z.enum(["compact", "comfortable"]).default("comfortable"),
   itemsPerPage: z.number().min(10).max(100).default(25),
   defaultTab: z.enum(["issues", "pullRequests", "actions"]).default("issues"),
@@ -47,7 +56,7 @@ export function loadConfig(): Config {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && "theme" in parsed) {
       if (!THEME_OPTIONS.includes((parsed as Record<string, unknown>).theme as typeof THEME_OPTIONS[number])) {
-        (parsed as Record<string, unknown>).theme = "light";
+        (parsed as Record<string, unknown>).theme = "auto";
       }
     }
     const result = ConfigSchema.safeParse(parsed);
