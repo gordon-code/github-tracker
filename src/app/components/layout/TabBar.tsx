@@ -24,19 +24,19 @@ export default function TabBar(props: TabBarProps) {
             <Tabs.Trigger value="issues" class="tab data-[selected]:tab-active">
               Issues
               <Show when={props.counts?.issues !== undefined}>
-                <span class="badge badge-sm ml-1">{props.counts?.issues}</span>
+                <span class="badge badge-sm badge-neutral ml-1">{props.counts?.issues}</span>
               </Show>
             </Tabs.Trigger>
             <Tabs.Trigger value="pullRequests" class="tab data-[selected]:tab-active">
               Pull Requests
               <Show when={props.counts?.pullRequests !== undefined}>
-                <span class="badge badge-sm ml-1">{props.counts?.pullRequests}</span>
+                <span class="badge badge-sm badge-neutral ml-1">{props.counts?.pullRequests}</span>
               </Show>
             </Tabs.Trigger>
             <Tabs.Trigger value="actions" class="tab data-[selected]:tab-active">
               Actions
               <Show when={props.counts?.actions !== undefined}>
-                <span class="badge badge-sm ml-1">{props.counts?.actions}</span>
+                <span class="badge badge-sm badge-neutral ml-1">{props.counts?.actions}</span>
               </Show>
             </Tabs.Trigger>
           </Tabs.List>

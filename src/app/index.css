@@ -61,6 +61,15 @@
   animation: overlay-fade-out 0.3s ease-in forwards;
 }
 
+/* ── Kobalte → daisyUI bridges ───────────────────────────────────────────── */
+
+/* Kobalte Tabs: data-selected → daisyUI tab-active */
+.tab[data-selected] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 /* ── Dark-theme scrollbar styling ────────────────────────────────────────── */
 
 [data-theme="dark"] *,

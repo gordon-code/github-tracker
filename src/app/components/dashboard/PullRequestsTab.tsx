@@ -251,7 +251,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar with SortDropdown */}
-      <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-200">
+      <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <SortDropdown
           options={sortOptions}
           value={sortPref().field}
@@ -348,7 +348,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                     <button
                       onClick={() => toggleRepo(repoGroup.repoFullName)}
                       aria-expanded={isExpanded()}
-                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-base-content bg-base-200 hover:bg-base-300 transition-colors"
+                      class="w-full flex items-center gap-2 px-4 py-2 text-left text-sm font-semibold text-base-content bg-base-200 border-b border-base-300 hover:bg-base-300 transition-colors"
                     >
                       <ChevronIcon size="md" rotated={!isExpanded()} />
                       {repoGroup.repoFullName}

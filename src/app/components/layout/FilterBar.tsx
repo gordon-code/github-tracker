@@ -55,7 +55,7 @@ export default function FilterBar(props: FilterBarProps) {
   });
 
   return (
-    <div class="flex items-center gap-3 px-4 py-2 bg-base-200 border-b border-base-300">
+    <div class="flex items-center gap-3 px-4 py-2 bg-base-100 border-b border-base-300 shadow-sm">
       <Select<string>
         value={viewState.globalFilter.org ?? ""}
         onChange={handleOrgChange}

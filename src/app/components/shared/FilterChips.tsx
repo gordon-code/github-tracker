@@ -36,7 +36,7 @@ export default function FilterChips(props: FilterChipsProps) {
                   class={`badge cursor-pointer transition-colors ${
                     current() === "all"
                       ? "badge-primary"
-                      : "badge-outline"
+                      : "badge-ghost"
                   }`}
                 >
                   All
@@ -50,7 +50,7 @@ export default function FilterChips(props: FilterChipsProps) {
                       class={`badge cursor-pointer transition-colors ${
                         current() === opt.value
                           ? "badge-primary"
-                          : "badge-outline"
+                          : "badge-ghost"
                       }`}
                     >
                       {opt.label}

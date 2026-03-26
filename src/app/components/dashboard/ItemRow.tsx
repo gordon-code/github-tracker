@@ -38,7 +38,6 @@ export default function ItemRow(props: ItemRowProps) {
         }
       }}
       class={`group relative flex items-start gap-3 cursor-pointer
-        border-b border-base-300
         hover:bg-base-200
         transition-colors focus:outline-none focus:bg-base-200 focus-visible:ring-2 focus-visible:ring-primary
         ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
