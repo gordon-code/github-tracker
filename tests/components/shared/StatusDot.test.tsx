@@ -10,11 +10,11 @@ describe("StatusDot", () => {
     expect(wrapper?.getAttribute("title")).toBe("All checks passed");
   });
 
-  it('shows "Checks pending" label for status="pending"', () => {
+  it('shows "Checks in progress" label for status="pending"', () => {
     const { container } = render(() => <StatusDot status="pending" />);
     const wrapper = container.querySelector("span");
-    expect(wrapper?.getAttribute("aria-label")).toBe("Checks pending");
-    expect(wrapper?.getAttribute("title")).toBe("Checks pending");
+    expect(wrapper?.getAttribute("aria-label")).toBe("Checks in progress");
+    expect(wrapper?.getAttribute("title")).toBe("Checks in progress");
   });
 
   it('shows "Checks failing" label for status="failure"', () => {
@@ -35,18 +35,18 @@ describe("StatusDot", () => {
     expect(wrapper?.getAttribute("aria-label")).toBe("No checks");
   });
 
-  it("has animate-ping class only for status=pending", () => {
+  it("has animate-slow-pulse class only for status=pending", () => {
     const { container: pendingContainer } = render(() => <StatusDot status="pending" />);
-    expect(pendingContainer.querySelector(".animate-ping")).not.toBeNull();
+    expect(pendingContainer.querySelector(".animate-slow-pulse")).not.toBeNull();
 
     const { container: successContainer } = render(() => <StatusDot status="success" />);
-    expect(successContainer.querySelector(".animate-ping")).toBeNull();
+    expect(successContainer.querySelector(".animate-slow-pulse")).toBeNull();
 
     const { container: failureContainer } = render(() => <StatusDot status="failure" />);
-    expect(failureContainer.querySelector(".animate-ping")).toBeNull();
+    expect(failureContainer.querySelector(".animate-slow-pulse")).toBeNull();
 
     const { container: nullContainer } = render(() => <StatusDot status={null} />);
-    expect(nullContainer.querySelector(".animate-ping")).toBeNull();
+    expect(nullContainer.querySelector(".animate-slow-pulse")).toBeNull();
   });
 
 });

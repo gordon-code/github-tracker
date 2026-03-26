@@ -10,7 +10,7 @@ const STATUS_CONFIG = {
   },
   pending: {
     bg: "bg-warning",
-    label: "Checks pending",
+    label: "Checks in progress",
     pulse: true,
   },
   failure: {
@@ -40,7 +40,7 @@ export default function StatusDot(props: StatusDotProps) {
     >
       {cfg().pulse && (
         <span
-          class={`absolute inline-flex h-full w-full rounded-full ${cfg().bg} opacity-75 animate-ping`}
+          class={`absolute inline-flex h-full w-full rounded-full ${cfg().bg} animate-slow-pulse`}
         />
       )}
       <span
