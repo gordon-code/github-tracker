@@ -6,12 +6,13 @@ import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
-import { config } from "../../stores/config";
+import { config, setConfig } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
+import { fetchOrgs } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
-import { getGraphqlRateLimit } from "../../services/github";
+import { getClient, getGraphqlRateLimit } from "../../services/github";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -154,6 +155,25 @@ export default function DashboardPage() {
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
+
+    // Auto-sync orgs on dashboard load — picks up newly accessible orgs
+    // after re-auth, scope changes, or org policy updates
+    const client = getClient();
+    if (client && config.onboardingComplete) {
+      void fetchOrgs(client).then((allOrgs) => {
+        const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+        const newOrgs = allOrgs
+          .map((o) => o.login)
+          .filter((login) => !currentSet.has(login.toLowerCase()));
+        if (newOrgs.length > 0) {
+          setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgs]);
+          console.info(`[dashboard] auto-synced ${newOrgs.length} new org(s)`);
+        }
+      }).catch(() => {
+        // Non-fatal — org sync failure doesn't block dashboard
+      });
+    }
+
     onCleanup(() => {
       _coordinator()?.destroy();
       _setCoordinator(null);

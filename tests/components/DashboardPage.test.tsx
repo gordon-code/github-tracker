@@ -32,10 +32,11 @@ vi.mock("../../src/app/stores/auth", () => ({
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
 }));
 
-// Mock github service (used by Header)
+// Mock github service (used by Header + DashboardPage org sync)
 vi.mock("../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
   getGraphqlRateLimit: () => null,
+  getClient: () => null,
 }));
 
 // Mock errors lib — return empty by default
