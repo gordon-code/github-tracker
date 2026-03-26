@@ -1,7 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
-import { getCoreRateLimit, getGraphqlRateLimit } from "../../services/github";
 import { getUnreadCount, markAllAsRead } from "../../lib/errors";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
@@ -26,14 +25,6 @@ export default function Header() {
 
   const unreadCount = () => getUnreadCount();
 
-  const coreRL = () => getCoreRateLimit();
-  const graphqlRL = () => getGraphqlRateLimit();
-
-  function formatLimit(remaining: number, limit: number, unit: string): string {
-    const k = limit >= 1000 ? `${limit / 1000}k` : String(limit);
-    return `${remaining}/${k}/${unit}`;
-  }
-
   return (
     <>
       <header class="navbar fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300 shadow-sm min-h-14">
@@ -43,34 +34,6 @@ export default function Header() {
         </span>
 
         <div class="flex-1" />
-
-        <Show when={coreRL() || graphqlRL()}>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-xs font-medium text-base-content/60">Rate Limits</span>
-            <div class="flex flex-col items-end text-xs tabular-nums leading-tight gap-0.5">
-              <Show when={coreRL()}>
-                {(rl) => (
-                  <span
-                    class={rl().remaining < 500 ? "text-warning" : "text-base-content/60"}
-                    title={`Core rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
-                  >
-                    {formatLimit(rl().remaining, 5000, "hr")}
-                  </span>
-                )}
-              </Show>
-              <Show when={graphqlRL()}>
-                {(rl) => (
-                  <span
-                    class={rl().remaining < 500 ? "text-warning" : "text-base-content/60"}
-                    title={`GraphQL rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
-                  >
-                    GraphQL {formatLimit(rl().remaining, 5000, "hr")}
-                  </span>
-                )}
-              </Show>
-            </div>
-          </div>
-        </Show>
 
         <Show when={user()}>
           {(u) => (

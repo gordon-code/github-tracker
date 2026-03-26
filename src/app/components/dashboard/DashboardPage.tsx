@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, createMemo, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -11,6 +11,7 @@ import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { getGraphqlRateLimit } from "../../services/github";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -214,22 +215,37 @@ export default function DashboardPage() {
         </div>
 
         <footer class="border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50 shrink-0">
-          <div class="max-w-6xl mx-auto w-full px-4 flex items-center justify-center gap-3">
-            <a
-              href="https://github.com/gordon-code/github-tracker"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="link link-hover"
-            >
-              Source
-            </a>
-            <span aria-hidden="true">&middot;</span>
-            <a
-              href="/privacy"
-              class="link link-hover"
-            >
-              Privacy
-            </a>
+          <div class="max-w-6xl mx-auto w-full px-4 grid grid-cols-3 items-center">
+            <div />
+            <div class="flex items-center justify-center gap-3">
+              <a
+                href="https://github.com/gordon-code/github-tracker"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link link-hover"
+              >
+                Source
+              </a>
+              <span aria-hidden="true">&middot;</span>
+              <a
+                href="/privacy"
+                class="link link-hover"
+              >
+                Privacy
+              </a>
+            </div>
+            <div class="flex justify-end">
+              <Show when={getGraphqlRateLimit()}>
+                {(rl) => (
+                  <span
+                    class={`tabular-nums ${rl().remaining < 500 ? "text-warning" : ""}`}
+                    title={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`}
+                  >
+                    API RL: {rl().remaining.toLocaleString()}/5k/hr
+                  </span>
+                )}
+              </Show>
+            </div>
           </div>
         </footer>
       </div>
