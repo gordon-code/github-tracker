@@ -217,16 +217,17 @@ describe("SettingsPage — Refresh interval", () => {
 });
 
 describe("SettingsPage — Appearance", () => {
-  it("shows current theme value", () => {
+  it("renders ThemePicker with theme buttons", () => {
     renderSettings();
-    screen.getByDisplayValue("Light");
+    // ThemePicker renders a button for each theme — at minimum "light" should be present
+    screen.getByRole("button", { name: /Theme: light/i });
   });
 
-  it("changing theme updates config", async () => {
+  it("clicking a theme button updates config", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const themeSelect = screen.getByDisplayValue("Light");
-    await user.selectOptions(themeSelect, "dark");
+    const darkThemeBtn = screen.getByRole("button", { name: /Theme: dark/i });
+    await user.click(darkThemeBtn);
     expect(config.theme).toBe("dark");
   });
 
