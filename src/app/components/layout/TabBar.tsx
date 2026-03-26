@@ -28,10 +28,9 @@ const TABS: Tab[] = [
 export default function TabBar(props: TabBarProps) {
   return (
     <nav
-      class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+      class="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4"
       aria-label="Dashboard tabs"
     >
-      <div class="max-w-6xl mx-auto w-full px-4 flex">
       <For each={TABS}>
         {(tab) => {
           const count = () => props.counts?.[tab.id];
@@ -63,7 +62,6 @@ export default function TabBar(props: TabBarProps) {
           );
         }}
       </For>
-      </div>
     </nav>
   );
 }

@@ -56,8 +56,7 @@ export default function FilterBar(props: FilterBarProps) {
   });
 
   return (
-    <div class="py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-      <div class="max-w-6xl mx-auto w-full px-4 flex items-center gap-3">
+    <div class="flex items-center gap-3 px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       <select
         value={viewState.globalFilter.org ?? ""}
         onChange={handleOrgChange}
@@ -117,7 +116,6 @@ export default function FilterBar(props: FilterBarProps) {
         </svg>
         Refresh
       </button>
-      </div>
     </div>
   );
 }

@@ -173,20 +173,21 @@ export default function DashboardPage() {
 
       {/* Offset for fixed header */}
       <div class="pt-14 flex flex-col h-screen">
-        <TabBar
-          activeTab={activeTab()}
-          onTabChange={handleTabChange}
-          counts={tabCounts()}
-        />
+        {/* Single constrained panel: tabs + filters + content */}
+        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 border-x border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+          <TabBar
+            activeTab={activeTab()}
+            onTabChange={handleTabChange}
+            counts={tabCounts()}
+          />
 
-        <FilterBar
-          isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
-          lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-          onRefresh={() => _coordinator()?.manualRefresh()}
-        />
+          <FilterBar
+            isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
+            lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+            onRefresh={() => _coordinator()?.manualRefresh()}
+          />
 
-        <main class="flex-1 overflow-auto">
-          <div class="max-w-6xl mx-auto w-full">
+          <main class="flex-1 overflow-auto">
             <Switch>
               <Match when={activeTab() === "issues"}>
                 <IssuesTab
@@ -209,8 +210,8 @@ export default function DashboardPage() {
                 />
               </Match>
             </Switch>
-          </div>
-        </main>
+          </main>
+        </div>
 
         <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
           <div class="max-w-6xl mx-auto w-full px-4 flex items-center justify-center gap-3">

@@ -300,10 +300,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
           const visible = createMemo(() => filteredReposForOrg(state()));
 
           return (
-            <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+            <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-800/40">
               {/* Org header */}
-              <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800/60">
-                <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+              <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-600 dark:bg-gray-700">
+                <span class="text-sm font-semibold text-gray-800 dark:text-gray-100">
                   {state().org}
                 </span>
                 <Show when={!state().loading && !state().error}>
