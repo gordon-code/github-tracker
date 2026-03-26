@@ -121,7 +121,7 @@ describe("Header", () => {
     });
     render(() => <Header />);
     const el = screen.getByText(/499\/5k\/hr/);
-    expect(el.className).toContain("text-amber-600");
+    expect(el.className).toContain("text-warning");
     vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
   });
 
@@ -132,7 +132,7 @@ describe("Header", () => {
     });
     render(() => <Header />);
     const el = screen.getByText(/500\/5k\/hr/);
-    expect(el.className).toContain("text-gray-500");
+    expect(el.className).toContain("text-base-content/60");
     vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
   });
 
