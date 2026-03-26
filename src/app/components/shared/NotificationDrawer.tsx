@@ -78,7 +78,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
                     const cfg = severityConfig(notif.severity);
                     return (
                       <li
-                        class={`flex items-start gap-3 px-4 py-3 border-b border-base-300 border-l-4 ${cfg.alertClass.includes("error") ? "border-l-error" : cfg.alertClass.includes("warning") ? "border-l-warning" : "border-l-info"} ${!notif.read ? "bg-blue-50/50" : ""}`}
+                        class={`flex items-start gap-3 px-4 py-3 border-b border-base-300 border-l-4 ${cfg.borderClass} ${!notif.read ? "bg-info/10" : ""}`}
                       >
                         <svg
                           class={`h-5 w-5 shrink-0 mt-0.5 ${cfg.iconClass}`}

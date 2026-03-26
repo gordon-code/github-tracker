@@ -98,7 +98,7 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
       {/* Expanded run list */}
       <Show when={props.expanded}>
         <div
-          class="mt-2 divide-y divide-base-200"
+          class="mt-2 divide-y divide-base-300"
           onClick={(e) => e.stopPropagation()}
         >
           <For each={props.runs}>

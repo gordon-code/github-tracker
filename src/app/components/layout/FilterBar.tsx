@@ -61,7 +61,7 @@ export default function FilterBar(props: FilterBarProps) {
         onChange={handleOrgChange}
         options={["", ...orgs()]}
         itemComponent={(itemProps) => (
-          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 text-sm">
+          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
             <Select.ItemLabel>
               {itemProps.item.rawValue === "" ? "All orgs" : itemProps.item.rawValue}
             </Select.ItemLabel>
@@ -86,7 +86,7 @@ export default function FilterBar(props: FilterBarProps) {
         onChange={handleRepoChange}
         options={["", ...repos().map((r) => r.fullName)]}
         itemComponent={(itemProps) => (
-          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 text-sm">
+          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
             <Select.ItemLabel>
               {itemProps.item.rawValue === "" ? "All repos" : itemProps.item.rawValue}
             </Select.ItemLabel>

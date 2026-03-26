@@ -37,7 +37,7 @@ function AuthGuard(props: { children: JSX.Element }) {
       fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
-            class="animate-spin h-8 w-8 text-gray-400"
+            class="animate-spin h-8 w-8 text-base-content/40"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
@@ -82,7 +82,7 @@ function RootRedirect() {
       fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
-            class="animate-spin h-8 w-8 text-gray-400"
+            class="animate-spin h-8 w-8 text-base-content/40"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"

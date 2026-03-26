@@ -84,13 +84,13 @@ describe("NotificationDrawer", () => {
     vi.advanceTimersByTime(0);
 
     const items = screen.getAllByRole("listitem");
-    expect(items[0].className).toContain("bg-blue-50/50");
+    expect(items[0].className).toContain("bg-info/10");
 
     fireEvent.click(screen.getByText("Mark all as read"));
     // Notifications still present
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     // Unread background class removed
-    expect(screen.getAllByRole("listitem")[0].className).not.toContain("bg-blue-50/50");
+    expect(screen.getAllByRole("listitem")[0].className).not.toContain("bg-info/10");
   });
 
   it("Dismiss all empties the list and mutes sources", () => {
@@ -134,21 +134,21 @@ describe("NotificationDrawer", () => {
     expect(screen.getByText("No notifications")).toBeDefined();
   });
 
-  it("unread notifications have bg-blue-50/50 background class", () => {
+  it("unread notifications have bg-info/10 background class", () => {
     pushNotification("api", "Unread notification", "error");
     renderDrawer(true);
     vi.advanceTimersByTime(0);
     const item = screen.getByRole("listitem");
-    expect(item.className).toContain("bg-blue-50/50");
+    expect(item.className).toContain("bg-info/10");
   });
 
-  it("read notifications do not have bg-blue-50/50 background class", () => {
+  it("read notifications do not have bg-info/10 background class", () => {
     pushNotification("api", "Read notification", "error");
     markAllAsRead();
     renderDrawer(true);
     vi.advanceTimersByTime(0);
     const item = screen.getByRole("listitem");
-    expect(item.className).not.toContain("bg-blue-50/50");
+    expect(item.className).not.toContain("bg-info/10");
   });
 
   it("has role=dialog and Close button with proper aria-label", () => {
