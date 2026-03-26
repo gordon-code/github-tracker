@@ -47,6 +47,7 @@ export function detectNewItems(current: DashboardData): NewItems {
     for (const item of current.pullRequests) seenPrIds.add(item.id);
     for (const item of current.workflowRuns) seenRunIds.add(item.id);
     initialized = true;
+    console.debug(`[notifications] seeded: ${seenIssueIds.size} issues, ${seenPrIds.size} PRs, ${seenRunIds.size} runs`);
     return { issues: [], pullRequests: [], workflowRuns: [] };
   }
 
@@ -71,6 +72,7 @@ export function detectNewItems(current: DashboardData): NewItems {
     }
   }
 
+  console.debug(`[notifications] detected: ${newIssues.length} new issues, ${newPrs.length} new PRs, ${newRuns.length} new runs (seen: ${seenIssueIds.size}/${seenPrIds.size}/${seenRunIds.size})`);
   return { issues: newIssues, pullRequests: newPrs, workflowRuns: newRuns };
 }
 
@@ -106,7 +108,15 @@ function fireNotification(
 }
 
 export function dispatchNotifications(newItems: NewItems, config: Config): void {
-  if (!canNotify(config)) return;
+  if (!canNotify(config)) {
+    console.debug("[notifications] dispatch skipped — canNotify=false", {
+      notificationApi: "Notification" in window,
+      permission: "Notification" in window ? Notification.permission : "N/A",
+      enabled: config.notifications.enabled,
+    });
+    return;
+  }
+  console.debug("[notifications] dispatching", { issues: newItems.issues.length, prs: newItems.pullRequests.length, runs: newItems.workflowRuns.length });
 
   const { issues, pullRequests, workflowRuns } = newItems;
   const notifCfg = config.notifications;
