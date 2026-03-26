@@ -64,7 +64,7 @@ export default function OrgSelector(props: OrgSelectorProps) {
             type="button"
             onClick={selectAll}
             disabled={allVisibleSelected() || filteredOrgs().length === 0}
-            class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            class="btn btn-ghost btn-xs"
           >
             Select All
           </button>
@@ -72,7 +72,7 @@ export default function OrgSelector(props: OrgSelectorProps) {
             type="button"
             onClick={deselectAll}
             disabled={props.selected.length === 0}
-            class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            class="btn btn-ghost btn-xs"
           >
             Deselect All
           </button>
@@ -86,7 +86,7 @@ export default function OrgSelector(props: OrgSelectorProps) {
       </Show>
 
       <Show when={orgs.error}>
-        <div class="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+        <div class="alert alert-error text-sm">
           Failed to load organizations. Please check your connection and try again.
         </div>
       </Show>
@@ -95,22 +95,22 @@ export default function OrgSelector(props: OrgSelectorProps) {
         <Show
           when={filteredOrgs().length > 0}
           fallback={
-            <p class="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+            <p class="py-4 text-center text-sm text-base-content/60">
               No organizations match your filter.
             </p>
           }
         >
-          <ul class="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+          <ul class="divide-y divide-base-300 overflow-hidden rounded-lg border border-base-300">
             <For each={filteredOrgs()}>
               {(org) => {
                 return (
                   <li>
-                    <label class="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                    <label class="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-base-200">
                       <input
                         type="checkbox"
                         checked={isSelected(org.login)}
                         onChange={() => toggleOrg(org.login)}
-                        class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
+                        class="checkbox checkbox-primary checkbox-sm"
                       />
                       <img
                         src={org.avatarUrl}
@@ -118,10 +118,10 @@ export default function OrgSelector(props: OrgSelectorProps) {
                         class="h-7 w-7 rounded-full"
                         aria-hidden="true"
                       />
-                      <span class="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                      <span class="flex-1 text-sm font-medium text-base-content">
                         {org.login}
                       </span>
-                      <span class="text-xs text-gray-400 dark:text-gray-500">
+                      <span class="text-xs text-base-content/40">
                         {org.type === "user" ? "Personal" : "Org"}
                       </span>
                     </label>
@@ -133,7 +133,7 @@ export default function OrgSelector(props: OrgSelectorProps) {
         </Show>
 
         <Show when={(orgs() ?? []).length > 0}>
-          <p class="text-xs text-gray-500 dark:text-gray-400">
+          <p class="text-xs text-base-content/60">
             {props.selected.length} of {(orgs() ?? []).length} selected
           </p>
         </Show>

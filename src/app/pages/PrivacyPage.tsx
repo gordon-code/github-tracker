@@ -1,25 +1,25 @@
 export default function PrivacyPage() {
   return (
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div class="bg-base-200 min-h-screen">
       <div class="mx-auto max-w-2xl px-4 py-12">
         <a
           href="/dashboard"
-          class="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          class="link link-hover text-sm text-base-content/40"
         >
           &larr; Back to dashboard
         </a>
 
-        <h1 class="mt-6 text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <h1 class="mt-6 text-2xl font-bold text-base-content">
           Privacy Policy
         </h1>
 
-        <div class="mt-6 space-y-4 text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+        <div class="mt-6 space-y-4 text-sm text-base-content/70 leading-relaxed">
           <p>
             GitHub Tracker does not collect, store, or transmit any personal
             data. All data stays in your browser.
           </p>
 
-          <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100 pt-2">
+          <h2 class="text-base font-semibold text-base-content pt-2">
             What we store
           </h2>
           <ul class="list-disc pl-5 space-y-1">
@@ -34,7 +34,7 @@ export default function PrivacyPage() {
             </li>
           </ul>
 
-          <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100 pt-2">
+          <h2 class="text-base font-semibold text-base-content pt-2">
             What we don't do
           </h2>
           <ul class="list-disc pl-5 space-y-1">
@@ -44,7 +44,7 @@ export default function PrivacyPage() {
             <li>No cookies</li>
           </ul>
 
-          <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100 pt-2">
+          <h2 class="text-base font-semibold text-base-content pt-2">
             GitHub API access
           </h2>
           <p>
@@ -55,7 +55,7 @@ export default function PrivacyPage() {
               href="https://github.com/settings/applications"
               target="_blank"
               rel="noopener noreferrer"
-              class="text-blue-600 hover:underline dark:text-blue-400"
+              class="link link-primary"
             >
               GitHub Settings &rarr; Applications
             </a>.
