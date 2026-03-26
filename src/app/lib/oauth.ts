@@ -32,12 +32,17 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
     // repo: read issues/PRs; read:org: list orgs; notifications: gate
     scope: "repo read:org notifications",
     state,
+    prompt: "select_account",
   });
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }
 
 const VALID_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * Links to the per-app authorization page where users can see org access
+ * status and request access for orgs with OAuth restrictions enabled.
+ */
 export function buildOrgAccessUrl(): string {
   const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID as string;
   if (!clientId || !VALID_CLIENT_ID_RE.test(clientId)) {

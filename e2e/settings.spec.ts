@@ -87,18 +87,18 @@ test("back link navigates to dashboard", async ({ page }) => {
 
 // ── Theme change ─────────────────────────────────────────────────────────────
 
-test("changing theme to dark adds dark class to html element", async ({
+test("changing theme to dark applies data-theme attribute", async ({
   page,
 }) => {
   await setupAuth(page);
   await page.goto("/settings");
 
-  // Locate the Theme setting row by its label text, then find its <select> child.
-  const themeSelect = page.getByRole("combobox").filter({ has: page.locator('option[value="dark"]') });
-  await themeSelect.selectOption("dark");
+  // ThemePicker uses buttons with aria-label "Theme: <name>"
+  const darkBtn = page.getByRole("button", { name: "Theme: dark" });
+  await darkBtn.click();
 
   const htmlElement = page.locator("html");
-  await expect(htmlElement).toHaveClass(/dark/);
+  await expect(htmlElement).toHaveAttribute("data-theme", "dark");
 });
 
 // ── Sign out ─────────────────────────────────────────────────────────────────

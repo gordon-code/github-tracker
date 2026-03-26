@@ -268,7 +268,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
           <button
             type="button"
             onClick={selectAll}
-            class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            class="btn btn-ghost btn-xs"
           >
             Select All
           </button>
@@ -276,7 +276,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
             type="button"
             onClick={deselectAll}
             disabled={props.selected.length === 0}
-            class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            class="btn btn-ghost btn-xs"
           >
             Deselect All
           </button>
@@ -287,7 +287,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
       <Show when={isLoadingAny()}>
         <div class="flex items-center gap-3 py-2">
           <LoadingSpinner size="sm" />
-          <span class="text-sm text-gray-500 dark:text-gray-400">
+          <span class="text-sm text-base-content/60">
             {progressLabel()}
           </span>
         </div>
@@ -300,10 +300,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
           const visible = createMemo(() => filteredReposForOrg(state()));
 
           return (
-            <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+            <div class="overflow-hidden rounded-lg border border-base-300">
               {/* Org header */}
-              <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800/60">
-                <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+              <div class="flex items-center justify-between border-b border-base-300 bg-base-200 px-4 py-2">
+                <span class="text-sm font-semibold text-base-content">
                   {state().org}
                 </span>
                 <Show when={!state().loading && !state().error}>
@@ -315,11 +315,11 @@ export default function RepoSelector(props: RepoSelectorProps) {
                         visible().length === 0 ||
                         visible().every((r) => isSelected(r.fullName))
                       }
-                      class="text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400"
+                      class="btn btn-ghost btn-xs"
                     >
                       Select All
                     </button>
-                    <span class="text-gray-300 dark:text-gray-600">·</span>
+                    <span class="text-base-content/30">·</span>
                     <button
                       type="button"
                       onClick={() => deselectAllInOrg(state())}
@@ -327,7 +327,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
                         visible().length === 0 ||
                         visible().every((r) => !isSelected(r.fullName))
                       }
-                      class="text-xs text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400"
+                      class="btn btn-ghost btn-xs"
                     >
                       Deselect All
                     </button>
@@ -345,13 +345,13 @@ export default function RepoSelector(props: RepoSelectorProps) {
               {/* Error state for this org */}
               <Show when={!state().loading && state().error !== null}>
                 <div class="flex items-center justify-between px-4 py-3">
-                  <span class="text-sm text-red-600 dark:text-red-400">
+                  <span class="text-sm text-error">
                     {state().error}
                   </span>
                   <button
                     type="button"
                     onClick={() => retryOrg(state().org)}
-                    class="ml-3 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    class="btn btn-ghost btn-xs ml-3"
                   >
                     Retry
                   </button>
@@ -363,7 +363,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
                 <Show
                   when={visible().length > 0}
                   fallback={
-                    <p class="px-4 py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                    <p class="px-4 py-4 text-center text-sm text-base-content/50">
                       {q()
                         ? "No repos match your filter."
                         : "No repositories found."}
@@ -375,25 +375,25 @@ export default function RepoSelector(props: RepoSelectorProps) {
                     role="region"
                     aria-label={`${state().org} repositories`}
                   >
-                    <ul class="divide-y divide-gray-100 dark:divide-gray-700">
+                    <ul class="divide-y divide-base-300">
                       <Index each={visible()}>
                         {(repo) => {
                           return (
                             <li>
-                              <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200">
                                 <input
                                   type="checkbox"
                                   checked={isSelected(repo().fullName)}
                                   onChange={() => toggleRepo(repo())}
-                                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-blue-400"
+                                  class="checkbox checkbox-primary checkbox-sm mt-0.5"
                                 />
                                 <div class="min-w-0 flex-1">
                                   <div class="flex items-center gap-2">
-                                    <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    <span class="min-w-0 truncate text-sm font-medium text-base-content">
                                       {repo().name}
                                     </span>
                                     <Show when={repo().pushedAt}>
-                                      <span class="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                                      <span class="ml-auto shrink-0 text-xs text-base-content/60">
                                         {relativeTime(repo().pushedAt!)}
                                       </span>
                                     </Show>
@@ -415,7 +415,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
       {/* Total count */}
       <Show when={!isLoadingAny() && props.selected.length > 0}>
-        <p class="text-xs text-gray-500 dark:text-gray-400">
+        <p class="text-xs text-base-content/60">
           {props.selected.length}{" "}
           {props.selected.length === 1 ? "repo" : "repos"} selected
         </p>

@@ -1,7 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
-import { getCoreRateLimit, getGraphqlRateLimit } from "../../services/github";
 import { getUnreadCount, markAllAsRead } from "../../lib/errors";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
@@ -26,50 +25,15 @@ export default function Header() {
 
   const unreadCount = () => getUnreadCount();
 
-  const coreRL = () => getCoreRateLimit();
-  const graphqlRL = () => getGraphqlRateLimit();
-
-  function formatLimit(remaining: number, limit: number, unit: string): string {
-    const k = limit >= 1000 ? `${limit / 1000}k` : String(limit);
-    return `${remaining}/${k}/${unit}`;
-  }
-
   return (
     <>
-      <header class="fixed top-0 left-0 right-0 z-50 h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center px-4 gap-4">
-        <span class="font-semibold text-gray-900 dark:text-gray-100 text-lg shrink-0">
+      <header class="navbar fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300 shadow-sm min-h-14">
+        <div class="max-w-6xl mx-auto w-full flex items-center gap-4 px-4">
+        <span class="font-semibold text-base-content text-lg shrink-0">
           GitHub Tracker
         </span>
 
         <div class="flex-1" />
-
-        <Show when={coreRL() || graphqlRL()}>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-xs font-medium text-gray-400 dark:text-gray-500">Rate Limits</span>
-            <div class="flex flex-col items-end text-xs tabular-nums leading-tight gap-0.5">
-              <Show when={coreRL()}>
-                {(rl) => (
-                  <span
-                    class={rl().remaining < 500 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
-                    title={`Core rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
-                  >
-                    {formatLimit(rl().remaining, 5000, "hr")}
-                  </span>
-                )}
-              </Show>
-              <Show when={graphqlRL()}>
-                {(rl) => (
-                  <span
-                    class={rl().remaining < 500 ? "text-amber-600 dark:text-amber-400" : "text-gray-500 dark:text-gray-400"}
-                    title={`GraphQL rate limit resets at ${rl().resetAt.toLocaleTimeString()}`}
-                  >
-                    GraphQL {formatLimit(rl().remaining, 5000, "hr")}
-                  </span>
-                )}
-              </Show>
-            </div>
-          </div>
-        </Show>
 
         <Show when={user()}>
           {(u) => (
@@ -79,7 +43,7 @@ export default function Header() {
                 alt={u().login}
                 class="h-7 w-7 rounded-full"
               />
-              <span class="text-sm text-gray-700 dark:text-gray-300 hidden sm:inline">
+              <span class="text-sm text-base-content hidden sm:inline">
                 {u().name ?? u().login}
               </span>
             </div>
@@ -88,7 +52,7 @@ export default function Header() {
 
         <a
           href="/settings"
-          class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0"
+          class="btn btn-ghost btn-sm shrink-0"
           aria-label="Settings"
         >
           <svg
@@ -110,7 +74,7 @@ export default function Header() {
         <button
           type="button"
           onClick={handleBellClick}
-          class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0 relative"
+          class="btn btn-ghost btn-sm shrink-0 relative"
           aria-label={unreadCount() > 0 ? `Notifications, ${unreadCount()} unread` : "Notifications"}
           aria-expanded={drawerOpen()}
           aria-haspopup="dialog"
@@ -125,7 +89,7 @@ export default function Header() {
             <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
           </svg>
           <Show when={unreadCount() > 0}>
-            <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+            <span class="badge badge-error badge-xs absolute -top-1 -right-1 flex items-center justify-center text-[10px] font-bold">
               {unreadCount() > 9 ? "9+" : unreadCount()}
             </span>
           </Show>
@@ -134,7 +98,7 @@ export default function Header() {
         <button
           type="button"
           onClick={handleLogout}
-          class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 shrink-0"
+          class="btn btn-ghost btn-sm shrink-0"
           aria-label="Sign out"
         >
           <svg
@@ -151,6 +115,7 @@ export default function Header() {
             />
           </svg>
         </button>
+        </div>
       </header>
       <NotificationDrawer open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
       <ToastContainer />

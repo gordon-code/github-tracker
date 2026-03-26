@@ -6,14 +6,15 @@ interface SizeBadgeProps {
   deletions: number;
   changedFiles: number;
   category?: "XS" | "S" | "M" | "L" | "XL";
+  filesUrl?: string;
 }
 
 const SIZE_CONFIG = {
-  XS: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  S: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  M: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
-  L: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
-  XL: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+  XS: "badge badge-success badge-sm",
+  S: "badge badge-success badge-sm",
+  M: "badge badge-warning badge-sm",
+  L: "badge badge-error badge-sm",
+  XL: "badge badge-error badge-sm",
 } as const;
 
 export default function SizeBadge(props: SizeBadgeProps) {
@@ -22,12 +23,30 @@ export default function SizeBadge(props: SizeBadgeProps) {
   return (
     <Show when={props.additions + props.deletions > 0 || props.changedFiles > 0}>
       <span class="flex items-center gap-1 text-xs">
-        <span class={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${SIZE_CONFIG[size()]}`}>
+        <span class={SIZE_CONFIG[size()]}>
           {size()}
         </span>
-        <span class="text-green-600">+{props.additions}</span>
-        <span class="text-red-600">-{props.deletions}</span>
-        <span class="text-gray-500 dark:text-gray-400">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+        <Show when={props.filesUrl} fallback={
+          <>
+            <span class="text-success">+{props.additions}</span>
+            <span class="text-error">-{props.deletions}</span>
+            <span class="text-base-content/50">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+          </>
+        }>
+          {(url) => (
+            <a
+              href={url()}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span class="text-success">+{props.additions}</span>
+              <span class="text-error">-{props.deletions}</span>
+              <span class="text-base-content/50">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+            </a>
+          )}
+        </Show>
       </span>
     </Show>
   );

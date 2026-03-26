@@ -45,10 +45,7 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
       <div class="relative">
         <button
           onClick={() => setOpen((v) => !v)}
-          class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium
-            bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300
-            hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors
-            focus:outline-none focus:ring-2 focus:ring-blue-500"
+          class="badge badge-neutral badge-sm cursor-pointer"
           aria-haspopup="true"
           aria-expanded={open()}
         >
@@ -65,39 +62,38 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
 
           {/* Popover */}
           <div
-            class="absolute right-0 top-full mt-1 z-20 w-80 rounded-lg border border-gray-200 dark:border-gray-700
-              bg-white dark:bg-gray-900 shadow-lg"
+            class="absolute right-0 top-full mt-1 z-20 w-80 bg-base-100 border border-base-300 rounded-lg shadow-lg"
             role="dialog"
             aria-label="Ignored items"
           >
-            <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-800 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            <div class="px-3 py-2 border-b border-base-300 text-xs font-semibold text-base-content/60 uppercase tracking-wide">
               Ignored
             </div>
 
-            <ul class="max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+            <ul class="max-h-64 overflow-y-auto divide-y divide-base-300">
               <For each={props.items}>
                 {(item) => (
                   <li class="flex items-start gap-2 px-3 py-2">
                     <span
-                      class="mt-0.5 shrink-0 text-gray-400 dark:text-gray-500 font-mono text-xs"
+                      class="mt-0.5 shrink-0 text-base-content/40 font-mono text-xs"
                       aria-label={item.type}
                     >
                       {typeIcon(item.type)}
                     </span>
                     <div class="flex-1 min-w-0">
-                      <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <p class="text-xs text-base-content/60 truncate">
                         {item.repo}
                       </p>
-                      <p class="text-sm text-gray-800 dark:text-gray-200 truncate" title={item.title}>
+                      <p class="text-sm text-base-content truncate" title={item.title}>
                         {item.title}
                       </p>
-                      <p class="text-xs text-gray-400 dark:text-gray-500">
+                      <p class="text-xs text-base-content/40">
                         Ignored {formatDate(item.ignoredAt)}
                       </p>
                     </div>
                     <button
                       onClick={() => props.onUnignore(item.id)}
-                      class="shrink-0 text-xs text-blue-600 dark:text-blue-400 hover:underline focus:outline-none focus:underline"
+                      class="shrink-0 text-xs text-primary hover:underline focus:outline-none focus:underline"
                     >
                       Unignore
                     </button>
@@ -106,10 +102,10 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
               </For>
             </ul>
 
-            <div class="px-3 py-2 border-t border-gray-100 dark:border-gray-800 flex justify-end">
+            <div class="px-3 py-2 border-t border-base-300 flex justify-end">
               <button
                 onClick={handleUnignoreAll}
-                class="text-xs text-red-600 dark:text-red-400 hover:underline focus:outline-none focus:underline"
+                class="text-xs text-error hover:underline focus:outline-none focus:underline"
               >
                 Unignore All
               </button>

@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, onMount, onCleanup, JSX } from "solid-js";
+import { createSignal, Show, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
@@ -10,141 +10,10 @@ import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
+import Section from "./Section";
+import SettingRow from "./SettingRow";
+import ThemePicker from "./ThemePicker";
 import type { RepoRef } from "../../services/api";
-
-// ── Theme application ──────────────────────────────────────────────────────
-
-function applyTheme(theme: "light" | "dark" | "system"): void {
-  const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else if (theme === "light") {
-    root.classList.remove("dark");
-  } else {
-    // system
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  }
-}
-
-// ── Section wrapper ────────────────────────────────────────────────────────
-
-function Section(props: { title: string; children: JSX.Element }) {
-  return (
-    <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-      <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
-          {props.title}
-        </h2>
-      </div>
-      <div class="px-6 py-5">{props.children}</div>
-    </div>
-  );
-}
-
-function SettingRow(props: {
-  label: string;
-  description?: string;
-  children: JSX.Element;
-}) {
-  return (
-    <div class="flex items-start justify-between gap-6 py-3 first:pt-0 last:pb-0">
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">{props.label}</p>
-        <Show when={props.description}>
-          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{props.description}</p>
-        </Show>
-      </div>
-      <div class="shrink-0">{props.children}</div>
-    </div>
-  );
-}
-
-// ── Toggle ─────────────────────────────────────────────────────────────────
-
-function Toggle(props: {
-  checked: boolean;
-  onChange: (val: boolean) => void;
-  disabled?: boolean;
-  label?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.checked}
-      aria-label={props.label}
-      disabled={props.disabled}
-      onClick={() => props.onChange(!props.checked)}
-      class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 disabled:cursor-not-allowed disabled:opacity-40 ${
-        props.checked ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-600"
-      }`}
-    >
-      <span
-        class={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-          props.checked ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
-}
-
-// ── Select ─────────────────────────────────────────────────────────────────
-
-function Select<T extends string | number>(props: {
-  value: T;
-  onChange: (val: T) => void;
-  options: { value: T; label: string }[];
-  class?: string;
-}) {
-  return (
-    <select
-      value={String(props.value)}
-      onChange={(e) => {
-        const raw = e.currentTarget.value;
-        // Attempt numeric coercion if original type is number
-        const coerced =
-          typeof props.value === "number" ? (Number(raw) as T) : (raw as T);
-        props.onChange(coerced);
-      }}
-      class={`rounded-md border border-gray-300 bg-white py-1.5 pl-3 pr-8 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:border-blue-400 dark:focus:ring-blue-400 ${props.class ?? ""}`}
-    >
-      {props.options.map((opt) => (
-        <option value={String(opt.value)}>{opt.label}</option>
-      ))}
-    </select>
-  );
-}
-
-// ── Number input ───────────────────────────────────────────────────────────
-
-function NumberInput(props: {
-  value: number;
-  min: number;
-  max: number;
-  onChange: (val: number) => void;
-}) {
-  return (
-    <input
-      type="number"
-      min={props.min}
-      max={props.max}
-      value={props.value}
-      onInput={(e) => {
-        const val = parseInt(e.currentTarget.value, 10);
-        if (!isNaN(val) && val >= props.min && val <= props.max) {
-          props.onChange(val);
-        }
-      }}
-      class="w-20 rounded-md border border-gray-300 bg-white py-1.5 px-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
-    />
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -182,24 +51,6 @@ export default function SettingsPage() {
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
-
-  // Apply theme reactively
-  createEffect(() => {
-    const theme = config.theme;
-    applyTheme(theme);
-  });
-
-  // System preference listener (only active when theme === "system")
-  onMount(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => {
-      if (config.theme === "system") {
-        applyTheme("system");
-      }
-    };
-    mq.addEventListener("change", handler);
-    onCleanup(() => mq.removeEventListener("change", handler));
-  });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -339,12 +190,6 @@ export default function SettingsPage() {
     { value: "actions" as const, label: "GitHub Actions" },
   ];
 
-  const themeOptions = [
-    { value: "system" as const, label: "System" },
-    { value: "light" as const, label: "Light" },
-    { value: "dark" as const, label: "Dark" },
-  ];
-
   const densityOptions = [
     { value: "comfortable" as const, label: "Comfortable" },
     { value: "compact" as const, label: "Compact" },
@@ -358,14 +203,14 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div class="bg-base-200 min-h-screen">
       {/* Page header */}
-      <div class="border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div class="border-b border-base-300 bg-base-100">
         <div class="mx-auto max-w-3xl px-4 py-6 sm:px-6">
           <div class="flex items-center gap-3">
             <a
               href="/dashboard"
-              class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              class="text-base-content/40 hover:text-base-content/60"
               aria-label="Back to dashboard"
             >
               <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -376,9 +221,9 @@ export default function SettingsPage() {
                 />
               </svg>
             </a>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+            <h1 class="text-2xl font-bold text-base-content">Settings</h1>
             <Show when={showSaved()}>
-              <span class="ml-auto text-sm font-medium text-green-600 dark:text-green-400 animate-pulse">
+              <span class="ml-auto text-sm font-medium text-success animate-pulse">
                 Saved
               </span>
             </Show>
@@ -389,24 +234,24 @@ export default function SettingsPage() {
       <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 flex flex-col gap-6">
         {/* Section 1: Orgs & Repos */}
         <Section title="Organizations & Repositories">
-          <div class="flex flex-col gap-3">
+          <div class="flex flex-col gap-3 px-4 py-3">
             <div class="flex items-center justify-between">
               <div>
-                <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Organizations</p>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
+                <p class="text-sm font-medium text-base-content">Organizations</p>
+                <p class="text-xs text-base-content/60">
                   {localOrgs().length} selected
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setOrgPanelOpen((v) => !v)}
-                class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="btn btn-sm btn-outline"
               >
                 Manage Organizations
               </button>
             </div>
             <Show when={orgPanelOpen()}>
-              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <div class="rounded-lg border border-base-300 p-4">
                 <OrgSelector
                   selected={localOrgs()}
                   onChange={handleOrgsChange}
@@ -414,36 +259,36 @@ export default function SettingsPage() {
               </div>
             </Show>
 
-            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+            <div class="border-t border-base-300 pt-3">
               <div class="flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  <p class="text-sm font-medium text-base-content">
                     Organization Access
                   </p>
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    Manage organization access on GitHub — new orgs sync automatically when you return
+                  <p class="text-xs text-base-content/60">
+                    Request access for restricted orgs on GitHub — new orgs sync when you return
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleGrantOrgs}
                   disabled={merging()}
-                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                  class="btn btn-sm btn-outline"
                 >
-                  {merging() ? "Syncing..." : "Grant more orgs"}
+                  {merging() ? "Syncing..." : "Manage org access"}
                 </button>
               </div>
             </div>
 
-            <div class="border-t border-gray-100 pt-3 dark:border-gray-700">
+            <div class="border-t border-base-300 pt-3">
               <div class="flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Repositories</p>
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                  <p class="text-sm font-medium text-base-content">Repositories</p>
+                  <p class="text-xs text-base-content/60">
                     {localRepos().length} selected
                   </p>
                   <Show when={localRepos().length > 50}>
-                    <p class="text-xs text-amber-600 dark:text-amber-400">
+                    <p class="text-xs text-warning">
                       Tracking {localRepos().length} repos will use significant API quota per poll cycle
                     </p>
                   </Show>
@@ -451,14 +296,14 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setRepoPanelOpen((v) => !v)}
-                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                  class="btn btn-sm btn-outline"
                 >
                   Manage Repositories
                 </button>
               </div>
             </div>
             <Show when={repoPanelOpen()}>
-              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <div class="rounded-lg border border-base-300 p-4">
                 <RepoSelector
                   selectedOrgs={localOrgs()}
                   selected={localRepos()}
@@ -475,284 +320,330 @@ export default function SettingsPage() {
             label="Refresh interval"
             description="How often to poll GitHub for new data"
           >
-            <Select
-              value={config.refreshInterval}
-              onChange={(val) => saveWithFeedback({ refreshInterval: val })}
-              options={refreshOptions}
-            />
+            <select
+              value={String(config.refreshInterval)}
+              onChange={(e) => {
+                saveWithFeedback({ refreshInterval: Number(e.currentTarget.value) });
+              }}
+              class="select select-sm"
+            >
+              {refreshOptions.map((opt) => (
+                <option value={String(opt.value)}>{opt.label}</option>
+              ))}
+            </select>
           </SettingRow>
         </Section>
 
         {/* Section 3: GitHub Actions */}
         <Section title="GitHub Actions">
-          <div class="divide-y divide-gray-100 dark:divide-gray-700">
-            <SettingRow
-              label="Max workflows per repo"
-              description="Number of active workflows to track per repository (1–20)"
-            >
-              <NumberInput
-                value={config.maxWorkflowsPerRepo}
-                min={1}
-                max={20}
-                onChange={(val) => saveWithFeedback({ maxWorkflowsPerRepo: val })}
-              />
-            </SettingRow>
-            <SettingRow
-              label="Max runs per workflow"
-              description="Number of recent runs to show per workflow (1–10)"
-            >
-              <NumberInput
-                value={config.maxRunsPerWorkflow}
-                min={1}
-                max={10}
-                onChange={(val) => saveWithFeedback({ maxRunsPerWorkflow: val })}
-              />
-            </SettingRow>
-          </div>
+          <SettingRow
+            label="Max workflows per repo"
+            description="Number of active workflows to track per repository (1–20)"
+          >
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={config.maxWorkflowsPerRepo}
+              onInput={(e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                if (!isNaN(val) && val >= 1 && val <= 20) {
+                  saveWithFeedback({ maxWorkflowsPerRepo: val });
+                }
+              }}
+              class="input input-sm w-20"
+            />
+          </SettingRow>
+          <SettingRow
+            label="Max runs per workflow"
+            description="Number of recent runs to show per workflow (1–10)"
+          >
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={config.maxRunsPerWorkflow}
+              onInput={(e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                if (!isNaN(val) && val >= 1 && val <= 10) {
+                  saveWithFeedback({ maxRunsPerWorkflow: val });
+                }
+              }}
+              class="input input-sm w-20"
+            />
+          </SettingRow>
         </Section>
 
         {/* Section 4: Notifications */}
         <Section title="Notifications">
-          <div class="divide-y divide-gray-100 dark:divide-gray-700">
-            <SettingRow
-              label="Enable notifications"
-              description="Show browser notifications for new activity"
-            >
-              <div class="flex items-center gap-3">
-                <Show when={notifPermission() !== "granted" && !config.notifications.enabled}>
-                  <button
-                    type="button"
-                    onClick={() => void handleRequestNotificationPermission()}
-                    class="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    Grant permission
-                  </button>
-                </Show>
-                <Show when={notifPermission() === "denied"}>
-                  <span class="text-xs text-red-500 dark:text-red-400">
-                    Permission denied in browser
-                  </span>
-                </Show>
-                <Toggle
-                  checked={config.notifications.enabled}
-                  disabled={notifPermission() === "denied"}
-                  label="Enable notifications"
-                  onChange={(val) => {
-                    if (val && notifPermission() !== "granted") {
-                      void handleRequestNotificationPermission();
-                    } else {
-                      saveWithFeedback({
-                        notifications: { ...config.notifications, enabled: val },
-                      });
-                    }
-                  }}
-                />
-              </div>
-            </SettingRow>
-            <SettingRow label="Issues" description="Notify when new issues are opened">
-              <Toggle
-                checked={config.notifications.issues}
-                disabled={!config.notifications.enabled}
-                label="Issues notifications"
-                onChange={(val) =>
-                  saveWithFeedback({
-                    notifications: { ...config.notifications, issues: val },
-                  })
-}
+          <SettingRow
+            label="Enable notifications"
+            description="Show browser notifications for new activity"
+          >
+            <div class="flex items-center gap-3">
+              <Show when={notifPermission() !== "granted" && !config.notifications.enabled}>
+                <button
+                  type="button"
+                  onClick={() => void handleRequestNotificationPermission()}
+                  class="btn btn-ghost btn-xs"
+                >
+                  Grant permission
+                </button>
+              </Show>
+              <Show when={notifPermission() === "denied"}>
+                <span class="text-xs text-error">
+                  Permission denied in browser
+                </span>
+              </Show>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-checked={config.notifications.enabled}
+                aria-label="Enable notifications"
+                checked={config.notifications.enabled}
+                disabled={notifPermission() === "denied"}
+                onChange={(e) => {
+                  const val = e.currentTarget.checked;
+                  if (val && notifPermission() !== "granted") {
+                    void handleRequestNotificationPermission();
+                  } else {
+                    saveWithFeedback({
+                      notifications: { ...config.notifications, enabled: val },
+                    });
+                  }
+                }}
+                class="toggle toggle-primary"
               />
-            </SettingRow>
-            <SettingRow label="Pull Requests" description="Notify when PRs are opened or updated">
-              <Toggle
-                checked={config.notifications.pullRequests}
-                disabled={!config.notifications.enabled}
-                label="Pull requests notifications"
-                onChange={(val) =>
-                  saveWithFeedback({
-                    notifications: { ...config.notifications, pullRequests: val },
-                  })
-                }
-              />
-            </SettingRow>
-            <SettingRow label="Workflow Runs" description="Notify when workflow runs complete">
-              <Toggle
-                checked={config.notifications.workflowRuns}
-                disabled={!config.notifications.enabled}
-                label="Workflow runs notifications"
-                onChange={(val) =>
-                  saveWithFeedback({
-                    notifications: { ...config.notifications, workflowRuns: val },
-                  })
-                }
-              />
-            </SettingRow>
-          </div>
+            </div>
+          </SettingRow>
+          <SettingRow label="Issues" description="Notify when new issues are opened">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.notifications.issues}
+              aria-label="Issues notifications"
+              checked={config.notifications.issues}
+              disabled={!config.notifications.enabled}
+              onChange={(e) =>
+                saveWithFeedback({
+                  notifications: { ...config.notifications, issues: e.currentTarget.checked },
+                })
+              }
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+          <SettingRow label="Pull Requests" description="Notify when PRs are opened or updated">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.notifications.pullRequests}
+              aria-label="Pull requests notifications"
+              checked={config.notifications.pullRequests}
+              disabled={!config.notifications.enabled}
+              onChange={(e) =>
+                saveWithFeedback({
+                  notifications: { ...config.notifications, pullRequests: e.currentTarget.checked },
+                })
+              }
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+          <SettingRow label="Workflow Runs" description="Notify when workflow runs complete">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.notifications.workflowRuns}
+              aria-label="Workflow runs notifications"
+              checked={config.notifications.workflowRuns}
+              disabled={!config.notifications.enabled}
+              onChange={(e) =>
+                saveWithFeedback({
+                  notifications: { ...config.notifications, workflowRuns: e.currentTarget.checked },
+                })
+              }
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
         </Section>
 
         {/* Section 5: Appearance */}
         <Section title="Appearance">
-          <div class="divide-y divide-gray-100 dark:divide-gray-700">
-            <SettingRow label="Theme">
-              <Select
-                value={config.theme}
-                onChange={(val) => saveWithFeedback({ theme: val })}
-                options={themeOptions}
-              />
-            </SettingRow>
-            <SettingRow
-              label="View density"
-              description="Controls spacing between items in lists"
-            >
-              <Select
-                value={config.viewDensity}
-                onChange={(val) => saveWithFeedback({ viewDensity: val })}
-                options={densityOptions}
-              />
-            </SettingRow>
-            <SettingRow
-              label="Items per page"
-              description="Number of items to show in each tab"
-            >
-              <Select
-                value={config.itemsPerPage}
-                onChange={(val) => saveWithFeedback({ itemsPerPage: val })}
-                options={itemsPerPageOptions}
-              />
-            </SettingRow>
+          <div class="px-4 py-2 border-b border-base-300">
+            <p class="text-sm font-medium text-base-content mb-2">Theme</p>
+            <ThemePicker />
           </div>
+          <SettingRow
+            label="View density"
+            description="Controls spacing between items in lists"
+          >
+            <select
+              value={config.viewDensity}
+              onChange={(e) => {
+                saveWithFeedback({ viewDensity: e.currentTarget.value as "comfortable" | "compact" });
+              }}
+              class="select select-sm"
+            >
+              {densityOptions.map((opt) => (
+                <option value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </SettingRow>
+          <SettingRow
+            label="Items per page"
+            description="Number of items to show in each tab"
+          >
+            <select
+              value={String(config.itemsPerPage)}
+              onChange={(e) => {
+                saveWithFeedback({ itemsPerPage: Number(e.currentTarget.value) });
+              }}
+              class="select select-sm"
+            >
+              {itemsPerPageOptions.map((opt) => (
+                <option value={String(opt.value)}>{opt.label}</option>
+              ))}
+            </select>
+          </SettingRow>
         </Section>
 
         {/* Section 6: Tabs */}
         <Section title="Tabs">
-          <div class="divide-y divide-gray-100 dark:divide-gray-700">
-            <SettingRow
-              label="Default tab"
-              description="Tab shown when opening the dashboard fresh"
+          <SettingRow
+            label="Default tab"
+            description="Tab shown when opening the dashboard fresh"
+          >
+            <select
+              value={config.defaultTab}
+              onChange={(e) => {
+                saveWithFeedback({ defaultTab: e.currentTarget.value as "issues" | "pullRequests" | "actions" });
+              }}
+              class="select select-sm"
             >
-              <Select
-                value={config.defaultTab}
-                onChange={(val) => saveWithFeedback({ defaultTab: val })}
-                options={tabOptions}
-              />
-            </SettingRow>
-            <SettingRow
-              label="Remember last tab"
-              description="Return to the last active tab on revisit"
-            >
-              <Toggle
-                checked={config.rememberLastTab}
-                label="Remember last tab"
-                onChange={(val) => saveWithFeedback({ rememberLastTab: val })}
-              />
-            </SettingRow>
-          </div>
+              {tabOptions.map((opt) => (
+                <option value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </SettingRow>
+          <SettingRow
+            label="Remember last tab"
+            description="Return to the last active tab on revisit"
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.rememberLastTab}
+              aria-label="Remember last tab"
+              checked={config.rememberLastTab}
+              onChange={(e) => saveWithFeedback({ rememberLastTab: e.currentTarget.checked })}
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
         </Section>
 
         {/* Section 7: Data */}
         <Section title="Data">
-          <div class="divide-y divide-gray-100 dark:divide-gray-700">
-            {/* Clear cache */}
-            <SettingRow
-              label="Clear cache"
-              description="Remove all cached API responses from IndexedDB"
-            >
-              <Show
-                when={!confirmClearCache()}
-                fallback={
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-600 dark:text-gray-400">Are you sure?</span>
-                    <button
-                      type="button"
-                      onClick={() => void handleClearCache()}
-                      disabled={cacheClearing()}
-                      class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                    >
-                      {cacheClearing() ? "Clearing..." : "Yes, clear"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClearCache(false)}
-                      class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                }
-              >
-                <button
-                  type="button"
-                  onClick={() => void handleClearCache()}
-                  class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                >
-                  Clear cache
-                </button>
-              </Show>
-            </SettingRow>
-
-            {/* Export settings */}
-            <SettingRow
-              label="Export settings"
-              description="Download your configuration as a JSON file"
+          {/* Clear cache */}
+          <SettingRow
+            label="Clear cache"
+            description="Remove all cached API responses from IndexedDB"
+          >
+            <Show
+              when={!confirmClearCache()}
+              fallback={
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-base-content/60">Are you sure?</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleClearCache()}
+                    disabled={cacheClearing()}
+                    class="btn btn-error btn-xs"
+                  >
+                    {cacheClearing() ? "Clearing..." : "Yes, clear"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearCache(false)}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              }
             >
               <button
                 type="button"
-                onClick={handleExportSettings}
-                class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                onClick={() => void handleClearCache()}
+                class="btn btn-sm btn-outline"
               >
-                Export
+                Clear cache
               </button>
-            </SettingRow>
+            </Show>
+          </SettingRow>
 
-            {/* Reset all */}
-            <SettingRow
-              label="Reset all"
-              description="Clear all settings, cache, and auth — reloads the page"
+          {/* Export settings */}
+          <SettingRow
+            label="Export settings"
+            description="Download your configuration as a JSON file"
+          >
+            <button
+              type="button"
+              onClick={handleExportSettings}
+              class="btn btn-sm btn-outline"
             >
-              <Show
-                when={!confirmReset()}
-                fallback={
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-600 dark:text-gray-400">Are you sure?</span>
-                    <button
-                      type="button"
-                      onClick={() => handleResetAll()}
-                      class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
-                    >
-                      Yes, reset
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmReset(false)}
-                      class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                }
-              >
-                <button
-                  type="button"
-                  onClick={() => handleResetAll()}
-                  class="rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-700 dark:bg-gray-700 dark:text-red-400 dark:hover:bg-red-900/20"
-                >
-                  Reset all
-                </button>
-              </Show>
-            </SettingRow>
+              Export
+            </button>
+          </SettingRow>
 
-            {/* Sign out */}
-            <SettingRow
-              label="Sign out"
-              description="Clear auth tokens and return to login"
+          {/* Reset all */}
+          <SettingRow
+            label="Reset all"
+            description="Clear all settings, cache, and auth — reloads the page"
+          >
+            <Show
+              when={!confirmReset()}
+              fallback={
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-base-content/60">Are you sure?</span>
+                  <button
+                    type="button"
+                    onClick={() => handleResetAll()}
+                    class="btn btn-error btn-xs"
+                  >
+                    Yes, reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmReset(false)}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              }
             >
               <button
                 type="button"
-                onClick={handleSignOut}
-                class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                onClick={() => handleResetAll()}
+                class="btn btn-sm btn-error btn-outline"
               >
-                Sign out
+                Reset all
               </button>
-            </SettingRow>
-          </div>
+            </Show>
+          </SettingRow>
+
+          {/* Sign out */}
+          <SettingRow
+            label="Sign out"
+            description="Clear auth tokens and return to login"
+          >
+            <button
+              type="button"
+              onClick={handleSignOut}
+              class="btn btn-sm btn-outline"
+            >
+              Sign out
+            </button>
+          </SettingRow>
         </Section>
       </div>
     </div>

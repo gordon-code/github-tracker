@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import {
   pushNotification,
@@ -33,16 +34,15 @@ function renderDrawer(open = true, onClose = vi.fn()) {
 }
 
 describe("NotificationDrawer", () => {
-  it("does not render when open is false", () => {
-    const { container } = render(() => (
+  it("does not render dialog when open is false", () => {
+    render(() => (
       <NotificationDrawer open={false} onClose={vi.fn()} />
     ));
-    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("renders drawer with Notifications heading when open is true", () => {
     renderDrawer(true);
-    // advance timers so effect runs
     vi.advanceTimersByTime(0);
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.getByText("Notifications")).toBeDefined();
@@ -84,13 +84,13 @@ describe("NotificationDrawer", () => {
     vi.advanceTimersByTime(0);
 
     const items = screen.getAllByRole("listitem");
-    expect(items[0].className).toContain("bg-blue-50/50");
+    expect(items[0].className).toContain("bg-info/10");
 
     fireEvent.click(screen.getByText("Mark all as read"));
     // Notifications still present
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     // Unread background class removed
-    expect(screen.getAllByRole("listitem")[0].className).not.toContain("bg-blue-50/50");
+    expect(screen.getAllByRole("listitem")[0].className).not.toContain("bg-info/10");
   });
 
   it("Dismiss all empties the list and mutes sources", () => {
@@ -108,14 +108,15 @@ describe("NotificationDrawer", () => {
     expect(isMuted("search")).toBe(true);
   });
 
-  it("calls onClose when overlay backdrop is clicked", () => {
+  it("calls onClose when overlay backdrop is clicked", async () => {
+    const user = userEvent.setup({ delay: null });
     const onClose = vi.fn();
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
-    // The overlay is the element with bg-black/40
-    const overlay = document.querySelector("[aria-hidden='true']") as HTMLElement;
+    // corvu drawer overlay
+    const overlay = document.body.querySelector("[data-corvu-drawer-overlay]") as HTMLElement;
     expect(overlay).not.toBeNull();
-    fireEvent.click(overlay);
+    await user.click(overlay);
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -133,28 +134,27 @@ describe("NotificationDrawer", () => {
     expect(screen.getByText("No notifications")).toBeDefined();
   });
 
-  it("unread notifications have bg-blue-50/50 background class", () => {
+  it("unread notifications have bg-info/10 background class", () => {
     pushNotification("api", "Unread notification", "error");
     renderDrawer(true);
     vi.advanceTimersByTime(0);
     const item = screen.getByRole("listitem");
-    expect(item.className).toContain("bg-blue-50/50");
+    expect(item.className).toContain("bg-info/10");
   });
 
-  it("read notifications do not have bg-blue-50/50 background class", () => {
+  it("read notifications do not have bg-info/10 background class", () => {
     pushNotification("api", "Read notification", "error");
     markAllAsRead();
     renderDrawer(true);
     vi.advanceTimersByTime(0);
     const item = screen.getByRole("listitem");
-    expect(item.className).not.toContain("bg-blue-50/50");
+    expect(item.className).not.toContain("bg-info/10");
   });
 
-  it("has role=dialog and proper aria labels", () => {
+  it("has role=dialog and Close button with proper aria-label", () => {
     renderDrawer(true);
     vi.advanceTimersByTime(0);
-    const dialog = screen.getByRole("dialog");
-    expect(dialog.getAttribute("aria-label")).toBe("Notifications");
+    expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.getByLabelText("Close notifications")).toBeDefined();
   });
 

@@ -94,58 +94,75 @@ describe("FilterBar", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
-  it("renders org options from config", () => {
+  it("org trigger shows 'All orgs' by default", () => {
     render(() => <FilterBar />);
-    const orgSelect = screen.getByLabelText("Filter by organization") as HTMLSelectElement;
-    const options = Array.from(orgSelect.options).map((o) => o.value);
-    expect(options).toContain("myorg");
-    expect(options).toContain("otherorg");
+    const orgTrigger = screen.getByLabelText("Filter by organization");
+    expect(orgTrigger.textContent).toContain("All orgs");
   });
 
-  it("renders all repos when no org filter is set", () => {
+  it("repo trigger shows 'All repos' by default", () => {
     render(() => <FilterBar />);
-    const repoSelect = screen.getByLabelText("Filter by repository") as HTMLSelectElement;
-    const options = Array.from(repoSelect.options).map((o) => o.value);
-    expect(options).toContain("myorg/repo-a");
-    expect(options).toContain("myorg/repo-b");
-    expect(options).toContain("otherorg/repo-c");
+    const repoTrigger = screen.getByLabelText("Filter by repository");
+    expect(repoTrigger.textContent).toContain("All repos");
   });
 
-  it("changing org filter calls setGlobalFilter and resets repo", async () => {
-    const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
-    const orgSelect = screen.getByLabelText("Filter by organization");
-    await user.selectOptions(orgSelect, "myorg");
-    expect(viewStore.setGlobalFilter).toHaveBeenCalledWith("myorg", null);
-  });
-
-  it("repo dropdown shows only repos for selected org", () => {
-    // Set org filter to myorg
+  it("org trigger shows selected org when org filter is set", () => {
     (viewStore.viewState as { globalFilter: { org: string | null; repo: string | null } }).globalFilter = {
       org: "myorg",
       repo: null,
     };
     render(() => <FilterBar />);
-    const repoSelect = screen.getByLabelText("Filter by repository") as HTMLSelectElement;
-    const options = Array.from(repoSelect.options).map((o) => o.value);
-    expect(options).toContain("myorg/repo-a");
-    expect(options).toContain("myorg/repo-b");
-    expect(options).not.toContain("otherorg/repo-c");
+    const orgTrigger = screen.getByLabelText("Filter by organization");
+    expect(orgTrigger.textContent).toContain("myorg");
   });
 
-  it("changing repo filter calls setGlobalFilter with current org and new repo", async () => {
+  it("clicking org trigger opens listbox with org options", async () => {
     const user = userEvent.setup({ delay: null });
     render(() => <FilterBar />);
-    const repoSelect = screen.getByLabelText("Filter by repository");
-    await user.selectOptions(repoSelect, "myorg/repo-a");
+    const orgTrigger = screen.getByLabelText("Filter by organization");
+    await user.click(orgTrigger);
+    // Options should now be visible in the listbox
+    expect(screen.getByRole("option", { name: "myorg" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "otherorg" })).toBeDefined();
+  });
+
+  it("clicking org trigger opens listbox with repo options", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(() => <FilterBar />);
+    const repoTrigger = screen.getByLabelText("Filter by repository");
+    await user.click(repoTrigger);
+    expect(screen.getByRole("option", { name: "myorg/repo-a" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "myorg/repo-b" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "otherorg/repo-c" })).toBeDefined();
+  });
+
+  it("selecting an org option calls setGlobalFilter and resets repo", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(() => <FilterBar />);
+    const orgTrigger = screen.getByLabelText("Filter by organization");
+    await user.click(orgTrigger);
+    const myorgOption = screen.getByRole("option", { name: "myorg" });
+    await user.click(myorgOption);
+    expect(viewStore.setGlobalFilter).toHaveBeenCalledWith("myorg", null);
+  });
+
+  it("selecting a repo option calls setGlobalFilter with current org and new repo", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(() => <FilterBar />);
+    const repoTrigger = screen.getByLabelText("Filter by repository");
+    await user.click(repoTrigger);
+    const repoOption = screen.getByRole("option", { name: "myorg/repo-a" });
+    await user.click(repoOption);
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, "myorg/repo-a");
   });
 
-  it("changing org to empty string calls setGlobalFilter with null org", async () => {
+  it("selecting 'All orgs' option calls setGlobalFilter with null org", async () => {
     const user = userEvent.setup({ delay: null });
     render(() => <FilterBar />);
-    const orgSelect = screen.getByLabelText("Filter by organization");
-    await user.selectOptions(orgSelect, "");
+    const orgTrigger = screen.getByLabelText("Filter by organization");
+    await user.click(orgTrigger);
+    const allOrgsOption = screen.getByRole("option", { name: "All orgs" });
+    await user.click(allOrgsOption);
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, null);
   });
 });

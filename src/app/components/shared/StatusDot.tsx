@@ -1,26 +1,34 @@
+import { Show } from "solid-js";
+
 export interface StatusDotProps {
-  status: "success" | "pending" | "failure" | "error" | null;
+  status: "success" | "pending" | "failure" | "error" | "conflict" | null;
+  href?: string;
 }
 
 const STATUS_CONFIG = {
   success: {
-    bg: "bg-green-500",
+    bg: "bg-success",
     label: "All checks passed",
     pulse: false,
   },
   pending: {
-    bg: "bg-yellow-500",
-    label: "Checks pending",
+    bg: "bg-warning",
+    label: "Checks in progress",
     pulse: true,
   },
   failure: {
-    bg: "bg-red-500",
+    bg: "bg-error",
     label: "Checks failing",
     pulse: false,
   },
   error: {
-    bg: "bg-red-500",
+    bg: "bg-error",
     label: "Checks failing",
+    pulse: false,
+  },
+  conflict: {
+    bg: "bg-warning/60",
+    label: "Checks blocked by merge conflict",
     pulse: false,
   },
 } as const;
@@ -29,24 +37,39 @@ export default function StatusDot(props: StatusDotProps) {
   const cfg = () =>
     props.status !== null
       ? STATUS_CONFIG[props.status]
-      : { bg: "bg-gray-300", label: "No checks", pulse: false };
+      : { bg: "bg-base-content/20", label: "No checks", pulse: false };
 
-  return (
+  const dot = () => (
     <span
-      class="relative inline-flex items-center justify-center"
+      class={`relative inline-flex items-center justify-center${props.href ? " cursor-pointer" : ""}`}
       style={{ width: "12px", height: "12px" }}
       title={cfg().label}
       aria-label={cfg().label}
     >
-      {cfg().pulse && (
+      <Show when={cfg().pulse}>
         <span
-          class={`absolute inline-flex h-full w-full rounded-full ${cfg().bg} opacity-75 animate-ping`}
+          class={`absolute inline-flex h-full w-full rounded-full ${cfg().bg} animate-slow-pulse`}
         />
-      )}
+      </Show>
       <span
         class={`relative inline-flex rounded-full ${cfg().bg}`}
         style={{ width: "8px", height: "8px" }}
       />
     </span>
+  );
+
+  return (
+    <Show when={props.href} fallback={dot()}>
+      {(url) => (
+        <a
+          href={url()}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {dot()}
+        </a>
+      )}
+    </Show>
   );
 }

@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, createMemo, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -6,11 +6,13 @@ import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
-import { config } from "../../stores/config";
+import { config, setConfig } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
+import { fetchOrgs } from "../../services/api";
 import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { getClient, getGraphqlRateLimit } from "../../services/github";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -153,6 +155,26 @@ export default function DashboardPage() {
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
+
+    // Auto-sync orgs on dashboard load — picks up newly accessible orgs
+    // after re-auth, scope changes, or org policy updates.
+    // Only adds orgs to the filter list — repos are user-selected via Settings.
+    const client = getClient();
+    if (client && config.onboardingComplete) {
+      void fetchOrgs(client).then((allOrgs) => {
+        const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+        const newOrgs = allOrgs
+          .map((o) => o.login)
+          .filter((login) => !currentSet.has(login.toLowerCase()));
+        if (newOrgs.length > 0) {
+          setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgs]);
+          console.info(`[dashboard] auto-synced ${newOrgs.length} new org(s)`);
+        }
+      }).catch(() => {
+        // Non-fatal — org sync failure doesn't block dashboard
+      });
+    }
+
     onCleanup(() => {
       _coordinator()?.destroy();
       _setCoordinator(null);
@@ -168,64 +190,83 @@ export default function DashboardPage() {
   const userLogin = createMemo(() => user()?.login ?? "");
 
   return (
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div class="min-h-screen bg-base-200">
       <Header />
 
       {/* Offset for fixed header */}
       <div class="pt-14 flex flex-col h-screen">
-        <TabBar
-          activeTab={activeTab()}
-          onTabChange={handleTabChange}
-          counts={tabCounts()}
-        />
+        {/* Single constrained panel: tabs + filters + content */}
+        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 bg-base-100 shadow-lg border-x border-base-300">
+          <TabBar
+            activeTab={activeTab()}
+            onTabChange={handleTabChange}
+            counts={tabCounts()}
+          />
 
-        <FilterBar
-          isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
-          lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-          onRefresh={() => _coordinator()?.manualRefresh()}
-        />
+          <FilterBar
+            isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
+            lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+            onRefresh={() => _coordinator()?.manualRefresh()}
+          />
 
-        <main class="flex-1 overflow-auto">
-          <Switch>
-            <Match when={activeTab() === "issues"}>
-              <IssuesTab
-                issues={dashboardData.issues}
-                loading={dashboardData.loading}
-                userLogin={userLogin()}
-              />
-            </Match>
-            <Match when={activeTab() === "pullRequests"}>
-              <PullRequestsTab
-                pullRequests={dashboardData.pullRequests}
-                loading={dashboardData.loading}
-                userLogin={userLogin()}
-              />
-            </Match>
-            <Match when={activeTab() === "actions"}>
-              <ActionsTab
-                workflowRuns={dashboardData.workflowRuns}
-                loading={dashboardData.loading}
-              />
-            </Match>
-          </Switch>
-        </main>
+          <main class="flex-1 overflow-auto">
+            <Switch>
+              <Match when={activeTab() === "issues"}>
+                <IssuesTab
+                  issues={dashboardData.issues}
+                  loading={dashboardData.loading}
+                  userLogin={userLogin()}
+                />
+              </Match>
+              <Match when={activeTab() === "pullRequests"}>
+                <PullRequestsTab
+                  pullRequests={dashboardData.pullRequests}
+                  loading={dashboardData.loading}
+                  userLogin={userLogin()}
+                />
+              </Match>
+              <Match when={activeTab() === "actions"}>
+                <ActionsTab
+                  workflowRuns={dashboardData.workflowRuns}
+                  loading={dashboardData.loading}
+                />
+              </Match>
+            </Switch>
+          </main>
+        </div>
 
-        <footer class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-center gap-3 text-xs text-gray-400 dark:text-gray-500 shrink-0">
-          <a
-            href="https://github.com/gordon-code/github-tracker"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="hover:text-gray-600 dark:hover:text-gray-300"
-          >
-            Source
-          </a>
-          <span aria-hidden="true">&middot;</span>
-          <a
-            href="/privacy"
-            class="hover:text-gray-600 dark:hover:text-gray-300"
-          >
-            Privacy
-          </a>
+        <footer class="border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50 shrink-0">
+          <div class="max-w-6xl mx-auto w-full px-4 grid grid-cols-3 items-center">
+            <div />
+            <div class="flex items-center justify-center gap-3">
+              <a
+                href="https://github.com/gordon-code/github-tracker"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link link-hover"
+              >
+                Source
+              </a>
+              <span aria-hidden="true">&middot;</span>
+              <a
+                href="/privacy"
+                class="link link-hover"
+              >
+                Privacy
+              </a>
+            </div>
+            <div class="flex justify-end">
+              <Show when={getGraphqlRateLimit()}>
+                {(rl) => (
+                  <div class="tooltip tooltip-left" data-tip={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`}>
+                    <span class={`tabular-nums ${rl().remaining < 500 ? "text-warning" : ""}`}>
+                      API RL: {rl().remaining.toLocaleString()}/5k/hr
+                    </span>
+                  </div>
+                )}
+              </Show>
+            </div>
+          </div>
         </footer>
       </div>
     </div>

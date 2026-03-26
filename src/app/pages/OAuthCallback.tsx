@@ -71,21 +71,21 @@ export default function OAuthCallback() {
   });
 
   return (
-    <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+    <div class="bg-base-200 min-h-screen flex items-center justify-center">
       <div class="max-w-sm w-full mx-4 text-center">
         <Show
           when={error()}
           fallback={
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 flex flex-col items-center gap-4">
+            <div class="card bg-base-100 shadow-md p-8 flex flex-col items-center gap-4">
               <LoadingSpinner size="md" label="Completing sign in..." />
             </div>
           }
         >
-          <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 flex flex-col items-center gap-4">
-            <p class="text-red-600 dark:text-red-400 font-medium">{error()}</p>
+          <div class="card bg-base-100 shadow-md p-8 flex flex-col items-center gap-4">
+            <p class="text-error font-medium">{error()}</p>
             <a
               href="/login"
-              class="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              class="link link-primary text-sm"
             >
               Return to sign in
             </a>

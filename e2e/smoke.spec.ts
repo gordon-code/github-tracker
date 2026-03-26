@@ -134,35 +134,35 @@ test("dashboard loads with tab bar visible", async ({ page }) => {
   await setupAuth(page);
   await page.goto("/dashboard");
 
-  const nav = page.getByRole("navigation", { name: /dashboard tabs/i });
-  await expect(nav).toBeVisible();
+  const tablist = page.getByRole("tablist");
+  await expect(tablist).toBeVisible();
 
-  await expect(page.getByRole("button", { name: /^issues/i })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^issues/i })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /^pull requests/i })
+    page.getByRole("tab", { name: /^pull requests/i })
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /^actions/i })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^actions/i })).toBeVisible();
 });
 
 test("switching tabs changes active tab indicator", async ({ page }) => {
   await setupAuth(page);
   await page.goto("/dashboard");
 
-  const issuesBtn = page.getByRole("button", { name: /^issues/i });
-  const prBtn = page.getByRole("button", { name: /^pull requests/i });
-  const actionsBtn = page.getByRole("button", { name: /^actions/i });
+  const issuesTab = page.getByRole("tab", { name: /^issues/i });
+  const prTab = page.getByRole("tab", { name: /^pull requests/i });
+  const actionsTab = page.getByRole("tab", { name: /^actions/i });
 
   // Default tab should be issues (or whatever config says; we didn't set defaultTab)
-  await expect(issuesBtn).toBeVisible();
+  await expect(issuesTab).toBeVisible();
 
   // Click Pull Requests tab
-  await prBtn.click();
-  await expect(prBtn).toHaveAttribute("aria-current", "page");
-  await expect(issuesBtn).not.toHaveAttribute("aria-current", "page");
+  await prTab.click();
+  await expect(prTab).toHaveAttribute("aria-selected", "true");
+  await expect(issuesTab).not.toHaveAttribute("aria-selected", "true");
 
   // Click Actions tab
-  await actionsBtn.click();
-  await expect(actionsBtn).toHaveAttribute("aria-current", "page");
+  await actionsTab.click();
+  await expect(actionsTab).toHaveAttribute("aria-selected", "true");
 });
 
 test("dashboard shows empty state with no data", async ({ page }) => {
@@ -171,8 +171,8 @@ test("dashboard shows empty state with no data", async ({ page }) => {
 
   // With empty mocked responses the dashboard should not show a loading spinner
   // indefinitely — wait for the tab bar to appear then confirm no data rows
-  const nav = page.getByRole("navigation", { name: /dashboard tabs/i });
-  await expect(nav).toBeVisible();
+  const tablist = page.getByRole("tablist");
+  await expect(tablist).toBeVisible();
 
   // The issues tab content area should render (even if empty)
   await expect(page.getByRole("main")).toBeVisible();

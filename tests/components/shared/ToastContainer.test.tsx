@@ -14,7 +14,7 @@ beforeEach(() => {
   clearNotifications();
   clearMutedSources();
   vi.useFakeTimers();
-  // Ensure matchMedia returns non-reduced-motion (animDelay=300)
+  // Ensure matchMedia returns non-reduced-motion
   vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
 
@@ -25,8 +25,8 @@ afterEach(() => {
 
 describe("ToastContainer", () => {
   it("renders no toasts when notification store is empty", () => {
-    const { container } = render(() => <ToastContainer />);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    render(() => <ToastContainer />);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
   it("renders a toast when pushNotification is called", () => {
@@ -45,25 +45,25 @@ describe("ToastContainer", () => {
     expect(alert.textContent).toContain("Results incomplete");
   });
 
-  it("applies bg-red-50 class for error severity", () => {
+  it("applies alert-error class for error severity", () => {
     render(() => <ToastContainer />);
     pushNotification("api", "Error happened", "error");
     const alert = screen.getByRole("alert");
-    expect(alert.className).toContain("bg-red-50");
+    expect(alert.className).toContain("alert-error");
   });
 
-  it("applies bg-yellow-50 class for warning severity", () => {
+  it("applies alert-warning class for warning severity", () => {
     render(() => <ToastContainer />);
     pushNotification("search", "Warning here", "warning");
     const alert = screen.getByRole("alert");
-    expect(alert.className).toContain("bg-yellow-50");
+    expect(alert.className).toContain("alert-warning");
   });
 
-  it("applies bg-blue-50 class for info severity", () => {
+  it("applies alert-info class for info severity", () => {
     render(() => <ToastContainer />);
     pushNotification("graphql", "Info message", "info");
     const alert = screen.getByRole("alert");
-    expect(alert.className).toContain("bg-blue-50");
+    expect(alert.className).toContain("alert-info");
   });
 
   it("shows (will retry) for retryable notifications", () => {
@@ -78,86 +78,79 @@ describe("ToastContainer", () => {
     expect(screen.getByRole("alert").textContent).not.toContain("(will retry)");
   });
 
-  it("manual dismiss starts dismiss animation and removes toast after delay", () => {
-    const { container } = render(() => <ToastContainer />);
+  it("manual dismiss removes toast when close button clicked", () => {
+    render(() => <ToastContainer />);
     pushNotification("api", "Error", "error");
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
     const dismissBtn = screen.getByLabelText("Dismiss notification");
     fireEvent.click(dismissBtn);
-    // Should switch to animate-toast-out
-    const alert = container.querySelector("[role='alert']");
-    expect(alert?.className).toContain("animate-toast-out");
-    // After 300ms, toast should be removed
+    // Toast starts dismiss animation, removed after 300ms
     vi.advanceTimersByTime(300);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
   it("auto-dismisses error toasts after 10 seconds", () => {
-    const { container } = render(() => <ToastContainer />);
+    render(() => <ToastContainer />);
     pushNotification("api", "Error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
     // At 9999ms, still visible
     vi.advanceTimersByTime(9999);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
-    // At 10s + animation delay (300ms), should be gone
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+    // At 10s + 300ms animation delay, toast removed
     vi.advanceTimersByTime(1 + 300);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
   it("auto-dismisses warning/info toasts after 5 seconds", () => {
-    const { container } = render(() => <ToastContainer />);
+    render(() => <ToastContainer />);
     pushNotification("search", "Warning", "warning");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
     vi.advanceTimersByTime(4999);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
     vi.advanceTimersByTime(1 + 300);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
   it("cooldown: no new toast within 60s for same source with different message", () => {
-    const { container } = render(() => <ToastContainer />);
+    render(() => <ToastContainer />);
     pushNotification("api", "First error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
 
     // Manually dismiss so toast is gone from screen
     const dismissBtn = screen.getByLabelText("Dismiss notification");
     fireEvent.click(dismissBtn);
     vi.advanceTimersByTime(300);
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
 
     // Push different message within 60s — should NOT show new toast (cooldown)
     pushNotification("api", "Second error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
 
     // Advance past cooldown (60s)
     vi.advanceTimersByTime(60_001);
 
     // Push again — should show toast now
     pushNotification("api", "Third error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
   });
 
   it("muted source suppresses toast", () => {
-    const { container } = render(() => <ToastContainer />);
+    render(() => <ToastContainer />);
     addMutedSource("api");
     pushNotification("api", "Muted error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
-  it("toast removed when notification dismissed from store during animation", () => {
-    const { container } = render(() => <ToastContainer />);
+  it("toast removed when notification dismissed from store", () => {
+    render(() => <ToastContainer />);
     pushNotification("api", "Error", "error");
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
 
-    // Start dismiss animation
-    const dismissBtn = screen.getByLabelText("Dismiss notification");
-    fireEvent.click(dismissBtn);
-    expect(container.querySelector("[role='alert']")?.className).toContain("animate-toast-out");
-
-    // While animation is in progress, dismiss from store externally
+    // Dismiss from store externally — toast should be removed
     const notifId = getNotifications()[0].id;
     dismissError(notifId);
 
-    // Toast should be removed immediately (store pruning path)
-    expect(container.querySelectorAll("[role='alert']")).toHaveLength(0);
+    // Toast should be removed (store pruning path)
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 });

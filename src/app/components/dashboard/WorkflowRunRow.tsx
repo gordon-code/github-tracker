@@ -16,7 +16,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-green-500 shrink-0"
+        class="h-4 w-4 text-success shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Success"
@@ -35,7 +35,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-red-500 shrink-0"
+        class="h-4 w-4 text-error shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Failure"
@@ -54,7 +54,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-gray-400 shrink-0"
+        class="h-4 w-4 text-base-content/40 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-label="Cancelled"
@@ -73,7 +73,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        class="h-4 w-4 text-yellow-500 animate-spin shrink-0"
+        class="h-4 w-4 text-warning animate-spin shrink-0"
         fill="none"
         viewBox="0 0 24 24"
         aria-label="In progress"
@@ -100,7 +100,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      class="h-4 w-4 text-gray-400 shrink-0"
+      class="h-4 w-4 text-base-content/40 shrink-0"
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-label={label}
@@ -126,7 +126,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   return (
     <div
-      class={`flex items-center gap-3 ${paddingClass()} hover:bg-gray-50 dark:hover:bg-gray-800/50 group`}
+      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group`}
     >
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 
@@ -134,43 +134,43 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
         href={isSafeGitHubUrl(props.run.htmlUrl) ? props.run.htmlUrl : undefined}
         target="_blank"
         rel="noopener noreferrer"
-        class="flex-1 min-w-0 flex flex-col gap-0.5 text-sm hover:text-blue-600 dark:hover:text-blue-400"
+        class="flex-1 min-w-0 flex flex-col gap-0.5 text-sm hover:text-primary"
       >
-        <span class="truncate text-gray-900 dark:text-gray-100">
+        <span class="truncate text-base-content">
           {props.run.displayTitle}
         </span>
-        <span class="truncate text-xs text-gray-500 dark:text-gray-400">
+        <span class="truncate text-xs text-base-content/60">
           {props.run.name}
         </span>
       </a>
 
       <Show when={props.run.isPrRun}>
-        <span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 shrink-0">
+        <span class="badge badge-info badge-sm shrink-0">
           PR
         </span>
       </Show>
 
       <Show when={props.run.runAttempt > 1}>
-        <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 shrink-0">
+        <span class="badge badge-warning badge-sm shrink-0">
           Attempt {props.run.runAttempt}
         </span>
       </Show>
 
-      <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+      <span class="text-xs text-base-content/60 shrink-0">
         {props.run.actorLogin}
       </span>
 
-      <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+      <span class="text-xs text-base-content/60 shrink-0">
         {durationLabel(props.run)}
       </span>
 
-      <span class="text-xs text-gray-400 dark:text-gray-500 shrink-0">
+      <span class="text-xs text-base-content/40 shrink-0">
         {relativeTime(props.run.createdAt)}
       </span>
 
       <button
         onClick={() => props.onIgnore(props.run)}
-        class="shrink-0 rounded p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-red-400"
+        class="shrink-0 rounded p-1 text-base-content/30 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-error"
         title="Ignore this run"
         aria-label={`Ignore run ${props.run.name}`}
       >

@@ -26,7 +26,7 @@ function makeConfig(overrides: Partial<Config["notifications"]> = {}): Config {
       workflowRuns: true,
       ...overrides,
     },
-    theme: "system",
+    theme: "light",
     viewDensity: "comfortable",
     itemsPerPage: 25,
     defaultTab: "issues",

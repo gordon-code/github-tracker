@@ -32,10 +32,11 @@ vi.mock("../../src/app/stores/auth", () => ({
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
 }));
 
-// Mock github service (used by Header)
+// Mock github service (used by Header + DashboardPage org sync)
 vi.mock("../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
   getGraphqlRateLimit: () => null,
+  getClient: () => null,
 }));
 
 // Mock errors lib — return empty by default
@@ -127,19 +128,17 @@ beforeEach(async () => {
 describe("DashboardPage — tab switching", () => {
   it("renders IssuesTab by default", () => {
     render(() => <DashboardPage />);
-    // IssuesTab column headers are always rendered (even while loading)
-    screen.getByLabelText("Sort by Title");
+    // IssuesTab renders a SortDropdown with aria-label="Sort by"
+    screen.getByLabelText("Sort by");
   });
 
   it("switches to PullRequestsTab when Pull Requests tab is clicked", async () => {
     const user = userEvent.setup();
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Pull Requests"));
-    // PullRequestsTab renders its own "Sort by Title" column header
-    screen.getByLabelText("Sort by Title");
-    // The PR tab button is now active
+    // PullRequestsTab tab is now active
     const prButton = screen.getByText("Pull Requests").closest("button");
-    expect(prButton?.getAttribute("aria-current")).toBe("page");
+    expect(prButton?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("switches to ActionsTab when Actions tab is clicked", async () => {
@@ -149,21 +148,21 @@ describe("DashboardPage — tab switching", () => {
     // ActionsTab renders a "Show PR runs" checkbox — unique to that tab
     screen.getByText("Show PR runs");
     const actionsButton = screen.getByText("Actions").closest("button");
-    expect(actionsButton?.getAttribute("aria-current")).toBe("page");
+    expect(actionsButton?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("Issues tab button has aria-current=page on initial render", () => {
+  it("Issues tab button has aria-selected=true on initial render", () => {
     render(() => <DashboardPage />);
     const issuesButton = screen.getByText("Issues").closest("button");
-    expect(issuesButton?.getAttribute("aria-current")).toBe("page");
+    expect(issuesButton?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("clicking a tab removes aria-current from previous tab", async () => {
+  it("clicking a tab removes aria-selected from previous tab", async () => {
     const user = userEvent.setup();
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Pull Requests"));
     const issuesButton = screen.getByText("Issues").closest("button");
-    expect(issuesButton?.getAttribute("aria-current")).toBeNull();
+    expect(issuesButton?.getAttribute("aria-selected")).toBe("false");
   });
 });
 
@@ -224,7 +223,13 @@ describe("DashboardPage — data flow", () => {
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Actions"));
     await waitFor(() => {
-      // ActionsTab shows workflow names as group headers (may appear in header button + run row)
+      // ActionsTab shows repo group header (collapsed by default)
+      expect(screen.getByText("owner/repo")).toBeTruthy();
+    });
+    // Expand the repo group to see workflow cards
+    await user.click(screen.getByText("owner/repo"));
+    await waitFor(() => {
+      // Workflow cards visible after expansion
       expect(screen.getAllByText("CI pipeline").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Deploy job").length).toBeGreaterThan(0);
     });

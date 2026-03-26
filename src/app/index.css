@@ -1,6 +1,20 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@plugin "daisyui" {
+  themes: corporate --default, cupcake, light, nord, dim, dracula, dark, forest;
+}
+
+
+/* ── Status dot animation ─────────────────────────────────────────────────── */
+
+@keyframes slow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0; }
+}
+
+@utility animate-slow-pulse {
+  animation: slow-pulse 3s ease-in-out infinite;
+}
 
 /* ── Notification animations ──────────────────────────────────────────────── */
 
@@ -56,6 +70,24 @@
 
 @utility animate-overlay-out {
   animation: overlay-fade-out 0.3s ease-in forwards;
+}
+
+/* ── Kobalte → daisyUI bridges ───────────────────────────────────────────── */
+
+/* Kobalte Tabs: data-selected → daisyUI tab-active */
+.tab[data-selected] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* ── Dark-theme scrollbar styling ────────────────────────────────────────── */
+
+[data-theme="dark"] *,
+[data-theme="dracula"] *,
+[data-theme="forest"] *,
+[data-theme="dim"] * {
+  scrollbar-color: color-mix(in oklch, var(--color-base-content) 30%, transparent) var(--color-base-200);
 }
 
 @media (prefers-reduced-motion: reduce) {

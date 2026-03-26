@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@solidjs/testing-library";
+import { screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 
@@ -26,12 +26,6 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
 }));
 
-// Mock github service
-vi.mock("../../../src/app/services/github", () => ({
-  getCoreRateLimit: () => null,
-  getGraphqlRateLimit: () => null,
-}));
-
 // Mock errors module so Header's notification imports work
 vi.mock("../../../src/app/lib/errors", () => ({
   getUnreadCount: vi.fn(() => 0),
@@ -51,7 +45,6 @@ vi.mock("../../../src/app/lib/errors", () => ({
 
 import Header from "../../../src/app/components/layout/Header";
 import * as authStore from "../../../src/app/stores/auth";
-import * as githubService from "../../../src/app/services/github";
 import * as errorsModule from "../../../src/app/lib/errors";
 import { render } from "@solidjs/testing-library";
 
@@ -91,54 +84,6 @@ describe("Header", () => {
     render(() => <Header />);
     screen.getByText("octocat");
     vi.mocked(authStore.user).mockRestore();
-  });
-
-  it("shows rate limit info when available", () => {
-    vi.spyOn(githubService, "getCoreRateLimit").mockReturnValue({
-      remaining: 4567,
-      resetAt: new Date("2024-01-10T09:00:00Z"),
-    });
-    render(() => <Header />);
-    screen.getByText("4567/5k/hr");
-    vi.mocked(githubService.getCoreRateLimit).mockRestore();
-  });
-
-  it("shows GraphQL rate limit with label when available", () => {
-    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
-      remaining: 4800,
-      resetAt: new Date("2024-01-10T09:00:00Z"),
-    });
-    render(() => <Header />);
-    screen.getByText(/GraphQL/);
-    screen.getByText(/4800\/5k\/hr/);
-    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
-  });
-
-  it("shows amber warning when GraphQL rate limit is below 500", () => {
-    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
-      remaining: 499,
-      resetAt: new Date("2024-01-10T09:00:00Z"),
-    });
-    render(() => <Header />);
-    const el = screen.getByText(/499\/5k\/hr/);
-    expect(el.className).toContain("text-amber-600");
-    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
-  });
-
-  it("shows normal color when GraphQL rate limit is at 500", () => {
-    vi.spyOn(githubService, "getGraphqlRateLimit").mockReturnValue({
-      remaining: 500,
-      resetAt: new Date("2024-01-10T09:00:00Z"),
-    });
-    render(() => <Header />);
-    const el = screen.getByText(/500\/5k\/hr/);
-    expect(el.className).toContain("text-gray-500");
-    vi.mocked(githubService.getGraphqlRateLimit).mockRestore();
-  });
-
-  it("does not show rate limit when not available", () => {
-    render(() => <Header />);
-    expect(screen.queryByText(/\/5k\/hr/)).toBeNull();
   });
 
   it("logout button calls clearAuth", async () => {
@@ -194,15 +139,16 @@ describe("Header", () => {
     expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("clicking bell twice closes the drawer", async () => {
+  it("closing drawer via close button resets bell state", async () => {
     const user = userEvent.setup();
     render(() => <Header />);
     const bellBtn = screen.getByLabelText("Notifications");
     await user.click(bellBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
-    await user.click(bellBtn);
+    // Close via drawer close button (corvu sets pointer-events:none on body while open)
+    const closeBtn = screen.getByLabelText("Close notifications");
+    fireEvent.click(closeBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
-    // markAllAsRead called only once (on open, not on close)
     expect(errorsModule.markAllAsRead).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,7 @@
 import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken } from "./stores/auth";
-import { config, initConfigPersistence } from "./stores/config";
+import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
@@ -35,9 +35,9 @@ function AuthGuard(props: { children: JSX.Element }) {
     <Show
       when={!validating()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
-            class="animate-spin h-8 w-8 text-gray-400"
+            class="animate-spin h-8 w-8 text-base-content/40"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
@@ -80,9 +80,9 @@ function RootRedirect() {
     <Show
       when={!validating()}
       fallback={
-        <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div class="min-h-screen flex items-center justify-center bg-base-200">
           <svg
-            class="animate-spin h-8 w-8 text-gray-400"
+            class="animate-spin h-8 w-8 text-base-content/40"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
@@ -117,7 +117,20 @@ function RootRedirect() {
 }
 
 export default function App() {
+  createEffect(() => {
+    document.documentElement.setAttribute("data-theme", resolveTheme(config.theme));
+  });
+
   onMount(() => {
+    // Listen for system theme changes so "auto" reacts immediately
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemThemeChange = () => {
+      if (config.theme === "auto") {
+        document.documentElement.setAttribute("data-theme", resolveTheme("auto"));
+      }
+    };
+    mq.addEventListener("change", onSystemThemeChange);
+
     // All reactive init functions must be called inside the component tree
     initConfigPersistence();
     initViewPersistence();

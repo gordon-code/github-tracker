@@ -36,7 +36,7 @@ export interface Issue {
 }
 
 export interface CheckStatus {
-  status: "success" | "failure" | "pending" | null;
+  status: "success" | "failure" | "pending" | "conflict" | null;
 }
 
 export interface PullRequest {
@@ -244,6 +244,7 @@ interface GraphQLPRNode {
   baseRefName: string;
   headRepository: { owner: { login: string }; nameWithOwner: string } | null;
   repository: { nameWithOwner: string } | null;
+  mergeStateStatus: string;
   assignees: { nodes: { login: string }[] };
   reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
   labels: { nodes: { name: string; color: string }[] };
@@ -341,6 +342,7 @@ const PR_SEARCH_QUERY = `
           baseRefName
           headRepository { owner { login } nameWithOwner }
           repository { nameWithOwner }
+          mergeStateStatus
           assignees(first: 20) { nodes { login } }
           reviewRequests(first: 20) {
             # Team reviewers are excluded (only User fragment matched)
@@ -585,7 +587,17 @@ async function graphqlSearchPRs(
       .filter((l): l is string => l != null);
     const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
 
-    const rawState = node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+    let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
+    // mergeStateStatus overrides checkStatus when it indicates action is needed.
+    // BLOCKED means required checks/reviews haven't passed — leave checkStatus from rollup.
+    const mss = node.mergeStateStatus;
+    if (mss === "DIRTY" || mss === "BEHIND") {
+      checkStatus = "conflict";
+    } else if (mss === "UNSTABLE") {
+      checkStatus = "failure";
+    } else if (mss === "UNKNOWN" && checkStatus === null) {
+      checkStatus = null; // no-op, kept explicit for clarity
+    }
 
     // Store fork info for fallback detection
     if (node.headRepository) {
@@ -612,7 +624,7 @@ async function graphqlSearchPRs(
       assigneeLogins: node.assignees.nodes.map((a) => a.login),
       reviewerLogins,
       repoFullName: node.repository.nameWithOwner,
-      checkStatus: mapCheckStatus(rawState),
+      checkStatus,
       additions: node.additions,
       deletions: node.deletions,
       changedFiles: node.changedFiles,
