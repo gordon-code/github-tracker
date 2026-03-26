@@ -37,16 +37,16 @@ describe("WorkflowSummaryCard", () => {
         density="comfortable"
       />
     ));
-    // 2 successes shown as green count
-    expect(screen.getByText("2").className).toContain("green");
-    // 1 failure shown as red count — use container query to target by color class
-    const redCount = container.querySelector('[class*="text-red"]');
-    expect(redCount).not.toBeNull();
-    expect(redCount!.textContent).toBe("1");
-    // 1 running shown as yellow count
-    const yellowCount = container.querySelector('[class*="text-yellow"]');
-    expect(yellowCount).not.toBeNull();
-    expect(yellowCount!.textContent).toBe("1");
+    // 2 successes shown as success-colored count
+    expect(screen.getByText("2").className).toContain("text-success");
+    // 1 failure shown as error-colored count
+    const errorCount = container.querySelector('[class*="text-error"]');
+    expect(errorCount).not.toBeNull();
+    expect(errorCount!.textContent).toBe("1");
+    // 1 running shown as warning-colored count
+    const warningCount = container.querySelector('[class*="text-warning"]');
+    expect(warningCount).not.toBeNull();
+    expect(warningCount!.textContent).toBe("1");
   });
 
   it("does not show zero counts", () => {
@@ -61,11 +61,11 @@ describe("WorkflowSummaryCard", () => {
         density="comfortable"
       />
     ));
-    // Only green count visible, no red or yellow elements
-    const redSpans = container.querySelectorAll('[class*="red"]');
-    const yellowSpans = container.querySelectorAll('[class*="yellow"]');
-    expect(redSpans.length).toBe(0);
-    expect(yellowSpans.length).toBe(0);
+    // Only success count visible, no error or warning elements
+    const errorSpans = container.querySelectorAll('[class*="text-error"]');
+    const warningSpans = container.querySelectorAll('[class*="text-warning"]');
+    expect(errorSpans.length).toBe(0);
+    expect(warningSpans.length).toBe(0);
   });
 
   it("collapsed: does not render WorkflowRunRow components", () => {
@@ -123,7 +123,7 @@ describe("WorkflowSummaryCard", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("card with failures has red border classes", () => {
+  it("card with failures has error border classes", () => {
     const runs = [makeWorkflowRun({ conclusion: "failure", status: "completed" })];
     const { container } = render(() => (
       <WorkflowSummaryCard
@@ -136,10 +136,10 @@ describe("WorkflowSummaryCard", () => {
       />
     ));
     const card = container.firstElementChild as HTMLElement;
-    expect(card.className).toContain("border-red");
+    expect(card.className).toContain("border-error");
   });
 
-  it("card with all successes has green border accent", () => {
+  it("card with all successes has success border accent", () => {
     const runs = [
       makeWorkflowRun({ conclusion: "success", status: "completed" }),
       makeWorkflowRun({ conclusion: "success", status: "completed" }),
@@ -155,10 +155,10 @@ describe("WorkflowSummaryCard", () => {
       />
     ));
     const card = container.firstElementChild as HTMLElement;
-    expect(card.className).toContain("border-l-green");
+    expect(card.className).toContain("border-l-success");
   });
 
-  it("card with running workflows has yellow border accent", () => {
+  it("card with running workflows has warning border accent", () => {
     const runs = [
       makeWorkflowRun({ conclusion: null, status: "in_progress" }),
     ];
@@ -173,6 +173,6 @@ describe("WorkflowSummaryCard", () => {
       />
     ));
     const card = container.firstElementChild as HTMLElement;
-    expect(card.className).toContain("border-l-yellow");
+    expect(card.className).toContain("border-l-warning");
   });
 });

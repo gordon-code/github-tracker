@@ -38,16 +38,16 @@ export default function ItemRow(props: ItemRowProps) {
         }
       }}
       class={`group relative flex items-start gap-3 cursor-pointer
-        border-b border-gray-200 dark:border-gray-700
-        hover:bg-gray-50 dark:hover:bg-gray-800/60
-        transition-colors focus:outline-none focus:bg-gray-50 dark:focus:bg-gray-800/60
+        border-b border-base-300
+        hover:bg-base-200
+        transition-colors focus:outline-none focus:bg-base-200 focus-visible:ring-2 focus-visible:ring-primary
         ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
     >
       {/* Repo badge */}
       <Show when={!props.hideRepo}>
         <span
           class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
-            bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200
+            bg-primary/10 text-primary
             ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
           title={props.repo}
         >
@@ -58,10 +58,10 @@ export default function ItemRow(props: ItemRowProps) {
       {/* Main content */}
       <div class="flex-1 min-w-0">
         <div class={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 ${isCompact() ? "text-sm" : "text-sm"}`}>
-          <span class="text-gray-500 dark:text-gray-400 shrink-0">
+          <span class="text-base-content/60 shrink-0">
             #{props.number}
           </span>
-          <span class="font-medium text-gray-900 dark:text-gray-100 truncate">
+          <span class="font-medium text-base-content truncate">
             {props.title}
           </span>
         </div>
@@ -94,7 +94,7 @@ export default function ItemRow(props: ItemRowProps) {
       </div>
 
       {/* Author + time + comment count */}
-      <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-gray-500 dark:text-gray-400 ${isCompact() ? "" : "pt-0.5"}`}>
+      <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 ${isCompact() ? "" : "pt-0.5"}`}>
         <span>{props.author}</span>
         <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
         <Show when={(props.commentCount ?? 0) > 0}>
@@ -125,10 +125,10 @@ export default function ItemRow(props: ItemRowProps) {
           props.onIgnore();
         }}
         class={`shrink-0 self-center rounded p-1
-          text-gray-300 dark:text-gray-600
-          hover:text-red-500 dark:hover:text-red-400
+          text-base-content/30
+          hover:text-error
           opacity-0 group-hover:opacity-100 focus:opacity-100
-          transition-opacity focus:outline-none focus:ring-2 focus:ring-red-400`}
+          transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
         title="Ignore this item"
         aria-label={`Ignore #${props.number} ${props.title}`}
       >
