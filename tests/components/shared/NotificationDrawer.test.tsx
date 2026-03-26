@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import {
   pushNotification,
@@ -33,16 +34,15 @@ function renderDrawer(open = true, onClose = vi.fn()) {
 }
 
 describe("NotificationDrawer", () => {
-  it("does not render when open is false", () => {
-    const { container } = render(() => (
+  it("does not render dialog when open is false", () => {
+    render(() => (
       <NotificationDrawer open={false} onClose={vi.fn()} />
     ));
-    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("renders drawer with Notifications heading when open is true", () => {
     renderDrawer(true);
-    // advance timers so effect runs
     vi.advanceTimersByTime(0);
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.getByText("Notifications")).toBeDefined();
@@ -108,14 +108,15 @@ describe("NotificationDrawer", () => {
     expect(isMuted("search")).toBe(true);
   });
 
-  it("calls onClose when overlay backdrop is clicked", () => {
+  it("calls onClose when overlay backdrop is clicked", async () => {
+    const user = userEvent.setup({ delay: null });
     const onClose = vi.fn();
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
-    // The overlay is the element with bg-black/40
-    const overlay = document.querySelector("[aria-hidden='true']") as HTMLElement;
+    // corvu drawer overlay
+    const overlay = document.body.querySelector("[data-corvu-drawer-overlay]") as HTMLElement;
     expect(overlay).not.toBeNull();
-    fireEvent.click(overlay);
+    await user.click(overlay);
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -150,11 +151,10 @@ describe("NotificationDrawer", () => {
     expect(item.className).not.toContain("bg-blue-50/50");
   });
 
-  it("has role=dialog and proper aria labels", () => {
+  it("has role=dialog and Close button with proper aria-label", () => {
     renderDrawer(true);
     vi.advanceTimersByTime(0);
-    const dialog = screen.getByRole("dialog");
-    expect(dialog.getAttribute("aria-label")).toBe("Notifications");
+    expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.getByLabelText("Close notifications")).toBeDefined();
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@solidjs/testing-library";
+import { screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 
@@ -194,15 +194,16 @@ describe("Header", () => {
     expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("clicking bell twice closes the drawer", async () => {
+  it("closing drawer via close button resets bell state", async () => {
     const user = userEvent.setup();
     render(() => <Header />);
     const bellBtn = screen.getByLabelText("Notifications");
     await user.click(bellBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
-    await user.click(bellBtn);
+    // Close via drawer close button (corvu sets pointer-events:none on body while open)
+    const closeBtn = screen.getByLabelText("Close notifications");
+    fireEvent.click(closeBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
-    // markAllAsRead called only once (on open, not on close)
     expect(errorsModule.markAllAsRead).toHaveBeenCalledTimes(1);
   });
 });
