@@ -588,9 +588,10 @@ async function graphqlSearchPRs(
     const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
 
     let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
-    // mergeStateStatus overrides checkStatus when it indicates action is needed
+    // mergeStateStatus overrides checkStatus when it indicates action is needed.
+    // BLOCKED means required checks/reviews haven't passed — leave checkStatus from rollup.
     const mss = node.mergeStateStatus;
-    if (mss === "DIRTY" || mss === "BEHIND" || mss === "BLOCKED") {
+    if (mss === "DIRTY" || mss === "BEHIND") {
       checkStatus = "conflict";
     } else if (mss === "UNSTABLE") {
       checkStatus = "failure";
