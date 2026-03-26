@@ -6,6 +6,7 @@ interface SizeBadgeProps {
   deletions: number;
   changedFiles: number;
   category?: "XS" | "S" | "M" | "L" | "XL";
+  filesUrl?: string;
 }
 
 const SIZE_CONFIG = {
@@ -25,9 +26,27 @@ export default function SizeBadge(props: SizeBadgeProps) {
         <span class={SIZE_CONFIG[size()]}>
           {size()}
         </span>
-        <span class="text-success">+{props.additions}</span>
-        <span class="text-error">-{props.deletions}</span>
-        <span class="text-base-content/50">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+        <Show when={props.filesUrl} fallback={
+          <>
+            <span class="text-success">+{props.additions}</span>
+            <span class="text-error">-{props.deletions}</span>
+            <span class="text-base-content/50">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+          </>
+        }>
+          {(url) => (
+            <a
+              href={url()}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span class="text-success">+{props.additions}</span>
+              <span class="text-error">-{props.deletions}</span>
+              <span class="text-base-content/50">{props.changedFiles} {props.changedFiles === 1 ? "file" : "files"}</span>
+            </a>
+          )}
+        </Show>
       </span>
     </Show>
   );

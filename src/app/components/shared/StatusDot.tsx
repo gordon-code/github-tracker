@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 
 export interface StatusDotProps {
   status: "success" | "pending" | "failure" | "error" | "conflict" | null;
+  href?: string;
 }
 
 const STATUS_CONFIG = {
@@ -38,9 +39,9 @@ export default function StatusDot(props: StatusDotProps) {
       ? STATUS_CONFIG[props.status]
       : { bg: "bg-base-content/20", label: "No checks", pulse: false };
 
-  return (
+  const dot = () => (
     <span
-      class="relative inline-flex items-center justify-center"
+      class={`relative inline-flex items-center justify-center${props.href ? " cursor-pointer" : ""}`}
       style={{ width: "12px", height: "12px" }}
       title={cfg().label}
       aria-label={cfg().label}
@@ -55,5 +56,20 @@ export default function StatusDot(props: StatusDotProps) {
         style={{ width: "8px", height: "8px" }}
       />
     </span>
+  );
+
+  return (
+    <Show when={props.href} fallback={dot()}>
+      {(url) => (
+        <a
+          href={url()}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {dot()}
+        </a>
+      )}
+    </Show>
   );
 }

@@ -436,8 +436,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
                                   <ReviewBadge decision={pr.reviewDecision} />
-                                  <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} />
-                                  <StatusDot status={pr.checkStatus} />
+                                  <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={`${pr.htmlUrl}/files`} />
+                                  <StatusDot status={pr.checkStatus} href={`${pr.htmlUrl}/checks`} />
                                   <Show when={pr.checkStatus === "conflict"}>
                                     <span class="badge badge-warning badge-sm gap-1">
                                       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
