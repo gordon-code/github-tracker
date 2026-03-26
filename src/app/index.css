@@ -4,7 +4,6 @@
   themes: light --default, dark, nord, dracula, synthwave, corporate, cupcake, forest, coffee, dim;
 }
 
-@custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Notification animations ──────────────────────────────────────────────── */
 
@@ -62,10 +61,15 @@
   animation: overlay-fade-out 0.3s ease-in forwards;
 }
 
-/* ── Dark-mode scrollbar styling ─────────────────────────────────────────── */
+/* ── Dark-theme scrollbar styling ────────────────────────────────────────── */
 
-.dark * {
-  scrollbar-color: #4b5563 #1f2937; /* gray-600 thumb, gray-800 track */
+[data-theme="dark"] *,
+[data-theme="dracula"] *,
+[data-theme="synthwave"] *,
+[data-theme="forest"] *,
+[data-theme="coffee"] *,
+[data-theme="dim"] * {
+  scrollbar-color: color-mix(in oklch, var(--color-base-content) 30%, transparent) var(--color-base-200);
 }
 
 @media (prefers-reduced-motion: reduce) {

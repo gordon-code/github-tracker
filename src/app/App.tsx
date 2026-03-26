@@ -1,7 +1,7 @@
 import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken } from "./stores/auth";
-import { config, initConfigPersistence, DARK_THEMES } from "./stores/config";
+import { config, initConfigPersistence } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
@@ -118,14 +118,7 @@ function RootRedirect() {
 
 export default function App() {
   createEffect(() => {
-    const theme = config.theme;
-    document.documentElement.setAttribute("data-theme", theme);
-    // Bridge: set .dark class for components still using dark: prefix during migration
-    if (DARK_THEMES.has(theme)) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    document.documentElement.setAttribute("data-theme", config.theme);
   });
 
   onMount(() => {
