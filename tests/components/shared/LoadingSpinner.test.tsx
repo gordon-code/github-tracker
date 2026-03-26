@@ -8,31 +8,29 @@ describe("LoadingSpinner", () => {
     expect(screen.getByRole("status")).toBeTruthy();
   });
 
-  it("has animate-spin class on SVG", () => {
+  it("has loading-spinner class on spinner element", () => {
     const { container } = render(() => <LoadingSpinner />);
-    const svg = container.querySelector("svg");
-    expect(svg?.className).toContain("animate-spin");
+    const spinner = container.querySelector(".loading");
+    expect(spinner).not.toBeNull();
+    expect(spinner?.className).toContain("loading-spinner");
   });
 
-  it('uses h-4 w-4 for size="sm"', () => {
+  it('uses loading-sm for size="sm"', () => {
     const { container } = render(() => <LoadingSpinner size="sm" />);
-    const svg = container.querySelector("svg");
-    expect(svg?.className).toContain("h-4");
-    expect(svg?.className).toContain("w-4");
+    const spinner = container.querySelector(".loading");
+    expect(spinner?.className).toContain("loading-sm");
   });
 
-  it('uses h-8 w-8 for size="md" (default)', () => {
+  it('uses loading-md for size="md" (default)', () => {
     const { container } = render(() => <LoadingSpinner />);
-    const svg = container.querySelector("svg");
-    expect(svg?.className).toContain("h-8");
-    expect(svg?.className).toContain("w-8");
+    const spinner = container.querySelector(".loading");
+    expect(spinner?.className).toContain("loading-md");
   });
 
-  it('uses h-12 w-12 for size="lg"', () => {
+  it('uses loading-lg for size="lg"', () => {
     const { container } = render(() => <LoadingSpinner size="lg" />);
-    const svg = container.querySelector("svg");
-    expect(svg?.className).toContain("h-12");
-    expect(svg?.className).toContain("w-12");
+    const spinner = container.querySelector(".loading");
+    expect(spinner?.className).toContain("loading-lg");
   });
 
   it("shows label text when label prop provided", () => {
@@ -40,8 +38,11 @@ describe("LoadingSpinner", () => {
     expect(screen.getByText("Loading data...")).toBeTruthy();
   });
 
-  it("does not render label element when label omitted", () => {
+  it("does not render label span when label omitted", () => {
     const { container } = render(() => <LoadingSpinner />);
-    expect(container.querySelector("span")).toBeNull();
+    // The wrapper div has role="status", the only spans are the loading spinner
+    const spans = container.querySelectorAll("span");
+    // Only the loading spinner span should exist, no text span
+    expect(Array.from(spans).some((s) => s.textContent?.trim())).toBe(false);
   });
 });

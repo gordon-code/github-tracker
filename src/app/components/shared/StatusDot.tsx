@@ -4,22 +4,22 @@ export interface StatusDotProps {
 
 const STATUS_CONFIG = {
   success: {
-    bg: "bg-green-500",
+    bg: "bg-success",
     label: "All checks passed",
     pulse: false,
   },
   pending: {
-    bg: "bg-yellow-500",
+    bg: "bg-warning",
     label: "Checks pending",
     pulse: true,
   },
   failure: {
-    bg: "bg-red-500",
+    bg: "bg-error",
     label: "Checks failing",
     pulse: false,
   },
   error: {
-    bg: "bg-red-500",
+    bg: "bg-error",
     label: "Checks failing",
     pulse: false,
   },
@@ -29,7 +29,7 @@ export default function StatusDot(props: StatusDotProps) {
   const cfg = () =>
     props.status !== null
       ? STATUS_CONFIG[props.status]
-      : { bg: "bg-gray-300", label: "No checks", pulse: false };
+      : { bg: "bg-base-300", label: "No checks", pulse: false };
 
   return (
     <span

@@ -3,7 +3,7 @@ export default function ChevronIcon(props: { size: "sm" | "md"; rotated: boolean
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      class={`${sizeClass()} text-gray-400 transition-transform ${props.rotated ? "-rotate-90" : ""}`}
+      class={`${sizeClass()} text-base-content/50 transition-transform ${props.rotated ? "-rotate-90" : ""}`}
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-hidden="true"
