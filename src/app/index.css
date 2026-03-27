@@ -2,6 +2,7 @@
 
 @plugin "daisyui" {
   themes: corporate --default, cupcake, light, nord, dim, dracula, dark, forest;
+  exclude: chat, mask, mockup;
 }
 
 

@@ -75,8 +75,8 @@ export default function ItemRow(props: ItemRowProps) {
                 const fg = isValidHex ? labelTextColor(label.color) : "#374151";
                 return (
                   <span
-                    class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium"
-                    style={{ "background-color": bg, color: fg }}
+                    class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium bg-[var(--lb)] text-[var(--lf)]"
+                    style={{ "--lb": bg, "--lf": fg }}
                   >
                     {label.name}
                   </span>
