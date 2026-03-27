@@ -41,8 +41,7 @@ export default function StatusDot(props: StatusDotProps) {
 
   const dot = () => (
     <span
-      class={`relative inline-flex items-center justify-center${props.href ? " cursor-pointer" : ""}`}
-      style={{ width: "12px", height: "12px" }}
+      class={`relative inline-flex items-center justify-center w-3 h-3${props.href ? " cursor-pointer" : ""}`}
       title={cfg().label}
       aria-label={cfg().label}
     >
@@ -52,8 +51,7 @@ export default function StatusDot(props: StatusDotProps) {
         />
       </Show>
       <span
-        class={`relative inline-flex rounded-full ${cfg().bg}`}
-        style={{ width: "8px", height: "8px" }}
+        class={`relative inline-flex rounded-full w-2 h-2 ${cfg().bg}`}
       />
     </span>
   );
