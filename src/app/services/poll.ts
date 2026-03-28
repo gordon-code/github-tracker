@@ -3,8 +3,7 @@ import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
 import {
-  fetchIssues,
-  fetchPullRequests,
+  fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
   type Issue,
   type PullRequest,
@@ -143,18 +142,17 @@ export async function fetchAllData(): Promise<DashboardData> {
   // would cause unchanged items to vanish from the display. ETag caching already
   // handles the "nothing changed" case for workflow runs (304 = free).
 
-  // Issues + PRs use GraphQL (5000 pts/hr), workflow runs use REST core (5000/hr) — all parallel
-  const [issueResult, prResult, runResult] = await Promise.allSettled([
-    fetchIssues(octokit, repos, userLogin),
-    fetchPullRequests(octokit, repos, userLogin),
+  // Issues + PRs combined in a single aliased GraphQL query; workflow runs use REST core.
+  // Both streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
+  const [issuesAndPrsResult, runResult] = await Promise.allSettled([
+    fetchIssuesAndPullRequests(octokit, repos, userLogin),
     fetchWorkflowRuns(octokit, repos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 
   // Collect top-level errors (total function failures)
   const topLevelErrors: ApiError[] = [];
   const settled: [PromiseSettledResult<unknown>, string][] = [
-    [issueResult, "issues"],
-    [prResult, "pull-requests"],
+    [issuesAndPrsResult, "issues-and-prs"],
     [runResult, "workflow-runs"],
   ];
   for (const [result, label] of settled) {
@@ -169,29 +167,27 @@ export async function fetchAllData(): Promise<DashboardData> {
   }
 
   // Extract data and per-batch errors from successful results
-  const issueData = issueResult.status === "fulfilled" ? issueResult.value : null;
-  const prData = prResult.status === "fulfilled" ? prResult.value : null;
+  const issuesAndPrsData = issuesAndPrsResult.status === "fulfilled" ? issuesAndPrsResult.value : null;
   const runData = runResult.status === "fulfilled" ? runResult.value : null;
 
   // Merge all error sources: top-level failures + per-batch partial failures
   const errors = [
     ...topLevelErrors,
-    ...(issueData?.errors ?? []),
-    ...(prData?.errors ?? []),
+    ...(issuesAndPrsData?.errors ?? []),
     ...(runData?.errors ?? []),
   ];
 
   // Only activate the notifications gate if at least one fetch succeeded.
-  // If all three failed (e.g., network outage), we don't want the gate to
+  // If all failed (e.g., network outage), we don't want the gate to
   // suppress retries on the next poll cycle.
-  const anySucceeded = issueData !== null || prData !== null || runData !== null;
+  const anySucceeded = issuesAndPrsData !== null || runData !== null;
   if (anySucceeded) {
     _lastSuccessfulFetch = new Date();
   }
 
   return {
-    issues: issueData?.issues ?? [],
-    pullRequests: prData?.pullRequests ?? [],
+    issues: issuesAndPrsData?.issues ?? [],
+    pullRequests: issuesAndPrsData?.pullRequests ?? [],
     workflowRuns: runData?.workflowRuns ?? [],
     errors,
   };

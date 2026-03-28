@@ -279,8 +279,8 @@ describe("fetchIssues", () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
   });
 
-  it("batches repos into chunks of 30", async () => {
-    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
+  it("batches repos into chunks of 50", async () => {
+    const repos: RepoRef[] = Array.from({ length: 55 }, (_, i) => ({
       owner: "org",
       name: `repo-${i}`,
       fullName: `org/repo-${i}`,
@@ -293,7 +293,7 @@ describe("fetchIssues", () => {
       "octocat"
     );
 
-    // Should make 2 GraphQL calls (30 + 5 repos)
+    // Should make 2 GraphQL calls (50 + 5 repos)
     expect(octokit.graphql).toHaveBeenCalledTimes(2);
   });
 
@@ -486,8 +486,8 @@ describe("fetchIssues", () => {
   it("truncates to exactly 1000 when parallel chunks overshoot", async () => {
     vi.mocked(pushNotification).mockClear();
 
-    // 35 repos → 2 chunks. Each chunk returns 600 items (total 1200, well over cap).
-    const repos: RepoRef[] = Array.from({ length: 35 }, (_, i) => ({
+    // 55 repos → 2 chunks. Each chunk returns 600 items (total 1200, well over cap).
+    const repos: RepoRef[] = Array.from({ length: 55 }, (_, i) => ({
       owner: "org",
       name: `repo-${i}`,
       fullName: `org/repo-${i}`,

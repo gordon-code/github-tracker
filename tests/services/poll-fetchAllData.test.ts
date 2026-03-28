@@ -23,10 +23,9 @@ vi.mock("../../src/app/stores/auth", () => ({
   onAuthCleared: vi.fn(),
 }));
 
-// Mock the three fetch functions
+// Mock the fetch functions (combined issues+PRs and workflow runs)
 vi.mock("../../src/app/services/api", () => ({
-  fetchIssues: vi.fn(),
-  fetchPullRequests: vi.fn(),
+  fetchIssuesAndPullRequests: vi.fn(),
   fetchWorkflowRuns: vi.fn(),
   resetEmptyActionRepos: vi.fn(),
 }));
@@ -57,8 +56,7 @@ vi.mock("../../src/app/lib/errors", () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const emptyIssueResult = { issues: [], errors: [] };
-const emptyPrResult = { pullRequests: [], errors: [] };
+const emptyIssuesAndPrsResult = { issues: [], pullRequests: [], errors: [] };
 const emptyRunResult = { workflowRuns: [], errors: [] };
 
 function makeMockOctokit() {
@@ -78,16 +76,14 @@ afterEach(() => {
 
 describe("fetchAllData — first call", () => {
 
-  it("returns data from all three fetches on first call", async () => {
+  it("returns data from all fetches on first call", async () => {
     vi.resetModules();
 
-    // Re-import mocked modules after reset
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -102,15 +98,14 @@ describe("fetchAllData — first call", () => {
     expect(result.skipped).toBeUndefined();
   });
 
-  it("calls all three fetch functions on first call (no notification gate)", async () => {
+  it("calls both fetch functions on first call (no notification gate)", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -120,9 +115,8 @@ describe("fetchAllData — first call", () => {
 
     // First call: no _lastSuccessfulFetch, so notifications gate is skipped
     expect(mockOctokit.request).not.toHaveBeenCalled();
-    // All three data fetches should run
-    expect(fetchIssues).toHaveBeenCalledOnce();
-    expect(fetchPullRequests).toHaveBeenCalledOnce();
+    // Both data fetches should run
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
     expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
   });
 
@@ -130,12 +124,11 @@ describe("fetchAllData — first call", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const { config } = await import("../../src/app/stores/config");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -143,8 +136,7 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    expect(fetchIssues).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat");
-    expect(fetchPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat");
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat");
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
       config.selectedRepos,
@@ -157,11 +149,10 @@ describe("fetchAllData — first call", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -199,11 +190,10 @@ describe("fetchAllData — notification gate skip", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -212,8 +202,7 @@ describe("fetchAllData — notification gate skip", () => {
     // First call to set _lastSuccessfulFetch
     await fetchAllData();
 
-    vi.mocked(fetchIssues).mockClear();
-    vi.mocked(fetchPullRequests).mockClear();
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
     vi.mocked(fetchWorkflowRuns).mockClear();
 
     // Simulate 304 from notifications — nothing changed
@@ -223,8 +212,7 @@ describe("fetchAllData — notification gate skip", () => {
 
     expect(result.skipped).toBe(true);
     // Data fetches should NOT have been called
-    expect(fetchIssues).not.toHaveBeenCalled();
-    expect(fetchPullRequests).not.toHaveBeenCalled();
+    expect(fetchIssuesAndPullRequests).not.toHaveBeenCalled();
     expect(fetchWorkflowRuns).not.toHaveBeenCalled();
   });
 
@@ -233,11 +221,10 @@ describe("fetchAllData — notification gate skip", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -245,7 +232,7 @@ describe("fetchAllData — notification gate skip", () => {
 
     // First call — sets _lastSuccessfulFetch
     await fetchAllData();
-    vi.mocked(fetchIssues).mockClear();
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
 
     // Advance time past 10 minutes
     vi.advanceTimersByTime(11 * 60 * 1000);
@@ -257,28 +244,26 @@ describe("fetchAllData — notification gate skip", () => {
 
     // Should NOT be skipped — staleness cap bypasses the gate
     expect(result.skipped).toBeUndefined();
-    expect(fetchIssues).toHaveBeenCalled();
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
   });
 });
 
-// ── qa-1: All three fetches fail — errors aggregated, _lastSuccessfulFetch not updated ──
+// ── qa-1: All fetches fail — errors aggregated, _lastSuccessfulFetch not updated ──
 
 describe("fetchAllData — all fetches fail", () => {
-  it("aggregates top-level errors when all three fetches reject", async () => {
+  it("aggregates top-level errors when all fetches reject", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
 
-    vi.mocked(fetchIssues).mockRejectedValue(Object.assign(new Error("Issues failed"), { status: 500 }));
-    vi.mocked(fetchPullRequests).mockRejectedValue(Object.assign(new Error("PRs failed"), { status: 500 }));
+    vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue(Object.assign(new Error("Issues+PRs failed"), { status: 500 }));
     vi.mocked(fetchWorkflowRuns).mockRejectedValue(Object.assign(new Error("Runs failed"), { status: 500 }));
 
     const topLevelErrors = [
-      { repo: "issues", statusCode: 500, message: "Issues failed", retryable: true },
-      { repo: "pull-requests", statusCode: 500, message: "PRs failed", retryable: true },
+      { repo: "issues-and-prs", statusCode: 500, message: "Issues+PRs failed", retryable: true },
       { repo: "workflow-runs", statusCode: 500, message: "Runs failed", retryable: true },
     ];
     const { fetchAllData } = await import("../../src/app/services/poll");
@@ -292,16 +277,15 @@ describe("fetchAllData — all fetches fail", () => {
     expect(result.skipped).toBeUndefined();
   });
 
-  it("does NOT update _lastSuccessfulFetch when all three fetches reject", async () => {
+  it("does NOT update _lastSuccessfulFetch when all fetches reject", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
 
-    vi.mocked(fetchIssues).mockRejectedValue(new Error("fail"));
-    vi.mocked(fetchPullRequests).mockRejectedValue(new Error("fail"));
+    vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue(new Error("fail"));
     vi.mocked(fetchWorkflowRuns).mockRejectedValue(new Error("fail"));
 
     const { fetchAllData } = await import("../../src/app/services/poll");
@@ -312,8 +296,7 @@ describe("fetchAllData — all fetches fail", () => {
     // Second call — if _lastSuccessfulFetch were set, a notification request would be made
     // Since all failed, it should NOT be set → no notification request
     mockOctokit.request.mockClear();
-    vi.mocked(fetchIssues).mockRejectedValue(new Error("fail"));
-    vi.mocked(fetchPullRequests).mockRejectedValue(new Error("fail"));
+    vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue(new Error("fail"));
     vi.mocked(fetchWorkflowRuns).mockRejectedValue(new Error("fail"));
 
 
@@ -331,7 +314,7 @@ describe("fetchAllData — partial success", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
 
@@ -342,9 +325,8 @@ describe("fetchAllData — partial success", () => {
       userLogin: "octocat", userAvatarUrl: "", labels: [], assigneeLogins: [],
       repoFullName: "o/r", comments: 0,
     }];
-    vi.mocked(fetchIssues).mockResolvedValue({ issues, errors: [] });
-    vi.mocked(fetchPullRequests).mockRejectedValue(Object.assign(new Error("PR fetch failed"), { status: 503 }));
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue({ workflowRuns: [], errors: [] });
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue({ issues, pullRequests: [], errors: [] });
+    vi.mocked(fetchWorkflowRuns).mockRejectedValue(Object.assign(new Error("Runs failed"), { status: 503 }));
     const { fetchAllData } = await import("../../src/app/services/poll");
 
     const result = await fetchAllData();
@@ -353,7 +335,7 @@ describe("fetchAllData — partial success", () => {
     expect(result.pullRequests).toEqual([]);
     expect(result.workflowRuns).toEqual([]);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].repo).toBe("pull-requests");
+    expect(result.errors[0].repo).toBe("workflow-runs");
   });
 });
 
@@ -364,7 +346,7 @@ describe("fetchAllData — no client", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     vi.mocked(getClient).mockReturnValue(null);
 
     const { fetchAllData } = await import("../../src/app/services/poll");
@@ -375,7 +357,7 @@ describe("fetchAllData — no client", () => {
     expect(result.pullRequests).toEqual([]);
     expect(result.workflowRuns).toEqual([]);
     expect(result.errors).toEqual([]);
-    expect(fetchIssues).not.toHaveBeenCalled();
+    expect(fetchIssuesAndPullRequests).not.toHaveBeenCalled();
   });
 });
 
@@ -386,12 +368,11 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const { onAuthCleared } = await import("../../src/app/stores/auth");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -412,8 +393,7 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
 
     // Gate is now disabled; third call should NOT call GET /notifications
     mockOctokit.request.mockClear();
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
     await fetchAllData();
     expect(mockOctokit.request).not.toHaveBeenCalled();
@@ -423,8 +403,7 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
 
     // First call after logout: _lastSuccessfulFetch is null → no gate check
     mockOctokit.request.mockClear();
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
     await fetchAllData();
     // No notification gate on first call after reset (no _lastSuccessfulFetch)
@@ -435,8 +414,7 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
       data: [],
       headers: { "last-modified": "Thu, 20 Mar 2026 12:00:00 GMT" },
     });
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
     await fetchAllData();
     // GET /notifications was called — gate is active again (not disabled)
@@ -454,11 +432,10 @@ describe("fetchAllData — If-Modified-Since header", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -473,8 +450,7 @@ describe("fetchAllData — If-Modified-Since header", () => {
       data: [],
       headers: { "last-modified": lastModified },
     });
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
     await fetchAllData();
 
@@ -483,8 +459,7 @@ describe("fetchAllData — If-Modified-Since header", () => {
       data: [],
       headers: {},
     });
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
     await fetchAllData();
 
@@ -505,12 +480,11 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const { pushNotification } = await import("../../src/app/lib/errors");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -518,7 +492,7 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
 
     // First call — sets _lastSuccessfulFetch
     await fetchAllData();
-    vi.mocked(fetchIssues).mockClear();
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
 
     // Second call — gate checks notifications, gets 403
     mockOctokit.request.mockRejectedValueOnce({ status: 403 });
@@ -533,19 +507,16 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
 
     // Third call — gate should be DISABLED, no notifications request
     mockOctokit.request.mockClear();
-    vi.mocked(fetchIssues).mockClear();
-    vi.mocked(fetchPullRequests).mockClear();
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
     vi.mocked(fetchWorkflowRuns).mockClear();
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
     await fetchAllData();
 
     expect(mockOctokit.request).not.toHaveBeenCalled();
-    // The three data fetches still run
-    expect(fetchIssues).toHaveBeenCalled();
-    expect(fetchPullRequests).toHaveBeenCalled();
+    // The data fetches still run
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
     expect(fetchWorkflowRuns).toHaveBeenCalled();
   });
 
@@ -553,11 +524,10 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssues).mockResolvedValue(emptyIssueResult);
-    vi.mocked(fetchPullRequests).mockResolvedValue(emptyPrResult);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
@@ -565,8 +535,7 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
 
     // First call — sets _lastSuccessfulFetch
     await fetchAllData();
-    vi.mocked(fetchIssues).mockClear();
-    vi.mocked(fetchPullRequests).mockClear();
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
     vi.mocked(fetchWorkflowRuns).mockClear();
 
     // Second call — gate returns 403; hasNotificationChanges returns true → full fetch runs
@@ -575,8 +544,7 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     const result = await fetchAllData();
 
     expect(result.skipped).toBeUndefined();
-    expect(fetchIssues).toHaveBeenCalled();
-    expect(fetchPullRequests).toHaveBeenCalled();
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
     expect(fetchWorkflowRuns).toHaveBeenCalled();
   });
 });
@@ -584,11 +552,11 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
 // ── qa-4: Concurrency verification ────────────────────────────────────────────
 
 describe("fetchAllData — parallel execution", () => {
-  it("initiates all three fetches before any resolves", async () => {
+  it("initiates both fetches before either resolves", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssues, fetchPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
     const mockOctokit = makeMockOctokit();
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
 
@@ -596,13 +564,9 @@ describe("fetchAllData — parallel execution", () => {
     const resolvers: Array<(v: unknown) => void> = [];
 
     // Each mock records when it's called but doesn't resolve until manually triggered
-    vi.mocked(fetchIssues).mockImplementation(() => {
-      callOrder.push("issues-start");
-      return new Promise((resolve) => { resolvers.push(() => resolve(emptyIssueResult)); });
-    });
-    vi.mocked(fetchPullRequests).mockImplementation(() => {
-      callOrder.push("prs-start");
-      return new Promise((resolve) => { resolvers.push(() => resolve(emptyPrResult)); });
+    vi.mocked(fetchIssuesAndPullRequests).mockImplementation(() => {
+      callOrder.push("issues-and-prs-start");
+      return new Promise((resolve) => { resolvers.push(() => resolve(emptyIssuesAndPrsResult)); });
     });
     vi.mocked(fetchWorkflowRuns).mockImplementation(() => {
       callOrder.push("runs-start");
@@ -613,14 +577,14 @@ describe("fetchAllData — parallel execution", () => {
 
     const promise = fetchAllData();
 
-    // Yield to allow Promise.allSettled to initiate all three
+    // Yield to allow Promise.allSettled to initiate both
     await new Promise((r) => setTimeout(r, 0));
 
-    // All three should have been called BEFORE any resolved
-    expect(callOrder).toEqual(["issues-start", "prs-start", "runs-start"]);
-    expect(resolvers.length).toBe(3);
+    // Both should have been called BEFORE either resolved
+    expect(callOrder).toEqual(["issues-and-prs-start", "runs-start"]);
+    expect(resolvers.length).toBe(2);
 
-    // Now resolve all
+    // Now resolve both
     for (const resolve of resolvers) resolve(undefined);
     await promise;
   });
