@@ -17,15 +17,15 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[settings]",
 ];
 
-export function initSentry(): void {
-  // Only initialize in production — never in dev/test
-  if (import.meta.env.DEV) return;
+// DSN is a public project identifier, not a secret.
+// Set this after creating a Sentry project.
+const SENTRY_DSN = "";
 
-  const dsn = import.meta.env.VITE_SENTRY_DSN;
-  if (!dsn) return;
+export function initSentry(): void {
+  if (import.meta.env.DEV || !SENTRY_DSN) return;
 
   Sentry.init({
-    dsn,
+    dsn: SENTRY_DSN,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
 
