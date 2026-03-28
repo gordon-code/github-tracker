@@ -14,6 +14,9 @@ not_found_handling = "single-page-application"
 pattern = "gh.gordoncode.dev"
 custom_domain = true
 
+[vars]
+SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240"
+
 [observability]
 enabled = true
 head_sampling_rate = 1

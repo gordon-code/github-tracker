@@ -12,7 +12,8 @@
     "test:watch": "vitest --config vitest.workspace.ts",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test"
+    "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test",
+    "test:waf": "bash scripts/waf-smoke-test.sh"
   },
   "dependencies": {
     "@kobalte/core": "^0.13.11",
@@ -20,6 +21,7 @@
     "@octokit/plugin-paginate-rest": "^14.0.0",
     "@octokit/plugin-retry": "^8.1.0",
     "@octokit/plugin-throttling": "^11.0.3",
+    "@sentry/solid": "^10.46.0",
     "@solidjs/router": "^0.16.1",
     "corvu": "^0.7.2",
     "idb": "^8.0.3",
