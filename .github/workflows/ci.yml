@@ -16,6 +16,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm test
+      - name: WAF smoke tests
+        run: pnpm test:waf
+        env:
+          WAF_BYPASS_TOKEN: ${{ secrets.WAF_BYPASS_TOKEN }}
       - name: Verify CSP hash
         run: node scripts/verify-csp-hash.mjs
       - name: Install Playwright browsers

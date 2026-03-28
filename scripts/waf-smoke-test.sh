@@ -14,6 +14,14 @@ BASE="https://gh.gordoncode.dev"
 PASS=0
 FAIL=0
 
+# When WAF_BYPASS_TOKEN is set (CI), send a header that a Cloudflare WAF rule
+# uses to skip Bot Fight Mode for this request. Without it (local dev), requests
+# pass through normally since residential IPs aren't challenged.
+BYPASS=()
+if [[ -n "${WAF_BYPASS_TOKEN:-}" ]]; then
+  BYPASS=(-H "X-CI-Bypass: ${WAF_BYPASS_TOKEN}")
+fi
+
 assert_status() {
   local expected="$1" actual="$2" label="$3"
   if [[ "$actual" == "$expected" ]]; then
@@ -26,7 +34,7 @@ assert_status() {
 }
 
 fetch() {
-  curl -s -o /dev/null -w "%{http_code}" "$@"
+  curl -s -o /dev/null -w "%{http_code}" "${BYPASS[@]}" "$@"
 }
 
 # ============================================================
