@@ -47,18 +47,16 @@ function errorResponse(
     headers: {
       "Content-Type": "application/json",
       ...corsHeaders,
-      ...securityHeaders(),
+      ...SECURITY_HEADERS,
     },
   });
 }
 
-function securityHeaders(): Record<string, string> {
-  return {
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "X-Frame-Options": "DENY",
-  };
-}
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "X-Frame-Options": "DENY",
+};
 
 // CORS: strict equality only (SDR-004)
 function getCorsHeaders(
@@ -82,12 +80,14 @@ function getCorsHeaders(
 // The envelope DSN is validated against env.SENTRY_DSN to prevent open proxy abuse.
 const SENTRY_ENVELOPE_MAX_BYTES = 256 * 1024; // 256 KB — Sentry rejects >200KB compressed
 
+let _dsnCache: { dsn: string; parsed: { host: string; projectId: string } | null } | undefined;
+
 /** Parse host and project ID from a Sentry DSN URL. Returns null if invalid. */
 function parseSentryDsn(dsn: string): { host: string; projectId: string } | null {
   if (!dsn) return null;
   try {
     const url = new URL(dsn);
-    const projectId = url.pathname.replace(/\//g, "");
+    const projectId = url.pathname.split("/").filter(Boolean).pop() ?? "";
     if (!url.hostname || !projectId) return null;
     return { host: url.hostname, projectId };
   } catch {
@@ -100,33 +100,36 @@ async function handleSentryTunnel(
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") {
-    return new Response(null, { status: 405, headers: securityHeaders() });
+    return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
-  const allowedDsn = parseSentryDsn(env.SENTRY_DSN);
+  if (!_dsnCache || _dsnCache.dsn !== env.SENTRY_DSN) {
+    _dsnCache = { dsn: env.SENTRY_DSN, parsed: parseSentryDsn(env.SENTRY_DSN) };
+  }
+  const allowedDsn = _dsnCache.parsed;
   if (!allowedDsn) {
     log("warn", "sentry_tunnel_not_configured", {}, request);
-    return new Response(null, { status: 404, headers: securityHeaders() });
-  }
-
-  const contentLength = parseInt(request.headers.get("Content-Length") ?? "0", 10);
-  if (contentLength > SENTRY_ENVELOPE_MAX_BYTES) {
-    log("warn", "sentry_tunnel_payload_too_large", { content_length: contentLength }, request);
-    return new Response(null, { status: 413, headers: securityHeaders() });
+    return new Response(null, { status: 404, headers: SECURITY_HEADERS });
   }
 
   let body: string;
   try {
     body = await request.text();
   } catch {
-    return new Response(null, { status: 400, headers: securityHeaders() });
+    log("warn", "sentry_tunnel_body_read_failed", {}, request);
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
+  }
+
+  if (body.length > SENTRY_ENVELOPE_MAX_BYTES) {
+    log("warn", "sentry_tunnel_payload_too_large", { body_length: body.length }, request);
+    return new Response(null, { status: 413, headers: SECURITY_HEADERS });
   }
 
   // Sentry envelope format: first line is JSON header with dsn field
   const firstNewline = body.indexOf("\n");
   if (firstNewline === -1) {
     log("warn", "sentry_tunnel_invalid_envelope", {}, request);
-    return new Response(null, { status: 400, headers: securityHeaders() });
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
   }
 
   let envelopeHeader: { dsn?: string };
@@ -134,20 +137,20 @@ async function handleSentryTunnel(
     envelopeHeader = JSON.parse(body.substring(0, firstNewline));
   } catch {
     log("warn", "sentry_tunnel_header_parse_failed", {}, request);
-    return new Response(null, { status: 400, headers: securityHeaders() });
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
   }
 
   if (typeof envelopeHeader.dsn !== "string") {
     // client_report envelopes may omit dsn — drop silently
     log("info", "sentry_tunnel_no_dsn", {}, request);
-    return new Response(null, { status: 200, headers: securityHeaders() });
+    return new Response(null, { status: 200, headers: SECURITY_HEADERS });
   }
 
   // Validate envelope DSN matches our project — prevents open proxy abuse
   const envelopeDsn = parseSentryDsn(envelopeHeader.dsn);
   if (!envelopeDsn) {
     log("warn", "sentry_tunnel_invalid_dsn", {}, request);
-    return new Response(null, { status: 400, headers: securityHeaders() });
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
   }
 
   if (envelopeDsn.host !== allowedDsn.host || envelopeDsn.projectId !== allowedDsn.projectId) {
@@ -155,7 +158,7 @@ async function handleSentryTunnel(
       dsn_host: envelopeDsn.host,
       dsn_project: envelopeDsn.projectId,
     }, request);
-    return new Response(null, { status: 403, headers: securityHeaders() });
+    return new Response(null, { status: 403, headers: SECURITY_HEADERS });
   }
 
   // Forward to Sentry ingest endpoint
@@ -173,13 +176,13 @@ async function handleSentryTunnel(
 
     return new Response(null, {
       status: sentryResp.status,
-      headers: securityHeaders(),
+      headers: SECURITY_HEADERS,
     });
   } catch (err) {
     log("error", "sentry_tunnel_fetch_failed", {
       error: err instanceof Error ? err.message : "unknown",
     }, request);
-    return new Response(null, { status: 502, headers: securityHeaders() });
+    return new Response(null, { status: 502, headers: SECURITY_HEADERS });
   }
 }
 
@@ -193,12 +196,12 @@ async function handleTokenExchange(
   env: Env,
   cors: Record<string, string>
 ): Promise<Response> {
-  log("info", "token_exchange_started", { method: request.method }, request);
-
   if (request.method !== "POST") {
     log("warn", "token_exchange_wrong_method", { method: request.method }, request);
     return errorResponse("method_not_allowed", 405, cors);
   }
+
+  log("info", "token_exchange_started", {}, request);
 
   const contentType = request.headers.get("Content-Type") ?? "";
   if (!contentType.includes("application/json")) {
@@ -222,10 +225,8 @@ async function handleTokenExchange(
     typeof (body as Record<string, unknown>)["code"] !== "string"
   ) {
     log("warn", "token_exchange_missing_code", {
-      body_type: typeof body,
-      body_is_null: body === null,
       has_code: body !== null && typeof body === "object" && "code" in body,
-      code_type: body !== null && typeof body === "object"
+      code_type: body !== null && typeof body === "object" && "code" in body
         ? typeof (body as Record<string, unknown>)["code"]
         : "n/a",
     }, request);
@@ -307,7 +308,7 @@ async function handleTokenExchange(
     headers: {
       "Content-Type": "application/json",
       ...cors,
-      ...securityHeaders(),
+      ...SECURITY_HEADERS,
     },
   });
 }
@@ -325,7 +326,6 @@ export default {
         method: request.method,
         pathname: url.pathname,
         cors_matched: corsMatched,
-        allowed_origin: env.ALLOWED_ORIGIN,
       }, request);
 
       if (!corsMatched && origin !== null) {
@@ -341,7 +341,7 @@ export default {
       log("info", "cors_preflight", { cors_matched: corsMatched }, request);
       return new Response(null, {
         status: 204,
-        headers: { ...cors, "Access-Control-Max-Age": "86400", ...securityHeaders() },
+        headers: { ...cors, "Access-Control-Max-Age": "86400", ...SECURITY_HEADERS },
       });
     }
 
@@ -356,7 +356,7 @@ export default {
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       return new Response("OK", {
-        headers: securityHeaders(),
+        headers: SECURITY_HEADERS,
       });
     }
 

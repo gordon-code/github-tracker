@@ -14,9 +14,6 @@ not_found_handling = "single-page-application"
 pattern = "gh.gordoncode.dev"
 custom_domain = true
 
-# Sentry tunnel — DSN is a public identifier, not a secret.
-# Set after creating a Sentry project.
-# Example: SENTRY_DSN = "https://key@o123456.ingest.sentry.io/7890123"
 [vars]
 SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240"
 

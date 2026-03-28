@@ -12,8 +12,7 @@
     "test:watch": "vitest --config vitest.workspace.ts",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test",
-    "test:waf": "bash hack/scripts/waf-smoke-test.sh"
+    "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test"
   },
   "dependencies": {
     "@kobalte/core": "^0.13.11",
