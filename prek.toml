@@ -41,6 +41,15 @@ always_run = true
 priority = 0
 
 [[repos.hooks]]
+id = "waf"
+name = "WAF smoke tests"
+language = "system"
+entry = "pnpm test:waf"
+pass_filenames = false
+always_run = true
+priority = 0
+
+[[repos.hooks]]
 id = "e2e"
 name = "Playwright E2E tests"
 language = "system"
