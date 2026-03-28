@@ -19,7 +19,7 @@ const ALLOWED_CONSOLE_PREFIXES = [
 
 // DSN is a public project identifier, not a secret.
 // Set this after creating a Sentry project.
-const SENTRY_DSN = "";
+const SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240";
 
 export function initSentry(): void {
   if (import.meta.env.DEV || !SENTRY_DSN) return;
