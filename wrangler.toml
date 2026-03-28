@@ -14,6 +14,14 @@ not_found_handling = "single-page-application"
 pattern = "gh.gordoncode.dev"
 custom_domain = true
 
+# Sentry tunnel — public identifiers, not secrets.
+# Set SENTRY_HOST and SENTRY_PROJECT_ID after creating a Sentry project.
+# Example: SENTRY_HOST = "o123456.ingest.sentry.io"
+#          SENTRY_PROJECT_ID = "7890123"
+[vars]
+SENTRY_HOST = ""
+SENTRY_PROJECT_ID = ""
+
 [observability]
 enabled = true
 head_sampling_rate = 1
