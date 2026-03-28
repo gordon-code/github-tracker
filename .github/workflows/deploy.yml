@@ -22,8 +22,6 @@ jobs:
         run: node scripts/verify-csp-hash.mjs
       - name: WAF smoke tests
         run: pnpm test:waf
-        env:
-          WAF_BYPASS_TOKEN: ${{ secrets.WAF_BYPASS_TOKEN }}
       - run: pnpm run build
         env:
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
