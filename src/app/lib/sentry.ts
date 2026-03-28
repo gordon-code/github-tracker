@@ -1,8 +1,5 @@
 import * as Sentry from "@sentry/solid";
 
-const SENTRY_DSN =
-  "https://placeholder@o0.ingest.sentry.io/0"; // TODO: replace with real DSN
-
 /** Strip OAuth credentials from any captured URL. */
 function scrubUrl(url: string): string {
   return url
@@ -24,8 +21,11 @@ export function initSentry(): void {
   // Only initialize in production — never in dev/test
   if (import.meta.env.DEV) return;
 
+  const dsn = import.meta.env.VITE_SENTRY_DSN;
+  if (!dsn) return;
+
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
 
