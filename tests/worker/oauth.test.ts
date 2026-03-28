@@ -9,8 +9,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     GITHUB_CLIENT_ID: "test_client_id",
     GITHUB_CLIENT_SECRET: "test_client_secret",
     ALLOWED_ORIGIN,
-    SENTRY_HOST: "o123456.ingest.sentry.io",
-    SENTRY_PROJECT_ID: "7890123",
+    SENTRY_DSN: "https://abc123@o123456.ingest.sentry.io/7890123",
     ...overrides,
   };
 }
@@ -850,9 +849,9 @@ describe("Worker OAuth endpoint", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns 404 when SENTRY_HOST is not configured", async () => {
+    it("returns 404 when SENTRY_DSN is not configured", async () => {
       const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      const res = await worker.fetch(req, makeEnv({ SENTRY_HOST: "", SENTRY_PROJECT_ID: "" }));
+      const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: "" }));
       expect(res.status).toBe(404);
     });
 

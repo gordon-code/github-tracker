@@ -3,8 +3,7 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   ALLOWED_ORIGIN: string;
-  SENTRY_HOST: string;    // e.g. "o123456.ingest.sentry.io"
-  SENTRY_PROJECT_ID: string; // e.g. "7890123"
+  SENTRY_DSN: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
 }
 
 // Predefined error strings only (SDR-006)
@@ -80,9 +79,21 @@ function getCorsHeaders(
 // ── Sentry tunnel ─────────────────────────────────────────────────────────
 // Proxies Sentry event envelopes through our own domain so the browser
 // treats them as same-origin (no CSP change, no ad-blocker interference).
-// The DSN is validated against env.SENTRY_HOST + env.SENTRY_PROJECT_ID to
-// prevent abuse as an open proxy.
+// The envelope DSN is validated against env.SENTRY_DSN to prevent open proxy abuse.
 const SENTRY_ENVELOPE_MAX_BYTES = 256 * 1024; // 256 KB — Sentry rejects >200KB compressed
+
+/** Parse host and project ID from a Sentry DSN URL. Returns null if invalid. */
+function parseSentryDsn(dsn: string): { host: string; projectId: string } | null {
+  if (!dsn) return null;
+  try {
+    const url = new URL(dsn);
+    const projectId = url.pathname.replace(/\//g, "");
+    if (!url.hostname || !projectId) return null;
+    return { host: url.hostname, projectId };
+  } catch {
+    return null;
+  }
+}
 
 async function handleSentryTunnel(
   request: Request,
@@ -92,7 +103,8 @@ async function handleSentryTunnel(
     return new Response(null, { status: 405, headers: securityHeaders() });
   }
 
-  if (!env.SENTRY_HOST || !env.SENTRY_PROJECT_ID) {
+  const allowedDsn = parseSentryDsn(env.SENTRY_DSN);
+  if (!allowedDsn) {
     log("warn", "sentry_tunnel_not_configured", {}, request);
     return new Response(null, { status: 404, headers: securityHeaders() });
   }
@@ -126,31 +138,28 @@ async function handleSentryTunnel(
   }
 
   if (typeof envelopeHeader.dsn !== "string") {
-    // client_report envelopes may omit dsn — forward if host is configured
+    // client_report envelopes may omit dsn — drop silently
     log("info", "sentry_tunnel_no_dsn", {}, request);
     return new Response(null, { status: 200, headers: securityHeaders() });
   }
 
-  // Validate DSN matches our project — prevents open proxy abuse
-  let dsnUrl: URL;
-  try {
-    dsnUrl = new URL(envelopeHeader.dsn);
-  } catch {
+  // Validate envelope DSN matches our project — prevents open proxy abuse
+  const envelopeDsn = parseSentryDsn(envelopeHeader.dsn);
+  if (!envelopeDsn) {
     log("warn", "sentry_tunnel_invalid_dsn", {}, request);
     return new Response(null, { status: 400, headers: securityHeaders() });
   }
 
-  const dsnProjectId = dsnUrl.pathname.replace(/\//g, "");
-  if (dsnUrl.hostname !== env.SENTRY_HOST || dsnProjectId !== env.SENTRY_PROJECT_ID) {
+  if (envelopeDsn.host !== allowedDsn.host || envelopeDsn.projectId !== allowedDsn.projectId) {
     log("warn", "sentry_tunnel_dsn_mismatch", {
-      dsn_host: dsnUrl.hostname,
-      dsn_project: dsnProjectId,
+      dsn_host: envelopeDsn.host,
+      dsn_project: envelopeDsn.projectId,
     }, request);
     return new Response(null, { status: 403, headers: securityHeaders() });
   }
 
   // Forward to Sentry ingest endpoint
-  const sentryUrl = `https://${env.SENTRY_HOST}/api/${env.SENTRY_PROJECT_ID}/envelope/`;
+  const sentryUrl = `https://${allowedDsn.host}/api/${allowedDsn.projectId}/envelope/`;
   try {
     const sentryResp = await fetch(sentryUrl, {
       method: "POST",
