@@ -1,5 +1,5 @@
 import { createSignal, createMemo, Show, Switch, Match, onMount, onCleanup } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
@@ -82,17 +82,81 @@ async function pollFetch(): Promise<DashboardData> {
     setDashboardData("loading", true);
   }
   try {
-    const data = await fetchAllData();
+    // Two-phase rendering: phase 1 callback fires with light issues + PRs
+    // so the UI renders immediately. Phase 2 (enrichment + workflow runs)
+    // arrives when fetchAllData resolves.
+    let phaseOneFired = false;
+    const data = await fetchAllData((lightData) => {
+      // Phase 1: render light issues + PRs immediately — but only on initial
+      // load (no cached data). On reload with cached data, the cache already
+      // has enriched PRs; replacing them with light PRs would cause a visible
+      // flicker (badges disappear then reappear when phase 2 arrives).
+      if (dashboardData.pullRequests.length === 0) {
+        phaseOneFired = true;
+        setDashboardData({
+          issues: lightData.issues,
+          pullRequests: lightData.pullRequests,
+          loading: false,
+          lastRefreshedAt: new Date(),
+        });
+      }
+    });
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
       const now = new Date();
-      setDashboardData({
-        issues: data.issues,
-        pullRequests: data.pullRequests,
-        workflowRuns: data.workflowRuns,
-        loading: false,
-        lastRefreshedAt: now,
-      });
+
+      if (phaseOneFired) {
+        // Phase 1 fired — use fine-grained merge for the light→enriched
+        // transition. Only update heavy fields to avoid re-rendering the
+        // entire list (light fields haven't changed within this poll cycle).
+        const enrichedMap = new Map<number, PullRequest>();
+        for (const pr of data.pullRequests) enrichedMap.set(pr.id, pr);
+
+        setDashboardData(produce((state) => {
+          state.issues = data.issues;
+          state.workflowRuns = data.workflowRuns;
+          state.loading = false;
+          state.lastRefreshedAt = now;
+
+          let canMerge = state.pullRequests.length === enrichedMap.size;
+          if (canMerge) {
+            for (let i = 0; i < state.pullRequests.length; i++) {
+              if (!enrichedMap.has(state.pullRequests[i].id)) { canMerge = false; break; }
+            }
+          }
+
+          if (canMerge) {
+            for (let i = 0; i < state.pullRequests.length; i++) {
+              const e = enrichedMap.get(state.pullRequests[i].id)!;
+              const pr = state.pullRequests[i];
+              pr.headSha = e.headSha;
+              pr.assigneeLogins = e.assigneeLogins;
+              pr.reviewerLogins = e.reviewerLogins;
+              pr.checkStatus = e.checkStatus;
+              pr.additions = e.additions;
+              pr.deletions = e.deletions;
+              pr.changedFiles = e.changedFiles;
+              pr.comments = e.comments;
+              pr.reviewThreads = e.reviewThreads;
+              pr.totalReviewCount = e.totalReviewCount;
+              pr.enriched = e.enriched;
+            }
+          } else {
+            state.pullRequests = data.pullRequests;
+          }
+        }));
+      } else {
+        // Phase 1 did NOT fire (cached data existed or subsequent poll).
+        // Full atomic replacement — all fields (light + heavy) may have
+        // changed since the last cycle.
+        setDashboardData({
+          issues: data.issues,
+          pullRequests: data.pullRequests,
+          workflowRuns: data.workflowRuns,
+          loading: false,
+          lastRefreshedAt: now,
+        });
+      }
       // Persist for stale-while-revalidate on full page reload.
       // Errors are transient and not persisted. Deferred to avoid blocking paint.
       const cachePayload = {

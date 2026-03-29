@@ -149,9 +149,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins);
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
-      // Tab filters
+      // Tab filters — light-field filters always apply; heavy-field filters
+      // only apply to enriched PRs so unenriched phase-1 PRs aren't incorrectly hidden
+      const isEnriched = pr.enriched !== false;
       if (tabFilters.role !== "all") {
-        if (!roles.includes(tabFilters.role as "author" | "reviewer" | "assignee")) return false;
+        // Role depends on assigneeLogins/reviewerLogins (heavy), but "author" is light
+        if (isEnriched && !roles.includes(tabFilters.role as "author" | "reviewer" | "assignee")) return false;
+        if (!isEnriched && tabFilters.role === "author" && !roles.includes("author")) return false;
       }
       if (tabFilters.reviewDecision !== "all") {
         if (pr.reviewDecision !== tabFilters.reviewDecision) return false;
@@ -160,14 +164,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (tabFilters.draft === "draft" && !pr.draft) return false;
         if (tabFilters.draft === "ready" && pr.draft) return false;
       }
-      if (tabFilters.checkStatus !== "all") {
+      if (tabFilters.checkStatus !== "all" && isEnriched) {
         if (tabFilters.checkStatus === "none") {
           if (pr.checkStatus !== null) return false;
         } else {
           if (pr.checkStatus !== tabFilters.checkStatus) return false;
         }
       }
-      if (tabFilters.sizeCategory !== "all") {
+      if (tabFilters.sizeCategory !== "all" && isEnriched) {
         if (sizeCategory !== tabFilters.sizeCategory) return false;
       }
 
@@ -429,29 +433,33 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 createdAt={pr.createdAt}
                                 url={pr.htmlUrl}
                                 labels={pr.labels}
-                                commentCount={pr.comments + pr.reviewThreads}
+                                commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
                                 density={config.viewDensity}
                               >
                                 <div class="flex items-center gap-2 flex-wrap">
-                                  <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
+                                  <Show when={pr.enriched !== false}>
+                                    <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
+                                  </Show>
                                   <ReviewBadge decision={pr.reviewDecision} />
-                                  <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={`${pr.htmlUrl}/files`} />
-                                  <StatusDot status={pr.checkStatus} href={`${pr.htmlUrl}/checks`} />
-                                  <Show when={pr.checkStatus === "conflict"}>
-                                    <span class="badge badge-warning badge-sm gap-1">
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                      </svg>
-                                      Merge conflict
-                                    </span>
+                                  <Show when={pr.enriched !== false}>
+                                    <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={`${pr.htmlUrl}/files`} />
+                                    <StatusDot status={pr.checkStatus} href={`${pr.htmlUrl}/checks`} />
+                                    <Show when={pr.checkStatus === "conflict"}>
+                                      <span class="badge badge-warning badge-sm gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                        </svg>
+                                        Merge conflict
+                                      </span>
+                                    </Show>
                                   </Show>
                                   <Show when={pr.draft}>
                                     <span class="badge badge-ghost badge-sm italic text-base-content/50">
                                       Draft
                                     </span>
                                   </Show>
-                                  <Show when={pr.reviewerLogins.length > 0}>
+                                  <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
                                     <span class="text-xs text-base-content/60" title={pr.reviewerLogins.join(", ")}>
                                       Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
                                       {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}

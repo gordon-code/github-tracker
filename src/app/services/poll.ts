@@ -3,8 +3,7 @@ import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
 import {
-  fetchIssues,
-  fetchPullRequests,
+  fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
   type Issue,
   type PullRequest,
@@ -116,7 +115,15 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
 
 // ── fetchAllData orchestrator ─────────────────────────────────────────────────
 
-export async function fetchAllData(): Promise<DashboardData> {
+/**
+ * Fetches all dashboard data. Supports two-phase progressive rendering:
+ * - If onLightData is provided, fires with light issues+PRs as soon as
+ *   phase 1 completes (before enrichment and workflow runs finish).
+ * - The returned promise resolves with fully enriched data.
+ */
+export async function fetchAllData(
+  onLightData?: (data: DashboardData) => void,
+): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
     return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
@@ -138,23 +145,26 @@ export async function fetchAllData(): Promise<DashboardData> {
   const repos = config.selectedRepos;
   const userLogin = user()?.login ?? "";
 
-  // Note: NOT using updated:>= or created:>= filters on any endpoint because
-  // the dashboard uses full-replacement — each poll replaces all data. Date filters
-  // would cause unchanged items to vanish from the display. ETag caching already
-  // handles the "nothing changed" case for workflow runs (304 = free).
-
-  // Issues + PRs use GraphQL (5000 pts/hr), workflow runs use REST core (5000/hr) — all parallel
-  const [issueResult, prResult, runResult] = await Promise.allSettled([
-    fetchIssues(octokit, repos, userLogin),
-    fetchPullRequests(octokit, repos, userLogin),
+  // Issues + PRs use a two-phase approach: light query first (phase 1),
+  // then heavy backfill (phase 2). Workflow runs use REST core.
+  // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
+  const [issuesAndPrsResult, runResult] = await Promise.allSettled([
+    fetchIssuesAndPullRequests(octokit, repos, userLogin, onLightData ? (lightData) => {
+      // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
+      onLightData({
+        issues: lightData.issues,
+        pullRequests: lightData.pullRequests,
+        workflowRuns: [],
+        errors: lightData.errors,
+      });
+    } : undefined),
     fetchWorkflowRuns(octokit, repos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 
   // Collect top-level errors (total function failures)
   const topLevelErrors: ApiError[] = [];
   const settled: [PromiseSettledResult<unknown>, string][] = [
-    [issueResult, "issues"],
-    [prResult, "pull-requests"],
+    [issuesAndPrsResult, "issues-and-prs"],
     [runResult, "workflow-runs"],
   ];
   for (const [result, label] of settled) {
@@ -169,29 +179,27 @@ export async function fetchAllData(): Promise<DashboardData> {
   }
 
   // Extract data and per-batch errors from successful results
-  const issueData = issueResult.status === "fulfilled" ? issueResult.value : null;
-  const prData = prResult.status === "fulfilled" ? prResult.value : null;
+  const issuesAndPrsData = issuesAndPrsResult.status === "fulfilled" ? issuesAndPrsResult.value : null;
   const runData = runResult.status === "fulfilled" ? runResult.value : null;
 
   // Merge all error sources: top-level failures + per-batch partial failures
   const errors = [
     ...topLevelErrors,
-    ...(issueData?.errors ?? []),
-    ...(prData?.errors ?? []),
+    ...(issuesAndPrsData?.errors ?? []),
     ...(runData?.errors ?? []),
   ];
 
   // Only activate the notifications gate if at least one fetch succeeded.
-  // If all three failed (e.g., network outage), we don't want the gate to
+  // If all failed (e.g., network outage), we don't want the gate to
   // suppress retries on the next poll cycle.
-  const anySucceeded = issueData !== null || prData !== null || runData !== null;
+  const anySucceeded = issuesAndPrsData !== null || runData !== null;
   if (anySucceeded) {
     _lastSuccessfulFetch = new Date();
   }
 
   return {
-    issues: issueData?.issues ?? [],
-    pullRequests: prData?.pullRequests ?? [],
+    issues: issuesAndPrsData?.issues ?? [],
+    pullRequests: issuesAndPrsData?.pullRequests ?? [],
     workflowRuns: runData?.workflowRuns ?? [],
     errors,
   };
