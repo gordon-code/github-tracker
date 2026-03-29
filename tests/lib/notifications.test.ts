@@ -6,33 +6,16 @@ import {
   _resetNotificationState,
   type NewItems,
 } from "../../src/app/lib/notifications";
-import type { Config } from "../../src/app/stores/config";
+import { ConfigSchema, type Config } from "../../src/app/stores/config";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { Issue, PullRequest, WorkflowRun } from "../../src/app/services/api";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 function makeConfig(overrides: Partial<Config["notifications"]> = {}): Config {
-  return {
-    selectedOrgs: [],
-    selectedRepos: [],
-    refreshInterval: 300,
-    maxWorkflowsPerRepo: 5,
-    maxRunsPerWorkflow: 3,
-    notifications: {
-      enabled: true,
-      issues: true,
-      pullRequests: true,
-      workflowRuns: true,
-      ...overrides,
-    },
-    theme: "light",
-    viewDensity: "comfortable",
-    itemsPerPage: 25,
-    defaultTab: "issues",
-    rememberLastTab: true,
-    onboardingComplete: false,
-  };
+  return ConfigSchema.parse({
+    notifications: { enabled: true, ...overrides },
+  });
 }
 
 function makeIssue(id: number): Issue {

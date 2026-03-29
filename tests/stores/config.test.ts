@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { ConfigSchema, loadConfig } from "../../src/app/stores/config";
+import { ConfigSchema, loadConfig, config, updateConfig, resetConfig } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
 import { produce } from "solid-js/store";
@@ -78,6 +78,32 @@ describe("ConfigSchema", () => {
   it("allows refreshInterval of 0 (disabled)", () => {
     const result = ConfigSchema.parse({ refreshInterval: 0 });
     expect(result.refreshInterval).toBe(0);
+  });
+
+  describe("hotPollInterval", () => {
+    it("defaults to 30", () => {
+      expect(ConfigSchema.parse({}).hotPollInterval).toBe(30);
+    });
+
+    it("accepts valid values (10, 60, 120)", () => {
+      expect(ConfigSchema.parse({ hotPollInterval: 10 }).hotPollInterval).toBe(10);
+      expect(ConfigSchema.parse({ hotPollInterval: 60 }).hotPollInterval).toBe(60);
+      expect(ConfigSchema.parse({ hotPollInterval: 120 }).hotPollInterval).toBe(120);
+    });
+
+    it("rejects values below min (9)", () => {
+      expect(() => ConfigSchema.parse({ hotPollInterval: 9 })).toThrow();
+    });
+
+    it("rejects values above max (121)", () => {
+      expect(() => ConfigSchema.parse({ hotPollInterval: 121 })).toThrow();
+    });
+
+    it("persists through config round-trip", () => {
+      const stored = ConfigSchema.parse({ hotPollInterval: 45 });
+      const roundTripped = ConfigSchema.parse(JSON.parse(JSON.stringify(stored)));
+      expect(roundTripped.hotPollInterval).toBe(45);
+    });
   });
 });
 
@@ -181,6 +207,39 @@ describe("updateConfig", () => {
       const { cfg, update } = makeStore();
       update({ onboardingComplete: true });
       expect(cfg.onboardingComplete).toBe(true);
+      dispose();
+    });
+  });
+});
+
+describe("updateConfig (real export)", () => {
+  beforeEach(() => {
+    createRoot((dispose) => {
+      resetConfig();
+      dispose();
+    });
+  });
+
+  it("applies valid partial updates", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 60 });
+      expect(config.hotPollInterval).toBe(60);
+      dispose();
+    });
+  });
+
+  it("rejects out-of-bounds values without modifying store", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 5 }); // below min of 10
+      expect(config.hotPollInterval).toBe(30); // unchanged from default
+      dispose();
+    });
+  });
+
+  it("rejects values above max without modifying store", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 999 }); // above max of 120
+      expect(config.hotPollInterval).toBe(30); // unchanged from default
       dispose();
     });
   });

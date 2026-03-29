@@ -29,6 +29,7 @@ export const ConfigSchema = z.object({
     )
     .default([]),
   refreshInterval: z.number().min(0).max(3600).default(300),
+  hotPollInterval: z.number().min(10).max(120).default(30),
   maxWorkflowsPerRepo: z.number().min(1).max(20).default(5),
   maxRunsPerWorkflow: z.number().min(1).max(10).default(3),
   notifications: z
@@ -70,9 +71,11 @@ export function loadConfig(): Config {
 export const [config, setConfig] = createStore<Config>(loadConfig());
 
 export function updateConfig(partial: Partial<Config>): void {
+  const validated = ConfigSchema.partial().safeParse(partial);
+  if (!validated.success) return; // reject invalid updates
   setConfig(
     produce((draft) => {
-      Object.assign(draft, partial);
+      Object.assign(draft, validated.data);
     })
   );
 }

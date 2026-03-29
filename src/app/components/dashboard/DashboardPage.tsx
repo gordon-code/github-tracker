@@ -10,12 +10,23 @@ import { config, setConfig } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
-import { createPollCoordinator, fetchAllData, type DashboardData } from "../../services/poll";
+import {
+  createPollCoordinator,
+  createHotPollCoordinator,
+  rebuildHotSets,
+  clearHotSets,
+  getHotPollGeneration,
+  fetchAllData,
+  type DashboardData,
+} from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
+// Bump only for breaking schema changes (renames, type changes). Additive optional
+// fields (e.g., nodeId?: string) don't require a bump — missing fields deserialize
+// as undefined, which consuming code handles gracefully.
 const CACHE_VERSION = 2;
 
 interface DashboardStore {
@@ -71,6 +82,11 @@ onAuthCleared(() => {
   if (coord) {
     coord.destroy();
     _setCoordinator(null);
+  }
+  const hotCoord = _hotCoordinator();
+  if (hotCoord) {
+    hotCoord.destroy();
+    _setHotCoordinator(null);
   }
 });
 
@@ -140,6 +156,7 @@ async function pollFetch(): Promise<DashboardData> {
               pr.reviewThreads = e.reviewThreads;
               pr.totalReviewCount = e.totalReviewCount;
               pr.enriched = e.enriched;
+              pr.nodeId = e.nodeId;
             }
           } else {
             state.pullRequests = data.pullRequests;
@@ -157,6 +174,7 @@ async function pollFetch(): Promise<DashboardData> {
           lastRefreshedAt: now,
         });
       }
+      rebuildHotSets(data);
       // Persist for stale-while-revalidate on full page reload.
       // Errors are transient and not persisted. Deferred to avoid blocking paint.
       const cachePayload = {
@@ -198,6 +216,7 @@ async function pollFetch(): Promise<DashboardData> {
 }
 
 const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
+const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 
 export default function DashboardPage() {
 
@@ -218,6 +237,38 @@ export default function DashboardPage() {
   onMount(() => {
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
+    }
+
+    if (!_hotCoordinator()) {
+      _setHotCoordinator(createHotPollCoordinator(
+        () => config.hotPollInterval,
+        (prUpdates, runUpdates, fetchGeneration) => {
+          // Guard against stale hot poll results overlapping with a full refresh.
+          // fetchGeneration was captured BEFORE fetchHotData() started its async work.
+          // If a full refresh completed during the fetch, _hotPollGeneration will have
+          // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
+          if (fetchGeneration !== getHotPollGeneration()) return; // stale, discard
+          setDashboardData(produce((state) => {
+            // Apply PR status updates
+            for (const pr of state.pullRequests) {
+              const update = prUpdates.get(pr.id);
+              if (!update) continue;
+              pr.state = update.state; // detect closed/merged quickly
+              pr.checkStatus = update.checkStatus;
+              pr.reviewDecision = update.reviewDecision;
+            }
+            // Apply workflow run updates
+            for (const run of state.workflowRuns) {
+              const update = runUpdates.get(run.id);
+              if (!update) continue;
+              run.status = update.status;
+              run.conclusion = update.conclusion;
+              run.updatedAt = update.updatedAt;
+              run.completedAt = update.completedAt;
+            }
+          }));
+        }
+      ));
     }
 
     // Auto-sync orgs on dashboard load — picks up newly accessible orgs
@@ -242,6 +293,9 @@ export default function DashboardPage() {
     onCleanup(() => {
       _coordinator()?.destroy();
       _setCoordinator(null);
+      _hotCoordinator()?.destroy();
+      _setHotCoordinator(null);
+      clearHotSets();
     });
   });
 
