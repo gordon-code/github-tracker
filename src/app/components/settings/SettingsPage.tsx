@@ -135,6 +135,7 @@ export default function SettingsPage() {
         selectedOrgs: config.selectedOrgs,
         selectedRepos: config.selectedRepos,
         refreshInterval: config.refreshInterval,
+        hotPollInterval: config.hotPollInterval,
         maxWorkflowsPerRepo: config.maxWorkflowsPerRepo,
         maxRunsPerWorkflow: config.maxRunsPerWorkflow,
         notifications: config.notifications,
@@ -331,6 +332,24 @@ export default function SettingsPage() {
                 <option value={String(opt.value)}>{opt.label}</option>
               ))}
             </select>
+          </SettingRow>
+          <SettingRow
+            label="Hot poll interval"
+            description="How often to check in-flight CI and workflow status (10-120s)"
+          >
+            <input
+              type="number"
+              min={10}
+              max={120}
+              value={config.hotPollInterval}
+              onInput={(e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                if (!isNaN(val) && val >= 10 && val <= 120) {
+                  saveWithFeedback({ hotPollInterval: val });
+                }
+              }}
+              class="input input-sm w-20"
+            />
           </SettingRow>
         </Section>
 

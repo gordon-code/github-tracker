@@ -17,6 +17,7 @@ function makeConfig(overrides: Partial<Config["notifications"]> = {}): Config {
     selectedOrgs: [],
     selectedRepos: [],
     refreshInterval: 300,
+    hotPollInterval: 30,
     maxWorkflowsPerRepo: 5,
     maxRunsPerWorkflow: 3,
     notifications: {
