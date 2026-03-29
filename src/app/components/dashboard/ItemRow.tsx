@@ -35,7 +35,7 @@ export default function ItemRow(props: ItemRowProps) {
             href={url()}
             target="_blank"
             rel="noopener noreferrer"
-            class="absolute inset-0"
+            class="absolute inset-0 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset rounded"
             aria-label={`${props.repo} #${props.number}: ${props.title}`}
           />
         )}
