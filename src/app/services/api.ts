@@ -1,4 +1,4 @@
-import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
+import { getClient, cachedRequest, updateGraphqlRateLimit, updateRateLimitFromHeaders } from "./github";
 import { pushNotification } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -67,6 +67,8 @@ export interface PullRequest {
   totalReviewCount: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;
+  /** GraphQL global node ID — used for hot-poll status updates */
+  nodeId?: string;
 }
 
 export interface WorkflowRun {
@@ -212,7 +214,7 @@ type GitHubOctokit = NonNullable<ReturnType<typeof getClient>>;
  * Unlike chunked Promise.allSettled, tasks start immediately as slots free up
  * rather than waiting for an entire chunk to finish.
  */
-async function pooledAllSettled<T>(
+export async function pooledAllSettled<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number
 ): Promise<PromiseSettledResult<T>[]> {
@@ -543,6 +545,41 @@ const HEAVY_PR_BACKFILL_QUERY = `
   }
 `;
 
+/** Hot-poll query: fetches current status fields for a batch of PR node IDs. */
+const HOT_PR_STATUS_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        databaseId
+        state
+        mergeStateStatus
+        reviewDecision
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup { state }
+            }
+          }
+        }
+      }
+    }
+    rateLimit { remaining resetAt }
+  }
+`;
+
+interface HotPRStatusNode {
+  databaseId: number;
+  state: string;
+  mergeStateStatus: string;
+  reviewDecision: string | null;
+  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+}
+
+interface HotPRStatusResponse {
+  nodes: (HotPRStatusNode | null)[];
+  rateLimit?: { remaining: number; resetAt: string };
+}
+
 interface GraphQLLightPRNode {
   id: string; // GraphQL global node ID
   databaseId: number;
@@ -870,6 +907,7 @@ function processLightPRNode(
     reviewDecision: mapReviewDecision(node.reviewDecision),
     totalReviewCount: 0,
     enriched: false,
+    nodeId: node.id,
   });
   return true;
 }
@@ -1714,4 +1752,86 @@ export async function fetchWorkflowRuns(
   }
 
   return { workflowRuns: allRuns, errors: allErrors };
+}
+
+// ── Hot poll: targeted status updates ────────────────────────────────────────
+
+export interface HotPRStatusUpdate {
+  state: string;
+  checkStatus: CheckStatus["status"];
+  mergeStateStatus: string;
+  reviewDecision: PullRequest["reviewDecision"];
+}
+
+/**
+ * Fetches current status fields (check status, review decision, state) for a
+ * batch of PR node IDs using the nodes() GraphQL query. Returns a map keyed
+ * by databaseId. Uses Promise.allSettled per batch for error resilience.
+ */
+export async function fetchHotPRStatus(
+  octokit: GitHubOctokit,
+  nodeIds: string[]
+): Promise<Map<number, HotPRStatusUpdate>> {
+  const result = new Map<number, HotPRStatusUpdate>();
+  if (nodeIds.length === 0) return result;
+
+  const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch) => {
+    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch });
+    if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+    for (const node of response.nodes) {
+      if (!node || node.databaseId == null) continue;
+
+      let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
+      const mss = node.mergeStateStatus;
+      if (mss === "DIRTY" || mss === "BEHIND") {
+        checkStatus = "conflict";
+      } else if (mss === "UNSTABLE") {
+        checkStatus = "failure";
+      }
+
+      result.set(node.databaseId, {
+        state: node.state,
+        checkStatus,
+        mergeStateStatus: node.mergeStateStatus,
+        reviewDecision: mapReviewDecision(node.reviewDecision),
+      });
+    }
+  }));
+
+  return result;
+}
+
+export interface HotWorkflowRunUpdate {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+/**
+ * Fetches current status for a single workflow run by ID.
+ * Used by hot-poll to refresh in-progress runs without a full re-fetch.
+ */
+export async function fetchWorkflowRunById(
+  octokit: GitHubOctokit,
+  descriptor: { id: number; owner: string; repo: string }
+): Promise<HotWorkflowRunUpdate> {
+  const { id, owner, repo } = descriptor;
+  const response = await octokit.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}", {
+    owner,
+    repo,
+    run_id: id,
+  });
+  updateRateLimitFromHeaders(response.headers as Record<string, string>);
+  const run = response.data;
+  return {
+    id: run.id,
+    status: run.status ?? "",
+    conclusion: run.conclusion ?? null,
+    updatedAt: run.updated_at,
+    completedAt: (run as unknown as { completed_at: string | null }).completed_at ?? null,
+  };
 }
