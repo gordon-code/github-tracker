@@ -69,6 +69,15 @@ export const ViewStateSchema = z.object({
     actions: { conclusion: "all", event: "all" },
   }),
   showPrRuns: z.boolean().default(false),
+  expandedRepos: z.object({
+    issues: z.record(z.string(), z.boolean()).default({}),
+    pullRequests: z.record(z.string(), z.boolean()).default({}),
+    actions: z.record(z.string(), z.boolean()).default({}),
+  }).default({
+    issues: {},
+    pullRequests: {},
+    actions: {},
+  }),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -187,6 +196,59 @@ export function resetAllTabFilters(
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
+      }
+    })
+  );
+}
+
+export function toggleExpandedRepo(
+  tab: keyof ViewState["expandedRepos"],
+  repoFullName: string
+): void {
+  setViewState(
+    produce((draft) => {
+      if (draft.expandedRepos[tab][repoFullName]) {
+        delete draft.expandedRepos[tab][repoFullName];
+      } else {
+        draft.expandedRepos[tab][repoFullName] = true;
+      }
+    })
+  );
+}
+
+export function setAllExpanded(
+  tab: keyof ViewState["expandedRepos"],
+  repoFullNames: string[],
+  expanded: boolean
+): void {
+  setViewState(
+    produce((draft) => {
+      if (expanded) {
+        for (const name of repoFullNames) {
+          draft.expandedRepos[tab][name] = true;
+        }
+      } else {
+        for (const name of repoFullNames) {
+          delete draft.expandedRepos[tab][name];
+        }
+      }
+    })
+  );
+}
+
+export function pruneExpandedRepos(
+  tab: keyof ViewState["expandedRepos"],
+  activeRepoNames: string[]
+): void {
+  if (Object.keys(viewState.expandedRepos[tab]).length === 0) return;
+  const activeSet = new Set(activeRepoNames);
+  setViewState(
+    produce((draft) => {
+      const keys = Object.keys(draft.expandedRepos[tab]);
+      for (const key of keys) {
+        if (!activeSet.has(key)) {
+          delete draft.expandedRepos[tab][key];
+        }
       }
     })
   );

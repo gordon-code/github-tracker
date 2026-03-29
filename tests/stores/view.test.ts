@@ -9,6 +9,9 @@ import {
   setGlobalFilter,
   initViewPersistence,
   ViewStateSchema,
+  toggleExpandedRepo,
+  setAllExpanded,
+  pruneExpandedRepos,
 } from "../../src/app/stores/view";
 import type { IgnoredItem } from "../../src/app/stores/view";
 
@@ -49,6 +52,7 @@ function resetViewState() {
     sortPreferences: {},
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
+    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
   });
 }
 
@@ -203,5 +207,85 @@ describe("ViewStateSchema", () => {
   it("safeParse returns success=false for invalid data", () => {
     const result = ViewStateSchema.safeParse({ lastActiveTab: "invalid-tab-name" });
     expect(result.success).toBe(false);
+  });
+
+  it("missing expandedRepos field parses to defaults", () => {
+    const result = ViewStateSchema.parse({ lastActiveTab: "actions" });
+    expect(result.expandedRepos).toEqual({ issues: {}, pullRequests: {}, actions: {} });
+  });
+});
+
+describe("expandedRepos helpers", () => {
+  it("toggleExpandedRepo sets key to true when absent", () => {
+    toggleExpandedRepo("issues", "owner/repo");
+    expect(viewState.expandedRepos.issues["owner/repo"]).toBe(true);
+  });
+
+  it("toggleExpandedRepo deletes key when already true (sparse record)", () => {
+    toggleExpandedRepo("issues", "owner/repo");
+    expect(viewState.expandedRepos.issues["owner/repo"]).toBe(true);
+    toggleExpandedRepo("issues", "owner/repo");
+    expect("owner/repo" in viewState.expandedRepos.issues).toBe(false);
+  });
+
+  it("toggleExpandedRepo works independently per tab", () => {
+    toggleExpandedRepo("issues", "owner/repo");
+    toggleExpandedRepo("pullRequests", "owner/repo");
+    expect(viewState.expandedRepos.issues["owner/repo"]).toBe(true);
+    expect(viewState.expandedRepos.pullRequests["owner/repo"]).toBe(true);
+    expect("owner/repo" in viewState.expandedRepos.actions).toBe(false);
+  });
+
+  it("setAllExpanded sets multiple repos to true", () => {
+    setAllExpanded("issues", ["owner/a", "owner/b", "owner/c"], true);
+    expect(viewState.expandedRepos.issues["owner/a"]).toBe(true);
+    expect(viewState.expandedRepos.issues["owner/b"]).toBe(true);
+    expect(viewState.expandedRepos.issues["owner/c"]).toBe(true);
+  });
+
+  it("setAllExpanded with expanded=false deletes all keys (sparse record)", () => {
+    setAllExpanded("issues", ["owner/a", "owner/b"], true);
+    setAllExpanded("issues", ["owner/a", "owner/b"], false);
+    expect("owner/a" in viewState.expandedRepos.issues).toBe(false);
+    expect("owner/b" in viewState.expandedRepos.issues).toBe(false);
+  });
+
+  it("pruneExpandedRepos removes stale keys and keeps active ones", () => {
+    setAllExpanded("actions", ["owner/active", "owner/stale"], true);
+    pruneExpandedRepos("actions", ["owner/active"]);
+    expect(viewState.expandedRepos.actions["owner/active"]).toBe(true);
+    expect("owner/stale" in viewState.expandedRepos.actions).toBe(false);
+  });
+
+  it("pruneExpandedRepos short-circuits when no stale keys exist", () => {
+    setAllExpanded("pullRequests", ["owner/a"], true);
+    // Spy on setViewState indirectly: verify state is unchanged and no error thrown
+    const before = JSON.stringify(viewState.expandedRepos.pullRequests);
+    pruneExpandedRepos("pullRequests", ["owner/a"]);
+    expect(JSON.stringify(viewState.expandedRepos.pullRequests)).toBe(before);
+    expect(viewState.expandedRepos.pullRequests["owner/a"]).toBe(true);
+  });
+
+  it("localStorage round-trip: expandedRepos persists and restores via schema", async () => {
+    vi.useFakeTimers();
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initViewPersistence();
+      toggleExpandedRepo("issues", "myorg/myrepo");
+      setAllExpanded("actions", ["myorg/ci"], true);
+    });
+
+    await Promise.resolve();
+    vi.advanceTimersByTime(200);
+
+    const raw = localStorageMock.getItem(VIEW_KEY);
+    expect(raw).not.toBeNull();
+    const restored = ViewStateSchema.parse(JSON.parse(raw!));
+    expect(restored.expandedRepos.issues["myorg/myrepo"]).toBe(true);
+    expect(restored.expandedRepos.actions["myorg/ci"]).toBe(true);
+    expect(restored.expandedRepos.pullRequests).toEqual({});
+    dispose();
+    vi.useRealTimers();
   });
 });

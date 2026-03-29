@@ -114,5 +114,6 @@ export function resetViewStore(): void {
       actions: { conclusion: "all", event: "all" },
     },
     showPrRuns: false,
+    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
   });
 }
