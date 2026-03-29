@@ -79,6 +79,26 @@ describe("ConfigSchema", () => {
     const result = ConfigSchema.parse({ refreshInterval: 0 });
     expect(result.refreshInterval).toBe(0);
   });
+
+  describe("hotPollInterval", () => {
+    it("defaults to 30", () => {
+      expect(ConfigSchema.parse({}).hotPollInterval).toBe(30);
+    });
+
+    it("accepts valid values (10, 60, 120)", () => {
+      expect(ConfigSchema.parse({ hotPollInterval: 10 }).hotPollInterval).toBe(10);
+      expect(ConfigSchema.parse({ hotPollInterval: 60 }).hotPollInterval).toBe(60);
+      expect(ConfigSchema.parse({ hotPollInterval: 120 }).hotPollInterval).toBe(120);
+    });
+
+    it("rejects values below min (9)", () => {
+      expect(() => ConfigSchema.parse({ hotPollInterval: 9 })).toThrow();
+    });
+
+    it("rejects values above max (121)", () => {
+      expect(() => ConfigSchema.parse({ hotPollInterval: 121 })).toThrow();
+    });
+  });
 });
 
 describe("loadConfig", () => {
