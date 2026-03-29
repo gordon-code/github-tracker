@@ -46,9 +46,11 @@ let _notifGateDisabled = false; // Disabled after 403 (notifications scope not g
 
 /** PRs with pending/null check status: maps GraphQL node ID → databaseId */
 const _hotPRs = new Map<string, number>();
+const MAX_HOT_PRS = 200;
 
 /** In-progress workflow runs: maps run ID → repo descriptor */
 const _hotRuns = new Map<number, { owner: string; repo: string }>();
+const MAX_HOT_RUNS = 30;
 
 /** Incremented each time rebuildHotSets() is called (full refresh completed).
  * Allows hot poll callbacks to detect stale results that overlap with a fresh
@@ -387,12 +389,20 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
+    if (_hotPRs.size >= MAX_HOT_PRS) {
+      console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
+      break;
+    }
     if ((pr.checkStatus === "pending" || pr.checkStatus === null) && pr.nodeId) {
       _hotPRs.set(pr.nodeId, pr.id);
     }
   }
 
   for (const run of data.workflowRuns) {
+    if (_hotRuns.size >= MAX_HOT_RUNS) {
+      console.warn(`[hot-poll] Run cap reached (${MAX_HOT_RUNS}), skipping remaining`);
+      break;
+    }
     if (run.status === "queued" || run.status === "in_progress") {
       const parts = run.repoFullName.split("/");
       if (parts.length === 2) {

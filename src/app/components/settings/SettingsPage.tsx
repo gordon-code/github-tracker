@@ -334,8 +334,8 @@ export default function SettingsPage() {
             </select>
           </SettingRow>
           <SettingRow
-            label="Hot poll interval"
-            description="How often to check in-flight CI and workflow status (10-120s)"
+            label="CI status refresh"
+            description="How often to re-check in-flight CI checks and workflow runs (10-120s)"
           >
             <input
               type="number"

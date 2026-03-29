@@ -157,7 +157,6 @@ async function pollFetch(): Promise<DashboardData> {
             state.pullRequests = data.pullRequests;
           }
         }));
-        rebuildHotSets(data);
       } else {
         // Phase 1 did NOT fire (cached data existed or subsequent poll).
         // Full atomic replacement — all fields (light + heavy) may have
@@ -169,8 +168,8 @@ async function pollFetch(): Promise<DashboardData> {
           loading: false,
           lastRefreshedAt: now,
         });
-        rebuildHotSets(data);
       }
+      rebuildHotSets(data);
       // Persist for stale-while-revalidate on full page reload.
       // Errors are transient and not persisted. Deferred to avoid blocking paint.
       const cachePayload = {

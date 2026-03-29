@@ -189,6 +189,26 @@ describe("fetchWorkflowRunById", () => {
   });
 });
 
+describe("resetPollState", () => {
+  it("clears hot sets and resets generation", async () => {
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_x" })],
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+    expect(getHotPollGeneration()).toBe(1);
+
+    resetPollState();
+    expect(getHotPollGeneration()).toBe(0);
+
+    // After reset, fetchHotData should have nothing to fetch
+    mockGetClient.mockReturnValue(makeOctokit());
+    const { prUpdates, runUpdates } = await fetchHotData();
+    expect(prUpdates.size).toBe(0);
+    expect(runUpdates.size).toBe(0);
+  });
+});
+
 describe("rebuildHotSets", () => {
   beforeEach(() => {
     resetPollState();
@@ -438,6 +458,25 @@ describe("createHotPollCoordinator", () => {
       // Advance past several more intervals — no new calls
       await vi.advanceTimersByTimeAsync(30_000);
       expect(onHotData.mock.calls.length).toBe(callsBefore);
+      dispose();
+    });
+  });
+
+  it("skips fetch when document is hidden", async () => {
+    const onHotData = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).not.toHaveBeenCalled();
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
       dispose();
     });
   });

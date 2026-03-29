@@ -1832,6 +1832,6 @@ export async function fetchWorkflowRunById(
     status: run.status ?? "",
     conclusion: run.conclusion ?? null,
     updatedAt: run.updated_at,
-    completedAt: (run as unknown as { completed_at: string | null }).completed_at ?? null,
+    completedAt: ("completed_at" in run ? (run as Record<string, unknown>).completed_at as string | null : null) ?? null,
   };
 }
