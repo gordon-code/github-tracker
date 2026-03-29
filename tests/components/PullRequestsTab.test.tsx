@@ -570,6 +570,38 @@ describe("PullRequestsTab", () => {
     screen.getByText("Persistent PR");
   });
 
+  it("prunes stale expanded keys when a repo disappears from data", () => {
+    const [prs, setPrs] = createSignal<PullRequest[]>([
+      makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Repo B PR", repoFullName: "org/repo-b" }),
+    ]);
+    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b"], true);
+    render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
+    screen.getByText("Repo A PR");
+    screen.getByText("Repo B PR");
+
+    // Remove repo-b from data — pruning effect should fire
+    setPrs([makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" })]);
+    expect(viewStore.viewState.expandedRepos.pullRequests["org/repo-a"]).toBe(true);
+    expect("org/repo-b" in viewStore.viewState.expandedRepos.pullRequests).toBe(false);
+  });
+
+  it("preserves expanded keys when data becomes empty and restores UI on re-population", () => {
+    const [prs, setPrs] = createSignal<PullRequest[]>([
+      makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" }),
+    ]);
+    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
+    screen.getByText("PR A");
+
+    setPrs([]);
+    expect(viewStore.viewState.expandedRepos.pullRequests["org/repo-a"]).toBe(true);
+
+    // Data returns — UI should use preserved expanded state
+    setPrs([makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })]);
+    screen.getByText("PR A");
+  });
+
   it("clicking 'Expand all' expands repos on other pages too", async () => {
     const user = userEvent.setup();
     updateConfig({ itemsPerPage: 10 });

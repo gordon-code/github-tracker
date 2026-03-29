@@ -3,6 +3,7 @@ import { createRoot } from "solid-js";
 import {
   viewState,
   updateViewState,
+  resetViewState,
   ignoreItem,
   unignoreItem,
   setSortPreference,
@@ -44,20 +45,12 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-const defaultState = ViewStateSchema.parse({});
-
-function resetViewState() {
-  updateViewState({
-    lastActiveTab: defaultState.lastActiveTab,
-    sortPreferences: {},
-    ignoredItems: [],
-    globalFilter: { org: null, repo: null },
-    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-  });
+function resetForTest() {
+  resetViewState();
 }
 
 beforeEach(() => {
-  resetViewState();
+  resetForTest();
   localStorageMock.clear();
 });
 
@@ -243,6 +236,14 @@ describe("expandedRepos helpers", () => {
     expect(viewState.expandedRepos.issues["owner/c"]).toBe(true);
   });
 
+  it("setAllExpanded with empty array is a no-op", () => {
+    setAllExpanded("issues", ["owner/existing"], true);
+    setAllExpanded("issues", [], true);
+    expect(viewState.expandedRepos.issues["owner/existing"]).toBe(true);
+    setAllExpanded("issues", [], false);
+    expect(viewState.expandedRepos.issues["owner/existing"]).toBe(true);
+  });
+
   it("setAllExpanded with expanded=false deletes all keys (sparse record)", () => {
     setAllExpanded("issues", ["owner/a", "owner/b"], true);
     setAllExpanded("issues", ["owner/a", "owner/b"], false);
@@ -287,5 +288,21 @@ describe("expandedRepos helpers", () => {
     expect(restored.expandedRepos.pullRequests).toEqual({});
     dispose();
     vi.useRealTimers();
+  });
+});
+
+describe("resetViewState", () => {
+  it("clears dynamically-added expandedRepos keys", () => {
+    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("pullRequests", ["org/repo-c"], true);
+    toggleExpandedRepo("actions", "org/repo-d");
+    expect(viewState.expandedRepos.issues["org/repo-a"]).toBe(true);
+
+    resetViewState();
+
+    expect("org/repo-a" in viewState.expandedRepos.issues).toBe(false);
+    expect("org/repo-b" in viewState.expandedRepos.issues).toBe(false);
+    expect("org/repo-c" in viewState.expandedRepos.pullRequests).toBe(false);
+    expect("org/repo-d" in viewState.expandedRepos.actions).toBe(false);
   });
 });

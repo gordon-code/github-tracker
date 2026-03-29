@@ -390,6 +390,33 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Bob issue")).toBeNull();
   });
 
+  it("collapse all with active filter preserves hidden repos' expanded state", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Alice issue", repoFullName: "org/repo-a", userLogin: "alice" }),
+      makeIssue({ id: 2, title: "Bob issue", repoFullName: "org/repo-b", userLogin: "bob" }),
+    ];
+    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    render(() => <IssuesTab issues={issues} userLogin="alice" />);
+    screen.getByText("Alice issue");
+    screen.getByText("Bob issue");
+
+    // Apply filter hiding repo-b (only alice's issues visible)
+    viewStore.setTabFilter("issues", "role", "author");
+    screen.getByText("Alice issue");
+    expect(screen.queryByText("org/repo-b")).toBeNull();
+
+    // Collapse all — only affects visible (filtered) repos
+    await user.click(screen.getByLabelText("Collapse all"));
+    expect(screen.queryByText("Alice issue")).toBeNull();
+
+    // Remove filter — repo-b should still be expanded (was hidden during collapse-all)
+    viewStore.resetTabFilter("issues", "role");
+    screen.getByText("Bob issue");
+    // repo-a was collapsed by collapse-all
+    expect(screen.queryByText("Alice issue")).toBeNull();
+  });
+
   it("resets page when data shrinks below current page", async () => {
     const user = userEvent.setup();
     updateConfig({ itemsPerPage: 10 });
@@ -488,6 +515,54 @@ describe("IssuesTab", () => {
     render(() => <IssuesTab issues={issues} userLogin="" />);
     // State persisted in viewState store — should still be expanded
     screen.getByText("Survives remount");
+  });
+
+  it("prunes stale expanded keys when a repo disappears from data", () => {
+    const [issues, setIssues] = createSignal<Issue[]>([
+      makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" }),
+    ]);
+    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+    // Both repos expanded
+    screen.getByText("Repo A issue");
+    screen.getByText("Repo B issue");
+
+    // Remove repo-b from data — pruning effect should fire
+    setIssues([makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" })]);
+    expect(viewState.expandedRepos.issues["org/repo-a"]).toBe(true);
+    expect("org/repo-b" in viewState.expandedRepos.issues).toBe(false);
+  });
+
+  it("prunes the first repo key when it disappears (name-based, not positional)", () => {
+    const [issues, setIssues] = createSignal<Issue[]>([
+      makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" }),
+    ]);
+    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+
+    // Remove repo-a (first), keep repo-b (second)
+    setIssues([makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" })]);
+    expect("org/repo-a" in viewState.expandedRepos.issues).toBe(false);
+    expect(viewState.expandedRepos.issues["org/repo-b"]).toBe(true);
+  });
+
+  it("preserves expanded keys when data becomes empty and restores UI on re-population", () => {
+    const [issues, setIssues] = createSignal<Issue[]>([
+      makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a" }),
+    ]);
+    setAllExpanded("issues", ["org/repo-a"], true);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+    screen.getByText("Issue A");
+
+    // Data becomes empty (e.g. loading state) — expanded state should be preserved
+    setIssues([]);
+    expect(viewState.expandedRepos.issues["org/repo-a"]).toBe(true);
+
+    // Data returns — UI should use preserved expanded state
+    setIssues([makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a" })]);
+    screen.getByText("Issue A");
   });
 
   it("clicking 'Expand all' expands repos on other pages too", async () => {

@@ -102,8 +102,19 @@ export const [viewState, setViewState] = createStore<ViewState>(
 );
 
 export function resetViewState(): void {
-  const defaults = ViewStateSchema.parse({});
-  setViewState(defaults);
+  updateViewState({
+    lastActiveTab: "issues",
+    sortPreferences: {},
+    ignoredItems: [],
+    globalFilter: { org: null, repo: null },
+    tabFilters: {
+      issues: { role: "all", comments: "all" },
+      pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" },
+      actions: { conclusion: "all", event: "all" },
+    },
+    showPrRuns: false,
+    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
+  });
 }
 
 export function updateViewState(partial: Partial<ViewState>): void {

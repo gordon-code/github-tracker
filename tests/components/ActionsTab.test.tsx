@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
+import type { WorkflowRun } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { viewState } from "../../src/app/stores/view";
 import { makeWorkflowRun, resetViewStore } from "../helpers/index";
@@ -355,10 +357,41 @@ describe("ActionsTab", () => {
     await user.click(screen.getByRole("button", { name: /Collapse all/i }));
     await user.click(screen.getByRole("button", { name: /Expand all/i }));
 
-    // Workflow card expansion is local state — it resets when repo collapses/re-renders
-    // The key assertion: repo expand/collapse does not affect workflow-level state in viewState
-    // (workflow state is local, not persisted)
+    // Workflow card expansion is local component state (not persisted in viewState)
+    // It survives collapse/expand within the same mount because expandedWorkflows
+    // is at component scope, but would reset on full component remount
     expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+    // Run row still visible — local store persists within same component instance
+    screen.getByText("my-unique-run");
+  });
+
+  it("prunes stale expanded keys when a repo disappears from data", () => {
+    const [runs, setRuns] = createSignal<WorkflowRun[]>([
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+      makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B" }),
+    ]);
+    viewStore.setAllExpanded("actions", ["owner/repo-a", "owner/repo-b"], true);
+    render(() => <ActionsTab workflowRuns={runs()} />);
+
+    // Remove repo-b from data — pruning effect should fire
+    setRuns([makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" })]);
+    expect(viewState.expandedRepos.actions["owner/repo-a"]).toBe(true);
+    expect("owner/repo-b" in viewState.expandedRepos.actions).toBe(false);
+  });
+
+  it("preserves expanded keys when data becomes empty and restores UI on re-population", () => {
+    const [runs, setRuns] = createSignal<WorkflowRun[]>([
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
+    ]);
+    viewStore.setAllExpanded("actions", ["owner/repo"], true);
+    render(() => <ActionsTab workflowRuns={runs()} />);
+
+    setRuns([]);
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+
+    // Data returns — UI should use preserved expanded state
+    setRuns([makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" })]);
+    expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
   });
 
   it("expanded repo state persists in viewState", async () => {

@@ -10,7 +10,7 @@ export default function ExpandCollapseButtons(props: ExpandCollapseButtonsProps)
         class="btn btn-ghost btn-xs"
         title="Expand all"
         aria-label="Expand all"
-        onClick={() => props.onExpandAll()}
+        onClick={props.onExpandAll}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -31,7 +31,7 @@ export default function ExpandCollapseButtons(props: ExpandCollapseButtonsProps)
         class="btn btn-ghost btn-xs"
         title="Collapse all"
         aria-label="Collapse all"
-        onClick={() => props.onCollapseAll()}
+        onClick={props.onCollapseAll}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
