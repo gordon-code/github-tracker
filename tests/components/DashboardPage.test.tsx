@@ -99,6 +99,9 @@ beforeEach(async () => {
         };
       }
     ),
+    createHotPollCoordinator: vi.fn().mockReturnValue({ destroy: vi.fn() }),
+    rebuildHotSets: vi.fn(),
+    getHotPollGeneration: vi.fn().mockReturnValue(0),
   }));
 
   // Re-import with fresh module instances
