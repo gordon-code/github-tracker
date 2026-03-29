@@ -134,12 +134,7 @@ beforeEach(async () => {
     errors: [],
   });
   // Reset view store to defaults
-  viewStore.updateViewState({
-    lastActiveTab: "issues",
-    sortPreferences: {},
-    ignoredItems: [],
-    globalFilter: { org: null, repo: null },
-  });
+  viewStore.resetViewState();
 });
 
 describe("DashboardPage — tab switching", () => {

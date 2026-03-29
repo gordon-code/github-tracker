@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, untrack } from "solid-js";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 
@@ -240,15 +240,15 @@ export function pruneExpandedRepos(
   tab: keyof ViewState["expandedRepos"],
   activeRepoNames: string[]
 ): void {
-  if (Object.keys(viewState.expandedRepos[tab]).length === 0) return;
+  const currentKeys = untrack(() => Object.keys(viewState.expandedRepos[tab]));
+  if (currentKeys.length === 0) return;
   const activeSet = new Set(activeRepoNames);
+  const staleKeys = currentKeys.filter((k) => !activeSet.has(k));
+  if (staleKeys.length === 0) return;
   setViewState(
     produce((draft) => {
-      const keys = Object.keys(draft.expandedRepos[tab]);
-      for (const key of keys) {
-        if (!activeSet.has(key)) {
-          delete draft.expandedRepos[tab][key];
-        }
+      for (const key of staleKeys) {
+        delete draft.expandedRepos[tab][key];
       }
     })
   );
