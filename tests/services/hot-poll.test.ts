@@ -593,7 +593,7 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
-  it("applies exponential backoff on errors", async () => {
+  it("applies exponential backoff on errors and surfaces via pushError", async () => {
     const onHotData = vi.fn();
     // fetchHotPRStatus uses Promise.allSettled, so graphql errors set hadErrors=true
     // without throwing — consecutiveFailures increments via the hadErrors path
@@ -606,6 +606,9 @@ describe("createHotPollCoordinator", () => {
       pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
     });
 
+    const { pushError } = await import("../../src/app/lib/errors");
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+
     await createRoot(async (dispose) => {
       createHotPollCoordinator(() => 10, onHotData);
 
@@ -613,6 +616,8 @@ describe("createHotPollCoordinator", () => {
       await vi.advanceTimersByTimeAsync(10_000);
       const callsAfterFirst = graphqlFn.mock.calls.length;
       expect(callsAfterFirst).toBe(1);
+      // hadErrors surfaces error to user
+      expect(pushError).toHaveBeenCalledWith("hot-poll", expect.any(String), true);
 
       // Next cycle should be at 10s * 2^1 = 20s from first cycle
       // Advance 10s — should NOT have fired another fetch yet

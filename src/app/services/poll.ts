@@ -565,6 +565,7 @@ export function createHotPollCoordinator(
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       if (hadErrors) {
         consecutiveFailures++;
+        pushError("hot-poll", "Some status updates failed — retrying with backoff", true);
       } else {
         consecutiveFailures = 0;
       }
