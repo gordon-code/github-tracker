@@ -153,6 +153,7 @@ async function pollFetch(): Promise<DashboardData> {
               pr.reviewThreads = e.reviewThreads;
               pr.totalReviewCount = e.totalReviewCount;
               pr.enriched = e.enriched;
+              pr.nodeId = e.nodeId;
             }
           } else {
             state.pullRequests = data.pullRequests;
