@@ -555,13 +555,12 @@ export function createHotPollCoordinator(
       return;
     }
 
-    // Skip fetch when no authenticated client (e.g., mid-logout)
-    if (!getClient()) {
-      schedule(myGeneration);
-      return;
-    }
-
     try {
+      // Skip fetch when no authenticated client (e.g., mid-logout)
+      if (!getClient()) {
+        schedule(myGeneration);
+        return;
+      }
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       if (hadErrors) {

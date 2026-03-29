@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { ConfigSchema, loadConfig } from "../../src/app/stores/config";
+import { ConfigSchema, loadConfig, config, updateConfig, resetConfig } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
 import { createStore } from "solid-js/store";
 import { produce } from "solid-js/store";
@@ -207,6 +207,39 @@ describe("updateConfig", () => {
       const { cfg, update } = makeStore();
       update({ onboardingComplete: true });
       expect(cfg.onboardingComplete).toBe(true);
+      dispose();
+    });
+  });
+});
+
+describe("updateConfig (real export)", () => {
+  beforeEach(() => {
+    createRoot((dispose) => {
+      resetConfig();
+      dispose();
+    });
+  });
+
+  it("applies valid partial updates", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 60 });
+      expect(config.hotPollInterval).toBe(60);
+      dispose();
+    });
+  });
+
+  it("rejects out-of-bounds values without modifying store", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 5 }); // below min of 10
+      expect(config.hotPollInterval).toBe(30); // unchanged from default
+      dispose();
+    });
+  });
+
+  it("rejects values above max without modifying store", () => {
+    createRoot((dispose) => {
+      updateConfig({ hotPollInterval: 999 }); // above max of 120
+      expect(config.hotPollInterval).toBe(30); // unchanged from default
       dispose();
     });
   });

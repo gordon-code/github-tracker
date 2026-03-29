@@ -626,6 +626,28 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("calls pushError when cycle throws", async () => {
+    const onHotData = vi.fn();
+    // Make getClient() throw (now inside the try block) to trigger the catch path
+    mockGetClient.mockImplementation(() => { throw new Error("auth crash"); });
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    const { pushError } = await import("../../src/app/lib/errors");
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(pushError).toHaveBeenCalledWith("hot-poll", "auth crash", true);
+      expect(onHotData).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
   it("does not schedule when interval is 0", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());
@@ -780,6 +802,52 @@ describe("fetchHotData eviction edge cases", () => {
   beforeEach(() => {
     resetPollState();
     mockGetClient.mockReset();
+  });
+
+  it("evicts one PR while retaining the other in a two-PR hot set", async () => {
+    let callCount = 0;
+    const graphqlFn = vi.fn(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First fetch: PR 1 resolved (success), PR 2 still pending
+        return Promise.resolve({
+          nodes: [
+            { databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
+            { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
+          ],
+          rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+        });
+      }
+      // Second fetch: only PR 2 should be queried
+      return Promise.resolve({
+        nodes: [
+          { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
+        ],
+        rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      });
+    });
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_one" }),
+        makePullRequest({ id: 2, checkStatus: "pending", nodeId: "PR_two" }),
+      ],
+    });
+
+    // First fetch — PR 1 resolves, PR 2 stays pending
+    const first = await fetchHotData();
+    expect(first.prUpdates.size).toBe(2);
+
+    // Second fetch — only PR 2 should be queried (PR 1 was evicted)
+    const second = await fetchHotData();
+    expect(second.prUpdates.size).toBe(1);
+    expect(second.prUpdates.has(2)).toBe(true);
+    // Verify graphql was called with only PR_two's nodeId
+    const secondCallArgs = graphqlFn.mock.calls[1] as unknown as [string, { ids: string[] }];
+    expect(secondCallArgs[1].ids).toEqual(["PR_two"]);
   });
 
   it("evicts PRs when state is MERGED even with pending checkStatus", async () => {

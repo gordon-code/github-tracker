@@ -1834,6 +1834,7 @@ export async function fetchWorkflowRunById(
     run_id: id,
   });
   updateRateLimitFromHeaders(response.headers as Record<string, string>);
+  // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
   const run = response.data as unknown as RawWorkflowRun;
   return {
     id: run.id,
