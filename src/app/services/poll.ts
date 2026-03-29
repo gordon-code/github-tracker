@@ -389,21 +389,21 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
-    if (_hotPRs.size >= MAX_HOT_PRS) {
-      console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
-      break;
-    }
     if ((pr.checkStatus === "pending" || pr.checkStatus === null) && pr.nodeId) {
+      if (_hotPRs.size >= MAX_HOT_PRS) {
+        console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
+        break;
+      }
       _hotPRs.set(pr.nodeId, pr.id);
     }
   }
 
   for (const run of data.workflowRuns) {
-    if (_hotRuns.size >= MAX_HOT_RUNS) {
-      console.warn(`[hot-poll] Run cap reached (${MAX_HOT_RUNS}), skipping remaining`);
-      break;
-    }
     if (run.status === "queued" || run.status === "in_progress") {
+      if (_hotRuns.size >= MAX_HOT_RUNS) {
+        console.warn(`[hot-poll] Run cap reached (${MAX_HOT_RUNS}), skipping remaining`);
+        break;
+      }
       const parts = run.repoFullName.split("/");
       if (parts.length === 2) {
         _hotRuns.set(run.id, { owner: parts[0], repo: parts[1] });
