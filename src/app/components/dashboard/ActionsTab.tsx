@@ -1,14 +1,15 @@
-import { createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type ActionsFilterField } from "../../stores/view";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
+import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -116,16 +117,21 @@ const actionsFilterGroups: FilterChipGroupDef[] = [
 ];
 
 export default function ActionsTab(props: ActionsTabProps) {
-  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
   const [expandedWorkflows, setExpandedWorkflows] = createStore<Record<string, boolean>>({});
-
-  function toggleRepo(repoFullName: string) {
-    setExpandedRepos(repoFullName, (v) => !v);
-  }
 
   function toggleWorkflow(key: string) {
     setExpandedWorkflows(key, (v) => !v);
   }
+
+  const activeRepoNames = createMemo(() =>
+    [...new Set(props.workflowRuns.map((r) => r.repoFullName))]
+  );
+
+  createEffect(() => {
+    const names = activeRepoNames();
+    if (names.length === 0) return;
+    pruneExpandedRepos("actions", names);
+  });
 
   function handleIgnore(run: WorkflowRun) {
     ignoreItem({
@@ -180,7 +186,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   return (
     <div class="divide-y divide-base-300">
       {/* Toolbar */}
-      <div class="flex flex-wrap items-center gap-3 px-4 py-2 bg-base-100">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
           <input
             type="checkbox"
@@ -198,6 +204,10 @@ export default function ActionsTab(props: ActionsTabProps) {
           onResetAll={() => resetAllTabFilters("actions")}
         />
         <div class="flex-1" />
+        <ExpandCollapseButtons
+          onExpandAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), true)}
+          onCollapseAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), false)}
+        />
         <IgnoreBadge
           items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
           onUnignore={unignoreItem}
@@ -224,7 +234,7 @@ export default function ActionsTab(props: ActionsTabProps) {
       <Show when={repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
-            const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+            const isExpanded = () => !!viewState.expandedRepos.actions[repoGroup.repoFullName];
 
             const sortedWorkflows = createMemo(() =>
               sortWorkflowsByStatus(repoGroup.workflows)
@@ -249,7 +259,7 @@ export default function ActionsTab(props: ActionsTabProps) {
               <div class="bg-base-100">
                 {/* Repo header */}
                 <button
-                  onClick={() => toggleRepo(repoGroup.repoFullName)}
+                  onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
                   aria-expanded={isExpanded()}
                   class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
                 >

@@ -3,6 +3,7 @@ import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
 import * as viewStore from "../../src/app/stores/view";
+import { viewState } from "../../src/app/stores/view";
 import { makeWorkflowRun, resetViewStore } from "../helpers/index";
 
 beforeEach(() => {
@@ -294,5 +295,111 @@ describe("ActionsTab", () => {
     render(() => <ActionsTab workflowRuns={[]} />);
     screen.getByRole("checkbox");
     screen.getByText("Show PR runs");
+  });
+
+  it("Expand all button expands all repo groups", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A", displayTitle: "run-a" }),
+      makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B", displayTitle: "run-b" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    // Both groups collapsed by default
+    expect(screen.queryByText("run-a")).toBeNull();
+    expect(screen.queryByText("run-b")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+
+    // After expand all, workflow names visible (repos expanded)
+    expect(screen.getAllByText("CI-A").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("CI-B").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("Collapse all button collapses all repo groups", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+      makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    // Expand all first
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+    expect(screen.getAllByText("CI-A").length).toBeGreaterThanOrEqual(1);
+
+    // Collapse all
+    await user.click(screen.getByRole("button", { name: /Collapse all/i }));
+
+    // Repo groups collapsed — workflow names hidden
+    expect(screen.queryByText("CI-A")).toBeNull();
+    expect(screen.queryByText("CI-B")).toBeNull();
+  });
+
+  it("workflow card expansion is independent of repo-level expand/collapse all", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "my-unique-run" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    // Expand repo
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+    // Expand workflow card
+    const cards = screen.getAllByText("CI");
+    await user.click(cards[0]);
+    // Run row now visible
+    screen.getByText("my-unique-run");
+
+    // Collapse all repos, then expand again
+    await user.click(screen.getByRole("button", { name: /Collapse all/i }));
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+
+    // Workflow card expansion is local state — it resets when repo collapses/re-renders
+    // The key assertion: repo expand/collapse does not affect workflow-level state in viewState
+    // (workflow state is local, not persisted)
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+  });
+
+  it("expanded repo state persists in viewState", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    // Initially not expanded
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBeFalsy();
+
+    // Click repo header to expand
+    await user.click(screen.getByText("owner/repo"));
+
+    // viewState updated
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+
+    // Click again to collapse
+    await user.click(screen.getByText("owner/repo"));
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBeFalsy();
+  });
+
+  it("expanded state survives component unmount and remount", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI", displayTitle: "unique-title" }),
+    ];
+
+    // First render — expand repo
+    const { unmount } = render(() => <ActionsTab workflowRuns={runs} />);
+    await user.click(screen.getByText("owner/repo"));
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+
+    // Unmount
+    unmount();
+
+    // Re-render — viewState persists so repo should still be expanded
+    render(() => <ActionsTab workflowRuns={runs} />);
+    // Workflow name visible means the repo group is expanded
+    expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
   });
 });

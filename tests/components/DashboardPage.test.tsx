@@ -198,8 +198,9 @@ describe("DashboardPage — data flow", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      screen.getByText("Fetched issue alpha");
-      screen.getByText("Fetched issue beta");
+      // Repo group header visible (groups start collapsed — verify data reached the tab)
+      screen.getByText("owner/repo");
+      screen.getByText("2 issues");
     });
   });
 
@@ -219,8 +220,9 @@ describe("DashboardPage — data flow", () => {
     render(() => <DashboardPage />);
     await user.click(screen.getByText("Pull Requests"));
     await waitFor(() => {
-      screen.getByText("Fetched PR one");
-      screen.getByText("Fetched PR two");
+      // Repo group header visible (groups start collapsed — verify data reached the tab)
+      screen.getByText("owner/repo");
+      screen.getByText("2 PRs");
     });
   });
 
@@ -274,15 +276,17 @@ describe("DashboardPage — data flow", () => {
     vi.mocked(pollService.fetchAllData)
       .mockResolvedValueOnce({ issues, pullRequests: [], workflowRuns: [], errors: [] })
       .mockResolvedValue({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true });
-
     render(() => <DashboardPage />);
     await waitFor(() => {
-      screen.getByText("Existing issue");
+      // Repo group header visible (collapsed — verify data reached the tab)
+      screen.getByText("owner/repo");
+      screen.getByText("1 issue");
     });
 
     // Trigger a second fetch via the captured callback — skipped result should not erase data
     await capturedFetchAll?.();
-    screen.getByText("Existing issue");
+    // Data still present (collapsed repo group summary persists)
+    screen.getByText("1 issue");
   });
 });
 
@@ -348,7 +352,9 @@ describe("DashboardPage — onAuthCleared integration", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      screen.getByText("Should be cleared");
+      // Repo group header visible (collapsed — verify data reached the tab)
+      screen.getByText("owner/repo");
+      screen.getByText("1 issue");
     });
 
     // DashboardPage registered an onAuthCleared callback at module scope.
@@ -359,9 +365,9 @@ describe("DashboardPage — onAuthCleared integration", () => {
     // The coordinator's destroy() should have been called
     expect(mockDestroy).toHaveBeenCalled();
 
-    // Dashboard data should be cleared — no stale items visible
+    // Dashboard data should be cleared — no stale repo groups visible
     await waitFor(() => {
-      expect(screen.queryByText("Should be cleared")).toBeNull();
+      expect(screen.queryByText("1 issue")).toBeNull();
     });
   });
 });

@@ -1,9 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, type PullRequestFilterField } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
@@ -119,11 +119,6 @@ const sortOptions: SortOption[] = [
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
-  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
-
-  function toggleRepo(repoFullName: string) {
-    setExpandedRepos(repoFullName, (v) => !v);
-  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
@@ -230,14 +225,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (page() > max) setPage(max);
   });
 
-  // Auto-expand first group on initial load
-  let hasAutoExpanded = false;
+  const activeRepoNames = createMemo(() =>
+    [...new Set(props.pullRequests.map((pr) => pr.repoFullName))]
+  );
+
   createEffect(() => {
-    const groups = pageGroups();
-    if (!hasAutoExpanded && groups.length > 0) {
-      hasAutoExpanded = true;
-      setExpandedRepos(groups[0].repoFullName, true);
-    }
+    const names = activeRepoNames();
+    if (names.length === 0) return;
+    pruneExpandedRepos("pullRequests", names);
   });
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -282,6 +277,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           }}
         />
         <div class="flex-1" />
+        <ExpandCollapseButtons
+          onExpandAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), true)}
+          onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
+        />
         <IgnoreBadge
           items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
           onUnignore={unignoreItem}
@@ -323,7 +322,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <div class="divide-y divide-base-300">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+                const isExpanded = () => !!viewState.expandedRepos.pullRequests[repoGroup.repoFullName];
 
                 const summaryMeta = createMemo(() => {
                   const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };
@@ -354,7 +353,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 return (
                   <div class="bg-base-100">
                     <button
-                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
                       aria-expanded={isExpanded()}
                       class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
                     >

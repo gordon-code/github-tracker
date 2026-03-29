@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { createStore } from "solid-js/store";
 import { config } from "../../stores/config";
-import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, type IssueFilterField } from "../../stores/view";
+import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
 import IgnoreBadge from "./IgnoreBadge";
@@ -13,6 +12,7 @@ import type { FilterChipGroupDef } from "../shared/FilterChips";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
+import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
 import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
 
@@ -54,11 +54,6 @@ const sortOptions: SortOption[] = [
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
-  const [expandedRepos, setExpandedRepos] = createStore<Record<string, boolean>>({});
-
-  function toggleRepo(repoFullName: string) {
-    setExpandedRepos(repoFullName, (v) => !v);
-  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
@@ -141,14 +136,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (page() > max) setPage(max);
   });
 
-  // Auto-expand first group on initial mount
-  let hasAutoExpanded = false;
+  const activeRepoNames = createMemo(() =>
+    [...new Set(props.issues.map((i) => i.repoFullName))]
+  );
+
   createEffect(() => {
-    const groups = pageGroups();
-    if (!hasAutoExpanded && groups.length > 0) {
-      hasAutoExpanded = true;
-      setExpandedRepos(groups[0].repoFullName, true);
-    }
+    const names = activeRepoNames();
+    if (names.length === 0) return;
+    pruneExpandedRepos("issues", names);
   });
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -193,6 +188,10 @@ export default function IssuesTab(props: IssuesTabProps) {
           }}
         />
         <div class="flex-1" />
+        <ExpandCollapseButtons
+          onExpandAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), true)}
+          onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
+        />
         <IgnoreBadge
           items={viewState.ignoredItems.filter((i) => i.type === "issue")}
           onUnignore={unignoreItem}
@@ -234,7 +233,7 @@ export default function IssuesTab(props: IssuesTabProps) {
           <div class="divide-y divide-base-300">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isExpanded = () => !!expandedRepos[repoGroup.repoFullName];
+                const isExpanded = () => !!viewState.expandedRepos.issues[repoGroup.repoFullName];
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};
@@ -252,7 +251,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                 return (
                   <div class="bg-base-100">
                     <button
-                      onClick={() => toggleRepo(repoGroup.repoFullName)}
+                      onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
                       aria-expanded={isExpanded()}
                       class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
                     >
