@@ -544,6 +544,12 @@ export function createHotPollCoordinator(
       consecutiveFailures = 0;
       onHotData(prUpdates, runUpdates, generation);
     } catch (err) {
+      // Note: fetchHotData handles errors internally (try/catch + pooledAllSettled)
+      // and returns empty maps rather than throwing. This catch is defense-in-depth
+      // for truly unexpected failures (e.g., getClient() throwing, Map iterator bugs).
+      // For expected API errors (rate limits, network failures), fetchHotData logs
+      // via console.warn and retries on the next cycle. Persistent auth errors are
+      // caught by the full poll coordinator on its 5-minute cadence.
       consecutiveFailures++;
       console.warn(`[hot-poll] cycle failed (${consecutiveFailures}x):`, err);
     }
