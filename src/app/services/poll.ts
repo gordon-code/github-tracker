@@ -446,7 +446,8 @@ export async function fetchHotData(): Promise<{
   const nodeIds = [..._hotPRs.keys()];
   try {
     const prResult = await fetchHotPRStatus(octokit, nodeIds);
-    for (const [id, update] of prResult) {
+    if (prResult.hadErrors) hadErrors = true;
+    for (const [id, update] of prResult.results) {
       prUpdates.set(id, update);
     }
   } catch (err) {

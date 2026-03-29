@@ -1771,11 +1771,12 @@ export interface HotPRStatusUpdate {
 export async function fetchHotPRStatus(
   octokit: GitHubOctokit,
   nodeIds: string[]
-): Promise<Map<number, HotPRStatusUpdate>> {
-  const result = new Map<number, HotPRStatusUpdate>();
-  if (nodeIds.length === 0) return result;
+): Promise<{ results: Map<number, HotPRStatusUpdate>; hadErrors: boolean }> {
+  const results = new Map<number, HotPRStatusUpdate>();
+  if (nodeIds.length === 0) return { results, hadErrors: false };
 
   const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
+  let hadErrors = false;
   const settled = await Promise.allSettled(batches.map(async (batch) => {
     const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch });
     if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
@@ -1791,7 +1792,7 @@ export async function fetchHotPRStatus(
         checkStatus = "failure";
       }
 
-      result.set(node.databaseId, {
+      results.set(node.databaseId, {
         state: node.state,
         checkStatus,
         mergeStateStatus: node.mergeStateStatus,
@@ -1802,11 +1803,12 @@ export async function fetchHotPRStatus(
 
   for (const s of settled) {
     if (s.status === "rejected") {
+      hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
     }
   }
 
-  return result;
+  return { results, hadErrors };
 }
 
 export interface HotWorkflowRunUpdate {

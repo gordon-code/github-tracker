@@ -98,6 +98,12 @@ describe("ConfigSchema", () => {
     it("rejects values above max (121)", () => {
       expect(() => ConfigSchema.parse({ hotPollInterval: 121 })).toThrow();
     });
+
+    it("persists through config round-trip", () => {
+      const stored = ConfigSchema.parse({ hotPollInterval: 45 });
+      const roundTripped = ConfigSchema.parse(JSON.parse(JSON.stringify(stored)));
+      expect(roundTripped.hotPollInterval).toBe(45);
+    });
   });
 });
 

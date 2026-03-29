@@ -54,6 +54,7 @@ vi.mock("../../src/app/stores/auth", () => ({
 import {
   resetPollState,
   rebuildHotSets,
+  clearHotSets,
   fetchHotData,
   createHotPollCoordinator,
   getHotPollGeneration,
@@ -90,8 +91,9 @@ const emptyData: DashboardData = {
 describe("fetchHotPRStatus", () => {
   it("returns empty map for empty nodeIds", async () => {
     const octokit = makeOctokit();
-    const result = await fetchHotPRStatus(octokit as never, []);
-    expect(result.size).toBe(0);
+    const { results, hadErrors } = await fetchHotPRStatus(octokit as never, []);
+    expect(results.size).toBe(0);
+    expect(hadErrors).toBe(false);
     expect(octokit.graphql).not.toHaveBeenCalled();
   });
 
@@ -107,9 +109,9 @@ describe("fetchHotPRStatus", () => {
       rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
-    const result = await fetchHotPRStatus(octokit as never, ["PR_node1"]);
-    expect(result.size).toBe(1);
-    const update = result.get(42)!;
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node1"]);
+    expect(results.size).toBe(1);
+    const update = results.get(42)!;
     expect(update.state).toBe("OPEN");
     expect(update.checkStatus).toBe("success");
     expect(update.mergeStateStatus).toBe("CLEAN");
@@ -128,8 +130,8 @@ describe("fetchHotPRStatus", () => {
       rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
-    const result = await fetchHotPRStatus(octokit as never, ["PR_node2"]);
-    expect(result.get(43)!.checkStatus).toBe("conflict");
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node2"]);
+    expect(results.get(43)!.checkStatus).toBe("conflict");
   });
 
   it("applies mergeStateStatus overrides: UNSTABLE -> failure", async () => {
@@ -144,8 +146,8 @@ describe("fetchHotPRStatus", () => {
       rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
-    const result = await fetchHotPRStatus(octokit as never, ["PR_node3"]);
-    expect(result.get(44)!.checkStatus).toBe("failure");
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node3"]);
+    expect(results.get(44)!.checkStatus).toBe("failure");
   });
 });
 
@@ -533,11 +535,11 @@ describe("fetchHotPRStatus edge cases", () => {
       rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
-    const result = await fetchHotPRStatus(octokit as never, ["PR_behind"]);
-    expect(result.get(50)!.checkStatus).toBe("conflict");
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_behind"]);
+    expect(results.get(50)!.checkStatus).toBe("conflict");
   });
 
-  it("returns partial results when one batch fails", async () => {
+  it("returns partial results and hadErrors when one batch fails", async () => {
     let callCount = 0;
     const octokit = makeOctokit(undefined, () => {
       callCount++;
@@ -558,10 +560,11 @@ describe("fetchHotPRStatus edge cases", () => {
 
     // Need >100 node IDs to trigger 2 batches
     const nodeIds = Array.from({ length: 101 }, (_, i) => `PR_${i}`);
-    const result = await fetchHotPRStatus(octokit as never, nodeIds);
+    const { results, hadErrors } = await fetchHotPRStatus(octokit as never, nodeIds);
     // First batch succeeded with 1 result, second batch failed
-    expect(result.size).toBe(1);
-    expect(result.get(1)).toBeDefined();
+    expect(results.size).toBe(1);
+    expect(results.get(1)).toBeDefined();
+    expect(hadErrors).toBe(true);
   });
 });
 
@@ -673,5 +676,100 @@ describe("fetchHotData eviction edge cases", () => {
     graphqlFn.mockClear();
     const second = await fetchHotData();
     expect(second.prUpdates.size).toBe(0);
+  });
+});
+
+describe("clearHotSets", () => {
+  it("empties both hot maps so next fetchHotData is a no-op", async () => {
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    clearHotSets();
+
+    const octokit = makeOctokit();
+    mockGetClient.mockReturnValue(octokit);
+    const { prUpdates, runUpdates } = await fetchHotData();
+    expect(prUpdates.size).toBe(0);
+    expect(runUpdates.size).toBe(0);
+    // Should not have made any API calls
+    expect(octokit.graphql).not.toHaveBeenCalled();
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchHotData hadErrors", () => {
+  beforeEach(() => {
+    resetPollState();
+    mockGetClient.mockReset();
+  });
+
+  it("returns hadErrors=false when all fetches succeed", async () => {
+    const octokit = makeOctokit(
+      () => Promise.resolve({
+        data: { id: 10, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+        headers: {},
+      }),
+      () => Promise.resolve({
+        nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } }],
+        rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }),
+    );
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    const { hadErrors } = await fetchHotData();
+    expect(hadErrors).toBe(false);
+  });
+
+  it("returns hadErrors=true when PR fetch fails", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.reject(new Error("graphql error")));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+    });
+
+    const { hadErrors, prUpdates } = await fetchHotData();
+    expect(hadErrors).toBe(true);
+    expect(prUpdates.size).toBe(0); // failed, no results
+  });
+
+  it("returns hadErrors=true when a run fetch fails", async () => {
+    const octokit = makeOctokit(
+      () => Promise.reject(new Error("network error")),
+      () => Promise.resolve({ nodes: [], rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
+    );
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    const { hadErrors, runUpdates } = await fetchHotData();
+    expect(hadErrors).toBe(true);
+    expect(runUpdates.size).toBe(0); // failed, no results
+  });
+});
+
+describe("fetchHotPRStatus updateGraphqlRateLimit", () => {
+  it("calls updateGraphqlRateLimit when response includes rateLimit", async () => {
+    const { updateGraphqlRateLimit } = await import("../../src/app/services/github");
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } }],
+      rateLimit: { remaining: 4200, resetAt: "2026-01-01T01:00:00Z" },
+    }));
+
+    await fetchHotPRStatus(octokit as never, ["PR_rl"]);
+    expect(updateGraphqlRateLimit).toHaveBeenCalledWith({ remaining: 4200, resetAt: "2026-01-01T01:00:00Z" });
   });
 });
