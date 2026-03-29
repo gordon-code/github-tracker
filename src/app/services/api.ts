@@ -1776,7 +1776,7 @@ export async function fetchHotPRStatus(
   if (nodeIds.length === 0) return result;
 
   const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
-  await Promise.allSettled(batches.map(async (batch) => {
+  const settled = await Promise.allSettled(batches.map(async (batch) => {
     const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch });
     if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
 
@@ -1799,6 +1799,12 @@ export async function fetchHotPRStatus(
       });
     }
   }));
+
+  for (const s of settled) {
+    if (s.status === "rejected") {
+      console.warn("[hot-poll] PR status batch failed:", s.reason);
+    }
+  }
 
   return result;
 }

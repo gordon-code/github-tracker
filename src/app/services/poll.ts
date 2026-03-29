@@ -539,8 +539,8 @@ export function createHotPollCoordinator(
       const { prUpdates, runUpdates, generation } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       onHotData(prUpdates, runUpdates, generation);
-    } catch {
-      // Fetch failure — silently continue to next cycle
+    } catch (err) {
+      console.warn("[hot-poll] cycle failed:", err);
     }
 
     schedule(myGeneration);
