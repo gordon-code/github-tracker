@@ -5,10 +5,15 @@ import { user, onAuthCleared } from "../stores/auth";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
+  fetchHotPRStatus,
+  fetchWorkflowRunById,
+  pooledAllSettled,
   type Issue,
   type PullRequest,
   type WorkflowRun,
   type ApiError,
+  type HotPRStatusUpdate,
+  type HotWorkflowRunUpdate,
   resetEmptyActionRepos,
 } from "./api";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
@@ -37,10 +42,31 @@ export interface PollCoordinator {
 let _notifLastModified: string | null = null;
 let _notifGateDisabled = false; // Disabled after 403 (notifications scope not granted)
 
-function resetPollState(): void {
+// ── Hot poll state ────────────────────────────────────────────────────────────
+
+/** PRs with pending/null check status: maps GraphQL node ID → databaseId */
+const _hotPRs = new Map<string, number>();
+
+/** In-progress workflow runs: maps run ID → repo descriptor */
+const _hotRuns = new Map<number, { owner: string; repo: string }>();
+
+/** Incremented each time rebuildHotSets() is called (full refresh completed).
+ * Allows hot poll callbacks to detect stale results that overlap with a fresh
+ * full refresh — if the captured generation no longer matches the current one,
+ * the hot data is discarded. */
+let _hotPollGeneration = 0;
+
+export function getHotPollGeneration(): number {
+  return _hotPollGeneration;
+}
+
+export function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
   _notifGateDisabled = false;
+  _hotPRs.clear();
+  _hotRuns.clear();
+  _hotPollGeneration = 0;
   _resetNotificationState();
   resetEmptyActionRepos();
   resetNotificationState();
@@ -345,4 +371,184 @@ export function createPollCoordinator(
   }
 
   return { isRefreshing, lastRefreshAt, manualRefresh, destroy };
+}
+
+// ── Hot poll: targeted refresh for in-flight items ───────────────────────────
+
+/**
+ * Rebuilds hot item sets from fresh full refresh data. Called after each full
+ * poll cycle completes. Clears and replaces both sets (full replacement, not
+ * incremental). Increments the generation counter so stale hot poll results
+ * from the previous cycle can be detected and discarded.
+ */
+export function rebuildHotSets(data: DashboardData): void {
+  _hotPollGeneration++;
+  _hotPRs.clear();
+  _hotRuns.clear();
+
+  for (const pr of data.pullRequests) {
+    if ((pr.checkStatus === "pending" || pr.checkStatus === null) && pr.nodeId) {
+      _hotPRs.set(pr.nodeId, pr.id);
+    }
+  }
+
+  for (const run of data.workflowRuns) {
+    if (run.status === "queued" || run.status === "in_progress") {
+      const parts = run.repoFullName.split("/");
+      if (parts.length === 2) {
+        _hotRuns.set(run.id, { owner: parts[0], repo: parts[1] });
+      }
+    }
+  }
+}
+
+/**
+ * Fetches updated status for all hot items (pending-check PRs + in-progress runs).
+ * Evicts items from the hot sets when they settle (PR closed/merged/resolved,
+ * run completed). Returns captured generation alongside results so callers can
+ * detect staleness.
+ */
+export async function fetchHotData(): Promise<{
+  prUpdates: Map<number, HotPRStatusUpdate>;
+  runUpdates: Map<number, HotWorkflowRunUpdate>;
+  generation: number;
+}> {
+  // Capture generation BEFORE any async work so callers can detect if a full
+  // refresh occurred while this fetch was in flight.
+  const generation = _hotPollGeneration;
+
+  const prUpdates = new Map<number, HotPRStatusUpdate>();
+  const runUpdates = new Map<number, HotWorkflowRunUpdate>();
+
+  const octokit = getClient();
+  if (!octokit || (_hotPRs.size === 0 && _hotRuns.size === 0)) {
+    return { prUpdates, runUpdates, generation };
+  }
+
+  // PR status fetch — wrap in try/catch so failures don't crash the hot poll
+  const nodeIds = [..._hotPRs.keys()];
+  try {
+    const prResult = await fetchHotPRStatus(octokit, nodeIds);
+    for (const [id, update] of prResult) {
+      prUpdates.set(id, update);
+    }
+  } catch (err) {
+    console.warn("[hot-poll] PR status fetch failed:", err);
+    // Items stay in _hotPRs for retry next cycle
+  }
+
+  // Workflow run fetches — bounded concurrency via pooledAllSettled
+  const runEntries = [..._hotRuns.entries()];
+  const runTasks = runEntries.map(
+    (entry) => async () => fetchWorkflowRunById(octokit, { id: entry[0], ...entry[1] })
+  );
+  const runResults = await pooledAllSettled(runTasks, 10);
+  for (const result of runResults) {
+    if (result.status === "fulfilled") {
+      runUpdates.set(result.value.id, result.value);
+    }
+    // Rejected results are silently skipped — run stays in hot set for retry
+  }
+
+  // Evict settled PRs: find their node IDs in _hotPRs and remove if settled
+  for (const [databaseId, upd] of prUpdates) {
+    if (
+      upd.state === "CLOSED" ||
+      upd.state === "MERGED" ||
+      (upd.checkStatus !== "pending" && upd.checkStatus !== null)
+    ) {
+      for (const [nodeId, id] of _hotPRs) {
+        if (id === databaseId) {
+          _hotPRs.delete(nodeId);
+          break;
+        }
+      }
+    }
+  }
+
+  // Evict completed runs
+  for (const [runId, runUpdate] of runUpdates) {
+    if (runUpdate.status === "completed") {
+      _hotRuns.delete(runId);
+    }
+  }
+
+  return { prUpdates, runUpdates, generation };
+}
+
+/**
+ * Creates a hot poll coordinator that fires at configurable intervals to refresh
+ * in-flight items without a full poll cycle. Uses setTimeout chains to avoid
+ * overlapping concurrent fetches.
+ *
+ * Must be called inside a SolidJS reactive root (uses createEffect + onCleanup).
+ *
+ * @param getInterval - Reactive accessor returning interval in seconds (0 = disabled)
+ * @param onHotData - Callback invoked with fresh updates after each cycle
+ */
+export function createHotPollCoordinator(
+  getInterval: () => number,
+  onHotData: (
+    prUpdates: Map<number, HotPRStatusUpdate>,
+    runUpdates: Map<number, HotWorkflowRunUpdate>,
+    generation: number
+  ) => void
+): { destroy: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let chainGeneration = 0;
+
+  function destroy(): void {
+    chainGeneration++;
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  }
+
+  async function cycle(myGeneration: number): Promise<void> {
+    if (myGeneration !== chainGeneration) return; // Stale chain
+
+    // No-op cycle when nothing to poll
+    if (_hotPRs.size === 0 && _hotRuns.size === 0) {
+      schedule(myGeneration);
+      return;
+    }
+
+    // Skip fetch when page is hidden
+    if (document.visibilityState === "hidden") {
+      schedule(myGeneration);
+      return;
+    }
+
+    try {
+      const { prUpdates, runUpdates, generation } = await fetchHotData();
+      if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
+      onHotData(prUpdates, runUpdates, generation);
+    } catch {
+      // Fetch failure — silently continue to next cycle
+    }
+
+    schedule(myGeneration);
+  }
+
+  function schedule(myGeneration: number): void {
+    const ms = getInterval() * 1000;
+    if (ms > 0 && myGeneration === chainGeneration) {
+      timeoutId = setTimeout(() => void cycle(myGeneration), ms);
+    }
+  }
+
+  // Reactive effect: restart chain when interval changes
+  createEffect(() => {
+    const intervalSec = getInterval();
+    destroy();
+    if (intervalSec > 0) {
+      const gen = chainGeneration;
+      timeoutId = setTimeout(() => void cycle(gen), intervalSec * 1000);
+    }
+  });
+
+  onCleanup(destroy);
+
+  return { destroy };
 }
