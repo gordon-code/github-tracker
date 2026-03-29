@@ -101,6 +101,7 @@ beforeEach(async () => {
     ),
     createHotPollCoordinator: vi.fn().mockReturnValue({ destroy: vi.fn() }),
     rebuildHotSets: vi.fn(),
+    clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
   }));
 

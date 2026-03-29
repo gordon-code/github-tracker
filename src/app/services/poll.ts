@@ -62,6 +62,11 @@ export function getHotPollGeneration(): number {
   return _hotPollGeneration;
 }
 
+export function clearHotSets(): void {
+  _hotPRs.clear();
+  _hotRuns.clear();
+}
+
 export function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
@@ -422,6 +427,7 @@ export async function fetchHotData(): Promise<{
   prUpdates: Map<number, HotPRStatusUpdate>;
   runUpdates: Map<number, HotWorkflowRunUpdate>;
   generation: number;
+  hadErrors: boolean;
 }> {
   // Capture generation BEFORE any async work so callers can detect if a full
   // refresh occurred while this fetch was in flight.
@@ -429,10 +435,11 @@ export async function fetchHotData(): Promise<{
 
   const prUpdates = new Map<number, HotPRStatusUpdate>();
   const runUpdates = new Map<number, HotWorkflowRunUpdate>();
+  let hadErrors = false;
 
   const octokit = getClient();
   if (!octokit || (_hotPRs.size === 0 && _hotRuns.size === 0)) {
-    return { prUpdates, runUpdates, generation };
+    return { prUpdates, runUpdates, generation, hadErrors };
   }
 
   // PR status fetch — wrap in try/catch so failures don't crash the hot poll
@@ -443,6 +450,7 @@ export async function fetchHotData(): Promise<{
       prUpdates.set(id, update);
     }
   } catch (err) {
+    hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
     // Items stay in _hotPRs for retry next cycle
   }
@@ -456,8 +464,9 @@ export async function fetchHotData(): Promise<{
   for (const result of runResults) {
     if (result.status === "fulfilled") {
       runUpdates.set(result.value.id, result.value);
+    } else {
+      hadErrors = true;
     }
-    // Rejected results are silently skipped — run stays in hot set for retry
   }
 
   // Skip eviction if a full refresh rebuilt the hot sets during our async work.
@@ -488,7 +497,7 @@ export async function fetchHotData(): Promise<{
     }
   }
 
-  return { prUpdates, runUpdates, generation };
+  return { prUpdates, runUpdates, generation, hadErrors };
 }
 
 /**
@@ -539,17 +548,15 @@ export function createHotPollCoordinator(
     }
 
     try {
-      const { prUpdates, runUpdates, generation } = await fetchHotData();
+      const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
-      consecutiveFailures = 0;
+      if (hadErrors) {
+        consecutiveFailures++;
+      } else {
+        consecutiveFailures = 0;
+      }
       onHotData(prUpdates, runUpdates, generation);
     } catch (err) {
-      // Note: fetchHotData handles errors internally (try/catch + pooledAllSettled)
-      // and returns empty maps rather than throwing. This catch is defense-in-depth
-      // for truly unexpected failures (e.g., getClient() throwing, Map iterator bugs).
-      // For expected API errors (rate limits, network failures), fetchHotData logs
-      // via console.warn and retries on the next cycle. Persistent auth errors are
-      // caught by the full poll coordinator on its 5-minute cadence.
       consecutiveFailures++;
       console.warn(`[hot-poll] cycle failed (${consecutiveFailures}x):`, err);
     }

@@ -14,6 +14,7 @@ import {
   createPollCoordinator,
   createHotPollCoordinator,
   rebuildHotSets,
+  clearHotSets,
   getHotPollGeneration,
   fetchAllData,
   type DashboardData,
@@ -291,6 +292,7 @@ export default function DashboardPage() {
       _setCoordinator(null);
       _hotCoordinator()?.destroy();
       _setHotCoordinator(null);
+      clearHotSets();
     });
   });
 
