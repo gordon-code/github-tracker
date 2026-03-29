@@ -568,6 +568,7 @@ export function createHotPollCoordinator(
         pushError("hot-poll", "Some status updates failed — retrying with backoff", true);
       } else {
         consecutiveFailures = 0;
+        dismissNotificationBySource("hot-poll");
       }
       if (prUpdates.size > 0 || runUpdates.size > 0) {
         onHotData(prUpdates, runUpdates, generation);
