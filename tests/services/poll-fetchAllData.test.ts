@@ -136,7 +136,7 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat");
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined);
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
       config.selectedRepos,

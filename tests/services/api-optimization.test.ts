@@ -36,6 +36,7 @@ const graphqlIssueNode = {
   comments: { totalCount: 3 },
 };
 
+/** Full PR node used by standalone fetchPullRequests (has all heavy fields) */
 const graphqlPRNode = {
   databaseId: 42,
   number: 42,
@@ -65,6 +66,48 @@ const graphqlPRNode = {
   commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
 };
 
+/** Light PR node used by the two-phase combined query (phase 1) */
+function makeLightPRNode(overrides: Partial<typeof graphqlLightPRNodeDefaults> = {}) {
+  return { ...graphqlLightPRNodeDefaults, ...overrides };
+}
+
+const graphqlLightPRNodeDefaults = {
+  id: "PR_kwDOtest42",
+  databaseId: 42,
+  number: 42,
+  title: "Add feature",
+  state: "open",
+  isDraft: false,
+  url: "https://github.com/octocat/Hello-World/pull/42",
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-02T00:00:00Z",
+  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
+  repository: { nameWithOwner: "octocat/Hello-World" },
+  headRefName: "feature-branch",
+  baseRefName: "main",
+  reviewDecision: "APPROVED",
+  labels: { nodes: [{ name: "feature", color: "a2eeef" }] },
+};
+
+/** Heavy PR node returned by phase 2 backfill (nodes(ids:[])) */
+function makeHeavyPRNode(databaseId: number, _nodeId?: string) {
+  return {
+    databaseId,
+    headRefOid: "abc123",
+    headRepository: { owner: { login: "octocat" }, nameWithOwner: "octocat/Hello-World" },
+    mergeStateStatus: "CLEAN",
+    assignees: { nodes: [{ login: "octocat" }] },
+    reviewRequests: { nodes: [{ requestedReviewer: { login: "reviewer2" } }] },
+    latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
+    additions: 100,
+    deletions: 20,
+    changedFiles: 5,
+    comments: { totalCount: 3 },
+    reviewThreads: { totalCount: 2 },
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+  };
+}
+
 const rateLimit = { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() };
 
 function makeSearchResponse<T>(nodes: T[], hasNextPage = false) {
@@ -75,9 +118,9 @@ function makeSearchResponse<T>(nodes: T[], hasNextPage = false) {
   };
 }
 
-function makeCombinedResponse(
+function makeLightCombinedResponse(
   issueNodes = [graphqlIssueNode],
-  prNodes = [graphqlPRNode],
+  prNodes = [makeLightPRNode()],
   issueHasNext = false,
   prInvHasNext = false,
   prRevHasNext = false,
@@ -86,6 +129,13 @@ function makeCombinedResponse(
     issues: makeSearchResponse(issueNodes, issueHasNext),
     prInvolves: makeSearchResponse(prNodes, prInvHasNext),
     prReviewReq: makeSearchResponse([], prRevHasNext),
+    rateLimit,
+  };
+}
+
+function makeHeavyBackfillResponse(prNodes: ReturnType<typeof makeHeavyPRNode>[]) {
+  return {
+    nodes: prNodes,
     rateLimit,
   };
 }
@@ -99,6 +149,27 @@ function makeRepos(count: number): RepoRef[] {
 }
 
 type OctokitLike = ReturnType<typeof import("../../src/app/services/github").getClient>;
+
+/**
+ * Creates a mock octokit that handles both light combined and heavy backfill queries.
+ * Detects backfill calls by the presence of the `ids` variable.
+ */
+function makeTwoPhaseOctokit(
+  lightImpl: (query: string, variables?: unknown) => Promise<unknown>,
+  heavyNodes?: ReturnType<typeof makeHeavyPRNode>[],
+) {
+  return {
+    request: vi.fn(async () => ({ data: [], headers: {} })),
+    graphql: vi.fn(async (query: string, variables?: Record<string, unknown>) => {
+      // Heavy backfill query has `ids` variable
+      if (variables && "ids" in variables) {
+        return makeHeavyBackfillResponse(heavyNodes ?? []);
+      }
+      return lightImpl(query, variables);
+    }),
+    paginate: { iterator: vi.fn() },
+  };
+}
 
 function makeOctokit(graphqlImpl: (query: string, variables?: unknown) => Promise<unknown>) {
   return {
@@ -139,16 +210,20 @@ describe("API call count: combined vs separate", () => {
       expect(issuesCalls + prCalls).toBe(3);
     });
 
-    it("combined fetchIssuesAndPullRequests makes 1 GraphQL call", async () => {
-      const octokit = makeOctokit(async () => makeCombinedResponse());
+    it("combined fetchIssuesAndPullRequests makes 2 GraphQL calls (light + heavy)", async () => {
+      const lightPR = makeLightPRNode();
+      const octokit = makeTwoPhaseOctokit(
+        async () => makeLightCombinedResponse([graphqlIssueNode], [lightPR]),
+        [makeHeavyPRNode(42, "PR_kwDOtest42")],
+      );
 
       await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
-      // Combined: 1 call with 3 aliases
-      expect(octokit.graphql).toHaveBeenCalledTimes(1);
+      // 1 light combined + 1 heavy backfill = 2 total
+      expect(octokit.graphql).toHaveBeenCalledTimes(2);
     });
 
-    it("combined returns same data as separate calls", async () => {
+    it("combined returns same data shape as separate calls", async () => {
       // Separate calls
       const separateOctokit = makeOctokit(async (_query, variables) => {
         const q = (variables as Record<string, unknown>).q as string;
@@ -161,8 +236,12 @@ describe("API call count: combined vs separate", () => {
       const issueResult = await fetchIssues(separateOctokit as unknown as OctokitLike, repos, "testuser");
       const prResult = await fetchPullRequests(separateOctokit as unknown as OctokitLike, repos, "testuser");
 
-      // Combined call
-      const combinedOctokit = makeOctokit(async () => makeCombinedResponse());
+      // Combined call (two-phase)
+      const lightPR = makeLightPRNode();
+      const combinedOctokit = makeTwoPhaseOctokit(
+        async () => makeLightCombinedResponse([graphqlIssueNode], [lightPR]),
+        [makeHeavyPRNode(42, "PR_kwDOtest42")],
+      );
       const combinedResult = await fetchIssuesAndPullRequests(combinedOctokit as unknown as OctokitLike, repos, "testuser");
 
       // Same data shape and content
@@ -170,6 +249,8 @@ describe("API call count: combined vs separate", () => {
       expect(combinedResult.pullRequests.length).toBe(prResult.pullRequests.length);
       expect(combinedResult.issues[0].id).toBe(issueResult.issues[0].id);
       expect(combinedResult.pullRequests[0].id).toBe(prResult.pullRequests[0].id);
+      // Enriched PRs should have enriched flag
+      expect(combinedResult.pullRequests[0].enriched).toBe(true);
     });
   });
 
@@ -195,23 +276,30 @@ describe("API call count: combined vs separate", () => {
       expect(issuesCalls + prCalls).toBe(6);
     });
 
-    it("combined fetchIssuesAndPullRequests makes 2 GraphQL calls", async () => {
-      const octokit = makeOctokit(async () => makeCombinedResponse(
-        [{ ...graphqlIssueNode, databaseId: Math.random() * 100000 | 0 }],
-        [{ ...graphqlPRNode, databaseId: Math.random() * 100000 | 0 }],
-      ));
+    it("combined fetchIssuesAndPullRequests makes 3 GraphQL calls (2 light + 1 heavy)", async () => {
+      let callId = 0;
+      const octokit = makeTwoPhaseOctokit(
+        async () => {
+          const id = ++callId;
+          return makeLightCombinedResponse(
+            [{ ...graphqlIssueNode, databaseId: id + 10000 }],
+            [makeLightPRNode({ databaseId: id, id: `PR_kwDO_${id}` })],
+          );
+        },
+        [makeHeavyPRNode(1, "PR_kwDO_1"), makeHeavyPRNode(2, "PR_kwDO_2")],
+      );
 
       await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
-      // Combined: 2 chunks × 1 call each = 2 (vs 6 separate)
-      expect(octokit.graphql).toHaveBeenCalledTimes(2);
+      // 2 light combined (1 per chunk) + 1 heavy backfill = 3 total
+      expect(octokit.graphql).toHaveBeenCalledTimes(3);
     });
   });
 
   describe("with 101-150 repos (three chunks)", () => {
     const repos = makeRepos(120);
 
-    it("separate makes 9 calls, combined makes 3", async () => {
+    it("separate makes 9 calls, combined makes 4", async () => {
       let callId = 0;
       const separateOctokit = makeOctokit(async () => ({
         search: makeSearchResponse([{ ...graphqlIssueNode, databaseId: ++callId }]),
@@ -229,15 +317,25 @@ describe("API call count: combined vs separate", () => {
       expect(prCalls).toBe(6);
 
       callId = 0;
-      const combinedOctokit = makeOctokit(async () => makeCombinedResponse(
-        [{ ...graphqlIssueNode, databaseId: ++callId }],
-        [{ ...graphqlPRNode, databaseId: callId + 10000 }],
-      ));
+      const combinedOctokit = makeTwoPhaseOctokit(
+        async () => {
+          const id = ++callId;
+          return makeLightCombinedResponse(
+            [{ ...graphqlIssueNode, databaseId: id + 20000 }],
+            [makeLightPRNode({ databaseId: id + 30000, id: `PR_kwDO_${id}` })],
+          );
+        },
+        [
+          makeHeavyPRNode(30001, "PR_kwDO_1"),
+          makeHeavyPRNode(30002, "PR_kwDO_2"),
+          makeHeavyPRNode(30003, "PR_kwDO_3"),
+        ],
+      );
 
       await fetchIssuesAndPullRequests(combinedOctokit as unknown as OctokitLike, repos, "testuser");
 
-      // Combined: 3 chunks × 1 call each = 3 (vs 9 separate)
-      expect(combinedOctokit.graphql).toHaveBeenCalledTimes(3);
+      // 3 light combined (1 per chunk) + 1 heavy backfill = 4 total
+      expect(combinedOctokit.graphql).toHaveBeenCalledTimes(4);
     });
   });
 });
@@ -253,11 +351,16 @@ describe("combined query pagination fallback", () => {
       callCount++;
       const vars = variables as Record<string, unknown>;
 
+      // Heavy backfill
+      if (vars && "ids" in vars) {
+        return makeHeavyBackfillResponse([makeHeavyPRNode(42, "PR_kwDOtest42")]);
+      }
+
       if (callCount === 1) {
-        // First call: combined query. Issues need pagination, PRs don't.
+        // First call: light combined query. Issues need pagination, PRs don't.
         return {
           issues: makeSearchResponse([graphqlIssueNode], true), // hasNextPage
-          prInvolves: makeSearchResponse([graphqlPRNode], false),
+          prInvolves: makeSearchResponse([makeLightPRNode()], false),
           prReviewReq: makeSearchResponse([], false),
           rateLimit,
         };
@@ -274,18 +377,22 @@ describe("combined query pagination fallback", () => {
 
     const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
-    // 1 combined + 1 pagination follow-up = 2 total
-    expect(callCount).toBe(2);
+    // 1 light combined + 1 issue pagination + 1 heavy backfill = 3 total
+    expect(callCount).toBe(3);
     expect(result.issues.length).toBe(2); // page 1 + page 2
     expect(result.pullRequests.length).toBe(1);
   });
 
   it("does not fire follow-up when no alias needs pagination", async () => {
-    const octokit = makeOctokit(async () => makeCombinedResponse());
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse(),
+      [makeHeavyPRNode(42, "PR_kwDOtest42")],
+    );
 
     await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
-    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    // 1 light combined + 1 heavy backfill = 2
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -295,11 +402,14 @@ describe("combined query structure", () => {
   const repos = makeRepos(5);
 
   it("sends all three search strings in one call with correct qualifiers", async () => {
-    const octokit = makeOctokit(async () => makeCombinedResponse());
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse(),
+      [makeHeavyPRNode(42, "PR_kwDOtest42")],
+    );
 
     await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
-    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    // First call is the light combined query
     const [, variables] = octokit.graphql.mock.calls[0] as [string, Record<string, unknown>];
 
     // Issue query string
@@ -318,7 +428,10 @@ describe("combined query structure", () => {
   });
 
   it("uses GraphQL aliases (issues, prInvolves, prReviewReq) in the query", async () => {
-    const octokit = makeOctokit(async () => makeCombinedResponse());
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse(),
+      [makeHeavyPRNode(42, "PR_kwDOtest42")],
+    );
 
     await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
 
@@ -326,7 +439,116 @@ describe("combined query structure", () => {
     expect(query).toContain("issues: search(");
     expect(query).toContain("prInvolves: search(");
     expect(query).toContain("prReviewReq: search(");
-    expect(query).toContain("PRSearchFields");
+    expect(query).toContain("LightPRFields");
+  });
+
+  it("phase 2 sends nodes(ids:[]) backfill query", async () => {
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse(),
+      [makeHeavyPRNode(42, "PR_kwDOtest42")],
+    );
+
+    await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+
+    // Second call is the heavy backfill
+    expect(octokit.graphql).toHaveBeenCalledTimes(2);
+    const [backfillQuery, backfillVars] = octokit.graphql.mock.calls[1] as [string, Record<string, unknown>];
+    expect(backfillQuery).toContain("nodes(ids:");
+    expect(backfillVars.ids).toEqual(["PR_kwDOtest42"]);
+  });
+});
+
+// ── Progressive rendering: onLightData callback ──────────────────────────────
+
+describe("onLightData callback (progressive rendering)", () => {
+  const repos = makeRepos(5);
+
+  it("fires onLightData with light PRs (enriched: false) before phase 2 completes", async () => {
+    const callOrder: string[] = [];
+    const octokit = makeOctokit(async (_query, variables) => {
+      const vars = variables as Record<string, unknown>;
+      if (vars && "ids" in vars) {
+        callOrder.push("heavy-start");
+        return makeHeavyBackfillResponse([makeHeavyPRNode(42, "PR_kwDOtest42")]);
+      }
+      callOrder.push("light-start");
+      return makeLightCombinedResponse();
+    });
+
+    let lightDataReceived: Awaited<ReturnType<typeof fetchIssuesAndPullRequests>> | null = null;
+    const result = await fetchIssuesAndPullRequests(
+      octokit as unknown as OctokitLike,
+      repos,
+      "testuser",
+      (data) => {
+        callOrder.push("onLightData");
+        lightDataReceived = data;
+      },
+    );
+
+    // onLightData fires after light query but before heavy backfill
+    expect(callOrder).toEqual(["light-start", "onLightData", "heavy-start"]);
+
+    // Light data has PRs with enriched: false
+    expect(lightDataReceived).not.toBeNull();
+    expect(lightDataReceived!.pullRequests.length).toBe(1);
+    expect(lightDataReceived!.pullRequests[0].enriched).toBe(false);
+    expect(lightDataReceived!.pullRequests[0].additions).toBe(0); // default heavy field
+
+    // Final result has enriched PRs
+    expect(result.pullRequests[0].enriched).toBe(true);
+    expect(result.pullRequests[0].additions).toBe(100); // from heavy backfill
+  });
+
+  it("does not fire onLightData when callback is not provided", async () => {
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse(),
+      [makeHeavyPRNode(42, "PR_kwDOtest42")],
+    );
+
+    // No callback — should not throw
+    const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+    expect(result.pullRequests[0].enriched).toBe(true);
+  });
+
+  it("marks PRs as enriched: true when there are 0 PRs (no backfill needed)", async () => {
+    const octokit = makeTwoPhaseOctokit(
+      async () => makeLightCombinedResponse([graphqlIssueNode], []),
+      [],
+    );
+
+    const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+    expect(result.pullRequests.length).toBe(0);
+    // Only light query, no backfill
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Phase 2 backfill failure ───────────────────────────────────────────────────
+
+describe("phase 2 backfill failure", () => {
+  const repos = makeRepos(5);
+
+  it("returns light PRs with enriched: false when backfill fails entirely", async () => {
+    const octokit = makeOctokit(async (_query, variables) => {
+      const vars = variables as Record<string, unknown>;
+      if (vars && "ids" in vars) {
+        throw new Error("GraphQL backfill network failure");
+      }
+      return makeLightCombinedResponse();
+    });
+
+    const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+
+    // Issues should be complete
+    expect(result.issues.length).toBe(1);
+    // PRs returned but not enriched
+    expect(result.pullRequests.length).toBe(1);
+    expect(result.pullRequests[0].enriched).toBe(false);
+    expect(result.pullRequests[0].additions).toBe(0); // default heavy field
+    expect(result.pullRequests[0].checkStatus).toBeNull();
+    // Backfill error should be in errors array
+    expect(result.errors.some(e => e.message.includes("backfill network failure"))).toBe(true);
   });
 });
 
@@ -406,12 +628,13 @@ describe("workflow run concurrency", () => {
 // ── Scaling: call count grows linearly with chunks ────────────────────────────
 
 describe("scaling behavior", () => {
+  // Two-phase: each chunk needs 1 light query + 1 heavy backfill total
   const repoCountsAndExpected = [
-    { repos: 10, separateCalls: 3, combinedCalls: 1 },
-    { repos: 50, separateCalls: 3, combinedCalls: 1 },
-    { repos: 51, separateCalls: 6, combinedCalls: 2 },
-    { repos: 100, separateCalls: 6, combinedCalls: 2 },
-    { repos: 150, separateCalls: 9, combinedCalls: 3 },
+    { repos: 10, separateCalls: 3, combinedCalls: 2 },   // 1 light + 1 heavy
+    { repos: 50, separateCalls: 3, combinedCalls: 2 },   // 1 light + 1 heavy
+    { repos: 51, separateCalls: 6, combinedCalls: 3 },   // 2 light + 1 heavy
+    { repos: 100, separateCalls: 6, combinedCalls: 3 },  // 2 light + 1 heavy
+    { repos: 150, separateCalls: 9, combinedCalls: 4 },  // 3 light + 1 heavy
   ];
 
   for (const { repos: repoCount, separateCalls, combinedCalls } of repoCountsAndExpected) {
@@ -432,12 +655,21 @@ describe("scaling behavior", () => {
       const prCalls = sepOctokit.graphql.mock.calls.length;
       expect(issueCalls + prCalls).toBe(separateCalls);
 
-      // Count combined calls
+      // Count combined calls (two-phase)
       nodeId = 0;
-      const combOctokit = makeOctokit(async () => makeCombinedResponse(
-        [{ ...graphqlIssueNode, databaseId: ++nodeId }],
-        [{ ...graphqlPRNode, databaseId: nodeId + 50000 }],
-      ));
+      const combOctokit = makeTwoPhaseOctokit(
+        async () => {
+          const id = ++nodeId;
+          return makeLightCombinedResponse(
+            [{ ...graphqlIssueNode, databaseId: id + 40000 }],
+            [makeLightPRNode({ databaseId: id + 50000, id: `PR_kwDO_${id}` })],
+          );
+        },
+        // Generate heavy nodes for all expected chunks
+        Array.from({ length: Math.ceil(repoCount / 50) }, (_, i) =>
+          makeHeavyPRNode(i + 1 + 50000, `PR_kwDO_${i + 1}`)
+        ),
+      );
       await fetchIssuesAndPullRequests(combOctokit as unknown as OctokitLike, repos, "testuser");
       expect(combOctokit.graphql).toHaveBeenCalledTimes(combinedCalls);
     });

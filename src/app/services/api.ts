@@ -65,6 +65,8 @@ export interface PullRequest {
   labels: { name: string; color: string }[];
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   totalReviewCount: number;
+  /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
+  enriched?: boolean;
 }
 
 export interface WorkflowRun {
@@ -329,7 +331,7 @@ interface ForkQueryResponse {
 
 const ISSUES_SEARCH_QUERY = `
   query($q: String!, $cursor: String) {
-    search(query: $q, type: ISSUE, first: 100, after: $cursor) {
+    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
       issueCount
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -342,8 +344,8 @@ const ISSUES_SEARCH_QUERY = `
           createdAt
           updatedAt
           author { login avatarUrl }
-          labels(first: 20) { nodes { name color } }
-          assignees(first: 20) { nodes { login } }
+          labels(first: 10) { nodes { name color } }
+          assignees(first: 10) { nodes { login } }
           repository { nameWithOwner }
           comments { totalCount }
         }
@@ -356,7 +358,7 @@ const ISSUES_SEARCH_QUERY = `
 const PR_SEARCH_QUERY = `
   query($q: String!, $cursor: String) {
     # GitHub search API uses type: ISSUE for both issues and PRs
-    search(query: $q, type: ISSUE, first: 100, after: $cursor) {
+    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
       issueCount
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -376,19 +378,19 @@ const PR_SEARCH_QUERY = `
           headRepository { owner { login } nameWithOwner }
           repository { nameWithOwner }
           mergeStateStatus
-          assignees(first: 20) { nodes { login } }
-          reviewRequests(first: 20) {
+          assignees(first: 10) { nodes { login } }
+          reviewRequests(first: 10) {
             # Team reviewers are excluded (only User fragment matched)
             nodes { requestedReviewer { ... on User { login } } }
           }
-          labels(first: 20) { nodes { name color } }
+          labels(first: 10) { nodes { name color } }
           additions
           deletions
           changedFiles
           comments { totalCount }
           reviewThreads { totalCount }
           reviewDecision
-          latestReviews(first: 15) {
+          latestReviews(first: 5) {
             totalCount
             nodes { author { login } }
           }
@@ -408,8 +410,11 @@ const PR_SEARCH_QUERY = `
 
 // ── GraphQL combined search query ─────────────────────────────────────────────
 
-const PR_FRAGMENT = `
-  fragment PRSearchFields on PullRequest {
+// ── Two-phase rendering: light + heavy queries ───────────────────────────────
+
+const LIGHT_PR_FRAGMENT = `
+  fragment LightPRFields on PullRequest {
+    id
     databaseId
     number
     title
@@ -419,46 +424,22 @@ const PR_FRAGMENT = `
     createdAt
     updatedAt
     author { login avatarUrl }
-    headRefOid
+    repository { nameWithOwner }
     headRefName
     baseRefName
-    headRepository { owner { login } nameWithOwner }
-    repository { nameWithOwner }
-    mergeStateStatus
-    assignees(first: 20) { nodes { login } }
-    reviewRequests(first: 20) {
-      nodes { requestedReviewer { ... on User { login } } }
-    }
-    labels(first: 20) { nodes { name color } }
-    additions
-    deletions
-    changedFiles
-    comments { totalCount }
-    reviewThreads { totalCount }
     reviewDecision
-    latestReviews(first: 15) {
-      totalCount
-      nodes { author { login } }
-    }
-    commits(last: 1) {
-      nodes {
-        commit {
-          statusCheckRollup { state }
-        }
-      }
-    }
+    labels(first: 10) { nodes { name color } }
   }
 `;
 
 /**
- * Combined query that fetches issues, PR-involves, and PR-review-requested
- * in a single HTTP request using GraphQL aliases. Each alias has its own
- * cursor for independent pagination.
+ * Phase 1 query: fetches issues fully and PRs with minimal fields.
+ * PR enrichment (check status, size, reviewers, etc.) comes from phase 2.
  */
-const COMBINED_SEARCH_QUERY = `
+const LIGHT_COMBINED_SEARCH_QUERY = `
   query($issueQ: String!, $prInvQ: String!, $prRevQ: String!,
         $issueCursor: String, $prInvCursor: String, $prRevCursor: String) {
-    issues: search(query: $issueQ, type: ISSUE, first: 100, after: $issueCursor) {
+    issues: search(query: $issueQ, type: ISSUE, first: 50, after: $issueCursor) {
       issueCount
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -471,37 +452,141 @@ const COMBINED_SEARCH_QUERY = `
           createdAt
           updatedAt
           author { login avatarUrl }
-          labels(first: 20) { nodes { name color } }
-          assignees(first: 20) { nodes { login } }
+          labels(first: 10) { nodes { name color } }
+          assignees(first: 10) { nodes { login } }
           repository { nameWithOwner }
           comments { totalCount }
         }
       }
     }
-    prInvolves: search(query: $prInvQ, type: ISSUE, first: 100, after: $prInvCursor) {
+    prInvolves: search(query: $prInvQ, type: ISSUE, first: 50, after: $prInvCursor) {
       issueCount
       pageInfo { hasNextPage endCursor }
       nodes {
         ... on PullRequest {
-          ...PRSearchFields
+          ...LightPRFields
         }
       }
     }
-    prReviewReq: search(query: $prRevQ, type: ISSUE, first: 100, after: $prRevCursor) {
+    prReviewReq: search(query: $prRevQ, type: ISSUE, first: 50, after: $prRevCursor) {
       issueCount
       pageInfo { hasNextPage endCursor }
       nodes {
         ... on PullRequest {
-          ...PRSearchFields
+          ...LightPRFields
         }
       }
     }
     rateLimit { remaining resetAt }
   }
-  ${PR_FRAGMENT}
+  ${LIGHT_PR_FRAGMENT}
 `;
 
-interface CombinedSearchResponse {
+/** Standalone light PR search query for pagination follow-ups. */
+const LIGHT_PR_SEARCH_QUERY = `
+  query($q: String!, $cursor: String) {
+    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
+      issueCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ... on PullRequest {
+          ...LightPRFields
+        }
+      }
+    }
+    rateLimit { remaining resetAt }
+  }
+  ${LIGHT_PR_FRAGMENT}
+`;
+
+interface LightPRSearchResponse {
+  search: {
+    issueCount: number;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: (GraphQLLightPRNode | null)[];
+  };
+  rateLimit?: { remaining: number; resetAt: string };
+}
+
+/** Phase 2 backfill query: enriches PRs with heavy fields using node IDs. */
+const HEAVY_PR_BACKFILL_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        databaseId
+        headRefOid
+        headRepository { owner { login } nameWithOwner }
+        mergeStateStatus
+        assignees(first: 10) { nodes { login } }
+        reviewRequests(first: 10) {
+          nodes { requestedReviewer { ... on User { login } } }
+        }
+        latestReviews(first: 5) {
+          totalCount
+          nodes { author { login } }
+        }
+        additions
+        deletions
+        changedFiles
+        comments { totalCount }
+        reviewThreads { totalCount }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup { state }
+            }
+          }
+        }
+      }
+    }
+    rateLimit { remaining resetAt }
+  }
+`;
+
+interface GraphQLLightPRNode {
+  id: string; // GraphQL global node ID
+  databaseId: number;
+  number: number;
+  title: string;
+  state: string;
+  isDraft: boolean;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  author: { login: string; avatarUrl: string } | null;
+  repository: { nameWithOwner: string } | null;
+  headRefName: string;
+  baseRefName: string;
+  reviewDecision: string | null;
+  labels: { nodes: { name: string; color: string }[] };
+}
+
+interface GraphQLHeavyPRNode {
+  databaseId: number;
+  headRefOid: string;
+  headRepository: { owner: { login: string }; nameWithOwner: string } | null;
+  mergeStateStatus: string;
+  assignees: { nodes: { login: string }[] };
+  reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
+  latestReviews: {
+    totalCount: number;
+    nodes: { author: { login: string } | null }[];
+  };
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  comments: { totalCount: number };
+  reviewThreads: { totalCount: number };
+  commits: {
+    nodes: {
+      commit: {
+        statusCheckRollup: { state: string } | null;
+      };
+    }[];
+  };
+}
+
+interface LightCombinedSearchResponse {
   issues: {
     issueCount: number;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -510,15 +595,23 @@ interface CombinedSearchResponse {
   prInvolves: {
     issueCount: number;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
-    nodes: (GraphQLPRNode | null)[];
+    nodes: (GraphQLLightPRNode | null)[];
   };
   prReviewReq: {
     issueCount: number;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
-    nodes: (GraphQLPRNode | null)[];
+    nodes: (GraphQLLightPRNode | null)[];
   };
   rateLimit?: { remaining: number; resetAt: string };
 }
+
+interface HeavyBackfillResponse {
+  nodes: (GraphQLHeavyPRNode | null)[];
+  rateLimit?: { remaining: number; resetAt: string };
+}
+
+// Max node IDs per nodes() query (GitHub limit)
+const NODES_BATCH_SIZE = 100;
 
 // ── GraphQL search functions ──────────────────────────────────────────────────
 
@@ -643,73 +736,6 @@ function processIssueNode(
 }
 
 /**
- * Processes a single GraphQL PR node into the app's PullRequest shape.
- * Returns true if the node was added (not a duplicate or invalid).
- */
-function processPRNodeShared(
-  node: GraphQLPRNode,
-  prMap: Map<number, PullRequest>,
-  forkInfoMap: Map<number, { owner: string; repoName: string }>
-): boolean {
-  if (node.databaseId == null || !node.repository) return false;
-  if (prMap.has(node.databaseId)) return false;
-
-  const pendingLogins = node.reviewRequests.nodes
-    .map((n) => n.requestedReviewer?.login)
-    .filter((l): l is string => l != null);
-  const actualLogins = node.latestReviews.nodes
-    .map((n) => n.author?.login)
-    .filter((l): l is string => l != null);
-  const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
-
-  let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
-  const mss = node.mergeStateStatus;
-  if (mss === "DIRTY" || mss === "BEHIND") {
-    checkStatus = "conflict";
-  } else if (mss === "UNSTABLE") {
-    checkStatus = "failure";
-  } else if (mss === "UNKNOWN" && checkStatus === null) {
-    checkStatus = null;
-  }
-
-  if (node.headRepository) {
-    const parts = node.headRepository.nameWithOwner.split("/");
-    if (parts.length === 2) {
-      forkInfoMap.set(node.databaseId, { owner: node.headRepository.owner.login, repoName: parts[1] });
-    }
-  }
-
-  prMap.set(node.databaseId, {
-    id: node.databaseId,
-    number: node.number,
-    title: node.title,
-    state: node.state,
-    draft: node.isDraft,
-    htmlUrl: node.url,
-    createdAt: node.createdAt,
-    updatedAt: node.updatedAt,
-    userLogin: node.author?.login ?? "",
-    userAvatarUrl: node.author?.avatarUrl ?? "",
-    headSha: node.headRefOid,
-    headRef: node.headRefName,
-    baseRef: node.baseRefName,
-    assigneeLogins: node.assignees.nodes.map((a) => a.login),
-    reviewerLogins,
-    repoFullName: node.repository.nameWithOwner,
-    checkStatus,
-    additions: node.additions,
-    deletions: node.deletions,
-    changedFiles: node.changedFiles,
-    comments: node.comments.totalCount,
-    reviewThreads: node.reviewThreads.totalCount,
-    labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-    reviewDecision: mapReviewDecision(node.reviewDecision),
-    totalReviewCount: node.latestReviews.totalCount,
-  });
-  return true;
-}
-
-/**
  * Runs the fork PR statusCheckRollup fallback for PRs where head repo owner
  * differs from base repo owner (fork PRs). Mutates prMap in place.
  */
@@ -793,21 +819,75 @@ export interface FetchIssuesAndPRsResult {
   errors: ApiError[];
 }
 
+// ── Two-phase: light combined search ──────────────────────────────────────────
+
+interface LightSearchResult {
+  issues: Issue[];
+  pullRequests: PullRequest[];
+  /** GraphQL node IDs for phase 2 backfill */
+  prNodeIds: string[];
+  errors: ApiError[];
+}
+
 /**
- * Fetches issues and PRs via a single aliased GraphQL query per repo chunk.
- * Combines issue search, PR-involves, and PR-review-requested into one HTTP call,
- * reducing round-trips by ~66%. Falls back to individual pagination queries if
- * any alias needs additional pages.
+ * Processes a light PR node into a PullRequest with default values for heavy fields.
+ * Returns true if the node was added (not a duplicate or invalid).
+ * Stores the GraphQL node ID in nodeIdMap for later backfill.
  */
-async function graphqlCombinedSearch(
+function processLightPRNode(
+  node: GraphQLLightPRNode,
+  prMap: Map<number, PullRequest>,
+  nodeIdMap: Map<number, string>
+): boolean {
+  if (node.databaseId == null || !node.repository) return false;
+  if (prMap.has(node.databaseId)) return false;
+
+  nodeIdMap.set(node.databaseId, node.id);
+  prMap.set(node.databaseId, {
+    id: node.databaseId,
+    number: node.number,
+    title: node.title,
+    state: node.state,
+    draft: node.isDraft,
+    htmlUrl: node.url,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+    userLogin: node.author?.login ?? "",
+    userAvatarUrl: node.author?.avatarUrl ?? "",
+    headSha: "",
+    headRef: node.headRefName,
+    baseRef: node.baseRefName,
+    assigneeLogins: [],
+    reviewerLogins: [],
+    repoFullName: node.repository.nameWithOwner,
+    checkStatus: null,
+    additions: 0,
+    deletions: 0,
+    changedFiles: 0,
+    comments: 0,
+    reviewThreads: 0,
+    labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
+    reviewDecision: mapReviewDecision(node.reviewDecision),
+    totalReviewCount: 0,
+    enriched: false,
+  });
+  return true;
+}
+
+/**
+ * Phase 1: light combined search. Fetches issues fully and PRs with minimal fields.
+ * Returns light PRs (enriched: false) and their GraphQL node IDs for phase 2 backfill.
+ */
+async function graphqlLightCombinedSearch(
   octokit: GitHubOctokit,
   repos: RepoRef[],
   userLogin: string
-): Promise<FetchIssuesAndPRsResult> {
+): Promise<LightSearchResult> {
   if (!VALID_LOGIN.test(userLogin)) {
     return {
       issues: [],
       pullRequests: [],
+      prNodeIds: [],
       errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }],
     };
   }
@@ -816,7 +896,7 @@ async function graphqlCombinedSearch(
   const issueSeen = new Set<number>();
   const issues: Issue[] = [];
   const prMap = new Map<number, PullRequest>();
-  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
+  const nodeIdMap = new Map<number, string>();
   const errors: ApiError[] = [];
   const ISSUE_CAP = 1000;
   const PR_CAP = 1000;
@@ -826,21 +906,19 @@ async function graphqlCombinedSearch(
     const issueQ = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
     const prInvQ = `is:pr is:open involves:${userLogin} ${repoQualifiers}`;
     const prRevQ = `is:pr is:open review-requested:${userLogin} ${repoQualifiers}`;
-    const batchLabel = `combined-batch-${chunkIdx + 1}/${chunks.length}`;
+    const batchLabel = `light-batch-${chunkIdx + 1}/${chunks.length}`;
 
-    // Fire the combined 3-alias query
-    let response: CombinedSearchResponse;
+    let response: LightCombinedSearchResponse;
     let isPartial = false;
     try {
       try {
-        response = await octokit.graphql<CombinedSearchResponse>(COMBINED_SEARCH_QUERY, {
+        response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
           issueQ, prInvQ, prRevQ,
           issueCursor: null, prInvCursor: null, prRevCursor: null,
         });
       } catch (err) {
-        // Try to extract partial data from GraphqlResponseError
         const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-          ? err.data as Partial<CombinedSearchResponse>
+          ? err.data as Partial<LightCombinedSearchResponse>
           : null;
         if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
           response = {
@@ -859,58 +937,53 @@ async function graphqlCombinedSearch(
 
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
 
-      // Process issue nodes
       for (const node of response.issues.nodes) {
         if (issues.length >= ISSUE_CAP) break;
         if (!node) continue;
         processIssueNode(node, issueSeen, issues);
       }
 
-      // Process PR nodes from both aliases
       for (const node of response.prInvolves.nodes) {
         if (prMap.size >= PR_CAP) break;
         if (!node) continue;
-        processPRNodeShared(node, prMap, forkInfoMap);
+        processLightPRNode(node, prMap, nodeIdMap);
       }
       for (const node of response.prReviewReq.nodes) {
         if (prMap.size >= PR_CAP) break;
         if (!node) continue;
-        processPRNodeShared(node, prMap, forkInfoMap);
+        processLightPRNode(node, prMap, nodeIdMap);
       }
 
-      // If partial error, skip pagination for this chunk
       if (isPartial) return;
 
-      // Pagination follow-ups: for any alias with hasNextPage, fall back to
-      // individual search queries using the existing paginateGraphQLSearch.
-      const paginationTasks: Promise<unknown>[] = [];
-
+      // Pagination follow-ups for issues (PRs don't paginate in light mode —
+      // backfill handles the full set via node IDs)
       if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < ISSUE_CAP) {
-        paginationTasks.push(paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+        await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
           octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
           (node) => processIssueNode(node, issueSeen, issues),
           () => issues.length, ISSUE_CAP, response.issues.pageInfo.endCursor,
-        ));
+        );
       }
 
+      // Light PR pagination: re-fetch with light query for additional pages
+      const prPaginationTasks: Promise<unknown>[] = [];
       if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < PR_CAP) {
-        paginationTasks.push(paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
-          octokit, PR_SEARCH_QUERY, prInvQ, batchLabel, errors,
-          (node) => processPRNodeShared(node, prMap, forkInfoMap),
+        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+          octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, batchLabel, errors,
+          (node) => processLightPRNode(node, prMap, nodeIdMap),
           () => prMap.size, PR_CAP, response.prInvolves.pageInfo.endCursor,
         ));
       }
-
       if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < PR_CAP) {
-        paginationTasks.push(paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
-          octokit, PR_SEARCH_QUERY, prRevQ, batchLabel, errors,
-          (node) => processPRNodeShared(node, prMap, forkInfoMap),
+        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+          octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, batchLabel, errors,
+          (node) => processLightPRNode(node, prMap, nodeIdMap),
           () => prMap.size, PR_CAP, response.prReviewReq.pageInfo.endCursor,
         ));
       }
-
-      if (paginationTasks.length > 0) {
-        await Promise.allSettled(paginationTasks);
+      if (prPaginationTasks.length > 0) {
+        await Promise.allSettled(prPaginationTasks);
       }
     } catch (err) {
       const { statusCode, message } = extractRejectionError(err);
@@ -921,11 +994,10 @@ async function graphqlCombinedSearch(
   for (const result of chunkResults) {
     if (result.status === "rejected") {
       const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({ repo: "combined-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
+      errors.push({ repo: "light-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }
 
-  // Cap enforcement
   if (issues.length >= ISSUE_CAP) {
     console.warn(`[api] Issue search results capped at ${ISSUE_CAP}`);
     pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
@@ -937,27 +1009,193 @@ async function graphqlCombinedSearch(
     pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
   }
 
-  // Fork PR fallback
-  await runForkPRFallback(octokit, prMap, forkInfoMap);
-
   const pullRequests = [...prMap.values()];
   if (pullRequests.length >= PR_CAP) pullRequests.splice(PR_CAP);
+  const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
 
-  return { issues, pullRequests, errors };
+  return { issues, pullRequests, prNodeIds, errors };
+}
+
+// ── Two-phase: heavy backfill ─────────────────────────────────────────────────
+
+export interface PREnrichmentData {
+  id: number;
+  headSha: string;
+  headRepository: { owner: string; repoName: string } | null;
+  assigneeLogins: string[];
+  reviewerLogins: string[];
+  checkStatus: CheckStatus["status"];
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  comments: number;
+  reviewThreads: number;
+  totalReviewCount: number;
 }
 
 /**
- * Fetches open issues and PRs together using a combined aliased GraphQL query.
- * This reduces HTTP round-trips by ~66% compared to separate fetchIssues/fetchPullRequests.
+ * Phase 2: fetches heavy PR fields using `nodes(ids: [...])` query.
+ * Returns enrichment data keyed by databaseId.
+ */
+export async function fetchPREnrichment(
+  octokit: GitHubOctokit,
+  nodeIds: string[]
+): Promise<{ enrichments: Map<number, PREnrichmentData>; errors: ApiError[] }> {
+  const enrichments = new Map<number, PREnrichmentData>();
+  const errors: ApiError[] = [];
+
+  if (nodeIds.length === 0) return { enrichments, errors };
+
+  const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch, batchIdx) => {
+    try {
+      const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
+        ids: batch,
+      });
+
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+      for (const node of response.nodes) {
+        if (!node || node.databaseId == null) continue;
+
+        const pendingLogins = node.reviewRequests.nodes
+          .map((n) => n.requestedReviewer?.login)
+          .filter((l): l is string => l != null);
+        const actualLogins = node.latestReviews.nodes
+          .map((n) => n.author?.login)
+          .filter((l): l is string => l != null);
+        const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
+
+        let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
+        const mss = node.mergeStateStatus;
+        if (mss === "DIRTY" || mss === "BEHIND") {
+          checkStatus = "conflict";
+        } else if (mss === "UNSTABLE") {
+          checkStatus = "failure";
+        }
+
+        let headRepository: PREnrichmentData["headRepository"] = null;
+        if (node.headRepository) {
+          const parts = node.headRepository.nameWithOwner.split("/");
+          if (parts.length === 2) {
+            headRepository = { owner: node.headRepository.owner.login, repoName: parts[1] };
+          }
+        }
+
+        enrichments.set(node.databaseId, {
+          id: node.databaseId,
+          headSha: node.headRefOid,
+          headRepository,
+          assigneeLogins: node.assignees.nodes.map((a) => a.login),
+          reviewerLogins,
+          checkStatus,
+          additions: node.additions,
+          deletions: node.deletions,
+          changedFiles: node.changedFiles,
+          comments: node.comments.totalCount,
+          reviewThreads: node.reviewThreads.totalCount,
+          totalReviewCount: node.latestReviews.totalCount,
+        });
+      }
+    } catch (err) {
+      const { statusCode, message } = extractRejectionError(err);
+      errors.push({
+        repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
+        statusCode, message,
+        retryable: statusCode === null || statusCode >= 500,
+      });
+    }
+  }));
+
+  return { enrichments, errors };
+}
+
+/**
+ * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
+ * Also detects fork PRs for the statusCheckRollup fallback.
+ */
+function mergeEnrichment(
+  lightPRs: PullRequest[],
+  enrichments: Map<number, PREnrichmentData>,
+  forkInfoMap: Map<number, { owner: string; repoName: string }>
+): PullRequest[] {
+  return lightPRs.map((pr) => {
+    const e = enrichments.get(pr.id);
+    if (!e) return pr; // Keep enriched: false if backfill missed this PR
+
+    if (e.headRepository) {
+      forkInfoMap.set(pr.id, e.headRepository);
+    }
+
+    return {
+      ...pr,
+      headSha: e.headSha,
+      assigneeLogins: e.assigneeLogins,
+      reviewerLogins: e.reviewerLogins,
+      checkStatus: e.checkStatus,
+      additions: e.additions,
+      deletions: e.deletions,
+      changedFiles: e.changedFiles,
+      comments: e.comments,
+      reviewThreads: e.reviewThreads,
+      totalReviewCount: e.totalReviewCount,
+      enriched: true,
+    };
+  });
+}
+
+/**
+ * Fetches open issues and PRs using a two-phase approach:
+ * - Phase 1 (light): minimal fields for immediate rendering
+ * - Phase 2 (heavy): enrichment via nodes(ids:[]) backfill
+ *
+ * If onLightData is provided, it fires after phase 1 with light data
+ * so the UI can render immediately. The returned promise resolves
+ * with fully enriched data after phase 2 completes.
  */
 export async function fetchIssuesAndPullRequests(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
-  userLogin: string
+  userLogin: string,
+  onLightData?: (data: FetchIssuesAndPRsResult) => void,
 ): Promise<FetchIssuesAndPRsResult> {
   if (!octokit) throw new Error("No GitHub client available");
   if (repos.length === 0 || !userLogin) return { issues: [], pullRequests: [], errors: [] };
-  return graphqlCombinedSearch(octokit, repos, userLogin);
+
+  // Phase 1: light combined search
+  const lightResult = await graphqlLightCombinedSearch(octokit, repos, userLogin);
+
+  // Notify caller with light data for immediate rendering
+  if (onLightData) {
+    onLightData({
+      issues: lightResult.issues,
+      pullRequests: lightResult.pullRequests,
+      errors: lightResult.errors,
+    });
+  }
+
+  // Phase 2: heavy backfill
+  if (lightResult.prNodeIds.length === 0) {
+    return {
+      issues: lightResult.issues,
+      pullRequests: lightResult.pullRequests.map(pr => ({ ...pr, enriched: true })),
+      errors: lightResult.errors,
+    };
+  }
+
+  const { enrichments, errors: backfillErrors } = await fetchPREnrichment(octokit, lightResult.prNodeIds);
+  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
+  const enrichedPRs = mergeEnrichment(lightResult.pullRequests, enrichments, forkInfoMap);
+
+  // Fork PR fallback for enriched PRs
+  const prMap = new Map(enrichedPRs.map(pr => [pr.id, pr]));
+  await runForkPRFallback(octokit, prMap, forkInfoMap);
+
+  return {
+    issues: lightResult.issues,
+    pullRequests: [...prMap.values()],
+    errors: [...lightResult.errors, ...backfillErrors],
+  };
 }
 
 /**

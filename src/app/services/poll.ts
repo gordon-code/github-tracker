@@ -115,7 +115,15 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
 
 // ── fetchAllData orchestrator ─────────────────────────────────────────────────
 
-export async function fetchAllData(): Promise<DashboardData> {
+/**
+ * Fetches all dashboard data. Supports two-phase progressive rendering:
+ * - If onLightData is provided, fires with light issues+PRs as soon as
+ *   phase 1 completes (before enrichment and workflow runs finish).
+ * - The returned promise resolves with fully enriched data.
+ */
+export async function fetchAllData(
+  onLightData?: (data: DashboardData) => void,
+): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
     return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
@@ -137,15 +145,19 @@ export async function fetchAllData(): Promise<DashboardData> {
   const repos = config.selectedRepos;
   const userLogin = user()?.login ?? "";
 
-  // Note: NOT using updated:>= or created:>= filters on any endpoint because
-  // the dashboard uses full-replacement — each poll replaces all data. Date filters
-  // would cause unchanged items to vanish from the display. ETag caching already
-  // handles the "nothing changed" case for workflow runs (304 = free).
-
-  // Issues + PRs combined in a single aliased GraphQL query; workflow runs use REST core.
-  // Both streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
+  // Issues + PRs use a two-phase approach: light query first (phase 1),
+  // then heavy backfill (phase 2). Workflow runs use REST core.
+  // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, repos, userLogin),
+    fetchIssuesAndPullRequests(octokit, repos, userLogin, onLightData ? (lightData) => {
+      // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
+      onLightData({
+        issues: lightData.issues,
+        pullRequests: lightData.pullRequests,
+        workflowRuns: [],
+        errors: lightData.errors,
+      });
+    } : undefined),
     fetchWorkflowRuns(octokit, repos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 
