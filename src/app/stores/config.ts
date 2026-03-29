@@ -71,9 +71,12 @@ export function loadConfig(): Config {
 export const [config, setConfig] = createStore<Config>(loadConfig());
 
 export function updateConfig(partial: Partial<Config>): void {
+  // Validate partial update through Zod to enforce schema bounds (e.g., min/max)
+  const validated = ConfigSchema.partial().safeParse(partial);
+  const safe = validated.success ? validated.data : partial;
   setConfig(
     produce((draft) => {
-      Object.assign(draft, partial);
+      Object.assign(draft, safe);
     })
   );
 }

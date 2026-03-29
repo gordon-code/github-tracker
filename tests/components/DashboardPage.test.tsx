@@ -59,6 +59,12 @@ vi.mock("../../src/app/lib/errors", () => ({
 // capturedFetchAll is populated by the createPollCoordinator mock each time
 // the module is reset and DashboardPage re-mounts, creating a fresh coordinator.
 let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
+// capturedOnHotData is populated by the createHotPollCoordinator mock
+let capturedOnHotData: ((
+  prUpdates: Map<number, { state: string; checkStatus: string; mergeStateStatus: string; reviewDecision: string | null }>,
+  runUpdates: Map<number, { id: number; status: string; conclusion: string | null; updatedAt: string; completedAt: string | null }>,
+  generation: number,
+) => void) | null = null;
 
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
@@ -99,7 +105,12 @@ beforeEach(async () => {
         };
       }
     ),
-    createHotPollCoordinator: vi.fn().mockReturnValue({ destroy: vi.fn() }),
+    createHotPollCoordinator: vi.fn().mockImplementation(
+      (_getInterval: unknown, onHotData: typeof capturedOnHotData) => {
+        capturedOnHotData = onHotData;
+        return { destroy: vi.fn() };
+      }
+    ),
     rebuildHotSets: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
@@ -113,6 +124,7 @@ beforeEach(async () => {
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
+  capturedOnHotData = null;
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
@@ -350,5 +362,84 @@ describe("DashboardPage — onAuthCleared integration", () => {
     await waitFor(() => {
       expect(screen.queryByText("Should be cleared")).toBeNull();
     });
+  });
+});
+
+describe("DashboardPage — onHotData integration", () => {
+  it("applies hot poll PR status updates to the store", async () => {
+    const testPR = makePullRequest({
+      id: 42,
+      checkStatus: "pending",
+      state: "open",
+      reviewDecision: null,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [testPR],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(capturedOnHotData).not.toBeNull();
+    });
+
+    // Verify initial state shows pending
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    });
+
+    // Simulate hot poll returning a status update (generation=0 matches default mock)
+    const prUpdates = new Map([[42, {
+      state: "OPEN",
+      checkStatus: "success" as const,
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED" as const,
+    }]]);
+    capturedOnHotData!(prUpdates, new Map(), 0);
+
+    // The StatusDot should update from "Checks in progress" to "All checks passed"
+    await waitFor(() => {
+      expect(screen.getByLabelText("All checks passed")).toBeTruthy();
+    });
+  });
+
+  it("discards stale hot poll updates when generation mismatches", async () => {
+    const testPR = makePullRequest({
+      id: 43,
+      checkStatus: "pending",
+      state: "open",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [testPR],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(capturedOnHotData).not.toBeNull();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    });
+
+    // Send update with stale generation (999 !== mock default of 0)
+    const prUpdates = new Map([[43, {
+      state: "OPEN",
+      checkStatus: "success" as const,
+      mergeStateStatus: "CLEAN",
+      reviewDecision: null,
+    }]]);
+    capturedOnHotData!(prUpdates, new Map(), 999);
+
+    // PR should still show pending — stale update was discarded
+    expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    expect(screen.queryByLabelText("All checks passed")).toBeNull();
   });
 });

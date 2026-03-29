@@ -46,11 +46,14 @@ let _notifGateDisabled = false; // Disabled after 403 (notifications scope not g
 
 /** PRs with pending/null check status: maps GraphQL node ID → databaseId */
 const _hotPRs = new Map<string, number>();
+/** Inverse index for O(1) eviction: maps databaseId → nodeId */
+const _hotPRsByDbId = new Map<number, string>();
 const MAX_HOT_PRS = 200;
 
 /** In-progress workflow runs: maps run ID → repo descriptor */
 const _hotRuns = new Map<number, { owner: string; repo: string }>();
 const MAX_HOT_RUNS = 30;
+const HOT_RUNS_CONCURRENCY = 10;
 
 /** Incremented each time rebuildHotSets() is called (full refresh completed).
  * Allows hot poll callbacks to detect stale results that overlap with a fresh
@@ -64,6 +67,7 @@ export function getHotPollGeneration(): number {
 
 export function clearHotSets(): void {
   _hotPRs.clear();
+  _hotPRsByDbId.clear();
   _hotRuns.clear();
 }
 
@@ -72,6 +76,7 @@ export function resetPollState(): void {
   _lastSuccessfulFetch = null;
   _notifGateDisabled = false;
   _hotPRs.clear();
+  _hotPRsByDbId.clear();
   _hotRuns.clear();
   _hotPollGeneration = 0;
   _resetNotificationState();
@@ -391,6 +396,7 @@ export function createPollCoordinator(
 export function rebuildHotSets(data: DashboardData): void {
   _hotPollGeneration++;
   _hotPRs.clear();
+  _hotPRsByDbId.clear();
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
@@ -400,6 +406,7 @@ export function rebuildHotSets(data: DashboardData): void {
         break;
       }
       _hotPRs.set(pr.nodeId, pr.id);
+      _hotPRsByDbId.set(pr.id, pr.nodeId);
     }
   }
 
@@ -459,9 +466,9 @@ export async function fetchHotData(): Promise<{
   // Workflow run fetches — bounded concurrency via pooledAllSettled
   const runEntries = [..._hotRuns.entries()];
   const runTasks = runEntries.map(
-    (entry) => async () => fetchWorkflowRunById(octokit, { id: entry[0], ...entry[1] })
+    ([runId, descriptor]) => async () => fetchWorkflowRunById(octokit, { id: runId, ...descriptor })
   );
-  const runResults = await pooledAllSettled(runTasks, 10);
+  const runResults = await pooledAllSettled(runTasks, HOT_RUNS_CONCURRENCY);
   for (const result of runResults) {
     if (result.status === "fulfilled") {
       runUpdates.set(result.value.id, result.value);
@@ -474,18 +481,17 @@ export async function fetchHotData(): Promise<{
   // The freshly rebuilt sets are authoritative — evicting from them based on
   // stale fetch results would corrupt the new data.
   if (generation === _hotPollGeneration) {
-    // Evict settled PRs
+    // Evict settled PRs using inverse index for O(1) lookup
     for (const [databaseId, upd] of prUpdates) {
       if (
         upd.state === "CLOSED" ||
         upd.state === "MERGED" ||
         (upd.checkStatus !== "pending" && upd.checkStatus !== null)
       ) {
-        for (const [nodeId, id] of _hotPRs) {
-          if (id === databaseId) {
-            _hotPRs.delete(nodeId);
-            break;
-          }
+        const nodeId = _hotPRsByDbId.get(databaseId);
+        if (nodeId) {
+          _hotPRs.delete(nodeId);
+          _hotPRsByDbId.delete(databaseId);
         }
       }
     }
@@ -525,6 +531,7 @@ export function createHotPollCoordinator(
   const MAX_BACKOFF_MULTIPLIER = 8; // caps at 8× the base interval
 
   function destroy(): void {
+    // Invalidates any in-flight cycle(); createEffect captures the new value as the next chain's seed
     chainGeneration++;
     consecutiveFailures = 0;
     if (timeoutId !== null) {
@@ -548,6 +555,12 @@ export function createHotPollCoordinator(
       return;
     }
 
+    // Skip fetch when no authenticated client (e.g., mid-logout)
+    if (!getClient()) {
+      schedule(myGeneration);
+      return;
+    }
+
     try {
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
@@ -556,10 +569,13 @@ export function createHotPollCoordinator(
       } else {
         consecutiveFailures = 0;
       }
-      onHotData(prUpdates, runUpdates, generation);
+      if (prUpdates.size > 0 || runUpdates.size > 0) {
+        onHotData(prUpdates, runUpdates, generation);
+      }
     } catch (err) {
       consecutiveFailures++;
-      console.warn(`[hot-poll] cycle failed (${consecutiveFailures}x):`, err);
+      const message = err instanceof Error ? err.message : "Unknown hot-poll error";
+      pushError("hot-poll", message, true);
     }
 
     schedule(myGeneration);

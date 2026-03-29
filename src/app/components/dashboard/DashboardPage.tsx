@@ -24,6 +24,9 @@ import { getClient, getGraphqlRateLimit } from "../../services/github";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
+// Bump only for breaking schema changes (renames, type changes). Additive optional
+// fields (e.g., nodeId?: string) don't require a bump — missing fields deserialize
+// as undefined, which consuming code handles gracefully.
 const CACHE_VERSION = 2;
 
 interface DashboardStore {
@@ -240,7 +243,6 @@ export default function DashboardPage() {
       _setHotCoordinator(createHotPollCoordinator(
         () => config.hotPollInterval,
         (prUpdates, runUpdates, fetchGeneration) => {
-          if (prUpdates.size === 0 && runUpdates.size === 0) return;
           // Guard against stale hot poll results overlapping with a full refresh.
           // fetchGeneration was captured BEFORE fetchHotData() started its async work.
           // If a full refresh completed during the fetch, _hotPollGeneration will have

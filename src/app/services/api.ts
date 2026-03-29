@@ -1834,12 +1834,12 @@ export async function fetchWorkflowRunById(
     run_id: id,
   });
   updateRateLimitFromHeaders(response.headers as Record<string, string>);
-  const run = response.data;
+  const run = response.data as unknown as RawWorkflowRun;
   return {
     id: run.id,
     status: run.status ?? "",
     conclusion: run.conclusion ?? null,
     updatedAt: run.updated_at,
-    completedAt: ("completed_at" in run ? (run as Record<string, unknown>).completed_at as string | null : null) ?? null,
+    completedAt: run.completed_at ?? null,
   };
 }

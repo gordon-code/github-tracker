@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { makePullRequest, makeWorkflowRun } from "../helpers/index";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -189,6 +189,17 @@ describe("fetchWorkflowRunById", () => {
       { owner: "myorg", repo: "myrepo", run_id: 200 },
     );
   });
+
+  it("calls updateRateLimitFromHeaders after request", async () => {
+    const { updateRateLimitFromHeaders } = await import("../../src/app/services/github");
+    const octokit = makeOctokit(() => Promise.resolve({
+      data: { id: 300, status: "completed", conclusion: "success", updated_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z" },
+      headers: { "x-ratelimit-remaining": "4999" },
+    }));
+
+    await fetchWorkflowRunById(octokit as never, { id: 300, owner: "org", repo: "repo" });
+    expect(updateRateLimitFromHeaders).toHaveBeenCalledWith({ "x-ratelimit-remaining": "4999" });
+  });
 });
 
 describe("resetPollState", () => {
@@ -270,6 +281,28 @@ describe("rebuildHotSets", () => {
     await fetchHotData();
     // Only 2 runs fetched (in_progress + queued), not the completed one
     expect(requestFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("silently skips runs with malformed repoFullName", async () => {
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    const octokit = makeOctokit(requestFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [
+        makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "noslash" }),
+        makeWorkflowRun({ id: 11, status: "in_progress", conclusion: null, repoFullName: "" }),
+        makeWorkflowRun({ id: 12, status: "in_progress", conclusion: null, repoFullName: "org/repo" }),
+      ],
+    });
+
+    await fetchHotData();
+    // Only the valid "org/repo" run should be fetched
+    expect(requestFn).toHaveBeenCalledTimes(1);
   });
 
   it("clears and replaces on each call", async () => {
@@ -411,9 +444,12 @@ describe("createHotPollCoordinator", () => {
 
   it("schedules cycle after interval", async () => {
     const onHotData = vi.fn();
-    mockGetClient.mockReturnValue(null); // no client = no-op cycle
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    mockGetClient.mockReturnValue(makeOctokit(requestFn));
 
-    // Put something in hot sets so it doesn't skip
     rebuildHotSets({
       ...emptyData,
       workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
@@ -423,8 +459,25 @@ describe("createHotPollCoordinator", () => {
       createHotPollCoordinator(() => 30, onHotData);
       // First cycle fires after 30s
       await vi.advanceTimersByTimeAsync(30_000);
-      // onHotData gets called with empty maps (no client)
       expect(onHotData).toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("skips onHotData when no client is available", async () => {
+    const onHotData = vi.fn();
+    mockGetClient.mockReturnValue(null);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      await vi.advanceTimersByTimeAsync(10_000);
+      // No client → cycle skips fetch and onHotData
+      expect(onHotData).not.toHaveBeenCalled();
       dispose();
     });
   });
@@ -485,7 +538,11 @@ describe("createHotPollCoordinator", () => {
 
   it("resets backoff counter on successful cycle", async () => {
     const onHotData = vi.fn();
-    mockGetClient.mockReturnValue(null); // returns empty maps (success path)
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    mockGetClient.mockReturnValue(makeOctokit(requestFn));
 
     rebuildHotSets({
       ...emptyData,
@@ -500,6 +557,71 @@ describe("createHotPollCoordinator", () => {
       // Cycle 2 at 20s (no backoff because previous succeeded)
       await vi.advanceTimersByTimeAsync(10_000);
       expect(onHotData).toHaveBeenCalledTimes(2);
+      dispose();
+    });
+  });
+
+  it("restarts chain when interval signal changes", async () => {
+    const onHotData = vi.fn();
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    mockGetClient.mockReturnValue(makeOctokit(requestFn));
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      const [interval, setInterval] = createSignal(30);
+      createHotPollCoordinator(interval, onHotData);
+
+      // Advance 15s into the 30s cycle — no callback yet
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(onHotData).not.toHaveBeenCalled();
+
+      // Change interval to 10s — destroys old chain, starts new one
+      setInterval(10);
+      // Need a microtask tick for SolidJS effect to re-run
+      await vi.advanceTimersByTimeAsync(0);
+      // The new chain should fire at 10s from now
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("applies exponential backoff on errors", async () => {
+    const onHotData = vi.fn();
+    // fetchHotPRStatus uses Promise.allSettled, so graphql errors set hadErrors=true
+    // without throwing — consecutiveFailures increments via the hadErrors path
+    const graphqlFn = vi.fn(() => Promise.reject(new Error("api error")));
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+
+      // First cycle at 10s — hadErrors=true, consecutiveFailures=1
+      await vi.advanceTimersByTimeAsync(10_000);
+      const callsAfterFirst = graphqlFn.mock.calls.length;
+      expect(callsAfterFirst).toBe(1);
+
+      // Next cycle should be at 10s * 2^1 = 20s from first cycle
+      // Advance 10s — should NOT have fired another fetch yet
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(graphqlFn.mock.calls.length).toBe(callsAfterFirst); // still 1
+
+      // Advance another 10s (20s total since first cycle) — second fetch fires
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(graphqlFn.mock.calls.length).toBe(callsAfterFirst + 1); // now 2
       dispose();
     });
   });
@@ -519,6 +641,42 @@ describe("createHotPollCoordinator", () => {
       expect(onHotData).not.toHaveBeenCalled();
       dispose();
     });
+  });
+});
+
+describe("fetchHotPRStatus null/missing nodes", () => {
+  it("skips null nodes and processes valid ones", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        null,
+        {
+          databaseId: 99,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        },
+      ],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_null", "PR_valid"]);
+    expect(results.size).toBe(1);
+    expect(results.get(99)!.checkStatus).toBe("success");
+  });
+
+  it("skips nodes with null databaseId", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        { databaseId: null, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [] } },
+        { databaseId: 77, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
+      ],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_nulldb", "PR_ok"]);
+    expect(results.size).toBe(1);
+    expect(results.has(77)).toBe(true);
   });
 });
 
