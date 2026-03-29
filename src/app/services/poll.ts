@@ -460,26 +460,31 @@ export async function fetchHotData(): Promise<{
     // Rejected results are silently skipped — run stays in hot set for retry
   }
 
-  // Evict settled PRs: find their node IDs in _hotPRs and remove if settled
-  for (const [databaseId, upd] of prUpdates) {
-    if (
-      upd.state === "CLOSED" ||
-      upd.state === "MERGED" ||
-      (upd.checkStatus !== "pending" && upd.checkStatus !== null)
-    ) {
-      for (const [nodeId, id] of _hotPRs) {
-        if (id === databaseId) {
-          _hotPRs.delete(nodeId);
-          break;
+  // Skip eviction if a full refresh rebuilt the hot sets during our async work.
+  // The freshly rebuilt sets are authoritative — evicting from them based on
+  // stale fetch results would corrupt the new data.
+  if (generation === _hotPollGeneration) {
+    // Evict settled PRs
+    for (const [databaseId, upd] of prUpdates) {
+      if (
+        upd.state === "CLOSED" ||
+        upd.state === "MERGED" ||
+        (upd.checkStatus !== "pending" && upd.checkStatus !== null)
+      ) {
+        for (const [nodeId, id] of _hotPRs) {
+          if (id === databaseId) {
+            _hotPRs.delete(nodeId);
+            break;
+          }
         }
       }
     }
-  }
 
-  // Evict completed runs
-  for (const [runId, runUpdate] of runUpdates) {
-    if (runUpdate.status === "completed") {
-      _hotRuns.delete(runId);
+    // Evict completed runs
+    for (const [runId, runUpdate] of runUpdates) {
+      if (runUpdate.status === "completed") {
+        _hotRuns.delete(runId);
+      }
     }
   }
 
@@ -493,7 +498,7 @@ export async function fetchHotData(): Promise<{
  *
  * Must be called inside a SolidJS reactive root (uses createEffect + onCleanup).
  *
- * @param getInterval - Reactive accessor returning interval in seconds (0 = disabled)
+ * @param getInterval - Reactive accessor returning interval in seconds
  * @param onHotData - Callback invoked with fresh updates after each cycle
  */
 export function createHotPollCoordinator(
