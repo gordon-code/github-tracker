@@ -511,9 +511,12 @@ export function createHotPollCoordinator(
 ): { destroy: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let chainGeneration = 0;
+  let consecutiveFailures = 0;
+  const MAX_BACKOFF_MULTIPLIER = 8; // caps at 8× the base interval
 
   function destroy(): void {
     chainGeneration++;
+    consecutiveFailures = 0;
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
       timeoutId = null;
@@ -538,19 +541,22 @@ export function createHotPollCoordinator(
     try {
       const { prUpdates, runUpdates, generation } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
+      consecutiveFailures = 0;
       onHotData(prUpdates, runUpdates, generation);
     } catch (err) {
-      console.warn("[hot-poll] cycle failed:", err);
+      consecutiveFailures++;
+      console.warn(`[hot-poll] cycle failed (${consecutiveFailures}x):`, err);
     }
 
     schedule(myGeneration);
   }
 
   function schedule(myGeneration: number): void {
-    const ms = getInterval() * 1000;
-    if (ms > 0 && myGeneration === chainGeneration) {
-      timeoutId = setTimeout(() => void cycle(myGeneration), ms);
-    }
+    const baseMs = getInterval() * 1000;
+    if (baseMs <= 0 || myGeneration !== chainGeneration) return;
+    const backoff = Math.min(2 ** consecutiveFailures, MAX_BACKOFF_MULTIPLIER);
+    const ms = baseMs * backoff;
+    timeoutId = setTimeout(() => void cycle(myGeneration), ms);
   }
 
   // Reactive effect: restart chain when interval changes

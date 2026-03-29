@@ -481,6 +481,27 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("resets backoff counter on successful cycle", async () => {
+    const onHotData = vi.fn();
+    mockGetClient.mockReturnValue(null); // returns empty maps (success path)
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      // Cycle 1 at 10s
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).toHaveBeenCalledTimes(1);
+      // Cycle 2 at 20s (no backoff because previous succeeded)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).toHaveBeenCalledTimes(2);
+      dispose();
+    });
+  });
+
   it("does not schedule when interval is 0", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());
@@ -496,5 +517,161 @@ describe("createHotPollCoordinator", () => {
       expect(onHotData).not.toHaveBeenCalled();
       dispose();
     });
+  });
+});
+
+describe("fetchHotPRStatus edge cases", () => {
+  it("applies BEHIND mergeStateStatus override to conflict", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [{
+        databaseId: 50,
+        state: "OPEN",
+        mergeStateStatus: "BEHIND",
+        reviewDecision: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      }],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const result = await fetchHotPRStatus(octokit as never, ["PR_behind"]);
+    expect(result.get(50)!.checkStatus).toBe("conflict");
+  });
+
+  it("returns partial results when one batch fails", async () => {
+    let callCount = 0;
+    const octokit = makeOctokit(undefined, () => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          nodes: [{
+            databaseId: 1,
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+          }],
+          rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+        });
+      }
+      return Promise.reject(new Error("rate limited"));
+    });
+
+    // Need >100 node IDs to trigger 2 batches
+    const nodeIds = Array.from({ length: 101 }, (_, i) => `PR_${i}`);
+    const result = await fetchHotPRStatus(octokit as never, nodeIds);
+    // First batch succeeded with 1 result, second batch failed
+    expect(result.size).toBe(1);
+    expect(result.get(1)).toBeDefined();
+  });
+});
+
+describe("rebuildHotSets caps", () => {
+  beforeEach(() => {
+    resetPollState();
+  });
+
+  it("caps hot PRs at MAX_HOT_PRS (200)", async () => {
+    const prs = Array.from({ length: 250 }, (_, i) =>
+      makePullRequest({ id: i + 1, checkStatus: "pending", nodeId: `PR_${i}` })
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    rebuildHotSets({ ...emptyData, pullRequests: prs });
+
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    mockGetClient.mockReturnValue(octokit);
+
+    await fetchHotData();
+    // graphql should be called with at most 200 node IDs (batched at 100)
+    const allIds = (octokit.graphql.mock.calls as Array<[string, { ids: string[] }]>)
+      .flatMap(c => c[1].ids);
+    expect(allIds.length).toBe(200);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("PR cap reached"));
+    warnSpy.mockRestore();
+  });
+
+  it("caps hot runs at MAX_HOT_RUNS (30)", async () => {
+    const runs = Array.from({ length: 40 }, (_, i) =>
+      makeWorkflowRun({ id: i + 1, status: "in_progress", conclusion: null, repoFullName: `org/repo${i}` })
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    rebuildHotSets({ ...emptyData, workflowRuns: runs });
+
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    const octokit = makeOctokit(requestFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    await fetchHotData();
+    expect(requestFn).toHaveBeenCalledTimes(30);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Run cap reached"));
+    warnSpy.mockRestore();
+  });
+});
+
+describe("fetchHotData eviction edge cases", () => {
+  beforeEach(() => {
+    resetPollState();
+    mockGetClient.mockReset();
+  });
+
+  it("evicts PRs when state is MERGED even with pending checkStatus", async () => {
+    const graphqlFn = vi.fn(() => Promise.resolve({
+      nodes: [{
+        databaseId: 1,
+        state: "MERGED",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED",
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+      }],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_merged" })],
+    });
+
+    const first = await fetchHotData();
+    expect(first.prUpdates.get(1)!.state).toBe("MERGED");
+
+    // Should be evicted — MERGED state takes priority over pending checks
+    graphqlFn.mockClear();
+    const second = await fetchHotData();
+    expect(second.prUpdates.size).toBe(0);
+    expect(graphqlFn).not.toHaveBeenCalled();
+  });
+
+  it("evicts PRs when state is CLOSED", async () => {
+    const graphqlFn = vi.fn(() => Promise.resolve({
+      nodes: [{
+        databaseId: 2,
+        state: "CLOSED",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+      }],
+      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 2, checkStatus: null, nodeId: "PR_closed" })],
+    });
+
+    await fetchHotData();
+    graphqlFn.mockClear();
+    const second = await fetchHotData();
+    expect(second.prUpdates.size).toBe(0);
   });
 });
