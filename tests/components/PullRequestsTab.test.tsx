@@ -569,4 +569,30 @@ describe("PullRequestsTab", () => {
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Persistent PR");
   });
+
+  it("clicking 'Expand all' expands repos on other pages too", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const prs = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        makePullRequest({ id: 100 + i, title: `Repo A PR ${i}`, repoFullName: "org/repo-a" })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makePullRequest({ id: 200 + i, title: `Repo B PR ${i}`, repoFullName: "org/repo-b" })
+      ),
+    ];
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    // Page 1 shows repo-a, page 2 shows repo-b
+    screen.getByText(/Page 1 of 2/);
+
+    // Expand all — affects repos on ALL pages
+    await user.click(screen.getByLabelText("Expand all"));
+    // Repo-a items visible on page 1
+    screen.getByText("Repo A PR 0");
+
+    // Navigate to page 2 — repo-b should already be expanded
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText("org/repo-b");
+    screen.getByText("Repo B PR 0");
+  });
 });

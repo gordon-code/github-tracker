@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import ExpandCollapseButtons from "../../src/app/components/shared/ExpandCollapseButtons";
 
 describe("ExpandCollapseButtons", () => {
@@ -9,17 +10,19 @@ describe("ExpandCollapseButtons", () => {
     expect(screen.getByRole("button", { name: "Collapse all" })).toBeTruthy();
   });
 
-  it("calls onExpandAll when expand button is clicked", () => {
+  it("calls onExpandAll when expand button is clicked", async () => {
+    const user = userEvent.setup();
     const onExpandAll = vi.fn();
     render(() => <ExpandCollapseButtons onExpandAll={onExpandAll} onCollapseAll={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    await user.click(screen.getByRole("button", { name: "Expand all" }));
     expect(onExpandAll).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onCollapseAll when collapse button is clicked", () => {
+  it("calls onCollapseAll when collapse button is clicked", async () => {
+    const user = userEvent.setup();
     const onCollapseAll = vi.fn();
     render(() => <ExpandCollapseButtons onExpandAll={() => {}} onCollapseAll={onCollapseAll} />);
-    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
     expect(onCollapseAll).toHaveBeenCalledTimes(1);
   });
 });

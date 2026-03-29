@@ -489,4 +489,30 @@ describe("IssuesTab", () => {
     // State persisted in viewState store — should still be expanded
     screen.getByText("Survives remount");
   });
+
+  it("clicking 'Expand all' expands repos on other pages too", async () => {
+    const user = userEvent.setup();
+    updateConfig({ itemsPerPage: 10 });
+    const issues = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 100 + i, title: `Repo A issue ${i}`, repoFullName: "org/repo-a" })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
+      ),
+    ];
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    // Page 1 shows repo-a, page 2 shows repo-b
+    screen.getByText(/Page 1 of 2/);
+
+    // Expand all — affects repos on ALL pages
+    await user.click(screen.getByLabelText("Expand all"));
+    // Repo-a items visible on page 1
+    screen.getByText("Repo A issue 0");
+
+    // Navigate to page 2 — repo-b should already be expanded
+    await user.click(screen.getByLabelText("Next page"));
+    screen.getByText("org/repo-b");
+    screen.getByText("Repo B issue 0");
+  });
 });
