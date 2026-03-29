@@ -59,21 +59,18 @@ describe("ItemRow", () => {
     expect(screen.queryByTestId("child-slot")).toBeNull();
   });
 
-  it("opens url in new tab when row is clicked", async () => {
-    const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+  it("title is a real link with correct href and target", () => {
     render(() => <ItemRow {...defaultProps} />);
+    const link = screen.getByText("Fix a bug").closest("a")!;
+    expect(link.getAttribute("href")).toBe(defaultProps.url);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
 
-    // Click on the title text to trigger row click
-    const titleEl = screen.getByText("Fix a bug");
-    await user.click(titleEl);
-
-    expect(openSpy).toHaveBeenCalledWith(
-      defaultProps.url,
-      "_blank",
-      "noopener,noreferrer"
-    );
-    openSpy.mockRestore();
+  it("title link has no href for non-GitHub URLs", () => {
+    render(() => <ItemRow {...defaultProps} url="https://evil.com/bad" />);
+    const link = screen.getByText("Fix a bug").closest("a")!;
+    expect(link.getAttribute("href")).toBeNull();
   });
 
   it("calls onIgnore when ignore button is clicked", async () => {
@@ -87,33 +84,31 @@ describe("ItemRow", () => {
     expect(onIgnore).toHaveBeenCalledOnce();
   });
 
-  it("does not open URL when ignore button is clicked", async () => {
+  it("ignore button does not navigate (sits above stretched link)", async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const onIgnore = vi.fn();
     render(() => <ItemRow {...defaultProps} onIgnore={onIgnore} />);
 
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
     await user.click(ignoreBtn);
 
-    expect(openSpy).not.toHaveBeenCalled();
-    openSpy.mockRestore();
+    expect(onIgnore).toHaveBeenCalledOnce();
   });
 
   it("applies compact padding in compact density", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} density="compact" />
     ));
-    const row = container.querySelector("[role='row']");
-    expect(row?.className).toContain("py-2");
+    const row = container.querySelector(".group")!;
+    expect(row.className).toContain("py-2");
   });
 
   it("applies comfortable padding in comfortable density", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} density="comfortable" />
     ));
-    const row = container.querySelector("[role='row']");
-    expect(row?.className).toContain("py-3");
+    const row = container.querySelector(".group")!;
+    expect(row.className).toContain("py-3");
   });
 
   it("renders no labels section when labels array is empty", () => {
