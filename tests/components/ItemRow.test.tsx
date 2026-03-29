@@ -54,23 +54,33 @@ describe("ItemRow", () => {
     screen.getByTestId("child-slot");
   });
 
+  it("children slot sits above overlay link (relative z-10)", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps}>
+        <span data-testid="child-slot">extra content</span>
+      </ItemRow>
+    ));
+    const childWrapper = container.querySelector("[data-testid='child-slot']")!.parentElement!;
+    expect(childWrapper.className).toContain("relative");
+    expect(childWrapper.className).toContain("z-10");
+  });
+
   it("does not render children slot when not provided", () => {
     render(() => <ItemRow {...defaultProps} />);
     expect(screen.queryByTestId("child-slot")).toBeNull();
   });
 
-  it("title is a real link with correct href and target", () => {
+  it("renders overlay link with correct href, target, rel, and aria-label", () => {
     render(() => <ItemRow {...defaultProps} />);
-    const link = screen.getByText("Fix a bug").closest("a")!;
+    const link = screen.getByRole("link", { name: /octocat\/Hello-World #42: Fix a bug/ });
     expect(link.getAttribute("href")).toBe(defaultProps.url);
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
-  it("title link has no href for non-GitHub URLs", () => {
+  it("does not render overlay link for non-GitHub URLs", () => {
     render(() => <ItemRow {...defaultProps} url="https://evil.com/bad" />);
-    const link = screen.getByText("Fix a bug").closest("a")!;
-    expect(link.getAttribute("href")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("calls onIgnore when ignore button is clicked", async () => {
@@ -84,15 +94,11 @@ describe("ItemRow", () => {
     expect(onIgnore).toHaveBeenCalledOnce();
   });
 
-  it("ignore button does not navigate (sits above stretched link)", async () => {
-    const user = userEvent.setup();
-    const onIgnore = vi.fn();
-    render(() => <ItemRow {...defaultProps} onIgnore={onIgnore} />);
-
+  it("ignore button has relative z-10 to sit above overlay link", () => {
+    render(() => <ItemRow {...defaultProps} />);
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    await user.click(ignoreBtn);
-
-    expect(onIgnore).toHaveBeenCalledOnce();
+    expect(ignoreBtn.className).toContain("relative");
+    expect(ignoreBtn.className).toContain("z-10");
   });
 
   it("applies compact padding in compact density", () => {

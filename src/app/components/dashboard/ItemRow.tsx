@@ -28,6 +28,19 @@ export default function ItemRow(props: ItemRowProps) {
         transition-colors
         ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
     >
+      {/* Overlay link — covers entire row; interactive children use relative z-10 */}
+      <Show when={safeUrl()}>
+        {(url) => (
+          <a
+            href={url()}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="absolute inset-0"
+            aria-label={`${props.repo} #${props.number}: ${props.title}`}
+          />
+        )}
+      </Show>
+
       {/* Repo badge */}
       <Show when={!props.hideRepo}>
         <span
@@ -46,14 +59,9 @@ export default function ItemRow(props: ItemRowProps) {
           <span class="text-base-content/60 shrink-0">
             #{props.number}
           </span>
-          <a
-            href={safeUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="font-medium text-base-content truncate after:absolute after:inset-0"
-          >
+          <span class="font-medium text-base-content truncate">
             {props.title}
-          </a>
+          </span>
         </div>
 
         {/* Labels row */}
@@ -77,9 +85,9 @@ export default function ItemRow(props: ItemRowProps) {
           </div>
         </Show>
 
-        {/* Additional children slot */}
+        {/* Additional children slot — z-10 to sit above stretched link */}
         <Show when={props.children !== undefined}>
-          <div class={isCompact() ? "mt-0.5" : "mt-1"}>{props.children}</div>
+          <div class={`relative z-10 ${isCompact() ? "mt-0.5" : "mt-1"}`}>{props.children}</div>
         </Show>
       </div>
 
