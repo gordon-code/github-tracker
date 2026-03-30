@@ -571,6 +571,7 @@ export function createHotPollCoordinator(
     // Invalidates any in-flight cycle(); createEffect captures the new value as the next chain's seed
     chainGeneration++;
     consecutiveFailures = 0;
+    options?.onEnd?.(); // Clear shimmer indicators on coordinator destruction
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
       timeoutId = null;

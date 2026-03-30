@@ -23,7 +23,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         when={lockInfo().isLocked}
         fallback={
           <button
-            class="btn btn-ghost btn-xs opacity-0 group-hover/repo-header:opacity-100 max-sm:opacity-60 sm:max-lg:opacity-60 transition-opacity"
+            class="btn btn-ghost btn-xs opacity-0 group-hover/repo-header:opacity-100 focus:opacity-100 max-sm:opacity-60 sm:max-lg:opacity-60 transition-opacity"
             onClick={() => lockRepo(props.tab, props.repoFullName)}
             title="Pin this repo to top of list"
             aria-label={`Pin ${props.repoFullName} to top of list`}
