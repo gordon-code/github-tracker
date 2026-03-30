@@ -8,6 +8,11 @@ vi.mock("../../../src/app/services/github", () => ({
   getClient: () => ({}),
 }));
 
+vi.mock("../../../src/app/stores/auth", () => ({
+  user: () => ({ login: "testuser", name: "Test User", avatar_url: "" }),
+  token: () => "fake-token",
+}));
+
 // Mock api module functions
 vi.mock("../../../src/app/services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/app/services/api")>();
@@ -20,6 +25,7 @@ vi.mock("../../../src/app/services/api", async (importOriginal) => {
       { login: "active-org", avatarUrl: "", type: "org" },
     ]),
     fetchRepos: vi.fn(),
+    discoverUpstreamRepos: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -360,5 +366,243 @@ describe("RepoSelector", () => {
       screen.getByText("repo-a");
     });
     expect(api.fetchOrgs).not.toHaveBeenCalled();
+  });
+});
+
+describe("RepoSelector — upstream discovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    vi.mocked(api.discoverUpstreamRepos).mockResolvedValue([]);
+  });
+
+  it("does not call discoverUpstreamRepos when showUpstreamDiscovery is false (default)", async () => {
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+    // Give time for any async effects to settle
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.discoverUpstreamRepos).not.toHaveBeenCalled();
+  });
+
+  it("does not render Upstream Repositories heading when showUpstreamDiscovery is false", async () => {
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+    await waitFor(() => screen.getByText("repo-a"));
+    expect(screen.queryByText("Upstream Repositories")).toBeNull();
+  });
+
+  it("renders Upstream Repositories heading when showUpstreamDiscovery is true", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+    await waitFor(() => {
+      screen.getByText("Upstream Repositories");
+    });
+  });
+
+  it("calls discoverUpstreamRepos after org repos load when showUpstreamDiscovery is true", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+    await waitFor(() => {
+      expect(api.discoverUpstreamRepos).toHaveBeenCalledOnce();
+    });
+    expect(api.discoverUpstreamRepos).toHaveBeenCalledWith(
+      expect.anything(),
+      "testuser",
+      expect.any(Set)
+    );
+  });
+
+  it("shows discovered repos as checkboxes", async () => {
+    const discovered: RepoRef[] = [
+      { owner: "upstream-owner", name: "upstream-repo", fullName: "upstream-owner/upstream-repo" },
+    ];
+    vi.mocked(api.discoverUpstreamRepos).mockResolvedValue(discovered);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("upstream-owner/upstream-repo");
+    });
+  });
+
+  it("selecting a discovered repo calls onUpstreamChange", async () => {
+    const user = userEvent.setup();
+    const discovered: RepoRef[] = [
+      { owner: "upstream-owner", name: "upstream-repo", fullName: "upstream-owner/upstream-repo" },
+    ];
+    vi.mocked(api.discoverUpstreamRepos).mockResolvedValue(discovered);
+    const onUpstreamChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={onUpstreamChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("upstream-owner/upstream-repo");
+    });
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    const upstreamCheckbox = checkboxes.find((cb) => {
+      const label = cb.closest("label");
+      return label?.textContent?.includes("upstream-owner/upstream-repo");
+    });
+    await user.click(upstreamCheckbox!);
+
+    expect(onUpstreamChange).toHaveBeenCalledWith([discovered[0]]);
+  });
+
+  it("discovered repos already in selectedRepos are excluded from the excludeSet passed to discoverUpstreamRepos", async () => {
+    const selected: RepoRef[] = [
+      { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" },
+    ];
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      expect(api.discoverUpstreamRepos).toHaveBeenCalled();
+    });
+
+    const excludeSet = vi.mocked(api.discoverUpstreamRepos).mock.calls[0][2] as Set<string>;
+    expect(excludeSet.has("myorg/repo-a")).toBe(true);
+  });
+
+  it("shows workflow runs note text", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+    await waitFor(() => {
+      screen.getByText(/workflow runs are not/i);
+    });
+  });
+
+  it("manual entry: typing owner/repo and clicking Add calls onUpstreamChange", async () => {
+    const user = userEvent.setup();
+    const onUpstreamChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={onUpstreamChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("Upstream Repositories");
+    });
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "some-owner/some-repo");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    expect(onUpstreamChange).toHaveBeenCalledWith([
+      { owner: "some-owner", name: "some-repo", fullName: "some-owner/some-repo" },
+    ]);
+  });
+
+  it("manual entry: invalid format (no slash) shows validation error", async () => {
+    const user = userEvent.setup();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("Upstream Repositories"));
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "noslash");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    screen.getByText(/format must be owner\/repo/i);
+  });
+
+  it("manual entry: duplicate from selectedRepos shows duplicate error", async () => {
+    const user = userEvent.setup();
+    const selected: RepoRef[] = [
+      { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" },
+    ];
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("Upstream Repositories"));
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "myorg/repo-a");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    screen.getByText(/already in your selected/i);
   });
 });

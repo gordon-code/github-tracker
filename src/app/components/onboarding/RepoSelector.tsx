@@ -4,18 +4,26 @@ import {
   createMemo,
   Show,
   Index,
+  For,
 } from "solid-js";
-import { fetchOrgs, fetchRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
+import { fetchOrgs, fetchRepos, discoverUpstreamRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
 import { getClient } from "../../services/github";
+import { user } from "../../stores/auth";
 import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
+
+// Validates owner/repo format (both segments must be non-empty, no spaces)
+const VALID_REPO_NAME = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
 interface RepoSelectorProps {
   selectedOrgs: string[];
   orgEntries?: OrgEntry[]; // Pre-fetched org entries — skip internal fetchOrgs when provided
   selected: RepoRef[];
   onChange: (selected: RepoRef[]) => void;
+  showUpstreamDiscovery?: boolean;
+  upstreamRepos?: RepoRef[];
+  onUpstreamChange?: (repos: RepoRef[]) => void;
 }
 
 interface OrgRepoState {
@@ -31,6 +39,13 @@ export default function RepoSelector(props: RepoSelectorProps) {
   const [orgStates, setOrgStates] = createSignal<OrgRepoState[]>([]);
   const [loadedCount, setLoadedCount] = createSignal(0);
   let effectVersion = 0;
+
+  // ── Upstream discovery state ───────────────────────────────────────────────
+  const [discoveredRepos, setDiscoveredRepos] = createSignal<RepoRef[]>([]);
+  const [discoveringUpstream, setDiscoveringUpstream] = createSignal(false);
+  const [discoveryCapped, setDiscoveryCapped] = createSignal(false);
+  const [manualEntry, setManualEntry] = createSignal("");
+  const [manualEntryError, setManualEntryError] = createSignal<string | null>(null);
 
   // Initialize org states and fetch repos on mount / when selectedOrgs change
   createEffect(() => {
@@ -125,6 +140,39 @@ export default function RepoSelector(props: RepoSelectorProps) {
       });
 
       await Promise.allSettled(promises);
+
+      // After all org repos have loaded, trigger upstream discovery if enabled
+      if (props.showUpstreamDiscovery && version === effectVersion) {
+        const currentUser = user();
+        const discoveryClient = getClient();
+        if (currentUser && discoveryClient) {
+          setDiscoveringUpstream(true);
+          setDiscoveredRepos([]);
+          setDiscoveryCapped(false);
+          // Build exclude set from all org repos + already-selected repos
+          const allOrgFullNames = new Set<string>();
+          for (const state of orgStates()) {
+            for (const repo of state.repos) {
+              allOrgFullNames.add(repo.fullName);
+            }
+          }
+          for (const repo of props.selected) {
+            allOrgFullNames.add(repo.fullName);
+          }
+          void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames)
+            .then((repos) => {
+              if (version !== effectVersion) return;
+              setDiscoveredRepos(repos);
+              setDiscoveryCapped(repos.length >= 100);
+            })
+            .catch(() => {
+              // Non-fatal — partial results may already be in state
+            })
+            .finally(() => {
+              if (version === effectVersion) setDiscoveringUpstream(false);
+            });
+        }
+      }
     })();
   });
 
@@ -251,6 +299,70 @@ export default function RepoSelector(props: RepoSelectorProps) {
     );
     props.onChange(props.selected.filter((r) => !allVisible.has(r.fullName)));
   }
+
+  // ── Upstream selection helpers ────────────────────────────────────────────
+
+  const upstreamSelectedSet = createMemo(() =>
+    new Set((props.upstreamRepos ?? []).map((r) => r.fullName))
+  );
+
+  function isUpstreamSelected(fullName: string) {
+    return upstreamSelectedSet().has(fullName);
+  }
+
+  function toggleUpstreamRepo(repo: RepoRef) {
+    const current = props.upstreamRepos ?? [];
+    if (isUpstreamSelected(repo.fullName)) {
+      props.onUpstreamChange?.(current.filter((r) => r.fullName !== repo.fullName));
+    } else {
+      props.onUpstreamChange?.([...current, repo]);
+    }
+  }
+
+  function handleManualAdd() {
+    const raw = manualEntry().trim();
+    if (!raw) return;
+    if (!VALID_REPO_NAME.test(raw)) {
+      setManualEntryError("Format must be owner/repo");
+      return;
+    }
+    const [owner, name] = raw.split("/");
+    const fullName = `${owner}/${name}`;
+
+    // Check duplicates against org repos, upstream selected, and discovered
+    if (selectedSet().has(fullName)) {
+      setManualEntryError("Already in your selected repositories");
+      return;
+    }
+    if (upstreamSelectedSet().has(fullName)) {
+      setManualEntryError("Already in upstream repositories");
+      return;
+    }
+    if (discoveredRepos().some((r) => r.fullName === fullName)) {
+      setManualEntryError("Already discovered — select it from the list below");
+      return;
+    }
+
+    const newRepo: RepoRef = { owner, name, fullName };
+    props.onUpstreamChange?.([...(props.upstreamRepos ?? []), newRepo]);
+    setManualEntry("");
+    setManualEntryError(null);
+  }
+
+  function handleManualKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter") handleManualAdd();
+  }
+
+  // Upstream repos visible in the discovery list (discovered + manually added that aren't org repos)
+  const filteredDiscovered = createMemo(() => {
+    const query = q();
+    if (!query) return discoveredRepos();
+    return discoveredRepos().filter(
+      (r) =>
+        r.name.toLowerCase().includes(query) ||
+        r.owner.toLowerCase().includes(query)
+    );
+  });
 
   // ── Status ────────────────────────────────────────────────────────────────
 
@@ -412,6 +524,110 @@ export default function RepoSelector(props: RepoSelectorProps) {
           );
         }}
       </Index>
+
+      {/* Upstream Repositories section */}
+      <Show when={props.showUpstreamDiscovery}>
+        <div class="flex flex-col gap-3">
+          {/* Section heading */}
+          <div class="border-t border-base-300 pt-3">
+            <h3 class="text-sm font-semibold text-base-content">Upstream Repositories</h3>
+            <p class="text-xs text-base-content/60 mt-0.5">
+              Repos you contribute to but don't own. Issues and PRs are tracked; workflow runs are not.
+            </p>
+          </div>
+
+          {/* Manual entry */}
+          <div class="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="owner/repo"
+              value={manualEntry()}
+              onInput={(e) => {
+                setManualEntry(e.currentTarget.value);
+                setManualEntryError(null);
+              }}
+              onKeyDown={handleManualKeyDown}
+              class="input input-sm flex-1"
+              aria-label="Add upstream repo manually"
+            />
+            <button
+              type="button"
+              onClick={handleManualAdd}
+              class="btn btn-sm btn-outline"
+            >
+              Add
+            </button>
+          </div>
+          <Show when={manualEntryError()}>
+            <div role="alert" class="alert alert-error text-xs py-2">
+              {manualEntryError()}
+            </div>
+          </Show>
+
+          {/* Discovery loading */}
+          <Show when={discoveringUpstream()}>
+            <div class="flex items-center gap-3 py-2">
+              <LoadingSpinner size="sm" />
+              <span class="text-sm text-base-content/60">Discovering upstream repos...</span>
+            </div>
+          </Show>
+
+          {/* Discovered repos list */}
+          <Show when={!discoveringUpstream() && discoveredRepos().length > 0}>
+            <div class="overflow-hidden rounded-lg border border-base-300">
+              <div class="max-h-[300px] overflow-y-auto" role="region" aria-label="Upstream repositories">
+                <ul class="divide-y divide-base-300">
+                  <For each={filteredDiscovered()}>
+                    {(repo) => (
+                      <li>
+                        <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200">
+                          <input
+                            type="checkbox"
+                            checked={isUpstreamSelected(repo.fullName)}
+                            onChange={() => toggleUpstreamRepo(repo)}
+                            class="checkbox checkbox-primary checkbox-sm mt-0.5"
+                          />
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 truncate text-sm font-medium text-base-content">
+                              {repo.fullName}
+                            </span>
+                          </div>
+                        </label>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </div>
+            </div>
+            <Show when={discoveryCapped()}>
+              <p class="text-xs text-base-content/50">
+                Showing first 100 discovered repos. Use manual entry above to add specific repos.
+              </p>
+            </Show>
+          </Show>
+
+          {/* Manually-added upstream repos not in discovered list */}
+          <Show when={(props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName)).length > 0}>
+            <div class="flex flex-col gap-1">
+              <For each={(props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName))}>
+                {(repo) => (
+                  <div class="flex items-center gap-2 px-1">
+                    <span class="text-sm flex-1">{repo.fullName}</span>
+                    <button
+                      type="button"
+                      onClick={() => props.onUpstreamChange?.((props.upstreamRepos ?? []).filter(r => r.fullName !== repo.fullName))}
+                      class="btn btn-ghost btn-xs"
+                      aria-label={`Remove ${repo.fullName}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </Show>
 
       {/* Total count */}
       <Show when={!isLoadingAny() && props.selected.length > 0}>

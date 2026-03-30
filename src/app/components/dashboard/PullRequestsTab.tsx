@@ -5,6 +5,7 @@ import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
+import UserAvatarBadge from "../shared/UserAvatarBadge";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
@@ -23,6 +24,8 @@ export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
   loading?: boolean;
   userLogin: string;
+  allUsers?: { login: string; label: string }[];
+  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -120,6 +123,19 @@ const sortOptions: SortOption[] = [
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
+    const users = props.allUsers;
+    if (!users || users.length <= 1) return prFilterGroups;
+    return [
+      ...prFilterGroups,
+      {
+        label: "User",
+        field: "user",
+        options: users.map((u) => ({ value: u.login, label: u.label })),
+      },
+    ];
+  });
+
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
     return pref ?? { field: "updatedAt", direction: "desc" as const };
@@ -168,6 +184,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       }
       if (tabFilters.sizeCategory !== "all" && isEnriched) {
         if (sizeCategory !== tabFilters.sizeCategory) return false;
+      }
+
+      if (tabFilters.user !== "all") {
+        const surfacedBy = pr.surfacedBy ?? [props.userLogin];
+        if (!surfacedBy.includes(tabFilters.user)) return false;
       }
 
       meta.set(pr.id, { roles, sizeCategory });
@@ -261,7 +282,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           onChange={handleSort}
         />
         <FilterChips
-          groups={prFilterGroups}
+          groups={filterGroups()}
           values={viewState.tabFilters.pullRequests}
           onChange={(field, value) => {
             setTabFilter("pullRequests", field as PullRequestFilterField, value);
@@ -435,6 +456,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
                                 density={config.viewDensity}
+                                surfacedByBadge={
+                                  props.trackedUsers && props.trackedUsers.length > 0
+                                    ? <UserAvatarBadge
+                                        users={(pr.surfacedBy ?? []).flatMap((login) => {
+                                          const u = props.trackedUsers!.find((t) => t.login === login);
+                                          return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
+                                        })}
+                                        currentUserLogin={props.userLogin}
+                                      />
+                                    : undefined
+                                }
                               >
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={pr.enriched !== false}>

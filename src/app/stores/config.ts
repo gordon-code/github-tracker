@@ -17,17 +17,25 @@ export function resolveTheme(theme: ThemeId): string {
   return prefersDark ? AUTO_DARK_THEME : AUTO_LIGHT_THEME;
 }
 
+export const RepoRefSchema = z.object({
+  owner: z.string(),
+  name: z.string(),
+  fullName: z.string(),
+});
+
+export const TrackedUserSchema = z.object({
+  login: z.string(),
+  avatarUrl: z.string().url(),
+  name: z.string().nullable(),
+});
+
+export type TrackedUser = z.infer<typeof TrackedUserSchema>;
+
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
-  selectedRepos: z
-    .array(
-      z.object({
-        owner: z.string(),
-        name: z.string(),
-        fullName: z.string(),
-      })
-    )
-    .default([]),
+  selectedRepos: z.array(RepoRefSchema).default([]),
+  upstreamRepos: z.array(RepoRefSchema).default([]),
+  trackedUsers: z.array(TrackedUserSchema).default([]),
   refreshInterval: z.number().min(0).max(3600).default(300),
   hotPollInterval: z.number().min(10).max(120).default(30),
   maxWorkflowsPerRepo: z.number().min(1).max(20).default(5),

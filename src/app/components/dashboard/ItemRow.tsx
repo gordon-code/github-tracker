@@ -15,6 +15,7 @@ export interface ItemRowProps {
   density: "compact" | "comfortable";
   commentCount?: number;
   hideRepo?: boolean;
+  surfacedByBadge?: JSX.Element;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -94,6 +95,9 @@ export default function ItemRow(props: ItemRowProps) {
       {/* Author + time + comment count */}
       <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 ${isCompact() ? "" : "pt-0.5"}`}>
         <span>{props.author}</span>
+        <Show when={props.surfacedByBadge !== undefined}>
+          <div class="relative z-10">{props.surfacedByBadge}</div>
+        </Show>
         <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
         <Show when={(props.commentCount ?? 0) > 0}>
           <span class="flex items-center gap-0.5">

@@ -13,6 +13,7 @@ import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
 import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
+import TrackedUsersSection from "./TrackedUsersSection";
 import type { RepoRef } from "../../services/api";
 
 export default function SettingsPage() {
@@ -51,6 +52,7 @@ export default function SettingsPage() {
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
+  const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -106,6 +108,11 @@ export default function SettingsPage() {
     saveWithFeedback({ selectedRepos: repos });
   }
 
+  function handleUpstreamChange(repos: RepoRef[]) {
+    setLocalUpstream(repos);
+    saveWithFeedback({ upstreamRepos: repos });
+  }
+
   async function handleRequestNotificationPermission() {
     if (typeof Notification === "undefined") return;
     const perm = await Notification.requestPermission();
@@ -134,6 +141,8 @@ export default function SettingsPage() {
       {
         selectedOrgs: config.selectedOrgs,
         selectedRepos: config.selectedRepos,
+        upstreamRepos: config.upstreamRepos,
+        trackedUsers: config.trackedUsers,
         refreshInterval: config.refreshInterval,
         hotPollInterval: config.hotPollInterval,
         maxWorkflowsPerRepo: config.maxWorkflowsPerRepo,
@@ -311,13 +320,29 @@ export default function SettingsPage() {
                   selectedOrgs={localOrgs()}
                   selected={localRepos()}
                   onChange={handleReposChange}
+                  showUpstreamDiscovery={true}
+                  upstreamRepos={localUpstream()}
+                  onUpstreamChange={handleUpstreamChange}
                 />
               </div>
             </Show>
           </div>
         </Section>
 
-        {/* Section 2: Refresh */}
+        {/* Section 2: Tracked Users */}
+        <Section title="Tracked Users">
+          <div class="flex flex-col gap-3 px-4 py-3">
+            <p class="text-xs text-base-content/60">
+              Track another GitHub user's issues and pull requests alongside yours.
+            </p>
+            <TrackedUsersSection
+              users={config.trackedUsers}
+              onSave={(users) => saveWithFeedback({ trackedUsers: users })}
+            />
+          </div>
+        </Section>
+
+        {/* Section 3: Refresh */}
         <Section title="Refresh">
           <SettingRow
             label="Refresh interval"
