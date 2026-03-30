@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
-import { CONFIG_STORAGE_KEY, resetConfig } from "./config";
+import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
@@ -43,6 +43,11 @@ export function setAuth(response: TokenExchangeResponse): void {
   localStorage.setItem(AUTH_STORAGE_KEY, response.access_token);
   _setToken(response.access_token);
   console.info("[auth] access token set (localStorage)");
+}
+
+export function setAuthFromPat(token: string): void {
+  setAuth({ access_token: token });
+  updateConfig({ authMethod: "pat" });
 }
 
 const _onClearCallbacks: (() => void)[] = [];
@@ -107,8 +112,12 @@ export async function validateToken(): Promise<boolean> {
     }
 
     if (resp.status === 401) {
-      // Permanent token is revoked — clear auth and redirect to login
-      console.info("[auth] access token invalid — clearing auth");
+      const method = config.authMethod;
+      console.info(
+        method === "pat"
+          ? "[auth] PAT invalid or expired — clearing auth"
+          : "[auth] access token invalid — clearing auth"
+      );
       clearAuth();
       return false;
     }

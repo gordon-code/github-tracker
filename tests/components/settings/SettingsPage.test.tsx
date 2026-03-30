@@ -115,6 +115,7 @@ beforeEach(() => {
     notifications: { enabled: false, issues: true, pullRequests: true, workflowRuns: true },
     selectedOrgs: [],
     selectedRepos: [],
+    authMethod: "oauth" as const,
   });
 
   sessionStorage.clear();
@@ -512,6 +513,30 @@ describe("SettingsPage — Data: Sign out", () => {
 });
 
 // Theme application tests removed — theme is now handled by createEffect in App.tsx, not SettingsPage
+
+describe("SettingsPage — Auth method display", () => {
+  it("shows 'OAuth' when authMethod is 'oauth'", () => {
+    renderSettings();
+    screen.getByText("OAuth");
+  });
+
+  it("shows 'Personal Access Token' when authMethod is 'pat'", () => {
+    updateConfig({ authMethod: "pat" });
+    renderSettings();
+    screen.getByText("Personal Access Token");
+  });
+
+  it("shows 'Manage org access' when authMethod is 'oauth'", () => {
+    renderSettings();
+    screen.getByRole("button", { name: "Manage org access" });
+  });
+
+  it("hides 'Manage org access' when authMethod is 'pat'", () => {
+    updateConfig({ authMethod: "pat" });
+    renderSettings();
+    expect(screen.queryByRole("button", { name: "Manage org access" })).toBeNull();
+  });
+});
 
 describe("SettingsPage — Manage org access button", () => {
   beforeEach(() => {

@@ -285,3 +285,41 @@ describe("validateToken", () => {
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghs_permanent");
   });
 });
+
+describe("setAuthFromPat", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+  let configMod: typeof import("../../src/app/stores/config");
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+    configMod = await import("../../src/app/stores/config");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("stores token in localStorage", () => {
+    mod.setAuthFromPat("ghp_testtoken123");
+    expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghp_testtoken123");
+  });
+
+  it("sets token signal", () => {
+    mod.setAuthFromPat("ghp_testtoken123");
+    expect(mod.token()).toBe("ghp_testtoken123");
+  });
+
+  it("sets config.authMethod to 'pat'", () => {
+    mod.setAuthFromPat("ghp_testtoken123");
+    expect(configMod.config.authMethod).toBe("pat");
+  });
+
+  it("clearAuth resets authMethod to 'oauth'", () => {
+    mod.setAuthFromPat("ghp_testtoken123");
+    expect(configMod.config.authMethod).toBe("pat");
+    mod.clearAuth();
+    expect(configMod.config.authMethod).toBe("oauth");
+  });
+});
