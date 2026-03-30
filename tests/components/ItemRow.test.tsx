@@ -54,26 +54,33 @@ describe("ItemRow", () => {
     screen.getByTestId("child-slot");
   });
 
+  it("children slot sits above overlay link (relative z-10)", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps}>
+        <span data-testid="child-slot">extra content</span>
+      </ItemRow>
+    ));
+    const childWrapper = container.querySelector("[data-testid='child-slot']")!.parentElement!;
+    expect(childWrapper.className).toContain("relative");
+    expect(childWrapper.className).toContain("z-10");
+  });
+
   it("does not render children slot when not provided", () => {
     render(() => <ItemRow {...defaultProps} />);
     expect(screen.queryByTestId("child-slot")).toBeNull();
   });
 
-  it("opens url in new tab when row is clicked", async () => {
-    const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+  it("renders overlay link with correct href, target, rel, and aria-label", () => {
     render(() => <ItemRow {...defaultProps} />);
+    const link = screen.getByRole("link", { name: /octocat\/Hello-World #42: Fix a bug/ });
+    expect(link.getAttribute("href")).toBe(defaultProps.url);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
 
-    // Click on the title text to trigger row click
-    const titleEl = screen.getByText("Fix a bug");
-    await user.click(titleEl);
-
-    expect(openSpy).toHaveBeenCalledWith(
-      defaultProps.url,
-      "_blank",
-      "noopener,noreferrer"
-    );
-    openSpy.mockRestore();
+  it("does not render overlay link for non-GitHub URLs", () => {
+    render(() => <ItemRow {...defaultProps} url="https://evil.com/bad" />);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("calls onIgnore when ignore button is clicked", async () => {
@@ -87,33 +94,27 @@ describe("ItemRow", () => {
     expect(onIgnore).toHaveBeenCalledOnce();
   });
 
-  it("does not open URL when ignore button is clicked", async () => {
-    const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-    const onIgnore = vi.fn();
-    render(() => <ItemRow {...defaultProps} onIgnore={onIgnore} />);
-
+  it("ignore button has relative z-10 to sit above overlay link", () => {
+    render(() => <ItemRow {...defaultProps} />);
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    await user.click(ignoreBtn);
-
-    expect(openSpy).not.toHaveBeenCalled();
-    openSpy.mockRestore();
+    expect(ignoreBtn.className).toContain("relative");
+    expect(ignoreBtn.className).toContain("z-10");
   });
 
   it("applies compact padding in compact density", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} density="compact" />
     ));
-    const row = container.querySelector("[role='row']");
-    expect(row?.className).toContain("py-2");
+    const row = container.querySelector(".group")!;
+    expect(row.className).toContain("py-2");
   });
 
   it("applies comfortable padding in comfortable density", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} density="comfortable" />
     ));
-    const row = container.querySelector("[role='row']");
-    expect(row?.className).toContain("py-3");
+    const row = container.querySelector(".group")!;
+    expect(row.className).toContain("py-3");
   });
 
   it("renders no labels section when labels array is empty", () => {

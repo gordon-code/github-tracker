@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, untrack } from "solid-js";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 
@@ -69,6 +69,15 @@ export const ViewStateSchema = z.object({
     actions: { conclusion: "all", event: "all" },
   }),
   showPrRuns: z.boolean().default(false),
+  expandedRepos: z.object({
+    issues: z.record(z.string(), z.boolean()).default({}),
+    pullRequests: z.record(z.string(), z.boolean()).default({}),
+    actions: z.record(z.string(), z.boolean()).default({}),
+  }).default({
+    issues: {},
+    pullRequests: {},
+    actions: {},
+  }),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -93,8 +102,19 @@ export const [viewState, setViewState] = createStore<ViewState>(
 );
 
 export function resetViewState(): void {
-  const defaults = ViewStateSchema.parse({});
-  setViewState(defaults);
+  updateViewState({
+    lastActiveTab: "issues",
+    sortPreferences: {},
+    ignoredItems: [],
+    globalFilter: { org: null, repo: null },
+    tabFilters: {
+      issues: { role: "all", comments: "all" },
+      pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" },
+      actions: { conclusion: "all", event: "all" },
+    },
+    showPrRuns: false,
+    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
+  });
 }
 
 export function updateViewState(partial: Partial<ViewState>): void {
@@ -187,6 +207,59 @@ export function resetAllTabFilters(
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
+      }
+    })
+  );
+}
+
+export function toggleExpandedRepo(
+  tab: keyof ViewState["expandedRepos"],
+  repoFullName: string
+): void {
+  setViewState(
+    produce((draft) => {
+      if (draft.expandedRepos[tab][repoFullName]) {
+        delete draft.expandedRepos[tab][repoFullName];
+      } else {
+        draft.expandedRepos[tab][repoFullName] = true;
+      }
+    })
+  );
+}
+
+export function setAllExpanded(
+  tab: keyof ViewState["expandedRepos"],
+  repoFullNames: string[],
+  expanded: boolean
+): void {
+  setViewState(
+    produce((draft) => {
+      if (expanded) {
+        for (const name of repoFullNames) {
+          draft.expandedRepos[tab][name] = true;
+        }
+      } else {
+        for (const name of repoFullNames) {
+          delete draft.expandedRepos[tab][name];
+        }
+      }
+    })
+  );
+}
+
+export function pruneExpandedRepos(
+  tab: keyof ViewState["expandedRepos"],
+  activeRepoNames: string[]
+): void {
+  const currentKeys = untrack(() => Object.keys(viewState.expandedRepos[tab]));
+  if (currentKeys.length === 0) return;
+  const activeSet = new Set(activeRepoNames);
+  const staleKeys = currentKeys.filter((k) => !activeSet.has(k));
+  if (staleKeys.length === 0) return;
+  setViewState(
+    produce((draft) => {
+      for (const key of staleKeys) {
+        delete draft.expandedRepos[tab][key];
       }
     })
   );

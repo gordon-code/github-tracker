@@ -591,7 +591,7 @@ describe("workflow run concurrency", () => {
 
   it("processes repos faster with pooled concurrency than sequential chunks", async () => {
     const repos = makeRepos(30);
-    const DELAY_MS = 5;
+    const DELAY_MS = 20;
 
     const makeTimedOctokit = () => ({
       request: vi.fn(async () => {

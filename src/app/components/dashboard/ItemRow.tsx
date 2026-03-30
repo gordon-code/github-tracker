@@ -1,5 +1,5 @@
 import { For, JSX, Show } from "solid-js";
-import { openGitHubUrl } from "../../lib/url";
+import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
 
 export interface ItemRowProps {
@@ -19,29 +19,28 @@ export interface ItemRowProps {
 
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
-
-  function handleRowClick(e: MouseEvent) {
-    // Only open if click was not on the ignore button
-    if ((e.target as HTMLElement).closest("[data-ignore-btn]")) return;
-    openGitHubUrl(props.url);
-  }
+  const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
   return (
     <div
-      role="row"
-      tabIndex={0}
-      onClick={handleRowClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openGitHubUrl(props.url);
-        }
-      }}
-      class={`group relative flex items-start gap-3 cursor-pointer
+      class={`group relative flex items-start gap-3
         hover:bg-base-200
-        transition-colors focus:outline-none focus:bg-base-200 focus-visible:ring-2 focus-visible:ring-primary
+        transition-colors
         ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
     >
+      {/* Overlay link — covers entire row; interactive children use relative z-10 */}
+      <Show when={safeUrl()}>
+        {(url) => (
+          <a
+            href={url()}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="absolute inset-0 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset rounded"
+            aria-label={`${props.repo} #${props.number}: ${props.title}`}
+          />
+        )}
+      </Show>
+
       {/* Repo badge */}
       <Show when={!props.hideRepo}>
         <span
@@ -86,9 +85,9 @@ export default function ItemRow(props: ItemRowProps) {
           </div>
         </Show>
 
-        {/* Additional children slot */}
+        {/* Additional children slot — z-10 to sit above stretched link */}
         <Show when={props.children !== undefined}>
-          <div class={isCompact() ? "mt-0.5" : "mt-1"}>{props.children}</div>
+          <div class={`relative z-10 ${isCompact() ? "mt-0.5" : "mt-1"}`}>{props.children}</div>
         </Show>
       </div>
 
@@ -119,11 +118,8 @@ export default function ItemRow(props: ItemRowProps) {
       {/* Ignore button — visible on hover */}
       <button
         data-ignore-btn
-        onClick={(e) => {
-          e.stopPropagation();
-          props.onIgnore();
-        }}
-        class={`shrink-0 self-center rounded p-1
+        onClick={() => props.onIgnore()}
+        class={`relative z-10 shrink-0 self-center rounded p-1
           text-base-content/30
           hover:text-error
           opacity-0 group-hover:opacity-100 focus:opacity-100
