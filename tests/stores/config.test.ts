@@ -107,6 +107,61 @@ describe("ConfigSchema", () => {
   });
 });
 
+describe("ConfigSchema — upstream repos and tracked users", () => {
+  it("defaults upstreamRepos to empty array", () => {
+    const result = ConfigSchema.parse({});
+    expect(result.upstreamRepos).toEqual([]);
+  });
+
+  it("defaults trackedUsers to empty array", () => {
+    const result = ConfigSchema.parse({});
+    expect(result.trackedUsers).toEqual([]);
+  });
+
+  it("accepts valid tracked users", () => {
+    const result = ConfigSchema.parse({
+      trackedUsers: [
+        { login: "octocat", avatarUrl: "https://avatars.githubusercontent.com/u/583231", name: "The Octocat" },
+      ],
+    });
+    expect(result.trackedUsers).toHaveLength(1);
+    expect(result.trackedUsers[0].login).toBe("octocat");
+  });
+
+  it("rejects trackedUsers array exceeding max of 10", () => {
+    const users = Array.from({ length: 11 }, (_, i) => ({
+      login: `user${i}`,
+      avatarUrl: `https://avatars.githubusercontent.com/u/${i}`,
+      name: null,
+    }));
+    expect(() => ConfigSchema.parse({ trackedUsers: users })).toThrow();
+  });
+
+  it("rejects trackedUser with non-GitHub-CDN avatar URL", () => {
+    expect(() => ConfigSchema.parse({
+      trackedUsers: [
+        { login: "evil", avatarUrl: "https://evil.com/avatar.png", name: null },
+      ],
+    })).toThrow();
+  });
+
+  it("accepts trackedUser with null name", () => {
+    const result = ConfigSchema.parse({
+      trackedUsers: [
+        { login: "noname", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: null },
+      ],
+    });
+    expect(result.trackedUsers[0].name).toBeNull();
+  });
+
+  it("accepts valid upstream repos", () => {
+    const result = ConfigSchema.parse({
+      upstreamRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    expect(result.upstreamRepos).toHaveLength(1);
+  });
+});
+
 describe("loadConfig", () => {
   beforeEach(() => {
     localStorageMock.clear();

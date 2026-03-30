@@ -244,6 +244,20 @@ describe("TrackedUsersSection — adding a user", () => {
     resolveValidation(null);
   });
 
+  it("shows error when validateGitHubUser throws (network error)", async () => {
+    vi.mocked(apiModule.validateGitHubUser).mockRejectedValue(new Error("Network timeout"));
+
+    const user = userEvent.setup();
+    render(() => <TrackedUsersSection users={[]} onSave={vi.fn()} />);
+
+    await user.type(screen.getByRole("textbox", { name: /github username/i }), "someuser");
+    await user.click(screen.getByRole("button", { name: /add/i }));
+
+    await waitFor(() => {
+      screen.getByText("Validation failed — try again");
+    });
+  });
+
   it("submits on Enter key press", async () => {
     const onSave = vi.fn();
     vi.mocked(apiModule.validateGitHubUser).mockResolvedValue(makeUser());

@@ -48,6 +48,8 @@ function makeUserResponse(overrides: {
   };
 }
 
+let searchPageIdCounter = 100000;
+
 /** Build a minimal GraphQL search response page with the given repo names. */
 function makeSearchPage(repoNames: string[], hasNextPage = false) {
   return {
@@ -55,7 +57,7 @@ function makeSearchPage(repoNames: string[], hasNextPage = false) {
       issueCount: repoNames.length,
       pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor-1" : null },
       nodes: repoNames.map((nameWithOwner) => ({
-        databaseId: Math.floor(Math.random() * 100000),
+        databaseId: searchPageIdCounter++,
         number: 1,
         title: "Test",
         state: "OPEN",
@@ -187,6 +189,7 @@ describe("validateGitHubUser", () => {
 describe("discoverUpstreamRepos", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    searchPageIdCounter = 100000;
   });
 
   it("returns repos found in issue and PR search results", async () => {
@@ -737,5 +740,21 @@ describe("multi-user search", () => {
 
     // surfacedBy must be set when onLightData fires
     expect(lightDataSurfacedBy).toEqual(["mainuser"]);
+  });
+
+  it("returns empty results immediately when repos and trackedUsers are both empty", async () => {
+    const octokit = makeOctokit(
+      async () => { throw new Error("should not be called"); },
+      async () => { throw new Error("should not be called"); }
+    );
+
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never, [], "mainuser", undefined, []
+    );
+
+    expect(result.issues).toEqual([]);
+    expect(result.pullRequests).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(octokit.graphql).not.toHaveBeenCalled();
   });
 });

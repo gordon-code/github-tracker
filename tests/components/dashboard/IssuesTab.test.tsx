@@ -169,6 +169,27 @@ describe("IssuesTab — user filter logic", () => {
 
     expect(screen.queryByText("Legacy issue")).toBeNull();
   });
+
+  it("shows all items when user filter references a removed tracked user (stale filter)", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "owner/repo", surfacedBy: ["me"] }),
+    ];
+
+    // Set filter to a user that no longer exists in allUsers
+    setTabFilter("issues", "user", "removed-user");
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }]}
+      />
+    ));
+
+    // Stale filter value should be ignored — items still visible
+    screen.getByText("My issue");
+  });
 });
 
 describe("IssuesTab — avatar badge", () => {

@@ -609,4 +609,56 @@ describe("RepoSelector — upstream discovery", () => {
 
     screen.getByText(/already in your selected/i);
   });
+
+  it("manual entry: duplicate from upstream repos shows duplicate error", async () => {
+    const user = userEvent.setup();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[{ owner: "upstream-org", name: "upstream-repo", fullName: "upstream-org/upstream-repo" }]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("Upstream Repositories"));
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "upstream-org/upstream-repo");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    screen.getByText(/already in upstream/i);
+  });
+
+  it("manual entry: duplicate from discovered repos shows discovered error", async () => {
+    const user = userEvent.setup();
+    const discovered: RepoRef[] = [
+      { owner: "disc-org", name: "disc-repo", fullName: "disc-org/disc-repo" },
+    ];
+    vi.mocked(api.discoverUpstreamRepos).mockResolvedValue(discovered);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("disc-org/disc-repo");
+    });
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "disc-org/disc-repo");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    screen.getByText(/already discovered/i);
+  });
 });

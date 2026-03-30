@@ -1,9 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { config } from "../../stores/config";
+import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
-import UserAvatarBadge from "../shared/UserAvatarBadge";
+import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
@@ -22,7 +22,7 @@ export interface IssuesTabProps {
   loading?: boolean;
   userLogin: string;
   allUsers?: { login: string; label: string }[];
-  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
+  trackedUsers?: TrackedUser[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -108,8 +108,11 @@ export default function IssuesTab(props: IssuesTabProps) {
       }
 
       if (tabFilter.user !== "all") {
-        const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
-        if (!surfacedBy.includes(tabFilter.user)) return false;
+        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
+        if (validUser) {
+          const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
+          if (!surfacedBy.includes(tabFilter.user)) return false;
+        }
       }
 
       meta.set(issue.id, { roles });
@@ -319,10 +322,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
-                                        users={(issue.surfacedBy ?? []).flatMap((login) => {
-                                          const u = trackedUserMap().get(login);
-                                          return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
-                                        })}
+                                        users={buildSurfacedByUsers(issue.surfacedBy, trackedUserMap())}
                                         currentUserLogin={props.userLogin}
                                       />
                                     : undefined

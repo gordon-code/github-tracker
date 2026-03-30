@@ -308,10 +308,14 @@ export default function DashboardPage() {
   }));
 
   const userLogin = createMemo(() => user()?.login ?? "");
-  const allUsers = createMemo(() => [
-    { login: userLogin().toLowerCase(), label: "Me" },
-    ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
-  ]);
+  const allUsers = createMemo(() => {
+    const login = userLogin().toLowerCase();
+    if (!login) return [];
+    return [
+      { login, label: "Me" },
+      ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
+    ];
+  });
 
   return (
     <div class="min-h-screen bg-base-200">

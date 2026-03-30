@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { config } from "../../stores/config";
+import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
-import UserAvatarBadge from "../shared/UserAvatarBadge";
+import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
@@ -25,7 +25,7 @@ export interface PullRequestsTabProps {
   loading?: boolean;
   userLogin: string;
   allUsers?: { login: string; label: string }[];
-  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
+  trackedUsers?: TrackedUser[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -191,8 +191,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       }
 
       if (tabFilters.user !== "all") {
-        const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
-        if (!surfacedBy.includes(tabFilters.user)) return false;
+        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
+        if (validUser) {
+          const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
+          if (!surfacedBy.includes(tabFilters.user)) return false;
+        }
       }
 
       meta.set(pr.id, { roles, sizeCategory });
@@ -463,10 +466,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
-                                        users={(pr.surfacedBy ?? []).flatMap((login) => {
-                                          const u = trackedUserMap().get(login);
-                                          return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
-                                        })}
+                                        users={buildSurfacedByUsers(pr.surfacedBy, trackedUserMap())}
                                         currentUserLogin={props.userLogin}
                                       />
                                     : undefined

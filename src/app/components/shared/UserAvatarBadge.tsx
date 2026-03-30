@@ -1,5 +1,15 @@
 import { createMemo, For, Show } from "solid-js";
 
+export function buildSurfacedByUsers(
+  surfacedBy: string[] | undefined,
+  trackedUserMap: Map<string, { login: string; avatarUrl: string }>,
+): { login: string; avatarUrl: string }[] {
+  return (surfacedBy ?? []).flatMap((login) => {
+    const u = trackedUserMap.get(login);
+    return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
+  });
+}
+
 interface UserAvatarBadgeProps {
   users: { login: string; avatarUrl: string }[];
   currentUserLogin: string;

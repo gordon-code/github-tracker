@@ -200,9 +200,8 @@ function extractSearchPartialData<T>(err: unknown): T | null {
 }
 
 const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-const VALID_LOGIN = /^[A-Za-z0-9\[\]-]+$/;
-// Stricter regex for user-supplied tracked user logins — no bracket chars, max 39 chars (GitHub limit).
-const VALID_TRACKED_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+const VALID_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+const VALID_TRACKED_LOGIN = VALID_LOGIN;
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -918,6 +917,99 @@ function processLightPRNode(
 }
 
 /**
+ * Executes a single LIGHT_COMBINED_SEARCH_QUERY with partial-error handling,
+ * node processing, and pagination follow-ups. Shared by both the chunked
+ * repo-scoped search and the unscoped global user search.
+ */
+async function executeLightCombinedQuery(
+  octokit: GitHubOctokit,
+  issueQ: string,
+  prInvQ: string,
+  prRevQ: string,
+  errorLabel: string,
+  issueSeen: Set<number>,
+  issues: Issue[],
+  prMap: Map<number, PullRequest>,
+  nodeIdMap: Map<number, string>,
+  errors: ApiError[],
+  issueCap: number,
+  prCap: number,
+): Promise<void> {
+  let response: LightCombinedSearchResponse;
+  let isPartial = false;
+  try {
+    response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
+      issueQ, prInvQ, prRevQ,
+      issueCursor: null, prInvCursor: null, prRevCursor: null,
+    });
+  } catch (err) {
+    const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+      ? err.data as Partial<LightCombinedSearchResponse>
+      : null;
+    if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
+      response = {
+        issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prInvolves: partial.prInvolves ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prReviewReq: partial.prReviewReq ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        rateLimit: partial.rateLimit,
+      };
+      isPartial = true;
+      const { message } = extractRejectionError(err);
+      errors.push({ repo: errorLabel, statusCode: null, message, retryable: true });
+    } else {
+      throw err;
+    }
+  }
+
+  if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+  for (const node of response.issues.nodes) {
+    if (issues.length >= issueCap) break;
+    if (!node) continue;
+    processIssueNode(node, issueSeen, issues);
+  }
+  for (const node of response.prInvolves.nodes) {
+    if (prMap.size >= prCap) break;
+    if (!node) continue;
+    processLightPRNode(node, prMap, nodeIdMap);
+  }
+  for (const node of response.prReviewReq.nodes) {
+    if (prMap.size >= prCap) break;
+    if (!node) continue;
+    processLightPRNode(node, prMap, nodeIdMap);
+  }
+
+  if (isPartial) return;
+
+  if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < issueCap) {
+    await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+      octokit, ISSUES_SEARCH_QUERY, issueQ, errorLabel, errors,
+      (node) => processIssueNode(node, issueSeen, issues),
+      () => issues.length, issueCap, response.issues.pageInfo.endCursor,
+    );
+  }
+
+  const prPaginationTasks: Promise<unknown>[] = [];
+  if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < prCap) {
+    prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+      octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, errorLabel, errors,
+      (node) => processLightPRNode(node, prMap, nodeIdMap),
+      () => prMap.size, prCap, response.prInvolves.pageInfo.endCursor,
+    ));
+  }
+  if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < prCap) {
+    prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+      octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, errorLabel, errors,
+      (node) => processLightPRNode(node, prMap, nodeIdMap),
+      () => prMap.size, prCap, response.prReviewReq.pageInfo.endCursor,
+    ));
+  }
+  if (prPaginationTasks.length > 0) {
+    await Promise.allSettled(prPaginationTasks);
+  }
+}
+
+/**
  * Phase 1: light combined search. Fetches issues fully and PRs with minimal fields.
  * Returns light PRs (enriched: false) and their GraphQL node IDs for phase 2 backfill.
  */
@@ -944,102 +1036,23 @@ async function graphqlLightCombinedSearch(
   const ISSUE_CAP = 1000;
   const PR_CAP = 1000;
 
-  const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+  await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
     const issueQ = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
     const prInvQ = `is:pr is:open involves:${userLogin} ${repoQualifiers}`;
     const prRevQ = `is:pr is:open review-requested:${userLogin} ${repoQualifiers}`;
     const batchLabel = `light-batch-${chunkIdx + 1}/${chunks.length}`;
 
-    let response: LightCombinedSearchResponse;
-    let isPartial = false;
     try {
-      try {
-        response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
-          issueQ, prInvQ, prRevQ,
-          issueCursor: null, prInvCursor: null, prRevCursor: null,
-        });
-      } catch (err) {
-        const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-          ? err.data as Partial<LightCombinedSearchResponse>
-          : null;
-        if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
-          response = {
-            issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            prInvolves: partial.prInvolves ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            prReviewReq: partial.prReviewReq ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            rateLimit: partial.rateLimit,
-          };
-          isPartial = true;
-          const { message } = extractRejectionError(err);
-          errors.push({ repo: batchLabel, statusCode: null, message, retryable: true });
-        } else {
-          throw err;
-        }
-      }
-
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-      for (const node of response.issues.nodes) {
-        if (issues.length >= ISSUE_CAP) break;
-        if (!node) continue;
-        processIssueNode(node, issueSeen, issues);
-      }
-
-      for (const node of response.prInvolves.nodes) {
-        if (prMap.size >= PR_CAP) break;
-        if (!node) continue;
-        processLightPRNode(node, prMap, nodeIdMap);
-      }
-      for (const node of response.prReviewReq.nodes) {
-        if (prMap.size >= PR_CAP) break;
-        if (!node) continue;
-        processLightPRNode(node, prMap, nodeIdMap);
-      }
-
-      if (isPartial) return;
-
-      // Pagination follow-ups for issues (PRs don't paginate in light mode —
-      // backfill handles the full set via node IDs)
-      if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < ISSUE_CAP) {
-        await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
-          octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
-          (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, ISSUE_CAP, response.issues.pageInfo.endCursor,
-        );
-      }
-
-      // Light PR pagination: re-fetch with light query for additional pages
-      const prPaginationTasks: Promise<unknown>[] = [];
-      if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, batchLabel, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prInvolves.pageInfo.endCursor,
-        ));
-      }
-      if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, batchLabel, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prReviewReq.pageInfo.endCursor,
-        ));
-      }
-      if (prPaginationTasks.length > 0) {
-        await Promise.allSettled(prPaginationTasks);
-      }
+      await executeLightCombinedQuery(
+        octokit, issueQ, prInvQ, prRevQ, batchLabel,
+        issueSeen, issues, prMap, nodeIdMap, errors, ISSUE_CAP, PR_CAP,
+      );
     } catch (err) {
       const { statusCode, message } = extractRejectionError(err);
       errors.push({ repo: batchLabel, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }));
-
-  for (const result of chunkResults) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({ repo: "light-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
-    }
-  }
 
   if (issues.length >= ISSUE_CAP) {
     console.warn(`[api] Issue search results capped at ${ISSUE_CAP}`);
@@ -1216,78 +1229,11 @@ async function graphqlGlobalUserSearch(
   const prInvQ = `is:pr is:open involves:${userLogin}`;
   const prRevQ = `is:pr is:open review-requested:${userLogin}`;
 
-  let response: LightCombinedSearchResponse;
-  let isPartial = false;
   try {
-    try {
-      response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
-        issueQ, prInvQ, prRevQ,
-        issueCursor: null, prInvCursor: null, prRevCursor: null,
-      });
-    } catch (err) {
-      const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-        ? err.data as Partial<LightCombinedSearchResponse>
-        : null;
-      if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
-        response = {
-          issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          prInvolves: partial.prInvolves ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          prReviewReq: partial.prReviewReq ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          rateLimit: partial.rateLimit,
-        };
-        isPartial = true;
-        const { message } = extractRejectionError(err);
-        errors.push({ repo: `global-search:${userLogin}`, statusCode: null, message, retryable: true });
-      } else {
-        throw err;
-      }
-    }
-
-    if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-    for (const node of response.issues.nodes) {
-      if (issues.length >= ISSUE_CAP) break;
-      if (!node) continue;
-      processIssueNode(node, issueSeen, issues);
-    }
-    for (const node of response.prInvolves.nodes) {
-      if (prMap.size >= PR_CAP) break;
-      if (!node) continue;
-      processLightPRNode(node, prMap, nodeIdMap);
-    }
-    for (const node of response.prReviewReq.nodes) {
-      if (prMap.size >= PR_CAP) break;
-      if (!node) continue;
-      processLightPRNode(node, prMap, nodeIdMap);
-    }
-
-    if (!isPartial) {
-      // Issue pagination
-      if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < ISSUE_CAP) {
-        await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
-          octokit, ISSUES_SEARCH_QUERY, issueQ, `global-search:${userLogin}`, errors,
-          (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, ISSUE_CAP, response.issues.pageInfo.endCursor,
-        );
-      }
-      // PR pagination
-      const prPaginationTasks: Promise<unknown>[] = [];
-      if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, `global-search:${userLogin}`, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prInvolves.pageInfo.endCursor,
-        ));
-      }
-      if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, `global-search:${userLogin}`, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prReviewReq.pageInfo.endCursor,
-        ));
-      }
-      if (prPaginationTasks.length > 0) await Promise.allSettled(prPaginationTasks);
-    }
+    await executeLightCombinedQuery(
+      octokit, issueQ, prInvQ, prRevQ, `global-search:${userLogin}`,
+      issueSeen, issues, prMap, nodeIdMap, errors, ISSUE_CAP, PR_CAP,
+    );
   } catch (err) {
     const { statusCode, message } = extractRejectionError(err);
     errors.push({ repo: `global-search:${userLogin}`, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
@@ -1363,8 +1309,8 @@ export async function fetchIssuesAndPullRequests(
 
   const hasTrackedUsers = (trackedUsers?.length ?? 0) > 0;
 
-  // Early exit only when both repos and tracked users are empty
-  if (repos.length === 0 && !hasTrackedUsers && !userLogin) {
+  // Early exit when there is nothing to search
+  if (repos.length === 0 && !hasTrackedUsers) {
     return { issues: [], pullRequests: [], errors: [] };
   }
 
@@ -1392,7 +1338,7 @@ export async function fetchIssuesAndPullRequests(
   }
 
   // Fire onLightData with annotated main user data (tracked user results come later)
-  if (onLightData) {
+  if (onLightData && (issueMap.size > 0 || prMap.size > 0)) {
     onLightData({
       issues: [...issueMap.values()],
       pullRequests: [...prMap.values()],
@@ -2158,8 +2104,8 @@ export async function discoverUpstreamRepos(
       (node) => extractRepoName(node),
       () => repoNames.size, CAP,
     ),
-    paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
-      octokit, PR_SEARCH_QUERY, prQ, "upstream-prs", errors,
+    paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+      octokit, LIGHT_PR_SEARCH_QUERY, prQ, "upstream-prs", errors,
       (node) => extractRepoName(node),
       () => repoNames.size, CAP,
     ),

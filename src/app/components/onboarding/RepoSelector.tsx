@@ -355,9 +355,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
   }
 
   // Manually-added upstream repos not in the discovered list
-  const manualUpstreamRepos = createMemo(() =>
-    (props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName))
-  );
+  const manualUpstreamRepos = createMemo(() => {
+    const discoveredSet = new Set(discoveredRepos().map(r => r.fullName));
+    return (props.upstreamRepos ?? []).filter(r => !discoveredSet.has(r.fullName));
+  });
 
   // Upstream repos visible in the discovery list (discovered + manually added that aren't org repos)
   const filteredDiscovered = createMemo(() => {

@@ -380,7 +380,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 3: GitHub Actions */}
+        {/* Section 4: GitHub Actions */}
         <Section title="GitHub Actions">
           <SettingRow
             label="Max workflows per repo"
@@ -420,7 +420,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 4: Notifications */}
+        {/* Section 5: Notifications */}
         <Section title="Notifications">
           <SettingRow
             label="Enable notifications"
@@ -512,7 +512,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 5: Appearance */}
+        {/* Section 6: Appearance */}
         <Section title="Appearance">
           <div class="px-4 py-2 border-b border-base-300">
             <p class="text-sm font-medium text-base-content mb-2">Theme</p>
@@ -552,7 +552,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 6: Tabs */}
+        {/* Section 7: Tabs */}
         <Section title="Tabs">
           <SettingRow
             label="Default tab"
@@ -586,7 +586,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 7: Data */}
+        {/* Section 8: Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow
