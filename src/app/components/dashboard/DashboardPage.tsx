@@ -309,7 +309,7 @@ export default function DashboardPage() {
 
   const userLogin = createMemo(() => user()?.login ?? "");
   const allUsers = createMemo(() => [
-    { login: userLogin(), label: "Me" },
+    { login: userLogin().toLowerCase(), label: "Me" },
     ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
   ]);
 

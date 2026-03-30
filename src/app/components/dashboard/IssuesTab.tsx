@@ -58,6 +58,10 @@ const sortOptions: SortOption[] = [
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const trackedUserMap = createMemo(() =>
+    new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     if (!users || users.length <= 1) return issueFilterGroups;
@@ -316,7 +320,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
                                         users={(issue.surfacedBy ?? []).flatMap((login) => {
-                                          const u = props.trackedUsers!.find((t) => t.login === login);
+                                          const u = trackedUserMap().get(login);
                                           return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
                                         })}
                                         currentUserLogin={props.userLogin}

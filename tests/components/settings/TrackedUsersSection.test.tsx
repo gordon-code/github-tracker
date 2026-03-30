@@ -215,7 +215,7 @@ describe("TrackedUsersSection — adding a user", () => {
     await user.type(screen.getByRole("textbox", { name: /github username/i }), "CurrentUser");
     await user.click(screen.getByRole("button", { name: /add/i }));
 
-    screen.getByText("Already tracking this user");
+    screen.getByText("Your activity is already included in your dashboard");
     expect(onSave).not.toHaveBeenCalled();
     expect(apiModule.validateGitHubUser).not.toHaveBeenCalled();
   });

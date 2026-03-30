@@ -175,10 +175,10 @@ describe("validateGitHubUser", () => {
     expect(result?.name).toBeNull();
   });
 
-  it("returns login from API response (may differ in casing)", async () => {
+  it("normalizes login to lowercase", async () => {
     const octokit = makeOctokit(async () => makeUserResponse({ login: "OctoCat" }));
     const result = await validateGitHubUser(octokit as never, "octocat");
-    expect(result?.login).toBe("OctoCat");
+    expect(result?.login).toBe("octocat");
   });
 });
 

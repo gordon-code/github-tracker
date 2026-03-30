@@ -149,7 +149,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
           setDiscoveringUpstream(true);
           setDiscoveredRepos([]);
           setDiscoveryCapped(false);
-          // Build exclude set from all org repos + already-selected repos
+          // Build exclude set from all org repos + already-selected repos + current upstream repos
           const allOrgFullNames = new Set<string>();
           for (const state of orgStates()) {
             for (const repo of state.repos) {
@@ -157,6 +157,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
             }
           }
           for (const repo of props.selected) {
+            allOrgFullNames.add(repo.fullName);
+          }
+          for (const repo of props.upstreamRepos ?? []) {
             allOrgFullNames.add(repo.fullName);
           }
           void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames)
@@ -352,6 +355,11 @@ export default function RepoSelector(props: RepoSelectorProps) {
   function handleManualKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter") handleManualAdd();
   }
+
+  // Manually-added upstream repos not in the discovered list
+  const manualUpstreamRepos = createMemo(() =>
+    (props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName))
+  );
 
   // Upstream repos visible in the discovery list (discovered + manually added that aren't org repos)
   const filteredDiscovered = createMemo(() => {
@@ -607,9 +615,9 @@ export default function RepoSelector(props: RepoSelectorProps) {
           </Show>
 
           {/* Manually-added upstream repos not in discovered list */}
-          <Show when={(props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName)).length > 0}>
+          <Show when={manualUpstreamRepos().length > 0}>
             <div class="flex flex-col gap-1">
-              <For each={(props.upstreamRepos ?? []).filter(r => !discoveredRepos().some(d => d.fullName === r.fullName))}>
+              <For each={manualUpstreamRepos()}>
                 {(repo) => (
                   <div class="flex items-center gap-2 px-1">
                     <span class="text-sm flex-1">{repo.fullName}</span>

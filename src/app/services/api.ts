@@ -1318,7 +1318,9 @@ function mergeTrackedUserResults(
   for (const issue of trackedResult.issues) {
     const existing = issueMap.get(issue.id);
     if (existing) {
-      existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      if (!existing.surfacedBy?.includes(login)) {
+        existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      }
     } else {
       issueMap.set(issue.id, { ...issue, surfacedBy: [login] });
     }
@@ -1327,7 +1329,9 @@ function mergeTrackedUserResults(
   for (const pr of trackedResult.pullRequests) {
     const existing = prMap.get(pr.id);
     if (existing) {
-      existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      if (!existing.surfacedBy?.includes(login)) {
+        existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      }
     } else {
       prMap.set(pr.id, { ...pr, surfacedBy: [login] });
       // Register node ID for backfill if this PR is new
@@ -2096,7 +2100,7 @@ export async function validateGitHubUser(
     : AVATAR_FALLBACK;
 
   return {
-    login: raw.login,
+    login: raw.login.toLowerCase(),
     avatarUrl,
     name: raw.name ?? null,
   };
@@ -2142,9 +2146,9 @@ export async function discoverUpstreamRepos(
     ),
   ]);
 
-  for (const err of errors) {
+  if (errors.length > 0) {
     pushNotification(
-      `upstream-discovery:${err.repo}`,
+      "upstream-discovery",
       `Upstream repo discovery partial failure — some repositories may be missing`,
       "warning"
     );

@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 
 interface UserAvatarBadgeProps {
   users: { login: string; avatarUrl: string }[];
@@ -6,14 +6,18 @@ interface UserAvatarBadgeProps {
 }
 
 export default function UserAvatarBadge(props: UserAvatarBadgeProps) {
-  const trackedUsers = () =>
+  const trackedUsers = createMemo(() =>
     props.users.filter(
       (u) => u.login.toLowerCase() !== props.currentUserLogin.toLowerCase()
-    );
+    )
+  );
 
   return (
     <Show when={trackedUsers().length > 0}>
-      <div class="flex items-center">
+      <div
+        class="flex items-center"
+        aria-label={`Surfaced by: ${trackedUsers().map(u => u.login).join(", ")}`}
+      >
         <For each={trackedUsers()}>
           {(u, i) => (
             <div

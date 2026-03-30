@@ -28,7 +28,13 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
     // Check self-tracking
     const currentLogin = user()?.login?.toLowerCase();
     if (currentLogin && raw === currentLogin) {
-      setValidationError("Already tracking this user");
+      setValidationError("Your activity is already included in your dashboard");
+      return;
+    }
+
+    // Soft cap
+    if (props.users.length >= 10) {
+      setValidationError("Maximum of 10 tracked users");
       return;
     }
 
@@ -85,7 +91,7 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
         <button
           type="button"
           onClick={() => void handleAdd()}
-          disabled={validating()}
+          disabled={validating() || props.users.length >= 10}
           class="btn btn-sm btn-primary"
         >
           {validating() ? "Adding..." : "Add"}
@@ -146,6 +152,13 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
         <div role="alert" class="alert alert-warning text-xs py-2">
           Each tracked user increases API usage by ~30 points per refresh. Adding many users may
           cause GitHub rate limiting.
+        </div>
+      </Show>
+
+      {/* Cap reached message */}
+      <Show when={props.users.length >= 10}>
+        <div role="alert" class="alert alert-info text-xs py-2">
+          Maximum of 10 tracked users
         </div>
       </Show>
     </div>

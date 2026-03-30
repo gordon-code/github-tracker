@@ -123,6 +123,10 @@ const sortOptions: SortOption[] = [
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const trackedUserMap = createMemo(() =>
+    new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     if (!users || users.length <= 1) return prFilterGroups;
@@ -460,7 +464,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
                                         users={(pr.surfacedBy ?? []).flatMap((login) => {
-                                          const u = props.trackedUsers!.find((t) => t.login === login);
+                                          const u = trackedUserMap().get(login);
                                           return u ? [{ login: u.login, avatarUrl: u.avatarUrl }] : [];
                                         })}
                                         currentUserLogin={props.userLogin}

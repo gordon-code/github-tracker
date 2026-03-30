@@ -35,7 +35,7 @@ export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
   upstreamRepos: z.array(RepoRefSchema).default([]),
-  trackedUsers: z.array(TrackedUserSchema).default([]),
+  trackedUsers: z.array(TrackedUserSchema).max(10).default([]),
   refreshInterval: z.number().min(0).max(3600).default(300),
   hotPollInterval: z.number().min(10).max(120).default(30),
   maxWorkflowsPerRepo: z.number().min(1).max(20).default(5),

@@ -231,13 +231,6 @@ export default function ActionsTab(props: ActionsTabProps) {
         </div>
       </Show>
 
-      {/* Upstream repos exclusion note */}
-      <Show when={props.hasUpstreamRepos}>
-        <p class="text-xs text-base-content/40 text-center py-2">
-          Workflow runs are not tracked for upstream repositories.
-        </p>
-      </Show>
-
       {/* Repo groups */}
       <Show when={repoGroups().length > 0}>
         <For each={repoGroups()}>
@@ -326,6 +319,13 @@ export default function ActionsTab(props: ActionsTabProps) {
             );
           }}
         </For>
+      </Show>
+
+      {/* Upstream repos exclusion note */}
+      <Show when={props.hasUpstreamRepos}>
+        <p class="text-xs text-base-content/40 text-center py-2">
+          Workflow runs are not tracked for upstream repositories.
+        </p>
       </Show>
     </div>
   );
