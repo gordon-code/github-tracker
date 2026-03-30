@@ -127,4 +127,19 @@ describe("WorkflowRunRow", () => {
     expect(row?.className).toContain("py-2.5");
     expect(row?.className).toContain("px-4");
   });
+
+  it("applies flash class when isFlashing is true", () => {
+    const { container } = render(() => (
+      <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" isFlashing={true} />
+    ));
+    expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
+  });
+
+  it("flash takes precedence over shimmer", () => {
+    const { container } = render(() => (
+      <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" isFlashing={true} isPolling={true} />
+    ));
+    expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+  });
 });

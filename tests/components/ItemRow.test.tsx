@@ -132,4 +132,38 @@ describe("ItemRow", () => {
     render(() => <ItemRow {...defaultProps} hideRepo={false} />);
     screen.getByText("octocat/Hello-World");
   });
+
+  it("applies shimmer class when isPolling is true", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} isPolling={true} />);
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(true);
+    expect(container.querySelector(".loading-spinner")).toBeTruthy();
+  });
+
+  it("does not apply shimmer class when isPolling is false", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} isPolling={false} />);
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+    expect(container.querySelector(".loading-spinner")).toBeFalsy();
+  });
+
+  it("does not apply shimmer class when isPolling is omitted", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+    expect(container.querySelector(".loading-spinner")).toBeFalsy();
+  });
+
+  it("applies flash class when isFlashing is true", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} isFlashing={true} />);
+    expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
+  });
+
+  it("does not apply flash class when isFlashing is false", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} isFlashing={false} />);
+    expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(false);
+  });
+
+  it("flash takes precedence over shimmer", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} isFlashing={true} isPolling={true} />);
+    expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+  });
 });

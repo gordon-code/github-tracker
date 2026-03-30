@@ -1,6 +1,6 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -15,7 +15,8 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
-import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, detectReorderedRepos } from "../../lib/grouping";
+import RepoLockControls from "../shared/RepoLockControls";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -156,7 +157,9 @@ export default function IssuesTab(props: IssuesTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
+  const repoGroups = createMemo(() =>
+    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos.issues)
+  );
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -177,6 +180,37 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (names.length === 0) return;
     pruneExpandedRepos("issues", names);
   });
+
+  createEffect(() => {
+    const names = repoGroups().map(g => g.repoFullName);
+    pruneLockedRepos("issues", names);
+  });
+
+  let prevRepoOrderIssues: string[] = [];
+  let prevLockedOrderIssues: string[] = [];
+  let highlightTimeoutIssues: ReturnType<typeof setTimeout> | undefined;
+  const [highlightedReposIssues, setHighlightedReposIssues] = createSignal<ReadonlySet<string>>(new Set());
+
+  createEffect(() => {
+    const currentOrder = repoGroups().map(g => g.repoFullName);
+    const currentLocked = viewState.lockedRepos.issues;
+
+    const lockedChanged = currentLocked.length !== prevLockedOrderIssues.length
+      || currentLocked.some((r, i) => r !== prevLockedOrderIssues[i]);
+
+    if (prevRepoOrderIssues.length > 0 && !lockedChanged) {
+      const moved = detectReorderedRepos(prevRepoOrderIssues, currentOrder);
+      if (moved.size > 0) {
+        setHighlightedReposIssues(moved);
+        clearTimeout(highlightTimeoutIssues);
+        highlightTimeoutIssues = setTimeout(() => setHighlightedReposIssues(new Set<string>()), 1500);
+      }
+    }
+
+    prevRepoOrderIssues = currentOrder;
+    prevLockedOrderIssues = [...currentLocked];
+  });
+  onCleanup(() => clearTimeout(highlightTimeoutIssues));
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("issues", field, direction);
@@ -282,30 +316,33 @@ export default function IssuesTab(props: IssuesTabProps) {
 
                 return (
                   <div class="bg-base-100">
-                    <button
-                      onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
-                      aria-expanded={isExpanded()}
-                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
-                    >
-                      <ChevronIcon size="md" rotated={!isExpanded()} />
-                      {repoGroup.repoFullName}
-                      <Show when={!isExpanded()}>
-                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                          <For each={roleSummary()}>
-                            {([role, count]) => (
-                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                role === "author" ? "bg-primary/10 text-primary" :
-                                role === "assignee" ? "bg-secondary/10 text-secondary" :
-                                "bg-base-300 text-base-content/70"
-                              }`}>
-                                {role} ×{count}
-                              </span>
-                            )}
-                          </For>
-                        </span>
-                      </Show>
-                    </button>
+                    <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposIssues().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
+                      <button
+                        onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
+                        aria-expanded={isExpanded()}
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                      >
+                        <ChevronIcon size="md" rotated={!isExpanded()} />
+                        {repoGroup.repoFullName}
+                        <Show when={!isExpanded()}>
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                            <For each={roleSummary()}>
+                              {([role, count]) => (
+                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                  role === "author" ? "bg-primary/10 text-primary" :
+                                  role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                  "bg-base-300 text-base-content/70"
+                                }`}>
+                                  {role} ×{count}
+                                </span>
+                              )}
+                            </For>
+                          </span>
+                        </Show>
+                      </button>
+                      <RepoLockControls tab="issues" repoFullName={repoGroup.repoFullName} />
+                    </div>
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>

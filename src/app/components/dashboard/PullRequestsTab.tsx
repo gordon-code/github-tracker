@@ -1,6 +1,6 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
@@ -18,7 +18,8 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
-import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, detectReorderedRepos } from "../../lib/grouping";
+import RepoLockControls from "../shared/RepoLockControls";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -26,6 +27,7 @@ export interface PullRequestsTabProps {
   userLogin: string;
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
+  hotPollingPRIds?: ReadonlySet<number>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -245,7 +247,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
+  const repoGroups = createMemo(() =>
+    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos.pullRequests)
+  );
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -265,6 +269,105 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     const names = activeRepoNames();
     if (names.length === 0) return;
     pruneExpandedRepos("pullRequests", names);
+  });
+
+  createEffect(() => {
+    const names = repoGroups().map(g => g.repoFullName);
+    pruneLockedRepos("pullRequests", names);
+  });
+
+  interface PeekUpdate {
+    itemLabel: string;
+    newStatus: string;
+  }
+  const [peekUpdates, setPeekUpdates] = createSignal<ReadonlyMap<string, PeekUpdate>>(new Map());
+  let peekTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  let prevPRValues = new Map<number, { checkStatus: string | null; reviewDecision: string | null }>();
+  let flashTimeout: ReturnType<typeof setTimeout> | undefined;
+  const [flashingPRIds, setFlashingPRIds] = createSignal<ReadonlySet<number>>(new Set());
+
+  createEffect(() => {
+    const prs = props.pullRequests;
+    const hotIds = props.hotPollingPRIds;
+
+    if (prevPRValues.size === 0) {
+      prevPRValues = new Map(prs.map(pr => [pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision }]));
+      return;
+    }
+
+    // Only detect changes for hot-polled items — full refresh replaces all data
+    // and would cause mass flashing if not gated.
+    if (!hotIds || hotIds.size === 0) {
+      prevPRValues = new Map(prs.map(pr => [pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision }]));
+      return;
+    }
+
+    const changed = new Set<number>();
+    for (const pr of prs) {
+      if (!hotIds.has(pr.id)) continue;
+      const prev = prevPRValues.get(pr.id);
+      if (prev && (prev.checkStatus !== pr.checkStatus || prev.reviewDecision !== pr.reviewDecision)) {
+        changed.add(pr.id);
+      }
+    }
+
+    prevPRValues = new Map(prs.map(pr => [pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision }]));
+
+    if (changed.size > 0) {
+      setFlashingPRIds(prev => new Set([...prev, ...changed]));
+      clearTimeout(flashTimeout);
+      flashTimeout = setTimeout(() => setFlashingPRIds(new Set<number>()), 1000);
+
+      // Peek: surface changed items in collapsed repos
+      const peeks = new Map<string, PeekUpdate>();
+      for (const pr of prs) {
+        if (changed.has(pr.id)) {
+          const isCollapsed = !viewState.expandedRepos.pullRequests[pr.repoFullName];
+          if (isCollapsed) {
+            peeks.set(pr.repoFullName, {
+              itemLabel: `#${pr.number} ${pr.title}`,
+              newStatus: pr.checkStatus ?? pr.reviewDecision ?? "updated",
+            });
+          }
+        }
+      }
+      if (peeks.size > 0) {
+        setPeekUpdates(peeks);
+        clearTimeout(peekTimeout);
+        peekTimeout = setTimeout(() => setPeekUpdates(new Map()), 3000);
+      }
+    }
+  });
+
+  let prevRepoOrderPRs: string[] = [];
+  let prevLockedOrderPRs: string[] = [];
+  let highlightTimeoutPRs: ReturnType<typeof setTimeout> | undefined;
+  const [highlightedReposPRs, setHighlightedReposPRs] = createSignal<ReadonlySet<string>>(new Set());
+
+  createEffect(() => {
+    const currentOrder = repoGroups().map(g => g.repoFullName);
+    const currentLocked = viewState.lockedRepos.pullRequests;
+
+    const lockedChanged = currentLocked.length !== prevLockedOrderPRs.length
+      || currentLocked.some((r, i) => r !== prevLockedOrderPRs[i]);
+
+    if (prevRepoOrderPRs.length > 0 && !lockedChanged) {
+      const moved = detectReorderedRepos(prevRepoOrderPRs, currentOrder);
+      if (moved.size > 0) {
+        setHighlightedReposPRs(moved);
+        clearTimeout(highlightTimeoutPRs);
+        highlightTimeoutPRs = setTimeout(() => setHighlightedReposPRs(new Set<string>()), 1500);
+      }
+    }
+
+    prevRepoOrderPRs = currentOrder;
+    prevLockedOrderPRs = [...currentLocked];
+  });
+  onCleanup(() => {
+    clearTimeout(flashTimeout);
+    clearTimeout(peekTimeout);
+    clearTimeout(highlightTimeoutPRs);
   });
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -384,15 +487,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
                 return (
                   <div class="bg-base-100">
-                    <button
-                      onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
-                      aria-expanded={isExpanded()}
-                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
-                    >
-                      <ChevronIcon size="md" rotated={!isExpanded()} />
-                      {repoGroup.repoFullName}
-                      <Show when={!isExpanded()}>
-                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                    <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposPRs().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
+                      <button
+                        onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                        aria-expanded={isExpanded()}
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                      >
+                        <ChevronIcon size="md" rotated={!isExpanded()} />
+                        {repoGroup.repoFullName}
+                        <Show when={!isExpanded()}>
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
                           <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
                           <Show when={summaryMeta().checks.success > 0}>
                             <span class="flex items-center gap-0.5">
@@ -449,7 +553,20 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           </For>
                         </span>
                       </Show>
-                    </button>
+                      </button>
+                      <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
+                    </div>
+                    <Show when={!isExpanded() && peekUpdates().has(repoGroup.repoFullName)}>
+                      <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                        <span class="loading loading-spinner loading-xs text-primary/60" />
+                        <span class="truncate flex-1">
+                          {peekUpdates().get(repoGroup.repoFullName)!.itemLabel}
+                        </span>
+                        <span class="badge badge-xs badge-primary">
+                          {peekUpdates().get(repoGroup.repoFullName)!.newStatus}
+                        </span>
+                      </div>
+                    </Show>
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
@@ -475,6 +592,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       />
                                     : undefined
                                 }
+                                isPolling={props.hotPollingPRIds?.has(pr.id)}
+                                isFlashing={flashingPRIds().has(pr.id)}
                               >
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={pr.enriched !== false}>

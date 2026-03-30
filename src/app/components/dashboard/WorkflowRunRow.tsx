@@ -8,6 +8,8 @@ interface WorkflowRunRowProps {
   run: WorkflowRun;
   onIgnore: (run: WorkflowRun) => void;
   density: Config["viewDensity"];
+  isPolling?: boolean;
+  isFlashing?: boolean;
 }
 
 function StatusIcon(props: { status: string; conclusion: string | null }) {
@@ -126,7 +128,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   return (
     <div
-      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group`}
+      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 
@@ -167,6 +169,10 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       <span class="text-xs text-base-content/40 shrink-0">
         {relativeTime(props.run.createdAt)}
       </span>
+
+      <Show when={props.isPolling}>
+        <span class="loading loading-spinner loading-xs text-base-content/40" />
+      </Show>
 
       <button
         onClick={() => props.onIgnore(props.run)}

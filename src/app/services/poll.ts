@@ -556,7 +556,11 @@ export function createHotPollCoordinator(
     prUpdates: Map<number, HotPRStatusUpdate>,
     runUpdates: Map<number, HotWorkflowRunUpdate>,
     generation: number
-  ) => void
+  ) => void,
+  options?: {
+    onStart?: (prDbIds: ReadonlySet<number>, runIds: ReadonlySet<number>) => void;
+    onEnd?: () => void;
+  }
 ): { destroy: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let chainGeneration = 0;
@@ -588,12 +592,22 @@ export function createHotPollCoordinator(
       return;
     }
 
+    // Skip fetch when no authenticated client (e.g., mid-logout)
+    // Guarded: getClient() can throw during auth state transitions
+    let client: ReturnType<typeof getClient>;
     try {
-      // Skip fetch when no authenticated client (e.g., mid-logout)
-      if (!getClient()) {
-        schedule(myGeneration);
-        return;
-      }
+      client = getClient();
+    } catch {
+      schedule(myGeneration);
+      return;
+    }
+    if (!client) {
+      schedule(myGeneration);
+      return;
+    }
+
+    options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
+    try {
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       if (hadErrors) {
@@ -610,6 +624,10 @@ export function createHotPollCoordinator(
       consecutiveFailures++;
       const message = err instanceof Error ? err.message : "Unknown hot-poll error";
       pushError("hot-poll", message, true);
+    } finally {
+      if (myGeneration === chainGeneration) {
+        options?.onEnd?.();
+      }
     }
 
     schedule(myGeneration);

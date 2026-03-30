@@ -631,9 +631,9 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
-  it("calls pushError when cycle throws", async () => {
+  it("silently reschedules when getClient throws", async () => {
     const onHotData = vi.fn();
-    // Make getClient() throw (now inside the try block) to trigger the catch path
+    // getClient() throw is caught by the pre-onStart guard — schedules next cycle without pushError
     mockGetClient.mockImplementation(() => { throw new Error("auth crash"); });
 
     rebuildHotSets({
@@ -647,7 +647,7 @@ describe("createHotPollCoordinator", () => {
     await createRoot(async (dispose) => {
       createHotPollCoordinator(() => 10, onHotData);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(pushError).toHaveBeenCalledWith("hot-poll", "auth crash", true);
+      expect(pushError).not.toHaveBeenCalled();
       expect(onHotData).not.toHaveBeenCalled();
       dispose();
     });

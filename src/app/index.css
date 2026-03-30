@@ -17,6 +17,41 @@
   animation: slow-pulse 3s ease-in-out infinite;
 }
 
+/* ── Hot-poll shimmer animation ──────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility animate-shimmer {
+  background: linear-gradient(90deg, transparent 25%, oklch(from var(--color-base-content) l c h / 0.06) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── Value-change flash animation ────────────────────────────────────────── */
+
+@keyframes flash {
+  0% { background-color: oklch(from var(--color-primary) l c h / 0.15); }
+  100% { background-color: transparent; }
+}
+
+@utility animate-flash {
+  animation: flash 1s ease-out forwards;
+}
+
+/* ── Repo reorder highlight animation ────────────────────────────────────── */
+
+@keyframes reorder-highlight {
+  0% { background-color: oklch(from var(--color-warning) l c h / 0.12); }
+  100% { background-color: transparent; }
+}
+
+@utility animate-reorder-highlight {
+  animation: reorder-highlight 1.5s ease-out forwards;
+}
+
 /* ── Notification animations ──────────────────────────────────────────────── */
 
 @keyframes toast-slide-in {
@@ -94,7 +129,9 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-toast-in, .animate-toast-out,
   .animate-drawer-in, .animate-drawer-out,
-  .animate-overlay-in, .animate-overlay-out {
+  .animate-overlay-in, .animate-overlay-out,
+  .animate-shimmer, .animate-flash, .animate-reorder-highlight,
+  .loading {
     animation: none;
   }
 }

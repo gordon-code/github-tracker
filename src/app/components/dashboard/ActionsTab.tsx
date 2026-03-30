@@ -1,8 +1,8 @@
-import { createEffect, createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -10,11 +10,14 @@ import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
+import RepoLockControls from "../shared/RepoLockControls";
+import { orderRepoGroups, detectReorderedRepos } from "../../lib/grouping";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
   hasUpstreamRepos?: boolean;
+  hotPollingRunIds?: ReadonlySet<number>;
 }
 
 interface WorkflowGroup {
@@ -134,6 +137,105 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneExpandedRepos("actions", names);
   });
 
+  createEffect(() => {
+    const names = repoGroups().map(g => g.repoFullName);
+    pruneLockedRepos("actions", names);
+  });
+
+  interface PeekUpdate {
+    itemLabel: string;
+    newStatus: string;
+  }
+  const [peekUpdates, setPeekUpdates] = createSignal<ReadonlyMap<string, PeekUpdate>>(new Map());
+  let peekTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  let prevRunValues = new Map<number, { status: string; conclusion: string | null }>();
+  let flashRunTimeout: ReturnType<typeof setTimeout> | undefined;
+  const [flashingRunIds, setFlashingRunIds] = createSignal<ReadonlySet<number>>(new Set());
+
+  createEffect(() => {
+    const runs = props.workflowRuns;
+    const hotIds = props.hotPollingRunIds;
+
+    if (prevRunValues.size === 0) {
+      prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
+      return;
+    }
+
+    // Only detect changes for hot-polled items — full refresh replaces all data
+    // and would cause mass flashing if not gated.
+    if (!hotIds || hotIds.size === 0) {
+      prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
+      return;
+    }
+
+    const changed = new Set<number>();
+    for (const run of runs) {
+      if (!hotIds.has(run.id)) continue;
+      const prev = prevRunValues.get(run.id);
+      if (prev && (prev.status !== run.status || prev.conclusion !== run.conclusion)) {
+        changed.add(run.id);
+      }
+    }
+
+    prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
+
+    if (changed.size > 0) {
+      setFlashingRunIds(prev => new Set([...prev, ...changed]));
+      clearTimeout(flashRunTimeout);
+      flashRunTimeout = setTimeout(() => setFlashingRunIds(new Set<number>()), 1000);
+
+      // Peek: surface changed runs in collapsed repos
+      const peeks = new Map<string, PeekUpdate>();
+      for (const run of runs) {
+        if (changed.has(run.id)) {
+          const isCollapsed = !viewState.expandedRepos.actions[run.repoFullName];
+          if (isCollapsed) {
+            peeks.set(run.repoFullName, {
+              itemLabel: run.name,
+              newStatus: run.conclusion ?? run.status,
+            });
+          }
+        }
+      }
+      if (peeks.size > 0) {
+        setPeekUpdates(peeks);
+        clearTimeout(peekTimeout);
+        peekTimeout = setTimeout(() => setPeekUpdates(new Map()), 3000);
+      }
+    }
+  });
+
+  let prevRepoOrderActions: string[] = [];
+  let prevLockedOrderActions: string[] = [];
+  let highlightTimeoutActions: ReturnType<typeof setTimeout> | undefined;
+  const [highlightedReposActions, setHighlightedReposActions] = createSignal<ReadonlySet<string>>(new Set());
+
+  createEffect(() => {
+    const currentOrder = repoGroups().map(g => g.repoFullName);
+    const currentLocked = viewState.lockedRepos.actions;
+
+    const lockedChanged = currentLocked.length !== prevLockedOrderActions.length
+      || currentLocked.some((r, i) => r !== prevLockedOrderActions[i]);
+
+    if (prevRepoOrderActions.length > 0 && !lockedChanged) {
+      const moved = detectReorderedRepos(prevRepoOrderActions, currentOrder);
+      if (moved.size > 0) {
+        setHighlightedReposActions(moved);
+        clearTimeout(highlightTimeoutActions);
+        highlightTimeoutActions = setTimeout(() => setHighlightedReposActions(new Set<string>()), 1500);
+      }
+    }
+
+    prevRepoOrderActions = currentOrder;
+    prevLockedOrderActions = [...currentLocked];
+  });
+  onCleanup(() => {
+    clearTimeout(flashRunTimeout);
+    clearTimeout(peekTimeout);
+    clearTimeout(highlightTimeoutActions);
+  });
+
   function handleIgnore(run: WorkflowRun) {
     ignoreItem({
       id: String(run.id),
@@ -182,7 +284,9 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   });
 
-  const repoGroups = createMemo(() => groupRuns(filteredRuns()));
+  const repoGroups = createMemo(() =>
+    orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos.actions)
+  );
 
   return (
     <div class="divide-y divide-base-300">
@@ -259,37 +363,51 @@ export default function ActionsTab(props: ActionsTabProps) {
             return (
               <div class="bg-base-100">
                 {/* Repo header */}
-                <button
-                  onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
-                  aria-expanded={isExpanded()}
-                  class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
-                >
-                  <ChevronIcon size="md" rotated={!isExpanded()} />
-                  {repoGroup.repoFullName}
-                  <Show when={!isExpanded()}>
-                    <span class="ml-auto text-xs font-normal text-base-content/60">
-                      {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
-                      <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
-                        {": "}
-                        <Show when={collapsedSummary().passed > 0}>
-                          <span>{collapsedSummary().passed} passed</span>
+                <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposActions().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
+                  <button
+                    onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                    aria-expanded={isExpanded()}
+                    class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                  >
+                    <ChevronIcon size="md" rotated={!isExpanded()} />
+                    {repoGroup.repoFullName}
+                    <Show when={!isExpanded()}>
+                      <span class="ml-auto text-xs font-normal text-base-content/60">
+                        {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
+                        <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
+                          {": "}
+                          <Show when={collapsedSummary().passed > 0}>
+                            <span>{collapsedSummary().passed} passed</span>
+                          </Show>
+                          <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
+                            {", "}
+                          </Show>
+                          <Show when={collapsedSummary().failed > 0}>
+                            <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
+                          </Show>
+                          <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
+                            {", "}
+                          </Show>
+                          <Show when={collapsedSummary().running > 0}>
+                            <span>{collapsedSummary().running} running</span>
+                          </Show>
                         </Show>
-                        <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
-                          {", "}
-                        </Show>
-                        <Show when={collapsedSummary().failed > 0}>
-                          <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
-                        </Show>
-                        <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
-                          {", "}
-                        </Show>
-                        <Show when={collapsedSummary().running > 0}>
-                          <span>{collapsedSummary().running} running</span>
-                        </Show>
-                      </Show>
+                      </span>
+                    </Show>
+                  </button>
+                  <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
+                </div>
+                <Show when={!isExpanded() && peekUpdates().has(repoGroup.repoFullName)}>
+                  <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                    <span class="loading loading-spinner loading-xs text-primary/60" />
+                    <span class="truncate flex-1">
+                      {peekUpdates().get(repoGroup.repoFullName)!.itemLabel}
                     </span>
-                  </Show>
-                </button>
+                    <span class="badge badge-xs badge-primary">
+                      {peekUpdates().get(repoGroup.repoFullName)!.newStatus}
+                    </span>
+                  </div>
+                </Show>
 
                 {/* Workflow cards grid */}
                 <Show when={isExpanded()}>
@@ -308,6 +426,8 @@ export default function ActionsTab(props: ActionsTabProps) {
                               onToggle={() => toggleWorkflow(wfKey)}
                               onIgnoreRun={handleIgnore}
                               density={config.viewDensity}
+                              hotPollingRunIds={props.hotPollingRunIds}
+                              flashingRunIds={flashingRunIds()}
                             />
                           </div>
                         );
