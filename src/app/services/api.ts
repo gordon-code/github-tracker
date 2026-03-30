@@ -263,7 +263,7 @@ interface GraphQLIssueSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLIssueNode | null)[];
   };
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 interface GraphQLPRNode {
@@ -310,7 +310,7 @@ interface GraphQLPRSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLPRNode | null)[];
   };
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 interface ForkCandidate {
@@ -325,8 +325,8 @@ interface ForkRepoResult {
 }
 
 interface ForkQueryResponse {
-  rateLimit?: { remaining: number; resetAt: string };
-  [key: string]: ForkRepoResult | { remaining: number; resetAt: string } | undefined | null;
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  [key: string]: ForkRepoResult | { limit: number; remaining: number; resetAt: string } | undefined | null;
 }
 
 // ── GraphQL search query constants ───────────────────────────────────────────
@@ -353,7 +353,7 @@ const ISSUES_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
 `;
 
@@ -406,7 +406,7 @@ const PR_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
 `;
 
@@ -479,7 +479,7 @@ const LIGHT_COMBINED_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
   ${LIGHT_PR_FRAGMENT}
 `;
@@ -496,7 +496,7 @@ const LIGHT_PR_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
   ${LIGHT_PR_FRAGMENT}
 `;
@@ -507,7 +507,7 @@ interface LightPRSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLLightPRNode | null)[];
   };
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 /** Phase 2 backfill query: enriches PRs with heavy fields using node IDs. */
@@ -541,7 +541,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
 `;
 
@@ -563,7 +563,7 @@ const HOT_PR_STATUS_QUERY = `
         }
       }
     }
-    rateLimit { remaining resetAt }
+    rateLimit { limit remaining resetAt }
   }
 `;
 
@@ -577,7 +577,7 @@ interface HotPRStatusNode {
 
 interface HotPRStatusResponse {
   nodes: (HotPRStatusNode | null)[];
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 interface GraphQLLightPRNode {
@@ -639,12 +639,12 @@ interface LightCombinedSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLLightPRNode | null)[];
   };
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 interface HeavyBackfillResponse {
   nodes: (GraphQLHeavyPRNode | null)[];
-  rateLimit?: { remaining: number; resetAt: string };
+  rateLimit?: { limit: number; remaining: number; resetAt: string };
 }
 
 // Max node IDs per nodes() query (GitHub limit)
@@ -663,7 +663,7 @@ interface SearchPageResult<T> {
  * caller-provided `processNode` callback. Handles partial errors, cap enforcement,
  * and rate limit tracking. Returns the count of items added by processNode.
  */
-async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: { remaining: number; resetAt: string } }, TNode>(
+async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: { limit: number; remaining: number; resetAt: string } }, TNode>(
   octokit: GitHubOctokit,
   query: string,
   queryString: string,
@@ -815,11 +815,11 @@ async function runForkPRFallback(
       );
     }
 
-    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
+    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
 
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-      if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { remaining: number; resetAt: string });
+      if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { limit: number; remaining: number; resetAt: string });
 
       for (let i = 0; i < forkChunk.length; i++) {
         const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
@@ -1475,11 +1475,11 @@ async function graphqlSearchPRs(
         );
       }
 
-      const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { remaining resetAt }\n}`;
+      const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
 
       try {
         const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { remaining: number; resetAt: string });
+        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { limit: number; remaining: number; resetAt: string });
 
         for (let i = 0; i < forkChunk.length; i++) {
           const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;

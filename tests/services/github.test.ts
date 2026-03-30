@@ -305,18 +305,27 @@ describe("getGraphqlRateLimit", () => {
 
   it("converts ISO 8601 resetAt string to Date", () => {
     const iso = "2024-06-01T12:00:00Z";
-    updateGraphqlRateLimit({ remaining: 4500, resetAt: iso });
+    updateGraphqlRateLimit({ limit: 5000, remaining: 4500, resetAt: iso });
     const rl = getGraphqlRateLimit();
     expect(rl).not.toBeNull();
+    expect(rl!.limit).toBe(5000);
     expect(rl!.remaining).toBe(4500);
     expect(rl!.resetAt).toBeInstanceOf(Date);
     expect(rl!.resetAt.getTime()).toBe(new Date(iso).getTime());
   });
 
-  it("overwrites previous value on subsequent updates", () => {
-    updateGraphqlRateLimit({ remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
-    updateGraphqlRateLimit({ remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+  it("stores limit from Enterprise Cloud (10000)", () => {
+    updateGraphqlRateLimit({ limit: 10000, remaining: 9500, resetAt: "2024-06-01T12:00:00Z" });
     const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(10000);
+    expect(rl!.remaining).toBe(9500);
+  });
+
+  it("overwrites previous value on subsequent updates", () => {
+    updateGraphqlRateLimit({ limit: 5000, remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ limit: 5000, remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(5000);
     expect(rl!.remaining).toBe(3000);
   });
 });

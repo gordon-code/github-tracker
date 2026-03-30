@@ -21,6 +21,7 @@ import {
 } from "../../services/poll";
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
+import { formatCount } from "../../lib/format";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -377,8 +378,8 @@ export default function DashboardPage() {
               <Show when={getGraphqlRateLimit()}>
                 {(rl) => (
                   <div class="tooltip tooltip-left" data-tip={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`}>
-                    <span class={`tabular-nums ${rl().remaining < 500 ? "text-warning" : ""}`}>
-                      API RL: {rl().remaining.toLocaleString()}/5k/hr
+                    <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
+                      API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
                     </span>
                   </div>
                 )}

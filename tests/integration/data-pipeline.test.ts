@@ -64,7 +64,7 @@ function makeGraphqlSearchResponse(nodes = [graphqlIssueNode]) {
       pageInfo: { hasNextPage: false, endCursor: null },
       nodes,
     },
-    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+    rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
   };
 }
 

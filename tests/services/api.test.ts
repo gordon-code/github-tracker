@@ -193,7 +193,7 @@ function makeGraphqlIssueResponse(nodes = [graphqlIssueNode], hasNextPage = fals
       pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null },
       nodes,
     },
-    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+    rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
   };
 }
 
@@ -371,7 +371,7 @@ describe("fetchIssues", () => {
         pageInfo: { hasNextPage: false, endCursor: null },
         nodes: [graphqlIssueNode, null, { ...graphqlIssueNode, databaseId: 999 }],
       },
-      rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
     }));
 
     const result = await fetchIssues(
@@ -427,7 +427,7 @@ describe("fetchIssues", () => {
           pageInfo: { hasNextPage: true, endCursor: "cursor-partial" },
           nodes: [{ ...graphqlIssueNode, databaseId: 42 }, null],
         },
-        rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        rateLimit: { limit: 5000, remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
       },
     });
     const octokit = makeIssueOctokit(async () => {
@@ -563,7 +563,7 @@ function makeGraphqlPRResponse(nodes = [graphqlPRNode], hasNextPage = false, iss
       pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null },
       nodes,
     },
-    rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+    rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
   };
 }
 
@@ -714,7 +714,7 @@ describe("fetchPullRequests", () => {
       // Fork fallback query
       return {
         fork0: { object: { statusCheckRollup: { state: "SUCCESS" } } },
-        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
       };
     });
 
@@ -788,7 +788,7 @@ describe("fetchPullRequests", () => {
           pageInfo: { hasNextPage: true, endCursor: null }, // degenerate response
           nodes: [{ ...graphqlPRNode, databaseId: callCount }],
         },
-        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
       };
     });
 
@@ -874,7 +874,7 @@ describe("fetchPullRequests", () => {
         data: {
           fork0: { object: { statusCheckRollup: { state: "SUCCESS" } } },
           // fork1 is missing — that fork repo was deleted/inaccessible
-          rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          rateLimit: { limit: 5000, remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
         },
       });
     });
@@ -951,7 +951,7 @@ describe("fetchPullRequests", () => {
           pageInfo: { hasNextPage: true, endCursor: "cursor-partial" },
           nodes: [{ ...graphqlPRNode, databaseId: 77 }],
         },
-        rateLimit: { remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        rateLimit: { limit: 5000, remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
       },
     });
     const octokit = makePROctokit(async (_query, variables) => {
@@ -1038,7 +1038,7 @@ describe("fetchPullRequests", () => {
       }
       // Fork fallback queries
       const response: Record<string, unknown> = {
-        rateLimit: { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
       };
       const indices = Object.keys(variables as Record<string, unknown>)
         .filter((k) => k.startsWith("owner"))
