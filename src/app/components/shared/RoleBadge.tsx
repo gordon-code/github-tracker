@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 
 interface RoleBadgeProps {
-  roles: ("author" | "reviewer" | "assignee")[];
+  roles: ("author" | "reviewer" | "assignee" | "involved")[];
 }
 
 const ROLE_CONFIG = {
@@ -16,6 +16,10 @@ const ROLE_CONFIG = {
   assignee: {
     label: "Assignee",
     class: "badge badge-accent badge-sm",
+  },
+  involved: {
+    label: "Involved",
+    class: "badge badge-ghost badge-sm",
   },
 } as const;
 

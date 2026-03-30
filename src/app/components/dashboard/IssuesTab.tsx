@@ -62,6 +62,10 @@ export default function IssuesTab(props: IssuesTabProps) {
     new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
   );
 
+  const upstreamRepoSet = createMemo(() =>
+    new Set((config.upstreamRepos ?? []).map(r => r.fullName))
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     if (!users || users.length <= 1) return issueFilterGroups;
@@ -96,7 +100,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (filter.repo && issue.repoFullName !== filter.repo) return false;
       if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
 
-      const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, []);
+      const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;

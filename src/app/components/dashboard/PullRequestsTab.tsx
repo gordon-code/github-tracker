@@ -127,6 +127,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
   );
 
+  const upstreamRepoSet = createMemo(() =>
+    new Set((config.upstreamRepos ?? []).map(r => r.fullName))
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     if (!users || users.length <= 1) return prFilterGroups;
@@ -161,7 +165,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       if (filter.repo && pr.repoFullName !== filter.repo) return false;
       if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
 
-      const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins);
+      const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
       // Tab filters — light-field filters always apply; heavy-field filters

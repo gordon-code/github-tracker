@@ -75,13 +75,15 @@ export function deriveInvolvementRoles(
   authorLogin: string,
   assigneeLogins: string[],
   reviewerLogins: string[],
-): ("author" | "reviewer" | "assignee")[] {
+  isUpstream?: boolean,
+): ("author" | "reviewer" | "assignee" | "involved")[] {
   if (!userLogin) return [];
   const login = userLogin.toLowerCase();
-  const roles: ("author" | "reviewer" | "assignee")[] = [];
+  const roles: ("author" | "reviewer" | "assignee" | "involved")[] = [];
   if (authorLogin.toLowerCase() === login) roles.push("author");
   if (reviewerLogins.some((r) => r.toLowerCase() === login)) roles.push("reviewer");
   if (assigneeLogins.some((a) => a.toLowerCase() === login)) roles.push("assignee");
+  if (roles.length === 0 && isUpstream) roles.push("involved");
   return roles;
 }
 

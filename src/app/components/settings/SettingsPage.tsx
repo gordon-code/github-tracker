@@ -297,7 +297,7 @@ export default function SettingsPage() {
                 <div>
                   <p class="text-sm font-medium text-base-content">Repositories</p>
                   <p class="text-xs text-base-content/60">
-                    {localRepos().length} selected
+                    {localRepos().length + localUpstream().length} selected{localUpstream().length > 0 ? ` (${localUpstream().length} upstream)` : ""}
                   </p>
                   <Show when={localRepos().length > 50}>
                     <p class="text-xs text-warning">
