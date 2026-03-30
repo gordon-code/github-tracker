@@ -1,5 +1,6 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit, updateRateLimitFromHeaders } from "./github";
 import { pushNotification } from "../lib/errors";
+import type { TrackedUser } from "../stores/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export interface Issue {
   assigneeLogins: string[];
   repoFullName: string;
   comments: number;
+  surfacedBy?: string[];
 }
 
 export interface CheckStatus {
@@ -69,6 +71,7 @@ export interface PullRequest {
   enriched?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;
+  surfacedBy?: string[];
 }
 
 export interface WorkflowRun {
@@ -197,7 +200,8 @@ function extractSearchPartialData<T>(err: unknown): T | null {
 }
 
 const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-const VALID_LOGIN = /^[A-Za-z0-9\[\]-]+$/;
+const VALID_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+const VALID_TRACKED_LOGIN = VALID_LOGIN;
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -913,6 +917,99 @@ function processLightPRNode(
 }
 
 /**
+ * Executes a single LIGHT_COMBINED_SEARCH_QUERY with partial-error handling,
+ * node processing, and pagination follow-ups. Shared by both the chunked
+ * repo-scoped search and the unscoped global user search.
+ */
+async function executeLightCombinedQuery(
+  octokit: GitHubOctokit,
+  issueQ: string,
+  prInvQ: string,
+  prRevQ: string,
+  errorLabel: string,
+  issueSeen: Set<number>,
+  issues: Issue[],
+  prMap: Map<number, PullRequest>,
+  nodeIdMap: Map<number, string>,
+  errors: ApiError[],
+  issueCap: number,
+  prCap: number,
+): Promise<void> {
+  let response: LightCombinedSearchResponse;
+  let isPartial = false;
+  try {
+    response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
+      issueQ, prInvQ, prRevQ,
+      issueCursor: null, prInvCursor: null, prRevCursor: null,
+    });
+  } catch (err) {
+    const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+      ? err.data as Partial<LightCombinedSearchResponse>
+      : null;
+    if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
+      response = {
+        issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prInvolves: partial.prInvolves ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prReviewReq: partial.prReviewReq ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        rateLimit: partial.rateLimit,
+      };
+      isPartial = true;
+      const { message } = extractRejectionError(err);
+      errors.push({ repo: errorLabel, statusCode: null, message, retryable: true });
+    } else {
+      throw err;
+    }
+  }
+
+  if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+
+  for (const node of response.issues.nodes) {
+    if (issues.length >= issueCap) break;
+    if (!node) continue;
+    processIssueNode(node, issueSeen, issues);
+  }
+  for (const node of response.prInvolves.nodes) {
+    if (prMap.size >= prCap) break;
+    if (!node) continue;
+    processLightPRNode(node, prMap, nodeIdMap);
+  }
+  for (const node of response.prReviewReq.nodes) {
+    if (prMap.size >= prCap) break;
+    if (!node) continue;
+    processLightPRNode(node, prMap, nodeIdMap);
+  }
+
+  if (isPartial) return;
+
+  if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < issueCap) {
+    await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+      octokit, ISSUES_SEARCH_QUERY, issueQ, errorLabel, errors,
+      (node) => processIssueNode(node, issueSeen, issues),
+      () => issues.length, issueCap, response.issues.pageInfo.endCursor,
+    );
+  }
+
+  const prPaginationTasks: Promise<unknown>[] = [];
+  if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < prCap) {
+    prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+      octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, errorLabel, errors,
+      (node) => processLightPRNode(node, prMap, nodeIdMap),
+      () => prMap.size, prCap, response.prInvolves.pageInfo.endCursor,
+    ));
+  }
+  if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < prCap) {
+    prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+      octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, errorLabel, errors,
+      (node) => processLightPRNode(node, prMap, nodeIdMap),
+      () => prMap.size, prCap, response.prReviewReq.pageInfo.endCursor,
+    ));
+  }
+  if (prPaginationTasks.length > 0) {
+    await Promise.allSettled(prPaginationTasks);
+  }
+}
+
+/**
  * Phase 1: light combined search. Fetches issues fully and PRs with minimal fields.
  * Returns light PRs (enriched: false) and their GraphQL node IDs for phase 2 backfill.
  */
@@ -939,102 +1036,23 @@ async function graphqlLightCombinedSearch(
   const ISSUE_CAP = 1000;
   const PR_CAP = 1000;
 
-  const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+  await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
     const issueQ = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
     const prInvQ = `is:pr is:open involves:${userLogin} ${repoQualifiers}`;
     const prRevQ = `is:pr is:open review-requested:${userLogin} ${repoQualifiers}`;
     const batchLabel = `light-batch-${chunkIdx + 1}/${chunks.length}`;
 
-    let response: LightCombinedSearchResponse;
-    let isPartial = false;
     try {
-      try {
-        response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
-          issueQ, prInvQ, prRevQ,
-          issueCursor: null, prInvCursor: null, prRevCursor: null,
-        });
-      } catch (err) {
-        const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-          ? err.data as Partial<LightCombinedSearchResponse>
-          : null;
-        if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
-          response = {
-            issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            prInvolves: partial.prInvolves ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            prReviewReq: partial.prReviewReq ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-            rateLimit: partial.rateLimit,
-          };
-          isPartial = true;
-          const { message } = extractRejectionError(err);
-          errors.push({ repo: batchLabel, statusCode: null, message, retryable: true });
-        } else {
-          throw err;
-        }
-      }
-
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-
-      for (const node of response.issues.nodes) {
-        if (issues.length >= ISSUE_CAP) break;
-        if (!node) continue;
-        processIssueNode(node, issueSeen, issues);
-      }
-
-      for (const node of response.prInvolves.nodes) {
-        if (prMap.size >= PR_CAP) break;
-        if (!node) continue;
-        processLightPRNode(node, prMap, nodeIdMap);
-      }
-      for (const node of response.prReviewReq.nodes) {
-        if (prMap.size >= PR_CAP) break;
-        if (!node) continue;
-        processLightPRNode(node, prMap, nodeIdMap);
-      }
-
-      if (isPartial) return;
-
-      // Pagination follow-ups for issues (PRs don't paginate in light mode —
-      // backfill handles the full set via node IDs)
-      if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < ISSUE_CAP) {
-        await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
-          octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
-          (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, ISSUE_CAP, response.issues.pageInfo.endCursor,
-        );
-      }
-
-      // Light PR pagination: re-fetch with light query for additional pages
-      const prPaginationTasks: Promise<unknown>[] = [];
-      if (response.prInvolves.pageInfo.hasNextPage && response.prInvolves.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, batchLabel, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prInvolves.pageInfo.endCursor,
-        ));
-      }
-      if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < PR_CAP) {
-        prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-          octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, batchLabel, errors,
-          (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prReviewReq.pageInfo.endCursor,
-        ));
-      }
-      if (prPaginationTasks.length > 0) {
-        await Promise.allSettled(prPaginationTasks);
-      }
+      await executeLightCombinedQuery(
+        octokit, issueQ, prInvQ, prRevQ, batchLabel,
+        issueSeen, issues, prMap, nodeIdMap, errors, ISSUE_CAP, PR_CAP,
+      );
     } catch (err) {
       const { statusCode, message } = extractRejectionError(err);
       errors.push({ repo: batchLabel, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }));
-
-  for (const result of chunkResults) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({ repo: "light-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
-    }
-  }
 
   if (issues.length >= ISSUE_CAP) {
     console.warn(`[api] Issue search results capped at ${ISSUE_CAP}`);
@@ -1183,56 +1201,171 @@ function mergeEnrichment(
 }
 
 /**
+ * Merges tracked user search results into the main issue/PR maps.
+ * Items already present get the tracked user's login appended to surfacedBy.
+ * New items are added with surfacedBy: [trackedLogin].
+ * Returns a union of all prNodeIds for backfill.
+ */
+function mergeTrackedUserResults(
+  issueMap: Map<number, Issue>,
+  prMap: Map<number, PullRequest>,
+  nodeIdMap: Map<number, string>,
+  trackedResult: LightSearchResult,
+  trackedLogin: string
+): void {
+  const login = trackedLogin.toLowerCase();
+
+  for (const issue of trackedResult.issues) {
+    const existing = issueMap.get(issue.id);
+    if (existing) {
+      if (!existing.surfacedBy?.includes(login)) {
+        existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      }
+    } else {
+      issueMap.set(issue.id, { ...issue, surfacedBy: [login] });
+    }
+  }
+
+  for (const pr of trackedResult.pullRequests) {
+    const existing = prMap.get(pr.id);
+    if (existing) {
+      if (!existing.surfacedBy?.includes(login)) {
+        existing.surfacedBy = [...(existing.surfacedBy ?? []), login];
+      }
+    } else {
+      prMap.set(pr.id, { ...pr, surfacedBy: [login] });
+      // Register node ID for backfill if this PR is new
+      if (pr.nodeId) nodeIdMap.set(pr.id, pr.nodeId);
+    }
+  }
+}
+
+/**
  * Fetches open issues and PRs using a two-phase approach:
  * - Phase 1 (light): minimal fields for immediate rendering
  * - Phase 2 (heavy): enrichment via nodes(ids:[]) backfill
  *
  * If onLightData is provided, it fires after phase 1 with light data
- * so the UI can render immediately. The returned promise resolves
- * with fully enriched data after phase 2 completes.
+ * (including surfacedBy annotations) so the UI can render immediately.
+ * The returned promise resolves with fully enriched data after phase 2.
+ *
+ * If trackedUsers is provided, their global searches run in parallel after
+ * phase 1 completes. Results are merged by databaseId with surfacedBy tracking.
  */
 export async function fetchIssuesAndPullRequests(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   userLogin: string,
   onLightData?: (data: FetchIssuesAndPRsResult) => void,
+  trackedUsers?: TrackedUser[],
 ): Promise<FetchIssuesAndPRsResult> {
   if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0 || !userLogin) return { issues: [], pullRequests: [], errors: [] };
 
-  // Phase 1: light combined search
-  const lightResult = await graphqlLightCombinedSearch(octokit, repos, userLogin);
+  const hasTrackedUsers = (trackedUsers?.length ?? 0) > 0;
 
-  // Notify caller with light data for immediate rendering
-  if (onLightData) {
+  // Early exit — tracked user searches are scoped to repos, so no repos = no results
+  if (repos.length === 0) {
+    return { issues: [], pullRequests: [], errors: [] };
+  }
+
+  const normalizedLogin = userLogin.toLowerCase();
+  const allErrors: ApiError[] = [];
+
+  // Working maps for merging results
+  const issueMap = new Map<number, Issue>();
+  const prMap = new Map<number, PullRequest>();
+  const nodeIdMap = new Map<number, string>();
+
+  // Phase 1: main user light search (skipped when repos empty)
+  if (repos.length > 0 && userLogin) {
+    const lightResult = await graphqlLightCombinedSearch(octokit, repos, userLogin);
+    allErrors.push(...lightResult.errors);
+
+    // Annotate main user's items with surfacedBy BEFORE firing onLightData
+    for (const issue of lightResult.issues) {
+      issueMap.set(issue.id, { ...issue, surfacedBy: [normalizedLogin] });
+    }
+    for (const pr of lightResult.pullRequests) {
+      prMap.set(pr.id, { ...pr, surfacedBy: [normalizedLogin] });
+      if (pr.nodeId) nodeIdMap.set(pr.id, pr.nodeId);
+    }
+  }
+
+  // Fire onLightData with annotated main user data (tracked user results come later)
+  if (onLightData && (issueMap.size > 0 || prMap.size > 0)) {
     onLightData({
-      issues: lightResult.issues,
-      pullRequests: lightResult.pullRequests,
-      errors: lightResult.errors,
+      issues: [...issueMap.values()],
+      pullRequests: [...prMap.values()],
+      errors: allErrors,
     });
   }
 
-  // Phase 2: heavy backfill
-  if (lightResult.prNodeIds.length === 0) {
-    return {
-      issues: lightResult.issues,
-      pullRequests: lightResult.pullRequests.map(pr => ({ ...pr, enriched: true })),
-      errors: lightResult.errors,
-    };
+  // Main user node IDs known — start backfill in parallel with tracked user searches.
+  // This delivers enriched main-user PRs without waiting for tracked user pagination.
+  const mainNodeIds = [...nodeIdMap.values()];
+  const mainBackfillPromise = mainNodeIds.length > 0
+    ? fetchPREnrichment(octokit, mainNodeIds)
+    : Promise.resolve({ enrichments: new Map<number, PREnrichmentData>(), errors: [] as ApiError[] });
+
+  // Tracked user searches — scoped to the same repos as the main user
+  const trackedSearchPromise = hasTrackedUsers && repos.length > 0
+    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, repos, u.login)))
+    : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
+
+  const [mainBackfill, trackedResults] = await Promise.all([mainBackfillPromise, trackedSearchPromise]);
+
+  // Merge main backfill results
+  const backfillErrors = [...mainBackfill.errors];
+  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
+
+  // Merge tracked user results and collect new (delta) node IDs
+  const preTrackedPrIds = new Set(prMap.keys());
+  if (hasTrackedUsers) {
+    const settled = trackedResults as PromiseSettledResult<LightSearchResult>[];
+    for (let i = 0; i < settled.length; i++) {
+      const result = settled[i];
+      const trackedLogin = trackedUsers![i].login;
+      if (result.status === "fulfilled") {
+        allErrors.push(...result.value.errors);
+        mergeTrackedUserResults(issueMap, prMap, nodeIdMap, result.value, trackedLogin);
+      } else {
+        const { statusCode, message } = extractRejectionError(result.reason);
+        allErrors.push({ repo: `tracked-user:${trackedLogin}`, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
+      }
+    }
   }
 
-  const { enrichments, errors: backfillErrors } = await fetchPREnrichment(octokit, lightResult.prNodeIds);
-  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
-  const enrichedPRs = mergeEnrichment(lightResult.pullRequests, enrichments, forkInfoMap);
+  const mergedIssues = [...issueMap.values()];
+  const mergedPRs = [...prMap.values()];
+
+  // Apply main backfill enrichments to all PRs (main user PRs get enriched, tracked-only PRs get nothing yet)
+  let enrichedPRs = mainBackfill.enrichments.size > 0
+    ? mergeEnrichment(mergedPRs, mainBackfill.enrichments, forkInfoMap)
+    : mergedPRs;
+
+  // Delta backfill: enrich only NEW PRs from tracked users (not already in main user's set)
+  const deltaNodeIds: string[] = [];
+  for (const pr of mergedPRs) {
+    if (!preTrackedPrIds.has(pr.id)) {
+      const nodeId = nodeIdMap.get(pr.id);
+      if (nodeId) deltaNodeIds.push(nodeId);
+    }
+  }
+
+  if (deltaNodeIds.length > 0) {
+    const delta = await fetchPREnrichment(octokit, deltaNodeIds);
+    backfillErrors.push(...delta.errors);
+    enrichedPRs = mergeEnrichment(enrichedPRs, delta.enrichments, forkInfoMap);
+  }
 
   // Fork PR fallback for enriched PRs
-  const prMap = new Map(enrichedPRs.map(pr => [pr.id, pr]));
-  await runForkPRFallback(octokit, prMap, forkInfoMap);
+  const enrichedPRMap = new Map(enrichedPRs.map(pr => [pr.id, pr]));
+  await runForkPRFallback(octokit, enrichedPRMap, forkInfoMap);
 
   return {
-    issues: lightResult.issues,
-    pullRequests: [...prMap.values()],
-    errors: [...lightResult.errors, ...backfillErrors],
+    issues: mergedIssues,
+    pullRequests: [...enrichedPRMap.values()],
+    errors: [...allErrors, ...backfillErrors],
   };
 }
 
@@ -1843,4 +1976,126 @@ export async function fetchWorkflowRunById(
     updatedAt: run.updated_at,
     completedAt: run.completed_at ?? null,
   };
+}
+
+// ── User validation + upstream repo discovery ─────────────────────────────────
+
+const AVATAR_CDN_PREFIX = "https://avatars.githubusercontent.com/";
+const AVATAR_FALLBACK = `${AVATAR_CDN_PREFIX}u/0`;
+
+interface RawGitHubUser {
+  login: string;
+  avatar_url: string;
+  name: string | null;
+}
+
+/**
+ * Validates a GitHub user login and returns their profile data.
+ * Uses a strict login regex to prevent injection into GraphQL query strings.
+ * Returns null if the login is invalid or the user does not exist (404).
+ * Throws on network or server errors.
+ */
+export async function validateGitHubUser(
+  octokit: GitHubOctokit,
+  login: string
+): Promise<TrackedUser | null> {
+  if (!VALID_TRACKED_LOGIN.test(login)) return null;
+
+  let response: { data: RawGitHubUser };
+  try {
+    response = await octokit.request("GET /users/{username}", { username: login }) as { data: RawGitHubUser };
+  } catch (err) {
+    const status =
+      typeof err === "object" && err !== null && "status" in err
+        ? (err as { status: number }).status
+        : null;
+    if (status === 404) return null;
+    throw err;
+  }
+
+  const raw = response.data;
+  const avatarUrl = raw.avatar_url.startsWith(AVATAR_CDN_PREFIX)
+    ? raw.avatar_url
+    : AVATAR_FALLBACK;
+
+  return {
+    login: raw.login.toLowerCase(),
+    avatarUrl,
+    name: raw.name ?? null,
+  };
+}
+
+/**
+ * Discovers repos the user participates in but doesn't own, via unscoped
+ * GraphQL search (no repo: qualifiers). Returns up to 100 repos sorted
+ * alphabetically, excluding any in the provided excludeRepos set.
+ * When trackedUsers is provided, also discovers repos those users participate in.
+ */
+export async function discoverUpstreamRepos(
+  octokit: GitHubOctokit,
+  userLogin: string,
+  excludeRepos: Set<string>,
+  trackedUsers?: TrackedUser[]
+): Promise<RepoRef[]> {
+  const repoNames = new Set<string>();
+  const errors: ApiError[] = [];
+  const CAP = 100;
+
+  function extractRepoName(node: { repository?: { nameWithOwner: string } | null }): boolean {
+    const name = node.repository?.nameWithOwner;
+    if (!name) return false;
+    if (excludeRepos.has(name)) return false;
+    repoNames.add(name);
+    return true;
+  }
+
+  function discoverForUser(login: string) {
+    const issueQ = `is:issue is:open involves:${login}`;
+    const prQ = `is:pr is:open involves:${login}`;
+    return Promise.allSettled([
+      paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+        octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,
+        (node) => extractRepoName(node),
+        () => repoNames.size, CAP,
+      ),
+      paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+        octokit, LIGHT_PR_SEARCH_QUERY, prQ, `upstream-prs:${login}`, errors,
+        (node) => extractRepoName(node),
+        () => repoNames.size, CAP,
+      ),
+    ]);
+  }
+
+  // Collect all valid logins to discover for
+  const logins: string[] = [];
+  if (VALID_TRACKED_LOGIN.test(userLogin)) logins.push(userLogin);
+  for (const u of trackedUsers ?? []) {
+    if (VALID_TRACKED_LOGIN.test(u.login)) logins.push(u.login);
+  }
+  if (logins.length === 0) return [];
+
+  await Promise.allSettled(logins.map((login) => discoverForUser(login)));
+
+  if (errors.length > 0) {
+    pushNotification(
+      "upstream-discovery",
+      `Upstream repo discovery partial failure — some repositories may be missing`,
+      "warning"
+    );
+  }
+
+  const repos: RepoRef[] = [];
+  for (const fullName of repoNames) {
+    const slash = fullName.indexOf("/");
+    if (slash === -1) continue;
+    repos.push({
+      owner: fullName.slice(0, slash),
+      name: fullName.slice(slash + 1),
+      fullName,
+    });
+  }
+
+  repos.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  if (repos.length > CAP) repos.splice(CAP);
+  return repos;
 }

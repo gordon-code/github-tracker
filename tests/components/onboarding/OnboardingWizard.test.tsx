@@ -47,7 +47,7 @@ vi.mock("../../../src/app/components/shared/LoadingSpinner", () => ({
 // Mock config store
 vi.mock("../../../src/app/stores/config", () => ({
   CONFIG_STORAGE_KEY: "github-tracker:config",
-  config: { selectedOrgs: [], selectedRepos: [] },
+  config: { selectedOrgs: [], selectedRepos: [], upstreamRepos: [] },
   updateConfig: vi.fn(),
 }));
 

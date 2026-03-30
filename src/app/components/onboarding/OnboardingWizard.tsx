@@ -16,6 +16,9 @@ export default function OnboardingWizard() {
   const [selectedRepos, setSelectedRepos] = createSignal<RepoRef[]>(
     config.selectedRepos.length > 0 ? [...config.selectedRepos] : []
   );
+  const [upstreamRepos, setUpstreamRepos] = createSignal<RepoRef[]>(
+    config.upstreamRepos.length > 0 ? [...config.upstreamRepos] : []
+  );
 
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
@@ -53,6 +56,7 @@ export default function OnboardingWizard() {
     updateConfig({
       selectedOrgs: uniqueOrgs,
       selectedRepos: selectedRepos(),
+      upstreamRepos: upstreamRepos(),
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload
@@ -108,6 +112,10 @@ export default function OnboardingWizard() {
                   orgEntries={orgEntries()}
                   selected={selectedRepos()}
                   onChange={setSelectedRepos}
+                  showUpstreamDiscovery={true}
+                  upstreamRepos={upstreamRepos()}
+                  onUpstreamChange={setUpstreamRepos}
+                  trackedUsers={config.trackedUsers}
                 />
               </Match>
             </Switch>
@@ -120,12 +128,12 @@ export default function OnboardingWizard() {
             <button
               type="button"
               onClick={handleFinish}
-              disabled={selectedRepos().length === 0}
+              disabled={selectedRepos().length === 0 && upstreamRepos().length === 0}
               class="btn btn-primary"
             >
-              {selectedRepos().length === 0
+              {selectedRepos().length + upstreamRepos().length === 0
                 ? "Finish Setup"
-                : `Finish Setup (${selectedRepos().length} ${selectedRepos().length === 1 ? "repo" : "repos"})`}
+                : `Finish Setup (${selectedRepos().length + upstreamRepos().length} ${selectedRepos().length + upstreamRepos().length === 1 ? "repo" : "repos"})`}
             </button>
           </div>
         </Show>

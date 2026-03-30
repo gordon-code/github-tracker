@@ -14,6 +14,7 @@ import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
+  hasUpstreamRepos?: boolean;
 }
 
 interface WorkflowGroup {
@@ -318,6 +319,13 @@ export default function ActionsTab(props: ActionsTabProps) {
             );
           }}
         </For>
+      </Show>
+
+      {/* Upstream repos exclusion note */}
+      <Show when={props.hasUpstreamRepos}>
+        <p class="text-xs text-base-content/40 text-center py-2">
+          Workflow runs are not tracked for upstream repositories.
+        </p>
       </Show>
     </div>
   );

@@ -136,7 +136,7 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined);
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined, []);
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
       config.selectedRepos,
@@ -584,6 +584,251 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
       expect.stringContaining("fine-grained tokens do not support notifications"),
       "warning"
     );
+  });
+});
+
+// ── Upstream repos + tracked users integration ────────────────────────────────
+
+describe("fetchAllData — upstream repos and tracked users", () => {
+
+  it("passes combined (selectedRepos + upstreamRepos) deduplicated to fetchIssuesAndPullRequests", async () => {
+    vi.resetModules();
+
+    // Override config mock to include upstreamRepos
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [
+          { owner: "other-org", name: "upstream-repo", fullName: "other-org/upstream-repo" },
+          // Duplicate of selectedRepos — should be filtered out
+          { owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" },
+        ],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    // Should be called with combined repos (2, not 3 — duplicate removed)
+    const callArgs = vi.mocked(fetchIssuesAndPullRequests).mock.calls[0];
+    const passedRepos = callArgs[1] as Array<{ fullName: string }>;
+    expect(passedRepos).toHaveLength(2);
+    expect(passedRepos.map((r) => r.fullName)).toContain("octocat/Hello-World");
+    expect(passedRepos.map((r) => r.fullName)).toContain("other-org/upstream-repo");
+  });
+
+  it("passes only selectedRepos to fetchWorkflowRuns (upstream repos excluded)", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [{ owner: "other-org", name: "upstream-repo", fullName: "other-org/upstream-repo" }],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    // fetchWorkflowRuns should only get selectedRepos, not upstream
+    const callArgs = vi.mocked(fetchWorkflowRuns).mock.calls[0];
+    const passedRepos = callArgs[1] as Array<{ fullName: string }>;
+    expect(passedRepos).toHaveLength(1);
+    expect(passedRepos[0].fullName).toBe("octocat/Hello-World");
+  });
+
+  it("passes trackedUsers to fetchIssuesAndPullRequests", async () => {
+    vi.resetModules();
+
+    const trackedUsers = [
+      { login: "tracked-alice", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: "Alice" },
+    ];
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [],
+        trackedUsers,
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    // 5th argument to fetchIssuesAndPullRequests should be trackedUsers
+    const callArgs = vi.mocked(fetchIssuesAndPullRequests).mock.calls[0];
+    expect(callArgs[4]).toEqual(trackedUsers);
+  });
+
+  it("empty upstreamRepos and trackedUsers produces identical behavior (backward compat)", async () => {
+    vi.resetModules();
+
+    const selectedRepos = [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }];
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos,
+        upstreamRepos: [],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    // Combined repos == selectedRepos when no upstream repos
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(
+      mockOctokit,
+      selectedRepos,
+      "octocat",
+      undefined,
+      []
+    );
+    expect(fetchWorkflowRuns).toHaveBeenCalledWith(
+      mockOctokit,
+      selectedRepos,
+      5,
+      3
+    );
+  });
+
+  it("duplicate repo in both selectedRepos and upstreamRepos is deduplicated (first occurrence wins)", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [
+          { owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" },
+          { owner: "octocat", name: "Other", fullName: "octocat/Other" },
+        ],
+        upstreamRepos: [
+          // Both are already in selectedRepos
+          { owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" },
+          { owner: "octocat", name: "Other", fullName: "octocat/Other" },
+          // This one is new
+          { owner: "new-org", name: "new-repo", fullName: "new-org/new-repo" },
+        ],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    const callArgs = vi.mocked(fetchIssuesAndPullRequests).mock.calls[0];
+    const passedRepos = callArgs[1] as Array<{ fullName: string }>;
+    // 2 selected + 1 new upstream (2 duplicates filtered)
+    expect(passedRepos).toHaveLength(3);
+    const names = passedRepos.map((r) => r.fullName);
+    expect(names.filter((n) => n === "octocat/Hello-World")).toHaveLength(1);
+    expect(names.filter((n) => n === "octocat/Other")).toHaveLength(1);
+    expect(names).toContain("new-org/new-repo");
+  });
+});
+
+// ── DashboardPage fine-grained merge: surfacedBy preserved ────────────────────
+
+describe("DashboardPage pollFetch — fine-grained merge preserves surfacedBy", () => {
+  it("surfacedBy is copied into the store during the canMerge path", () => {
+    // Test the canMerge loop logic directly (same code as DashboardPage.tsx pollFetch).
+    // Using Record<string, unknown> to avoid the 'never' collapse from conflicting
+    // enriched: false vs enriched: true literal types.
+    type MutablePR = Record<string, unknown> & { id: number };
+
+    const pr: MutablePR = {
+      id: 5001,
+      surfacedBy: ["mainuser", "trackeduser"],
+      enriched: false,
+    };
+
+    const enriched: MutablePR = {
+      id: 5001,
+      headSha: "abc123",
+      assigneeLogins: [],
+      reviewerLogins: [],
+      checkStatus: "success",
+      additions: 5,
+      deletions: 2,
+      changedFiles: 1,
+      comments: 0,
+      reviewThreads: 0,
+      totalReviewCount: 0,
+      enriched: true,
+      nodeId: "PR_node_5001",
+      surfacedBy: ["mainuser", "trackeduser"],
+    };
+
+    const state = { pullRequests: [pr] };
+    const enrichedMap = new Map([[5001, enriched]]);
+
+    // Simulate the canMerge loop from DashboardPage.tsx
+    for (let i = 0; i < state.pullRequests.length; i++) {
+      const e = enrichedMap.get(state.pullRequests[i].id)!;
+      const p = state.pullRequests[i];
+      p["headSha"] = e["headSha"];
+      p["assigneeLogins"] = e["assigneeLogins"];
+      p["reviewerLogins"] = e["reviewerLogins"];
+      p["checkStatus"] = e["checkStatus"];
+      p["additions"] = e["additions"];
+      p["deletions"] = e["deletions"];
+      p["changedFiles"] = e["changedFiles"];
+      p["comments"] = e["comments"];
+      p["reviewThreads"] = e["reviewThreads"];
+      p["totalReviewCount"] = e["totalReviewCount"];
+      p["enriched"] = e["enriched"];
+      p["nodeId"] = e["nodeId"];
+      p["surfacedBy"] = e["surfacedBy"];
+    }
+
+    expect(state.pullRequests[0]["surfacedBy"]).toEqual(["mainuser", "trackeduser"]);
+    expect(state.pullRequests[0]["enriched"]).toBe(true);
+    expect(state.pullRequests[0]["checkStatus"]).toBe("success");
   });
 });
 

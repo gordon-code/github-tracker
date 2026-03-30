@@ -6,7 +6,7 @@ import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
-import { config, setConfig } from "../../stores/config";
+import { config, setConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -158,6 +158,7 @@ async function pollFetch(): Promise<DashboardData> {
               pr.totalReviewCount = e.totalReviewCount;
               pr.enriched = e.enriched;
               pr.nodeId = e.nodeId;
+              pr.surfacedBy = e.surfacedBy;
             }
           } else {
             state.pullRequests = data.pullRequests;
@@ -307,6 +308,14 @@ export default function DashboardPage() {
   }));
 
   const userLogin = createMemo(() => user()?.login ?? "");
+  const allUsers = createMemo(() => {
+    const login = userLogin().toLowerCase();
+    if (!login) return [];
+    return [
+      { login, label: "Me" },
+      ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
+    ];
+  });
 
   return (
     <div class="min-h-screen bg-base-200">
@@ -335,6 +344,8 @@ export default function DashboardPage() {
                   issues={dashboardData.issues}
                   loading={dashboardData.loading}
                   userLogin={userLogin()}
+                  allUsers={allUsers()}
+                  trackedUsers={config.trackedUsers}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -342,12 +353,15 @@ export default function DashboardPage() {
                   pullRequests={dashboardData.pullRequests}
                   loading={dashboardData.loading}
                   userLogin={userLogin()}
+                  allUsers={allUsers()}
+                  trackedUsers={config.trackedUsers}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>
                 <ActionsTab
                   workflowRuns={dashboardData.workflowRuns}
                   loading={dashboardData.loading}
+                  hasUpstreamRepos={config.upstreamRepos.length > 0}
                 />
               </Match>
             </Switch>

@@ -1,8 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { config } from "../../stores/config";
+import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue } from "../../services/api";
 import ItemRow from "./ItemRow";
+import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
@@ -20,6 +21,8 @@ export interface IssuesTabProps {
   issues: Issue[];
   loading?: boolean;
   userLogin: string;
+  allUsers?: { login: string; label: string }[];
+  trackedUsers?: TrackedUser[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -55,6 +58,27 @@ const sortOptions: SortOption[] = [
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const trackedUserMap = createMemo(() =>
+    new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
+  );
+
+  const upstreamRepoSet = createMemo(() =>
+    new Set((config.upstreamRepos ?? []).map(r => r.fullName))
+  );
+
+  const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
+    const users = props.allUsers;
+    if (!users || users.length <= 1) return issueFilterGroups;
+    return [
+      ...issueFilterGroups,
+      {
+        label: "User",
+        field: "user",
+        options: users.map((u) => ({ value: u.login, label: u.label })),
+      },
+    ];
+  });
+
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
     return pref ?? { field: "updatedAt", direction: "desc" as const };
@@ -76,7 +100,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (filter.repo && issue.repoFullName !== filter.repo) return false;
       if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
 
-      const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, []);
+      const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
@@ -85,6 +109,14 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (tabFilter.comments !== "all") {
         if (tabFilter.comments === "has" && issue.comments === 0) return false;
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
+      }
+
+      if (tabFilter.user !== "all") {
+        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
+        if (validUser) {
+          const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
+          if (!surfacedBy.includes(tabFilter.user)) return false;
+        }
       }
 
       meta.set(issue.id, { roles });
@@ -172,7 +204,7 @@ export default function IssuesTab(props: IssuesTabProps) {
           onChange={handleSort}
         />
         <FilterChips
-          groups={issueFilterGroups}
+          groups={filterGroups()}
           values={viewState.tabFilters.issues}
           onChange={(field, value) => {
             setTabFilter("issues", field as IssueFilterField, value);
@@ -291,6 +323,14 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 onIgnore={() => handleIgnore(issue)}
                                 density={config.viewDensity}
                                 commentCount={issue.comments}
+                                surfacedByBadge={
+                                  props.trackedUsers && props.trackedUsers.length > 0
+                                    ? <UserAvatarBadge
+                                        users={buildSurfacedByUsers(issue.surfacedBy, trackedUserMap())}
+                                        currentUserLogin={props.userLogin}
+                                      />
+                                    : undefined
+                                }
                               >
                                 <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
                               </ItemRow>

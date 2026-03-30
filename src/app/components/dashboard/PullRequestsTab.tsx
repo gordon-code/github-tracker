@@ -1,10 +1,11 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
-import { config } from "../../stores/config";
+import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
+import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
@@ -23,6 +24,8 @@ export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
   loading?: boolean;
   userLogin: string;
+  allUsers?: { login: string; label: string }[];
+  trackedUsers?: TrackedUser[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -120,6 +123,27 @@ const sortOptions: SortOption[] = [
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const trackedUserMap = createMemo(() =>
+    new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
+  );
+
+  const upstreamRepoSet = createMemo(() =>
+    new Set((config.upstreamRepos ?? []).map(r => r.fullName))
+  );
+
+  const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
+    const users = props.allUsers;
+    if (!users || users.length <= 1) return prFilterGroups;
+    return [
+      ...prFilterGroups,
+      {
+        label: "User",
+        field: "user",
+        options: users.map((u) => ({ value: u.login, label: u.label })),
+      },
+    ];
+  });
+
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
     return pref ?? { field: "updatedAt", direction: "desc" as const };
@@ -141,7 +165,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       if (filter.repo && pr.repoFullName !== filter.repo) return false;
       if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
 
-      const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins);
+      const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
       // Tab filters — light-field filters always apply; heavy-field filters
@@ -168,6 +192,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       }
       if (tabFilters.sizeCategory !== "all" && isEnriched) {
         if (sizeCategory !== tabFilters.sizeCategory) return false;
+      }
+
+      if (tabFilters.user !== "all") {
+        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
+        if (validUser) {
+          const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
+          if (!surfacedBy.includes(tabFilters.user)) return false;
+        }
       }
 
       meta.set(pr.id, { roles, sizeCategory });
@@ -261,7 +293,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           onChange={handleSort}
         />
         <FilterChips
-          groups={prFilterGroups}
+          groups={filterGroups()}
           values={viewState.tabFilters.pullRequests}
           onChange={(field, value) => {
             setTabFilter("pullRequests", field as PullRequestFilterField, value);
@@ -435,6 +467,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
                                 density={config.viewDensity}
+                                surfacedByBadge={
+                                  props.trackedUsers && props.trackedUsers.length > 0
+                                    ? <UserAvatarBadge
+                                        users={buildSurfacedByUsers(pr.surfacedBy, trackedUserMap())}
+                                        currentUserLogin={props.userLogin}
+                                      />
+                                    : undefined
+                                }
                               >
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={pr.enriched !== false}>

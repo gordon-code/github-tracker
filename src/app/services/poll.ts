@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
@@ -86,6 +86,24 @@ export function resetPollState(): void {
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
 onAuthCleared(resetPollState);
+
+// When tracked users change, reset notification state so the next poll cycle
+// silently seeds all items (including the new tracked user's) without flooding
+// the user with "new item" notifications for pre-existing content.
+// Use a flag to skip the initial run (module-level mount).
+// Wrapped in createRoot to provide a reactive owner at module scope (per SolidJS gotcha).
+// Subscribes to array length only — fires on add/remove, not property mutations.
+let _trackedUsersMounted = false;
+createRoot(() => {
+  createEffect(() => {
+    void (config.trackedUsers?.length ?? 0);
+    if (!_trackedUsersMounted) {
+      _trackedUsersMounted = true;
+      return;
+    }
+    untrack(() => _resetNotificationState());
+  });
+});
 
 /**
  * Checks if anything changed since last poll using the Notifications API.
@@ -182,14 +200,27 @@ export async function fetchAllData(
     // If staleness >= MAX_GATE_STALENESS_MS, skip the gate and force a full fetch
   }
 
-  const repos = config.selectedRepos;
   const userLogin = user()?.login ?? "";
+
+  // Combine selectedRepos + upstreamRepos for issues/PRs, dedup by fullName.
+  // Upstream repos are excluded from workflow runs (Actions not supported there).
+  const selectedRepos = config.selectedRepos;
+  const upstreamRepos = config.upstreamRepos ?? [];
+  const seenFullNames = new Set<string>(selectedRepos.map((r) => r.fullName));
+  const combinedRepos = [...selectedRepos];
+  for (const repo of upstreamRepos) {
+    if (!seenFullNames.has(repo.fullName)) {
+      combinedRepos.push(repo);
+    }
+  }
+
+  const trackedUsers = config.trackedUsers ?? [];
 
   // Issues + PRs use a two-phase approach: light query first (phase 1),
   // then heavy backfill (phase 2). Workflow runs use REST core.
   // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, repos, userLogin, onLightData ? (lightData) => {
+    fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, onLightData ? (lightData) => {
       // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
       onLightData({
         issues: lightData.issues,
@@ -197,8 +228,8 @@ export async function fetchAllData(
         workflowRuns: [],
         errors: lightData.errors,
       });
-    } : undefined),
-    fetchWorkflowRuns(octokit, repos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
+    } : undefined, trackedUsers),
+    fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 
   // Collect top-level errors (total function failures)

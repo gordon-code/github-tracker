@@ -1,6 +1,7 @@
 import { For, JSX, Show } from "solid-js";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
+import { expandEmoji } from "../../lib/emoji";
 
 export interface ItemRowProps {
   repo: string;
@@ -15,6 +16,7 @@ export interface ItemRowProps {
   density: "compact" | "comfortable";
   commentCount?: number;
   hideRepo?: boolean;
+  surfacedByBadge?: JSX.Element;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -77,7 +79,7 @@ export default function ItemRow(props: ItemRowProps) {
                     class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium bg-[var(--lb)] text-[var(--lf)]"
                     style={{ "--lb": bg, "--lf": fg }}
                   >
-                    {label.name}
+                    {expandEmoji(label.name)}
                   </span>
                 );
               }}
@@ -94,6 +96,9 @@ export default function ItemRow(props: ItemRowProps) {
       {/* Author + time + comment count */}
       <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 ${isCompact() ? "" : "pt-0.5"}`}>
         <span>{props.author}</span>
+        <Show when={props.surfacedByBadge !== undefined}>
+          <div class="relative z-10">{props.surfacedByBadge}</div>
+        </Show>
         <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
         <Show when={(props.commentCount ?? 0) > 0}>
           <span class="flex items-center gap-0.5">

@@ -2,20 +2,30 @@ import {
   createSignal,
   createEffect,
   createMemo,
+  untrack,
   Show,
   Index,
+  For,
 } from "solid-js";
-import { fetchOrgs, fetchRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
+import { fetchOrgs, fetchRepos, discoverUpstreamRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
 import { getClient } from "../../services/github";
+import { user } from "../../stores/auth";
 import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
+
+// Validates owner/repo format (both segments must be non-empty, no spaces)
+const VALID_REPO_NAME = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
 interface RepoSelectorProps {
   selectedOrgs: string[];
   orgEntries?: OrgEntry[]; // Pre-fetched org entries — skip internal fetchOrgs when provided
   selected: RepoRef[];
   onChange: (selected: RepoRef[]) => void;
+  showUpstreamDiscovery?: boolean;
+  upstreamRepos?: RepoRef[];
+  onUpstreamChange?: (repos: RepoRef[]) => void;
+  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
 }
 
 interface OrgRepoState {
@@ -32,6 +42,14 @@ export default function RepoSelector(props: RepoSelectorProps) {
   const [loadedCount, setLoadedCount] = createSignal(0);
   let effectVersion = 0;
 
+  // ── Upstream discovery state ───────────────────────────────────────────────
+  const [discoveredRepos, setDiscoveredRepos] = createSignal<RepoRef[]>([]);
+  const [discoveringUpstream, setDiscoveringUpstream] = createSignal(false);
+  const [discoveryCapped, setDiscoveryCapped] = createSignal(false);
+  const [manualEntry, setManualEntry] = createSignal("");
+  const [validatingManual, setValidatingManual] = createSignal(false);
+  const [manualEntryError, setManualEntryError] = createSignal<string | null>(null);
+
   // Initialize org states and fetch repos on mount / when selectedOrgs change
   createEffect(() => {
     const orgs = props.selectedOrgs;
@@ -43,13 +61,6 @@ export default function RepoSelector(props: RepoSelectorProps) {
     // Version counter: if selectedOrgs changes while fetches are in-flight,
     // stale callbacks check this and bail out instead of writing to state.
     const version = ++effectVersion;
-    if (orgs.length === 0) {
-      setOrgStates([]);
-      setLoadedCount(0);
-      return;
-    }
-
-    // Initialize all orgs as loading
     setOrgStates(
       orgs.map((org) => ({
         org,
@@ -60,6 +71,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
       }))
     );
     setLoadedCount(0);
+
+    if (orgs.length === 0 && !props.showUpstreamDiscovery) {
+      return;
+    }
 
     const client = getClient();
     if (!client) {
@@ -73,58 +88,98 @@ export default function RepoSelector(props: RepoSelectorProps) {
         }))
       );
       setLoadedCount(orgs.length);
-      return;
+      if (!props.showUpstreamDiscovery) return;
     }
 
     // Fetch org type info first, then repos incrementally
     void (async () => {
-      let entries: OrgEntry[];
-      if (preloadedEntries != null) {
-        entries = preloadedEntries;
-      } else {
-        try {
-          entries = await fetchOrgs(client);
-        } catch {
-          entries = [];
-        }
-      }
-
-      if (version !== effectVersion) return;
-
-      const typeMap = new Map<string, "org" | "user">(
-        entries.map((e) => [e.login, e.type])
-      );
-
-      // Fetch repos for each org independently so results trickle in
-      const promises = orgs.map(async (org) => {
-        const type = typeMap.get(org) ?? "org";
-        try {
-          const repos = await fetchRepos(client, org, type);
-          if (version !== effectVersion) return;
-          setOrgStates((prev) =>
-            prev.map((s) =>
-              s.org === org ? { ...s, type, repos, loading: false } : s
-            )
-          );
-        } catch (err) {
-          if (version !== effectVersion) return;
-          const message =
-            err instanceof Error ? err.message : "Failed to load repositories";
-          setOrgStates((prev) =>
-            prev.map((s) =>
-              s.org === org
-                ? { ...s, type, repos: [], loading: false, error: message }
-                : s
-            )
-          );
-        } finally {
-          if (version === effectVersion) {
-            setLoadedCount((c) => c + 1);
+      if (orgs.length > 0 && client) {
+        let entries: OrgEntry[];
+        if (preloadedEntries != null) {
+          entries = preloadedEntries;
+        } else {
+          try {
+            entries = await fetchOrgs(client);
+          } catch {
+            entries = [];
           }
         }
-      });
 
-      await Promise.allSettled(promises);
+        if (version !== effectVersion) return;
+
+        const typeMap = new Map<string, "org" | "user">(
+          entries.map((e) => [e.login, e.type])
+        );
+
+        // Fetch repos for each org independently so results trickle in
+        const promises = orgs.map(async (org) => {
+          const type = typeMap.get(org) ?? "org";
+          try {
+            const repos = await fetchRepos(client, org, type);
+            if (version !== effectVersion) return;
+            setOrgStates((prev) =>
+              prev.map((s) =>
+                s.org === org ? { ...s, type, repos, loading: false } : s
+              )
+            );
+          } catch (err) {
+            if (version !== effectVersion) return;
+            const message =
+              err instanceof Error ? err.message : "Failed to load repositories";
+            setOrgStates((prev) =>
+              prev.map((s) =>
+                s.org === org
+                  ? { ...s, type, repos: [], loading: false, error: message }
+                  : s
+              )
+            );
+          } finally {
+            if (version === effectVersion) {
+              setLoadedCount((c) => c + 1);
+            }
+          }
+        });
+
+        await Promise.allSettled(promises);
+      }
+
+      // After all org repos have loaded, trigger upstream discovery if enabled.
+      // Use untrack to prevent reactive prop reads from re-triggering the effect.
+      if (props.showUpstreamDiscovery && version === effectVersion) {
+        const currentUser = untrack(() => user());
+        const discoveryClient = getClient();
+        if (currentUser && discoveryClient) {
+          setDiscoveringUpstream(true);
+          setDiscoveredRepos([]);
+          setDiscoveryCapped(false);
+          const allOrgFullNames = new Set<string>();
+          for (const state of orgStates()) {
+            for (const repo of state.repos) {
+              allOrgFullNames.add(repo.fullName);
+            }
+          }
+          untrack(() => {
+            for (const repo of props.selected) {
+              allOrgFullNames.add(repo.fullName);
+            }
+            for (const repo of props.upstreamRepos ?? []) {
+              allOrgFullNames.add(repo.fullName);
+            }
+          });
+          void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames, props.trackedUsers)
+            .then((repos) => {
+              if (version !== effectVersion) return;
+              setDiscoveredRepos(repos);
+              setDiscoveryCapped(repos.length >= 100);
+            })
+            .catch(() => {
+              // Non-fatal — partial results may already be in state
+            })
+            .finally(() => {
+              if (version === effectVersion) setDiscoveringUpstream(false);
+            });
+        }
+      }
     })();
   });
 
@@ -172,20 +227,18 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   const sortedOrgStates = createMemo(() => {
     const states = orgStates();
-    // Defer sorting during initial load to prevent layout shift as orgs trickle in.
-    // After initial load (all orgs resolved), sorting stays active during retries
-    // because loadedCount is not reset by retryOrg.
+    // Defer sorting until all orgs have loaded: prevents layout shift during
+    // trickle-in, and ensures each org's type ("user" vs "org") is resolved
+    // from fetchOrgs before we sort on it. loadedCount is not reset by retryOrg,
+    // so sorting stays active during retries.
     if (loadedCount() < props.selectedOrgs.length) return states;
-    const maxPushedAt = new Map(
-      states.map((s) => [
-        s.org,
-        s.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, ""),
-      ])
-    );
+    // Order: personal org first, then remaining orgs alphabetically.
+    // Repos within each org retain their existing recency order from fetchRepos.
     return [...states].sort((a, b) => {
-      const aMax = maxPushedAt.get(a.org) ?? "";
-      const bMax = maxPushedAt.get(b.org) ?? "";
-      return aMax > bMax ? -1 : aMax < bMax ? 1 : 0;
+      const aIsUser = a.type === "user" ? 0 : 1;
+      const bIsUser = b.type === "user" ? 0 : 1;
+      if (aIsUser !== bIsUser) return aIsUser - bIsUser;
+      return a.org.localeCompare(b.org, "en");
     });
   });
 
@@ -251,6 +304,100 @@ export default function RepoSelector(props: RepoSelectorProps) {
     );
     props.onChange(props.selected.filter((r) => !allVisible.has(r.fullName)));
   }
+
+  // ── Upstream selection helpers ────────────────────────────────────────────
+
+  const upstreamSelectedSet = createMemo(() =>
+    new Set((props.upstreamRepos ?? []).map((r) => r.fullName))
+  );
+
+  function isUpstreamSelected(fullName: string) {
+    return upstreamSelectedSet().has(fullName);
+  }
+
+  function toggleUpstreamRepo(repo: RepoRef) {
+    const current = props.upstreamRepos ?? [];
+    if (isUpstreamSelected(repo.fullName)) {
+      props.onUpstreamChange?.(current.filter((r) => r.fullName !== repo.fullName));
+    } else {
+      props.onUpstreamChange?.([...current, repo]);
+    }
+  }
+
+  async function handleManualAdd() {
+    const raw = manualEntry().trim();
+    if (!raw) return;
+    if (!VALID_REPO_NAME.test(raw)) {
+      setManualEntryError("Format must be owner/repo");
+      return;
+    }
+    const [owner, name] = raw.split("/");
+    const fullName = `${owner}/${name}`;
+
+    // Check duplicates against org repos, upstream selected, and discovered
+    if (selectedSet().has(fullName)) {
+      setManualEntryError("Already in your selected repositories");
+      return;
+    }
+    if (upstreamSelectedSet().has(fullName)) {
+      setManualEntryError("Already in upstream repositories");
+      return;
+    }
+    if (discoveredRepos().some((r) => r.fullName === fullName)) {
+      setManualEntryError("Already discovered — select it from the list below");
+      return;
+    }
+
+    const client = getClient();
+    if (!client) {
+      setManualEntryError("Not connected — try again");
+      return;
+    }
+
+    setValidatingManual(true);
+    setManualEntryError(null);
+    try {
+      await client.request("GET /repos/{owner}/{repo}", { owner, repo: name });
+    } catch (err) {
+      const status = typeof err === "object" && err !== null && "status" in err
+        ? (err as { status: number }).status
+        : null;
+      if (status === 404) {
+        setManualEntryError("Repository not found");
+      } else {
+        setManualEntryError("Could not verify repository — try again");
+      }
+      return;
+    } finally {
+      setValidatingManual(false);
+    }
+
+    const newRepo: RepoRef = { owner, name, fullName };
+    props.onUpstreamChange?.([...(props.upstreamRepos ?? []), newRepo]);
+    setManualEntry("");
+    setManualEntryError(null);
+  }
+
+  function handleManualKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter") void handleManualAdd();
+  }
+
+  // Manually-added upstream repos not in the discovered list
+  const manualUpstreamRepos = createMemo(() => {
+    const discoveredSet = new Set(discoveredRepos().map(r => r.fullName));
+    return (props.upstreamRepos ?? []).filter(r => !discoveredSet.has(r.fullName));
+  });
+
+  // Upstream repos visible in the discovery list (discovered + manually added that aren't org repos)
+  const filteredDiscovered = createMemo(() => {
+    const query = q();
+    if (!query) return discoveredRepos();
+    return discoveredRepos().filter(
+      (r) =>
+        r.name.toLowerCase().includes(query) ||
+        r.owner.toLowerCase().includes(query)
+    );
+  });
 
   // ── Status ────────────────────────────────────────────────────────────────
 
@@ -412,6 +559,112 @@ export default function RepoSelector(props: RepoSelectorProps) {
           );
         }}
       </Index>
+
+      {/* Upstream Repositories section */}
+      <Show when={props.showUpstreamDiscovery}>
+        <div class="flex flex-col gap-3">
+          {/* Section heading */}
+          <div class="border-t border-base-300 pt-3">
+            <h3 class="text-sm font-semibold text-base-content">Upstream Repositories</h3>
+            <p class="text-xs text-base-content/60 mt-0.5">
+              Repos you contribute to but don't own. Issues and PRs are tracked; workflow runs are not.
+            </p>
+          </div>
+
+          {/* Manual entry */}
+          <div class="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="owner/repo"
+              value={manualEntry()}
+              onInput={(e) => {
+                setManualEntry(e.currentTarget.value);
+                setManualEntryError(null);
+              }}
+              onKeyDown={handleManualKeyDown}
+              disabled={validatingManual()}
+              class="input input-sm flex-1"
+              aria-label="Add upstream repo manually"
+            />
+            <button
+              type="button"
+              onClick={() => void handleManualAdd()}
+              disabled={validatingManual()}
+              class="btn btn-sm btn-outline"
+            >
+              {validatingManual() ? "Checking..." : "Add"}
+            </button>
+          </div>
+          <Show when={manualEntryError()}>
+            <div role="alert" class="alert alert-error text-xs py-2">
+              {manualEntryError()}
+            </div>
+          </Show>
+
+          {/* Discovery loading */}
+          <Show when={discoveringUpstream()}>
+            <div class="flex items-center gap-3 py-2">
+              <LoadingSpinner size="sm" />
+              <span class="text-sm text-base-content/60">Discovering upstream repos...</span>
+            </div>
+          </Show>
+
+          {/* Discovered repos list */}
+          <Show when={!discoveringUpstream() && discoveredRepos().length > 0}>
+            <div class="overflow-hidden rounded-lg border border-base-300">
+              <div class="max-h-[300px] overflow-y-auto" role="region" aria-label="Upstream repositories">
+                <ul class="divide-y divide-base-300">
+                  <For each={filteredDiscovered()}>
+                    {(repo) => (
+                      <li>
+                        <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200">
+                          <input
+                            type="checkbox"
+                            checked={isUpstreamSelected(repo.fullName)}
+                            onChange={() => toggleUpstreamRepo(repo)}
+                            class="checkbox checkbox-primary checkbox-sm mt-0.5"
+                          />
+                          <div class="min-w-0 flex-1">
+                            <span class="min-w-0 truncate text-sm font-medium text-base-content">
+                              {repo.fullName}
+                            </span>
+                          </div>
+                        </label>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </div>
+            </div>
+            <Show when={discoveryCapped()}>
+              <p class="text-xs text-base-content/50">
+                Showing first 100 discovered repos. Use manual entry above to add specific repos.
+              </p>
+            </Show>
+          </Show>
+
+          {/* Manually-added upstream repos not in discovered list */}
+          <Show when={manualUpstreamRepos().length > 0}>
+            <div class="flex flex-col gap-1">
+              <For each={manualUpstreamRepos()}>
+                {(repo) => (
+                  <div class="flex items-center gap-2 px-1">
+                    <span class="text-sm flex-1">{repo.fullName}</span>
+                    <button
+                      type="button"
+                      onClick={() => props.onUpstreamChange?.((props.upstreamRepos ?? []).filter(r => r.fullName !== repo.fullName))}
+                      class="btn btn-ghost btn-xs"
+                      aria-label={`Remove ${repo.fullName}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </Show>
 
       {/* Total count */}
       <Show when={!isLoadingAny() && props.selected.length > 0}>
