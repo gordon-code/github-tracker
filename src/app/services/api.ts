@@ -1400,14 +1400,30 @@ export async function fetchIssuesAndPullRequests(
     });
   }
 
-  // Tracked user global searches — run in parallel
-  if (hasTrackedUsers) {
-    const trackedResults = await Promise.allSettled(
-      trackedUsers!.map((u) => graphqlGlobalUserSearch(octokit, u.login))
-    );
+  // Main user node IDs known — start backfill in parallel with tracked user searches.
+  // This delivers enriched main-user PRs without waiting for tracked user pagination.
+  const mainNodeIds = [...nodeIdMap.values()];
+  const mainBackfillPromise = mainNodeIds.length > 0
+    ? fetchPREnrichment(octokit, mainNodeIds)
+    : Promise.resolve({ enrichments: new Map<number, PREnrichmentData>(), errors: [] as ApiError[] });
 
-    for (let i = 0; i < trackedResults.length; i++) {
-      const result = trackedResults[i];
+  // Tracked user global searches — run in parallel with main backfill
+  const trackedSearchPromise = hasTrackedUsers
+    ? Promise.allSettled(trackedUsers!.map((u) => graphqlGlobalUserSearch(octokit, u.login)))
+    : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
+
+  const [mainBackfill, trackedResults] = await Promise.all([mainBackfillPromise, trackedSearchPromise]);
+
+  // Merge main backfill results
+  const backfillErrors = [...mainBackfill.errors];
+  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
+
+  // Merge tracked user results and collect new (delta) node IDs
+  const preTrackedPrIds = new Set(prMap.keys());
+  if (hasTrackedUsers) {
+    const settled = trackedResults as PromiseSettledResult<LightSearchResult>[];
+    for (let i = 0; i < settled.length; i++) {
+      const result = settled[i];
       const trackedLogin = trackedUsers![i].login;
       if (result.status === "fulfilled") {
         allErrors.push(...result.value.errors);
@@ -1422,22 +1438,25 @@ export async function fetchIssuesAndPullRequests(
   const mergedIssues = [...issueMap.values()];
   const mergedPRs = [...prMap.values()];
 
-  // Phase 2: heavy backfill — uses union of all node IDs (main + tracked users)
-  const allNodeIds = mergedPRs
-    .map((pr) => nodeIdMap.get(pr.id))
-    .filter((id): id is string => id != null);
+  // Apply main backfill enrichments to all PRs (main user PRs get enriched, tracked-only PRs get nothing yet)
+  let enrichedPRs = mainBackfill.enrichments.size > 0
+    ? mergeEnrichment(mergedPRs, mainBackfill.enrichments, forkInfoMap)
+    : mergedPRs;
 
-  if (allNodeIds.length === 0) {
-    return {
-      issues: mergedIssues,
-      pullRequests: mergedPRs.map(pr => ({ ...pr, enriched: true })),
-      errors: allErrors,
-    };
+  // Delta backfill: enrich only NEW PRs from tracked users (not already in main user's set)
+  const deltaNodeIds: string[] = [];
+  for (const pr of mergedPRs) {
+    if (!preTrackedPrIds.has(pr.id)) {
+      const nodeId = nodeIdMap.get(pr.id);
+      if (nodeId) deltaNodeIds.push(nodeId);
+    }
   }
 
-  const { enrichments, errors: backfillErrors } = await fetchPREnrichment(octokit, allNodeIds);
-  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
-  const enrichedPRs = mergeEnrichment(mergedPRs, enrichments, forkInfoMap);
+  if (deltaNodeIds.length > 0) {
+    const delta = await fetchPREnrichment(octokit, deltaNodeIds);
+    backfillErrors.push(...delta.errors);
+    enrichedPRs = mergeEnrichment(enrichedPRs, delta.enrichments, forkInfoMap);
+  }
 
   // Fork PR fallback for enriched PRs
   const enrichedPRMap = new Map(enrichedPRs.map(pr => [pr.id, pr]));
