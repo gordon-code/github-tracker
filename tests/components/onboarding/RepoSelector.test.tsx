@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import type { RepoRef, RepoEntry } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
+const mockRequest = vi.fn().mockResolvedValue({ data: {} });
 vi.mock("../../../src/app/services/github", () => ({
-  getClient: () => ({}),
+  getClient: () => ({ request: mockRequest }),
 }));
 
 vi.mock("../../../src/app/stores/auth", () => ({
@@ -379,6 +380,7 @@ describe("RepoSelector — upstream discovery", () => {
     vi.restoreAllMocks();
     vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
     vi.mocked(api.discoverUpstreamRepos).mockResolvedValue([]);
+    mockRequest.mockReset().mockResolvedValue({ data: {} });
   });
 
   it("does not call discoverUpstreamRepos when showUpstreamDiscovery is false (default)", async () => {
@@ -660,5 +662,31 @@ describe("RepoSelector — upstream discovery", () => {
     await user.click(screen.getByRole("button", { name: /^Add$/ }));
 
     screen.getByText(/already discovered/i);
+  });
+
+  it("manual entry: shows error when repo does not exist (404)", async () => {
+    const user = userEvent.setup();
+    mockRequest.mockRejectedValue(Object.assign(new Error("Not Found"), { status: 404 }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("Upstream Repositories"));
+
+    const input = screen.getByRole("textbox", { name: /add upstream repo/i });
+    await user.type(input, "nonexistent-org/no-repo");
+    await user.click(screen.getByRole("button", { name: /^Add$/ }));
+
+    await waitFor(() => {
+      screen.getByText(/repository not found/i);
+    });
   });
 });

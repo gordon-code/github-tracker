@@ -127,12 +127,12 @@ export default function OnboardingWizard() {
             <button
               type="button"
               onClick={handleFinish}
-              disabled={selectedRepos().length === 0}
+              disabled={selectedRepos().length === 0 && upstreamRepos().length === 0}
               class="btn btn-primary"
             >
-              {selectedRepos().length === 0
+              {selectedRepos().length + upstreamRepos().length === 0
                 ? "Finish Setup"
-                : `Finish Setup (${selectedRepos().length} ${selectedRepos().length === 1 ? "repo" : "repos"})`}
+                : `Finish Setup (${selectedRepos().length + upstreamRepos().length} ${selectedRepos().length + upstreamRepos().length === 1 ? "repo" : "repos"})`}
             </button>
           </div>
         </Show>

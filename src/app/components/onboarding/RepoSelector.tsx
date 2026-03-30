@@ -45,6 +45,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
   const [discoveringUpstream, setDiscoveringUpstream] = createSignal(false);
   const [discoveryCapped, setDiscoveryCapped] = createSignal(false);
   const [manualEntry, setManualEntry] = createSignal("");
+  const [validatingManual, setValidatingManual] = createSignal(false);
   const [manualEntryError, setManualEntryError] = createSignal<string | null>(null);
 
   // Initialize org states and fetch repos on mount / when selectedOrgs change
@@ -320,7 +321,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     }
   }
 
-  function handleManualAdd() {
+  async function handleManualAdd() {
     const raw = manualEntry().trim();
     if (!raw) return;
     if (!VALID_REPO_NAME.test(raw)) {
@@ -344,6 +345,30 @@ export default function RepoSelector(props: RepoSelectorProps) {
       return;
     }
 
+    const client = getClient();
+    if (!client) {
+      setManualEntryError("Not connected — try again");
+      return;
+    }
+
+    setValidatingManual(true);
+    setManualEntryError(null);
+    try {
+      await client.request("GET /repos/{owner}/{repo}", { owner, repo: name });
+    } catch (err) {
+      const status = typeof err === "object" && err !== null && "status" in err
+        ? (err as { status: number }).status
+        : null;
+      if (status === 404) {
+        setManualEntryError("Repository not found");
+      } else {
+        setManualEntryError("Could not verify repository — try again");
+      }
+      return;
+    } finally {
+      setValidatingManual(false);
+    }
+
     const newRepo: RepoRef = { owner, name, fullName };
     props.onUpstreamChange?.([...(props.upstreamRepos ?? []), newRepo]);
     setManualEntry("");
@@ -351,7 +376,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
   }
 
   function handleManualKeyDown(e: KeyboardEvent) {
-    if (e.key === "Enter") handleManualAdd();
+    if (e.key === "Enter") void handleManualAdd();
   }
 
   // Manually-added upstream repos not in the discovered list
@@ -554,15 +579,17 @@ export default function RepoSelector(props: RepoSelectorProps) {
                 setManualEntryError(null);
               }}
               onKeyDown={handleManualKeyDown}
+              disabled={validatingManual()}
               class="input input-sm flex-1"
               aria-label="Add upstream repo manually"
             />
             <button
               type="button"
-              onClick={handleManualAdd}
+              onClick={() => void handleManualAdd()}
+              disabled={validatingManual()}
               class="btn btn-sm btn-outline"
             >
-              Add
+              {validatingManual() ? "Checking..." : "Add"}
             </button>
           </div>
           <Show when={manualEntryError()}>
