@@ -631,9 +631,9 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
-  it("calls pushError when cycle throws", async () => {
+  it("silently reschedules when getClient throws", async () => {
     const onHotData = vi.fn();
-    // Make getClient() throw (now inside the try block) to trigger the catch path
+    // getClient() throw is caught by the pre-onStart guard — schedules next cycle without pushError
     mockGetClient.mockImplementation(() => { throw new Error("auth crash"); });
 
     rebuildHotSets({
@@ -647,8 +647,116 @@ describe("createHotPollCoordinator", () => {
     await createRoot(async (dispose) => {
       createHotPollCoordinator(() => 10, onHotData);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(pushError).toHaveBeenCalledWith("hot-poll", "auth crash", true);
+      expect(pushError).not.toHaveBeenCalled();
       expect(onHotData).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("calls onStart with correct IDs and onEnd after cycle", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+      workflowRuns: [makeWorkflowRun({ id: 7, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      const [prIds, runIds] = onStart.mock.calls[0];
+      expect(prIds).toBeInstanceOf(Set);
+      expect(prIds.has(42)).toBe(true);
+      expect(runIds).toBeInstanceOf(Set);
+      expect(runIds.has(7)).toBe(true);
+      expect(onEnd).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("does not call onStart when hot sets are empty", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    clearHotSets();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).not.toHaveBeenCalled();
+      expect(onEnd).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("calls onEnd on destroy when a cycle was active", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      // Let one cycle start
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      // onEnd fires from the completed cycle's finally block
+      expect(onEnd).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("does not call onEnd on destroy when no cycle ran", async () => {
+    const onHotData = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    // No hot items → cycle will skip (no onStart)
+    clearHotSets();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createHotPollCoordinator(() => 10, onHotData, { onEnd });
+      coordinator.destroy();
+      expect(onEnd).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("calls onEnd on error/throw path", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    // getClient() returns a valid client so onStart fires, but fetchHotData rejects
+    const octokit = makeOctokit();
+    mockGetClient.mockReturnValue(octokit);
+    // Make the graphql call throw (fetchHotData will throw)
+    octokit.graphql = vi.fn().mockRejectedValue(new Error("network failure"));
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+    });
+
+    const { pushError } = await import("../../src/app/lib/errors");
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      expect(onEnd).toHaveBeenCalledTimes(1);
       dispose();
     });
   });

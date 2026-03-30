@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
@@ -18,7 +18,10 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
-import { groupByRepo, computePageLayout, slicePageGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { createReorderHighlight } from "../../lib/reorderHighlight";
+import { createFlashDetection } from "../../lib/flashDetection";
+import RepoLockControls from "../shared/RepoLockControls";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -26,6 +29,7 @@ export interface PullRequestsTabProps {
   userLogin: string;
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
+  hotPollingPRIds?: ReadonlySet<number>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -245,7 +249,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() => groupByRepo(filteredSorted()));
+  const repoGroups = createMemo(() =>
+    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos.pullRequests)
+  );
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -266,6 +272,26 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (names.length === 0) return;
     pruneExpandedRepos("pullRequests", names);
   });
+
+  createEffect(() => {
+    const names = activeRepoNames();
+    if (names.length === 0) return;
+    pruneLockedRepos("pullRequests", names);
+  });
+
+  const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
+    getItems: () => props.pullRequests,
+    getHotIds: () => props.hotPollingPRIds,
+    getExpandedRepos: () => viewState.expandedRepos.pullRequests,
+    trackKey: (pr) => `${pr.checkStatus}|${pr.reviewDecision}`,
+    itemLabel: (pr) => `#${pr.number} ${pr.title}`,
+    itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
+  });
+
+  const highlightedReposPRs = createReorderHighlight(
+    () => repoGroups().map(g => g.repoFullName),
+    () => viewState.lockedRepos.pullRequests,
+  );
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("pullRequests", field, direction);
@@ -384,72 +410,84 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
                 return (
                   <div class="bg-base-100">
-                    <button
-                      onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
-                      aria-expanded={isExpanded()}
-                      class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
-                    >
-                      <ChevronIcon size="md" rotated={!isExpanded()} />
-                      {repoGroup.repoFullName}
-                      <Show when={!isExpanded()}>
-                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
-                          <Show when={summaryMeta().checks.success > 0}>
-                            <span class="flex items-center gap-0.5">
-                              <span class="inline-block w-2 h-2 rounded-full bg-success" />
-                              <span>{summaryMeta().checks.success}</span>
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().checks.failure > 0}>
-                            <span class="flex items-center gap-0.5">
-                              <span class="inline-block w-2 h-2 rounded-full bg-error" />
-                              <span>{summaryMeta().checks.failure}</span>
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().checks.pending > 0}>
-                            <span class="flex items-center gap-0.5">
-                              <span class="inline-block w-2 h-2 rounded-full bg-warning" />
-                              <span>{summaryMeta().checks.pending}</span>
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().checks.conflict > 0}>
-                            <span class="badge badge-warning badge-sm gap-0.5">
-                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                              </svg>
-                              {summaryMeta().checks.conflict === 1 ? "Conflict" : `Conflicts ×${summaryMeta().checks.conflict}`}
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().reviews.APPROVED > 0}>
-                            <span class="badge badge-success badge-sm">
-                              {`Approved ×${summaryMeta().reviews.APPROVED}`}
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
-                            <span class="badge badge-warning badge-sm">
-                              {`Changes ×${summaryMeta().reviews.CHANGES_REQUESTED}`}
-                            </span>
-                          </Show>
-                          <Show when={summaryMeta().reviews.REVIEW_REQUIRED > 0}>
-                            <span class="badge badge-info badge-sm">
-                              {`Needs review ×${summaryMeta().reviews.REVIEW_REQUIRED}`}
-                            </span>
-                          </Show>
-                          <For each={summaryMeta().roles}>
-                            {([role, count]) => (
-                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                role === "author" ? "bg-primary/10 text-primary" :
-                                role === "reviewer" ? "bg-secondary/10 text-secondary" :
-                                role === "assignee" ? "bg-accent/10 text-accent" :
-                                "bg-base-300 text-base-content/70"
-                              }`}>
-                                {`${role} ×${count}`}
+                    <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposPRs().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
+                      <button
+                        onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                        aria-expanded={isExpanded()}
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                      >
+                        <ChevronIcon size="md" rotated={!isExpanded()} />
+                        {repoGroup.repoFullName}
+                        <Show when={!isExpanded()}>
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
+                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
+                            <Show when={summaryMeta().checks.success > 0}>
+                              <span class="flex items-center gap-0.5">
+                                <span class="inline-block w-2 h-2 rounded-full bg-success" />
+                                <span>{summaryMeta().checks.success}</span>
                               </span>
-                            )}
-                          </For>
-                        </span>
-                      </Show>
-                    </button>
+                            </Show>
+                            <Show when={summaryMeta().checks.failure > 0}>
+                              <span class="flex items-center gap-0.5">
+                                <span class="inline-block w-2 h-2 rounded-full bg-error" />
+                                <span>{summaryMeta().checks.failure}</span>
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().checks.pending > 0}>
+                              <span class="flex items-center gap-0.5">
+                                <span class="inline-block w-2 h-2 rounded-full bg-warning" />
+                                <span>{summaryMeta().checks.pending}</span>
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().checks.conflict > 0}>
+                              <span class="badge badge-warning badge-sm gap-0.5">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                </svg>
+                                {summaryMeta().checks.conflict === 1 ? "Conflict" : `Conflicts ×${summaryMeta().checks.conflict}`}
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().reviews.APPROVED > 0}>
+                              <span class="badge badge-success badge-sm">
+                                {`Approved ×${summaryMeta().reviews.APPROVED}`}
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
+                              <span class="badge badge-warning badge-sm">
+                                {`Changes ×${summaryMeta().reviews.CHANGES_REQUESTED}`}
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().reviews.REVIEW_REQUIRED > 0}>
+                              <span class="badge badge-info badge-sm">
+                                {`Needs review ×${summaryMeta().reviews.REVIEW_REQUIRED}`}
+                              </span>
+                            </Show>
+                            <For each={summaryMeta().roles}>
+                              {([role, count]) => (
+                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                  role === "author" ? "bg-primary/10 text-primary" :
+                                  role === "reviewer" ? "bg-secondary/10 text-secondary" :
+                                  role === "assignee" ? "bg-accent/10 text-accent" :
+                                  "bg-base-300 text-base-content/70"
+                                }`}>
+                                  {`${role} ×${count}`}
+                                </span>
+                              )}
+                            </For>
+                          </span>
+                        </Show>
+                      </button>
+                      <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
+                    </div>
+                    <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
+                      {(peek) => (
+                        <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                          <span class="loading loading-spinner loading-xs text-primary/60" />
+                          <span class="truncate flex-1">{peek().itemLabel}</span>
+                          <span class="badge badge-xs badge-primary">{peek().newStatus}</span>
+                        </div>
+                      )}
+                    </Show>
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
@@ -475,6 +513,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       />
                                     : undefined
                                 }
+                                isPolling={props.hotPollingPRIds?.has(pr.id)}
+                                isFlashing={flashingPRIds().has(pr.id)}
                               >
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={pr.enriched !== false}>

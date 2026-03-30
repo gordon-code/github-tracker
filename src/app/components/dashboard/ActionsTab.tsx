@@ -2,7 +2,7 @@ import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -10,11 +10,16 @@ import FilterChips from "../shared/FilterChips";
 import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
+import RepoLockControls from "../shared/RepoLockControls";
+import { orderRepoGroups } from "../../lib/grouping";
+import { createReorderHighlight } from "../../lib/reorderHighlight";
+import { createFlashDetection } from "../../lib/flashDetection";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
   hasUpstreamRepos?: boolean;
+  hotPollingRunIds?: ReadonlySet<number>;
 }
 
 interface WorkflowGroup {
@@ -134,6 +139,15 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneExpandedRepos("actions", names);
   });
 
+  const { flashingIds: flashingRunIds, peekUpdates } = createFlashDetection({
+    getItems: () => props.workflowRuns,
+    getHotIds: () => props.hotPollingRunIds,
+    getExpandedRepos: () => viewState.expandedRepos.actions,
+    trackKey: (run) => `${run.status}|${run.conclusion}`,
+    itemLabel: (run) => run.name,
+    itemStatus: (run) => run.conclusion ?? run.status,
+  });
+
   function handleIgnore(run: WorkflowRun) {
     ignoreItem({
       id: String(run.id),
@@ -182,7 +196,20 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   });
 
-  const repoGroups = createMemo(() => groupRuns(filteredRuns()));
+  const repoGroups = createMemo(() =>
+    orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos.actions)
+  );
+
+  createEffect(() => {
+    const names = activeRepoNames();
+    if (names.length === 0) return;
+    pruneLockedRepos("actions", names);
+  });
+
+  const highlightedReposActions = createReorderHighlight(
+    () => repoGroups().map(g => g.repoFullName),
+    () => viewState.lockedRepos.actions,
+  );
 
   return (
     <div class="divide-y divide-base-300">
@@ -259,37 +286,49 @@ export default function ActionsTab(props: ActionsTabProps) {
             return (
               <div class="bg-base-100">
                 {/* Repo header */}
-                <button
-                  onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
-                  aria-expanded={isExpanded()}
-                  class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors"
-                >
-                  <ChevronIcon size="md" rotated={!isExpanded()} />
-                  {repoGroup.repoFullName}
-                  <Show when={!isExpanded()}>
-                    <span class="ml-auto text-xs font-normal text-base-content/60">
-                      {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
-                      <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
-                        {": "}
-                        <Show when={collapsedSummary().passed > 0}>
-                          <span>{collapsedSummary().passed} passed</span>
+                <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposActions().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
+                  <button
+                    onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                    aria-expanded={isExpanded()}
+                    class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                  >
+                    <ChevronIcon size="md" rotated={!isExpanded()} />
+                    {repoGroup.repoFullName}
+                    <Show when={!isExpanded()}>
+                      <span class="ml-auto text-xs font-normal text-base-content/60">
+                        {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
+                        <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
+                          {": "}
+                          <Show when={collapsedSummary().passed > 0}>
+                            <span>{collapsedSummary().passed} passed</span>
+                          </Show>
+                          <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
+                            {", "}
+                          </Show>
+                          <Show when={collapsedSummary().failed > 0}>
+                            <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
+                          </Show>
+                          <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
+                            {", "}
+                          </Show>
+                          <Show when={collapsedSummary().running > 0}>
+                            <span>{collapsedSummary().running} running</span>
+                          </Show>
                         </Show>
-                        <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
-                          {", "}
-                        </Show>
-                        <Show when={collapsedSummary().failed > 0}>
-                          <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
-                        </Show>
-                        <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
-                          {", "}
-                        </Show>
-                        <Show when={collapsedSummary().running > 0}>
-                          <span>{collapsedSummary().running} running</span>
-                        </Show>
-                      </Show>
-                    </span>
-                  </Show>
-                </button>
+                      </span>
+                    </Show>
+                  </button>
+                  <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
+                </div>
+                <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
+                  {(peek) => (
+                    <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                      <span class="loading loading-spinner loading-xs text-primary/60" />
+                      <span class="truncate flex-1">{peek().itemLabel}</span>
+                      <span class="badge badge-xs badge-primary">{peek().newStatus}</span>
+                    </div>
+                  )}
+                </Show>
 
                 {/* Workflow cards grid */}
                 <Show when={isExpanded()}>
@@ -308,6 +347,8 @@ export default function ActionsTab(props: ActionsTabProps) {
                               onToggle={() => toggleWorkflow(wfKey)}
                               onIgnoreRun={handleIgnore}
                               density={config.viewDensity}
+                              hotPollingRunIds={props.hotPollingRunIds}
+                              flashingRunIds={flashingRunIds()}
                             />
                           </div>
                         );

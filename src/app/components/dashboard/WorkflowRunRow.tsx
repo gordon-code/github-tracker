@@ -8,6 +8,8 @@ interface WorkflowRunRowProps {
   run: WorkflowRun;
   onIgnore: (run: WorkflowRun) => void;
   density: Config["viewDensity"];
+  isPolling?: boolean;
+  isFlashing?: boolean;
 }
 
 function StatusIcon(props: { status: string; conclusion: string | null }) {
@@ -19,6 +21,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-success shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Success"
       >
         <path
@@ -38,6 +41,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-error shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Failure"
       >
         <path
@@ -57,6 +61,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-base-content/40 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Cancelled"
       >
         <path
@@ -76,6 +81,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-warning animate-spin shrink-0"
         fill="none"
         viewBox="0 0 24 24"
+        role="img"
         aria-label="In progress"
       >
         <circle
@@ -103,6 +109,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
       class="h-4 w-4 text-base-content/40 shrink-0"
       viewBox="0 0 20 20"
       fill="currentColor"
+      role="img"
       aria-label={label}
     >
       <path
@@ -126,7 +133,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   return (
     <div
-      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group`}
+      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 
@@ -167,6 +174,10 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       <span class="text-xs text-base-content/40 shrink-0">
         {relativeTime(props.run.createdAt)}
       </span>
+
+      <Show when={props.isPolling}>
+        <span class="loading loading-spinner loading-xs text-base-content/40" />
+      </Show>
 
       <button
         onClick={() => props.onIgnore(props.run)}

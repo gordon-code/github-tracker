@@ -22,6 +22,7 @@ import {
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
+import { setsEqual } from "../../lib/collections";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -221,6 +222,8 @@ const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPol
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 
 export default function DashboardPage() {
+  const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
+  const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
 
   const initialTab = createMemo<TabId>(() => {
     if (config.rememberLastTab) {
@@ -269,6 +272,16 @@ export default function DashboardPage() {
               run.completedAt = update.completedAt;
             }
           }));
+        },
+        {
+          onStart: (prDbIds, runIds) => {
+            if (!setsEqual(hotPollingPRIds(), prDbIds)) setHotPollingPRIds(prDbIds);
+            if (!setsEqual(hotPollingRunIds(), runIds)) setHotPollingRunIds(runIds);
+          },
+          onEnd: () => {
+            if (hotPollingPRIds().size > 0) setHotPollingPRIds(new Set<number>());
+            if (hotPollingRunIds().size > 0) setHotPollingRunIds(new Set<number>());
+          },
         }
       ));
     }
@@ -355,6 +368,7 @@ export default function DashboardPage() {
                   userLogin={userLogin()}
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
+                  hotPollingPRIds={hotPollingPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>
@@ -362,6 +376,7 @@ export default function DashboardPage() {
                   workflowRuns={dashboardData.workflowRuns}
                   loading={dashboardData.loading}
                   hasUpstreamRepos={config.upstreamRepos.length > 0}
+                  hotPollingRunIds={hotPollingRunIds()}
                 />
               </Match>
             </Switch>

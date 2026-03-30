@@ -556,17 +556,27 @@ export function createHotPollCoordinator(
     prUpdates: Map<number, HotPRStatusUpdate>,
     runUpdates: Map<number, HotWorkflowRunUpdate>,
     generation: number
-  ) => void
+  ) => void,
+  options?: {
+    onStart?: (prDbIds: ReadonlySet<number>, runIds: ReadonlySet<number>) => void;
+    onEnd?: () => void;
+  }
 ): { destroy: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let chainGeneration = 0;
   let consecutiveFailures = 0;
+  let startedCycle = false; // tracks whether onStart was called for the active chain
   const MAX_BACKOFF_MULTIPLIER = 8; // caps at 8× the base interval
 
   function destroy(): void {
     // Invalidates any in-flight cycle(); createEffect captures the new value as the next chain's seed
     chainGeneration++;
     consecutiveFailures = 0;
+    // Clear shimmer only if an onStart was active (avoids spurious onEnd on init)
+    if (startedCycle) {
+      startedCycle = false;
+      options?.onEnd?.();
+    }
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
       timeoutId = null;
@@ -588,12 +598,23 @@ export function createHotPollCoordinator(
       return;
     }
 
+    // Skip fetch when no authenticated client (e.g., mid-logout)
+    // Guarded: getClient() can throw during auth state transitions
+    let client: ReturnType<typeof getClient>;
     try {
-      // Skip fetch when no authenticated client (e.g., mid-logout)
-      if (!getClient()) {
-        schedule(myGeneration);
-        return;
-      }
+      client = getClient();
+    } catch {
+      schedule(myGeneration);
+      return;
+    }
+    if (!client) {
+      schedule(myGeneration);
+      return;
+    }
+
+    startedCycle = true;
+    options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
+    try {
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       if (hadErrors) {
@@ -610,6 +631,11 @@ export function createHotPollCoordinator(
       consecutiveFailures++;
       const message = err instanceof Error ? err.message : "Unknown hot-poll error";
       pushError("hot-poll", message, true);
+    } finally {
+      if (myGeneration === chainGeneration) {
+        startedCycle = false;
+        options?.onEnd?.();
+      }
     }
 
     schedule(myGeneration);

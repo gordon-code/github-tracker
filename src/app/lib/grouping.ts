@@ -48,3 +48,41 @@ export function slicePageGroups<T>(
   const end = clampedPage + 1 < boundaries.length ? boundaries[clampedPage + 1] : groups.length;
   return groups.slice(start, end);
 }
+
+export function orderRepoGroups<G extends { repoFullName: string }>(
+  groups: G[],
+  lockedOrder: string[]
+): G[] {
+  const lockedIndex = new Map(lockedOrder.map((name, i) => [name, i]));
+  const locked: G[] = [];
+  const unlocked: G[] = [];
+
+  for (const group of groups) {
+    if (lockedIndex.has(group.repoFullName)) {
+      locked.push(group);
+    } else {
+      unlocked.push(group);
+    }
+  }
+
+  locked.sort((a, b) =>
+    (lockedIndex.get(a.repoFullName) ?? 0) - (lockedIndex.get(b.repoFullName) ?? 0)
+  );
+
+  return [...locked, ...unlocked];
+}
+
+export function detectReorderedRepos(
+  previousOrder: string[],
+  currentOrder: string[]
+): Set<string> {
+  const moved = new Set<string>();
+  const prevIndex = new Map(previousOrder.map((name, i) => [name, i]));
+  for (let i = 0; i < currentOrder.length; i++) {
+    const prev = prevIndex.get(currentOrder[i]);
+    if (prev !== undefined && prev !== i) {
+      moved.add(currentOrder[i]);
+    }
+  }
+  return moved;
+}

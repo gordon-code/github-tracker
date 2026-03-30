@@ -17,6 +17,8 @@ export interface ItemRowProps {
   commentCount?: number;
   hideRepo?: boolean;
   surfacedByBadge?: JSX.Element;
+  isPolling?: boolean;
+  isFlashing?: boolean;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -28,7 +30,8 @@ export default function ItemRow(props: ItemRowProps) {
       class={`group relative flex items-start gap-3
         hover:bg-base-200
         transition-colors
-        ${isCompact() ? "px-4 py-2" : "px-4 py-3"}`}
+        ${isCompact() ? "px-4 py-2" : "px-4 py-3"}
+        ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       {/* Overlay link — covers entire row; interactive children use relative z-10 */}
       <Show when={safeUrl()}>
@@ -57,7 +60,7 @@ export default function ItemRow(props: ItemRowProps) {
 
       {/* Main content */}
       <div class="flex-1 min-w-0">
-        <div class={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 ${isCompact() ? "text-sm" : "text-sm"}`}>
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
           <span class="text-base-content/60 shrink-0">
             #{props.number}
           </span>
@@ -100,6 +103,9 @@ export default function ItemRow(props: ItemRowProps) {
           <div class="relative z-10">{props.surfacedByBadge}</div>
         </Show>
         <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
+        <Show when={props.isPolling}>
+          <span class="loading loading-spinner loading-xs text-base-content/40" />
+        </Show>
         <Show when={(props.commentCount ?? 0) > 0}>
           <span class="flex items-center gap-0.5">
             <svg

@@ -80,11 +80,21 @@ export const ViewStateSchema = z.object({
     pullRequests: {},
     actions: {},
   }),
+  lockedRepos: z.object({
+    issues: z.array(z.string()).default([]),
+    pullRequests: z.array(z.string()).default([]),
+    actions: z.array(z.string()).default([]),
+  }).default({
+    issues: [],
+    pullRequests: [],
+    actions: [],
+  }),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
 export type SortPreference = ViewState["sortPreferences"][string];
+export type LockedReposTab = keyof ViewState["lockedRepos"];
 
 function loadViewState(): ViewState {
   try {
@@ -116,6 +126,7 @@ export function resetViewState(): void {
     },
     showPrRuns: false,
     expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
+    lockedRepos: { issues: [], pullRequests: [], actions: [] },
   });
 }
 
@@ -265,6 +276,51 @@ export function pruneExpandedRepos(
       }
     })
   );
+}
+
+export function lockRepo(tab: LockedReposTab, repoFullName: string): void {
+  setViewState(produce((draft) => {
+    if (!draft.lockedRepos[tab].includes(repoFullName)) {
+      draft.lockedRepos[tab].push(repoFullName);
+    }
+  }));
+}
+
+export function unlockRepo(tab: LockedReposTab, repoFullName: string): void {
+  setViewState(produce((draft) => {
+    draft.lockedRepos[tab] = draft.lockedRepos[tab].filter(r => r !== repoFullName);
+  }));
+}
+
+export function moveLockedRepo(
+  tab: LockedReposTab,
+  repoFullName: string,
+  direction: "up" | "down"
+): void {
+  setViewState(produce((draft) => {
+    const arr = draft.lockedRepos[tab];
+    const idx = arr.indexOf(repoFullName);
+    if (idx === -1) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= arr.length) return;
+    const tmp = arr[idx];
+    arr[idx] = arr[targetIdx];
+    arr[targetIdx] = tmp;
+  }));
+}
+
+export function pruneLockedRepos(
+  tab: LockedReposTab,
+  activeRepoNames: string[]
+): void {
+  const current = untrack(() => viewState.lockedRepos[tab]);
+  if (current.length === 0) return;
+  const activeSet = new Set(activeRepoNames);
+  const filtered = current.filter(name => activeSet.has(name));
+  if (filtered.length === current.length) return;
+  setViewState(produce((draft) => {
+    draft.lockedRepos[tab] = filtered;
+  }));
 }
 
 export function initViewPersistence(): void {

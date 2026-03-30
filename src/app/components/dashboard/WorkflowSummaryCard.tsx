@@ -9,6 +9,8 @@ interface WorkflowSummaryCardProps {
   onToggle: () => void;
   onIgnoreRun: (run: WorkflowRun) => void;
   density: "compact" | "comfortable";
+  hotPollingRunIds?: ReadonlySet<number>;
+  flashingRunIds?: ReadonlySet<number>;
 }
 
 export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
@@ -78,17 +80,17 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
         </span>
         <div class="flex items-center gap-1.5 shrink-0">
           <Show when={counts().success > 0}>
-            <span class="text-xs font-medium text-success" title={`${counts().success} successful`}>
+            <span class="text-xs font-medium text-success" title={`${counts().success} successful`} aria-label={`${counts().success} successful`}>
               {counts().success}
             </span>
           </Show>
           <Show when={counts().failure > 0}>
-            <span class="text-xs font-medium text-error" title={`${counts().failure} failed`}>
+            <span class="text-xs font-medium text-error" title={`${counts().failure} failed`} aria-label={`${counts().failure} failed`}>
               {counts().failure}
             </span>
           </Show>
           <Show when={counts().running > 0}>
-            <span class="text-xs font-medium text-warning" title={`${counts().running} running`}>
+            <span class="text-xs font-medium text-warning" title={`${counts().running} running`} aria-label={`${counts().running} running`}>
               {counts().running}
             </span>
           </Show>
@@ -107,6 +109,8 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
                 run={run}
                 onIgnore={props.onIgnoreRun}
                 density={props.density}
+                isPolling={props.hotPollingRunIds?.has(run.id)}
+                isFlashing={props.flashingRunIds?.has(run.id)}
               />
             )}
           </For>

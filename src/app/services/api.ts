@@ -4,6 +4,12 @@ import type { TrackedUser } from "../stores/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+interface GraphQLRateLimit {
+  limit: number;
+  remaining: number;
+  resetAt: string;
+}
+
 export interface OrgEntry {
   login: string;
   avatarUrl: string;
@@ -267,7 +273,7 @@ interface GraphQLIssueSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLIssueNode | null)[];
   };
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 interface GraphQLPRNode {
@@ -314,7 +320,7 @@ interface GraphQLPRSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLPRNode | null)[];
   };
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 interface ForkCandidate {
@@ -329,8 +335,8 @@ interface ForkRepoResult {
 }
 
 interface ForkQueryResponse {
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
-  [key: string]: ForkRepoResult | { limit: number; remaining: number; resetAt: string } | undefined | null;
+  rateLimit?: GraphQLRateLimit;
+  [key: string]: ForkRepoResult | GraphQLRateLimit | undefined | null;
 }
 
 // ── GraphQL search query constants ───────────────────────────────────────────
@@ -511,7 +517,7 @@ interface LightPRSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLLightPRNode | null)[];
   };
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 /** Phase 2 backfill query: enriches PRs with heavy fields using node IDs. */
@@ -581,7 +587,7 @@ interface HotPRStatusNode {
 
 interface HotPRStatusResponse {
   nodes: (HotPRStatusNode | null)[];
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 interface GraphQLLightPRNode {
@@ -643,12 +649,12 @@ interface LightCombinedSearchResponse {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: (GraphQLLightPRNode | null)[];
   };
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 interface HeavyBackfillResponse {
   nodes: (GraphQLHeavyPRNode | null)[];
-  rateLimit?: { limit: number; remaining: number; resetAt: string };
+  rateLimit?: GraphQLRateLimit;
 }
 
 // Max node IDs per nodes() query (GitHub limit)
@@ -667,7 +673,7 @@ interface SearchPageResult<T> {
  * caller-provided `processNode` callback. Handles partial errors, cap enforcement,
  * and rate limit tracking. Returns the count of items added by processNode.
  */
-async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: { limit: number; remaining: number; resetAt: string } }, TNode>(
+async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: GraphQLRateLimit }, TNode>(
   octokit: GitHubOctokit,
   query: string,
   queryString: string,
@@ -823,7 +829,7 @@ async function runForkPRFallback(
 
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-      if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { limit: number; remaining: number; resetAt: string });
+      if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
 
       for (let i = 0; i < forkChunk.length; i++) {
         const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
@@ -1612,7 +1618,7 @@ async function graphqlSearchPRs(
 
       try {
         const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as { limit: number; remaining: number; resetAt: string });
+        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
 
         for (let i = 0; i < forkChunk.length; i++) {
           const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
