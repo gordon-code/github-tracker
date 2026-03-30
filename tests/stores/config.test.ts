@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ConfigSchema, loadConfig, config, updateConfig, resetConfig } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
-import { createStore } from "solid-js/store";
-import { produce } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 
 // Mock localStorage
 const localStorageMock = (() => {
@@ -286,6 +285,25 @@ describe("updateConfig (real export)", () => {
       updateConfig({ theme: "forest" });
       expect(config.theme).toBe("forest");
       expect(config.selectedOrgs).toEqual(["my-org", "other-org"]);
+      dispose();
+    });
+  });
+
+  it("does nothing when called with empty object", () => {
+    createRoot((dispose) => {
+      updateConfig({ theme: "dark" });
+      updateConfig({});
+      expect(config.theme).toBe("dark");
+      dispose();
+    });
+  });
+
+  it("rejects entire update when any field is invalid", () => {
+    createRoot((dispose) => {
+      updateConfig({ theme: "dark" });
+      updateConfig({ theme: "forest", hotPollInterval: 5 }); // hotPollInterval below min
+      expect(config.theme).toBe("dark");
+      expect(config.hotPollInterval).toBe(30);
       dispose();
     });
   });
