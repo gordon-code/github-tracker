@@ -497,7 +497,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
                         <Show when={!isExpanded()}>
-                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                           <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
                           <Show when={summaryMeta().checks.success > 0}>
                             <span class="flex items-center gap-0.5">

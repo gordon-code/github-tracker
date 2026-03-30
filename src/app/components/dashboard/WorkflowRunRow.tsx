@@ -21,6 +21,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-success shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Success"
       >
         <path
@@ -40,6 +41,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-error shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Failure"
       >
         <path
@@ -59,6 +61,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-base-content/40 shrink-0"
         viewBox="0 0 20 20"
         fill="currentColor"
+        role="img"
         aria-label="Cancelled"
       >
         <path
@@ -78,6 +81,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
         class="h-4 w-4 text-warning animate-spin shrink-0"
         fill="none"
         viewBox="0 0 24 24"
+        role="img"
         aria-label="In progress"
       >
         <circle
@@ -105,6 +109,7 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
       class="h-4 w-4 text-base-content/40 shrink-0"
       viewBox="0 0 20 20"
       fill="currentColor"
+      role="img"
       aria-label={label}
     >
       <path
