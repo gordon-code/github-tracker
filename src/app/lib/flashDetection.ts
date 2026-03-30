@@ -1,5 +1,9 @@
 import { createSignal, createEffect, onCleanup, type Accessor } from "solid-js";
-import type { PeekUpdate } from "./grouping";
+
+export interface PeekUpdate {
+  itemLabel: string;
+  newStatus: string;
+}
 
 export function createFlashDetection<T extends { id: number; repoFullName: string }>(opts: {
   getItems: Accessor<T[]>;
@@ -37,18 +41,17 @@ export function createFlashDetection<T extends { id: number; repoFullName: strin
       return;
     }
 
+    // Single pass: detect changes for hot-polled items + update prevValues
     const changed = new Set<number>();
     for (const item of items) {
-      if (!hotIds.has(item.id)) continue;
-      const prev = prevValues.get(item.id);
-      if (prev !== undefined && prev !== opts.trackKey(item)) {
-        changed.add(item.id);
+      const key = opts.trackKey(item);
+      if (hotIds.has(item.id)) {
+        const prev = prevValues.get(item.id);
+        if (prev !== undefined && prev !== key) {
+          changed.add(item.id);
+        }
       }
-    }
-
-    // Hot-poll path — update in-place (items don't change set between hot polls)
-    for (const item of items) {
-      prevValues.set(item.id, opts.trackKey(item));
+      prevValues.set(item.id, key);
     }
 
     if (changed.size > 0) {

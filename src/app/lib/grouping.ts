@@ -49,11 +49,6 @@ export function slicePageGroups<T>(
   return groups.slice(start, end);
 }
 
-export interface PeekUpdate {
-  itemLabel: string;
-  newStatus: string;
-}
-
 export function orderRepoGroups<G extends { repoFullName: string }>(
   groups: G[],
   lockedOrder: string[]
