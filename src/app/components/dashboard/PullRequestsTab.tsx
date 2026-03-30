@@ -272,7 +272,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   });
 
   createEffect(() => {
-    const names = repoGroups().map(g => g.repoFullName);
+    const names = activeRepoNames();
+    if (names.length === 0) return;
     pruneLockedRepos("pullRequests", names);
   });
 

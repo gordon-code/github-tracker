@@ -254,7 +254,8 @@ export default function ActionsTab(props: ActionsTabProps) {
   );
 
   createEffect(() => {
-    const names = repoGroups().map(g => g.repoFullName);
+    const names = activeRepoNames();
+    if (names.length === 0) return;
     pruneLockedRepos("actions", names);
   });
 

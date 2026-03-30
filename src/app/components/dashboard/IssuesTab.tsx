@@ -182,7 +182,8 @@ export default function IssuesTab(props: IssuesTabProps) {
   });
 
   createEffect(() => {
-    const names = repoGroups().map(g => g.repoFullName);
+    const names = activeRepoNames();
+    if (names.length === 0) return;
     pruneLockedRepos("issues", names);
   });
 
