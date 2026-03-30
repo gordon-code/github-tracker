@@ -1,6 +1,7 @@
 import { For, JSX, Show } from "solid-js";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
+import { expandEmoji } from "../../lib/emoji";
 
 export interface ItemRowProps {
   repo: string;
@@ -78,7 +79,7 @@ export default function ItemRow(props: ItemRowProps) {
                     class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium bg-[var(--lb)] text-[var(--lf)]"
                     style={{ "--lb": bg, "--lf": fg }}
                   >
-                    {label.name}
+                    {expandEmoji(label.name)}
                   </span>
                 );
               }}
