@@ -137,11 +137,6 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneExpandedRepos("actions", names);
   });
 
-  createEffect(() => {
-    const names = repoGroups().map(g => g.repoFullName);
-    pruneLockedRepos("actions", names);
-  });
-
   interface PeekUpdate {
     itemLabel: string;
     newStatus: string;
@@ -206,36 +201,6 @@ export default function ActionsTab(props: ActionsTabProps) {
     }
   });
 
-  let prevRepoOrderActions: string[] = [];
-  let prevLockedOrderActions: string[] = [];
-  let highlightTimeoutActions: ReturnType<typeof setTimeout> | undefined;
-  const [highlightedReposActions, setHighlightedReposActions] = createSignal<ReadonlySet<string>>(new Set());
-
-  createEffect(() => {
-    const currentOrder = repoGroups().map(g => g.repoFullName);
-    const currentLocked = viewState.lockedRepos.actions;
-
-    const lockedChanged = currentLocked.length !== prevLockedOrderActions.length
-      || currentLocked.some((r, i) => r !== prevLockedOrderActions[i]);
-
-    if (prevRepoOrderActions.length > 0 && !lockedChanged) {
-      const moved = detectReorderedRepos(prevRepoOrderActions, currentOrder);
-      if (moved.size > 0) {
-        setHighlightedReposActions(moved);
-        clearTimeout(highlightTimeoutActions);
-        highlightTimeoutActions = setTimeout(() => setHighlightedReposActions(new Set<string>()), 1500);
-      }
-    }
-
-    prevRepoOrderActions = currentOrder;
-    prevLockedOrderActions = [...currentLocked];
-  });
-  onCleanup(() => {
-    clearTimeout(flashRunTimeout);
-    clearTimeout(peekTimeout);
-    clearTimeout(highlightTimeoutActions);
-  });
-
   function handleIgnore(run: WorkflowRun) {
     ignoreItem({
       id: String(run.id),
@@ -287,6 +252,41 @@ export default function ActionsTab(props: ActionsTabProps) {
   const repoGroups = createMemo(() =>
     orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos.actions)
   );
+
+  createEffect(() => {
+    const names = repoGroups().map(g => g.repoFullName);
+    pruneLockedRepos("actions", names);
+  });
+
+  let prevRepoOrderActions: string[] = [];
+  let prevLockedOrderActions: string[] = [];
+  let highlightTimeoutActions: ReturnType<typeof setTimeout> | undefined;
+  const [highlightedReposActions, setHighlightedReposActions] = createSignal<ReadonlySet<string>>(new Set());
+
+  createEffect(() => {
+    const currentOrder = repoGroups().map(g => g.repoFullName);
+    const currentLocked = viewState.lockedRepos.actions;
+
+    const lockedChanged = currentLocked.length !== prevLockedOrderActions.length
+      || currentLocked.some((r, i) => r !== prevLockedOrderActions[i]);
+
+    if (prevRepoOrderActions.length > 0 && !lockedChanged) {
+      const moved = detectReorderedRepos(prevRepoOrderActions, currentOrder);
+      if (moved.size > 0) {
+        setHighlightedReposActions(moved);
+        clearTimeout(highlightTimeoutActions);
+        highlightTimeoutActions = setTimeout(() => setHighlightedReposActions(new Set<string>()), 1500);
+      }
+    }
+
+    prevRepoOrderActions = currentOrder;
+    prevLockedOrderActions = [...currentLocked];
+  });
+  onCleanup(() => {
+    clearTimeout(flashRunTimeout);
+    clearTimeout(peekTimeout);
+    clearTimeout(highlightTimeoutActions);
+  });
 
   return (
     <div class="divide-y divide-base-300">
