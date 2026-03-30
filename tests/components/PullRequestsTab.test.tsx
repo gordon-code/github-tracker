@@ -627,4 +627,33 @@ describe("PullRequestsTab", () => {
     screen.getByText("org/repo-b");
     screen.getByText("Repo B PR 0");
   });
+
+  it("applies shimmer class to rows whose IDs are in hotPollingPRIds", () => {
+    const prs = [
+      makePullRequest({ id: 42, number: 42, title: "Hot PR", repoFullName: "org/repo" }),
+      makePullRequest({ id: 99, number: 99, title: "Cold PR", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("pullRequests", ["org/repo"], true);
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="" hotPollingPRIds={new Set([42])} />
+    ));
+    const rows = container.querySelectorAll("[role='listitem']");
+    expect(rows.length).toBe(2);
+    // First row (id=42, hot-polled) should have shimmer
+    expect(rows[0]?.querySelector(".animate-shimmer")).toBeTruthy();
+    // Second row (id=99, not hot-polled) should not
+    expect(rows[1]?.querySelector(".animate-shimmer")).toBeFalsy();
+  });
+
+  it("does not apply shimmer when hotPollingPRIds is undefined", () => {
+    const prs = [
+      makePullRequest({ id: 1, number: 1, title: "Normal PR", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("pullRequests", ["org/repo"], true);
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="" />
+    ));
+    const rows = container.querySelectorAll("[role='listitem']");
+    expect(rows[0]?.querySelector(".animate-shimmer")).toBeFalsy();
+  });
 });

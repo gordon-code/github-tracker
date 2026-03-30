@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest } from "../../services/api";
@@ -18,8 +18,9 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, type PeekUpdate } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
+import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
 
 export interface PullRequestsTabProps {
@@ -278,93 +279,19 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     pruneLockedRepos("pullRequests", names);
   });
 
-  const [peekUpdates, setPeekUpdates] = createSignal<ReadonlyMap<string, PeekUpdate>>(new Map());
-  let peekTimeout: ReturnType<typeof setTimeout> | undefined;
-
-  let prevPRValues = new Map<number, { checkStatus: string | null; reviewDecision: string | null }>();
-  let prevPRValuesInitialized = false;
-  let flashTimeout: ReturnType<typeof setTimeout> | undefined;
-  const [flashingPRIds, setFlashingPRIds] = createSignal<ReadonlySet<number>>(new Set());
-
-  createEffect(() => {
-    const prs = props.pullRequests;
-    const hotIds = props.hotPollingPRIds;
-
-    if (!prevPRValuesInitialized) {
-      prevPRValuesInitialized = true;
-      prevPRValues = new Map(prs.map(pr => [pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision }]));
-      return;
-    }
-
-    // Only detect changes for hot-polled items — full refresh replaces all data
-    // and would cause mass flashing if not gated.
-    if (!hotIds || hotIds.size === 0) {
-      for (const pr of prs) {
-        prevPRValues.set(pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision });
-      }
-      return;
-    }
-
-    const changed = new Set<number>();
-    for (const pr of prs) {
-      if (!hotIds.has(pr.id)) continue;
-      const prev = prevPRValues.get(pr.id);
-      if (prev && (prev.checkStatus !== pr.checkStatus || prev.reviewDecision !== pr.reviewDecision)) {
-        changed.add(pr.id);
-      }
-    }
-
-    for (const pr of prs) {
-      prevPRValues.set(pr.id, { checkStatus: pr.checkStatus, reviewDecision: pr.reviewDecision });
-    }
-
-    if (changed.size > 0) {
-      setFlashingPRIds(prev => new Set([...prev, ...changed]));
-      clearTimeout(flashTimeout);
-      flashTimeout = setTimeout(() => setFlashingPRIds(new Set<number>()), 1000);
-
-      // Peek: surface changed items in collapsed repos
-      const peeks = new Map<string, PeekUpdate>();
-      const peekCounts = new Map<string, number>();
-      const peekFirstLabels = new Map<string, string>();
-      for (const pr of prs) {
-        if (changed.has(pr.id)) {
-          const isCollapsed = !viewState.expandedRepos.pullRequests[pr.repoFullName];
-          if (isCollapsed) {
-            const count = (peekCounts.get(pr.repoFullName) ?? 0) + 1;
-            peekCounts.set(pr.repoFullName, count);
-            if (count === 1) {
-              const label = `#${pr.number} ${pr.title}`;
-              peekFirstLabels.set(pr.repoFullName, label);
-              peeks.set(pr.repoFullName, {
-                itemLabel: label,
-                newStatus: pr.checkStatus ?? pr.reviewDecision ?? "updated",
-              });
-            } else {
-              peeks.set(pr.repoFullName, {
-                itemLabel: `${peekFirstLabels.get(pr.repoFullName)} + ${count - 1} more`,
-                newStatus: peeks.get(pr.repoFullName)!.newStatus,
-              });
-            }
-          }
-        }
-      }
-      if (peeks.size > 0) {
-        setPeekUpdates(peeks);
-        clearTimeout(peekTimeout);
-        peekTimeout = setTimeout(() => setPeekUpdates(new Map()), 3000);
-      }
-    }
+  const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
+    getItems: () => props.pullRequests,
+    getHotIds: () => props.hotPollingPRIds,
+    getExpandedRepos: () => viewState.expandedRepos.pullRequests,
+    trackKey: (pr) => `${pr.checkStatus}|${pr.reviewDecision}`,
+    itemLabel: (pr) => `#${pr.number} ${pr.title}`,
+    itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
   });
 
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
   );
-  onCleanup(() => {
-    clearTimeout(flashTimeout);
-    clearTimeout(peekTimeout);
-  });
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("pullRequests", field, direction);

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
@@ -11,8 +11,9 @@ import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
-import { orderRepoGroups, type PeekUpdate } from "../../lib/grouping";
+import { orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
+import { createFlashDetection } from "../../lib/flashDetection";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -138,82 +139,13 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneExpandedRepos("actions", names);
   });
 
-  const [peekUpdates, setPeekUpdates] = createSignal<ReadonlyMap<string, PeekUpdate>>(new Map());
-  let peekTimeout: ReturnType<typeof setTimeout> | undefined;
-
-  let prevRunValues = new Map<number, { status: string; conclusion: string | null }>();
-  let prevRunValuesInitialized = false;
-  let flashRunTimeout: ReturnType<typeof setTimeout> | undefined;
-  const [flashingRunIds, setFlashingRunIds] = createSignal<ReadonlySet<number>>(new Set());
-
-  createEffect(() => {
-    const runs = props.workflowRuns;
-    const hotIds = props.hotPollingRunIds;
-
-    if (!prevRunValuesInitialized) {
-      prevRunValuesInitialized = true;
-      prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
-      return;
-    }
-
-    // Only detect changes for hot-polled items — full refresh replaces all data
-    // and would cause mass flashing if not gated.
-    if (!hotIds || hotIds.size === 0) {
-      for (const run of runs) {
-        prevRunValues.set(run.id, { status: run.status, conclusion: run.conclusion });
-      }
-      return;
-    }
-
-    const changed = new Set<number>();
-    for (const run of runs) {
-      if (!hotIds.has(run.id)) continue;
-      const prev = prevRunValues.get(run.id);
-      if (prev && (prev.status !== run.status || prev.conclusion !== run.conclusion)) {
-        changed.add(run.id);
-      }
-    }
-
-    for (const run of runs) {
-      prevRunValues.set(run.id, { status: run.status, conclusion: run.conclusion });
-    }
-
-    if (changed.size > 0) {
-      setFlashingRunIds(prev => new Set([...prev, ...changed]));
-      clearTimeout(flashRunTimeout);
-      flashRunTimeout = setTimeout(() => setFlashingRunIds(new Set<number>()), 1000);
-
-      // Peek: surface changed runs in collapsed repos
-      const peeks = new Map<string, PeekUpdate>();
-      const peekCounts = new Map<string, number>();
-      const peekFirstLabels = new Map<string, string>();
-      for (const run of runs) {
-        if (changed.has(run.id)) {
-          const isCollapsed = !viewState.expandedRepos.actions[run.repoFullName];
-          if (isCollapsed) {
-            const count = (peekCounts.get(run.repoFullName) ?? 0) + 1;
-            peekCounts.set(run.repoFullName, count);
-            if (count === 1) {
-              peekFirstLabels.set(run.repoFullName, run.name);
-              peeks.set(run.repoFullName, {
-                itemLabel: run.name,
-                newStatus: run.conclusion ?? run.status,
-              });
-            } else {
-              peeks.set(run.repoFullName, {
-                itemLabel: `${peekFirstLabels.get(run.repoFullName)} + ${count - 1} more`,
-                newStatus: peeks.get(run.repoFullName)!.newStatus,
-              });
-            }
-          }
-        }
-      }
-      if (peeks.size > 0) {
-        setPeekUpdates(peeks);
-        clearTimeout(peekTimeout);
-        peekTimeout = setTimeout(() => setPeekUpdates(new Map()), 3000);
-      }
-    }
+  const { flashingIds: flashingRunIds, peekUpdates } = createFlashDetection({
+    getItems: () => props.workflowRuns,
+    getHotIds: () => props.hotPollingRunIds,
+    getExpandedRepos: () => viewState.expandedRepos.actions,
+    trackKey: (run) => `${run.status}|${run.conclusion}`,
+    itemLabel: (run) => run.name,
+    itemStatus: (run) => run.conclusion ?? run.status,
   });
 
   function handleIgnore(run: WorkflowRun) {
@@ -278,10 +210,6 @@ export default function ActionsTab(props: ActionsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.actions,
   );
-  onCleanup(() => {
-    clearTimeout(flashRunTimeout);
-    clearTimeout(peekTimeout);
-  });
 
   return (
     <div class="divide-y divide-base-300">

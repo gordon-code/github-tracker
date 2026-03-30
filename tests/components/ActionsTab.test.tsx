@@ -5,7 +5,7 @@ import { createSignal } from "solid-js";
 import ActionsTab from "../../src/app/components/dashboard/ActionsTab";
 import type { WorkflowRun } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
-import { viewState } from "../../src/app/stores/view";
+import { viewState, setAllExpanded } from "../../src/app/stores/view";
 import { makeWorkflowRun, resetViewStore } from "../helpers/index";
 
 beforeEach(() => {
@@ -434,5 +434,39 @@ describe("ActionsTab", () => {
     // Workflow name visible means the repo group is expanded
     expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
     expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+  });
+
+  it("passes hotPollingRunIds to workflow summary cards", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ id: 10, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "in_progress", conclusion: null }),
+      makeWorkflowRun({ id: 20, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "success" }),
+    ];
+    setAllExpanded("actions", ["org/repo"], true);
+    const { container } = render(() => (
+      <ActionsTab workflowRuns={runs} hotPollingRunIds={new Set([10])} />
+    ));
+    // Click workflow card header to expand and show individual run rows
+    const ciHeader = screen.getByText("CI");
+    await user.click(ciHeader);
+    // Now WorkflowRunRow elements should be visible with shimmer on the hot-polled run
+    const runRows = container.querySelectorAll("[class*='flex items-center gap-3']");
+    expect(runRows.length).toBeGreaterThanOrEqual(2);
+    expect(runRows[0]?.classList.contains("animate-shimmer")).toBe(true);
+    expect(runRows[1]?.classList.contains("animate-shimmer")).toBe(false);
+  });
+
+  it("does not apply shimmer when hotPollingRunIds is undefined", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "in_progress", conclusion: null }),
+    ];
+    setAllExpanded("actions", ["org/repo"], true);
+    const { container } = render(() => <ActionsTab workflowRuns={runs} />);
+    await user.click(screen.getByText("CI"));
+    const runRows = container.querySelectorAll("[class*='flex items-center gap-3']");
+    for (const row of runRows) {
+      expect(row.classList.contains("animate-shimmer")).toBe(false);
+    }
   });
 });
