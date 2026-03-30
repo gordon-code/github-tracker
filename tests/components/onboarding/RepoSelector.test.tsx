@@ -233,27 +233,27 @@ describe("RepoSelector", () => {
     });
   });
 
-  it("sorts org groups by most recent activity", async () => {
-    const staleRepos: RepoEntry[] = [
-      { owner: "stale-org", name: "old-repo", fullName: "stale-org/old-repo", pushedAt: "2025-01-01T00:00:00Z" },
-    ];
-    const activeRepos: RepoEntry[] = [
-      { owner: "active-org", name: "new-repo", fullName: "active-org/new-repo", pushedAt: "2026-03-23T00:00:00Z" },
-    ];
+  it("shows personal org first, then remaining orgs alphabetically", async () => {
+    vi.mocked(api.fetchOrgs).mockResolvedValue([
+      { login: "zebra-org", avatarUrl: "", type: "org" },
+      { login: "testuser", avatarUrl: "", type: "user" },
+      { login: "alpha-org", avatarUrl: "", type: "org" },
+    ]);
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
-      if (org === "stale-org") return Promise.resolve(staleRepos);
-      return Promise.resolve(activeRepos);
+      return Promise.resolve([
+        { owner: org as string, name: "repo", fullName: `${org}/repo`, pushedAt: "2026-03-20T00:00:00Z" },
+      ]);
     });
     render(() => (
-      <RepoSelector selectedOrgs={["stale-org", "active-org"]} selected={[]} onChange={vi.fn()} />
+      <RepoSelector selectedOrgs={["zebra-org", "testuser", "alpha-org"]} selected={[]} onChange={vi.fn()} />
     ));
     await waitFor(() => {
-      screen.getByText("old-repo");
-      screen.getByText("new-repo");
+      expect(screen.getAllByText("repo").length).toBe(3);
     });
-    const orgHeaders = screen.getAllByText(/^(active-org|stale-org)$/);
-    expect(orgHeaders[0].textContent).toBe("active-org");
-    expect(orgHeaders[1].textContent).toBe("stale-org");
+    const orgHeaders = screen.getAllByText(/^(testuser|alpha-org|zebra-org)$/);
+    expect(orgHeaders[0].textContent).toBe("testuser");
+    expect(orgHeaders[1].textContent).toBe("alpha-org");
+    expect(orgHeaders[2].textContent).toBe("zebra-org");
   });
 
   it("does not show timestamp for repos with null pushedAt", async () => {
@@ -295,28 +295,32 @@ describe("RepoSelector", () => {
     }
   });
 
-  it("preserves org order when all repos have null pushedAt", async () => {
-    const nullOrg1: RepoEntry[] = [
-      { owner: "stale-org", name: "null-repo-1", fullName: "stale-org/null-repo-1", pushedAt: null },
+  it("sorts orgs alphabetically regardless of repo activity", async () => {
+    vi.mocked(api.fetchOrgs).mockResolvedValue([
+      { login: "stale-org", avatarUrl: "", type: "org" },
+      { login: "active-org", avatarUrl: "", type: "org" },
+    ]);
+    const staleRepos: RepoEntry[] = [
+      { owner: "stale-org", name: "old-repo", fullName: "stale-org/old-repo", pushedAt: "2025-01-01T00:00:00Z" },
     ];
-    const nullOrg2: RepoEntry[] = [
-      { owner: "active-org", name: "null-repo-2", fullName: "active-org/null-repo-2", pushedAt: null },
+    const activeRepos: RepoEntry[] = [
+      { owner: "active-org", name: "new-repo", fullName: "active-org/new-repo", pushedAt: "2026-03-23T00:00:00Z" },
     ];
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
-      if (org === "stale-org") return Promise.resolve(nullOrg1);
-      return Promise.resolve(nullOrg2);
+      if (org === "stale-org") return Promise.resolve(staleRepos);
+      return Promise.resolve(activeRepos);
     });
     render(() => (
       <RepoSelector selectedOrgs={["stale-org", "active-org"]} selected={[]} onChange={vi.fn()} />
     ));
     await waitFor(() => {
-      screen.getByText("null-repo-1");
-      screen.getByText("null-repo-2");
+      screen.getByText("old-repo");
+      screen.getByText("new-repo");
     });
     const orgHeaders = screen.getAllByText(/^(active-org|stale-org)$/);
-    // Both have null pushedAt → comparator returns 0 → original order preserved
-    expect(orgHeaders[0].textContent).toBe("stale-org");
-    expect(orgHeaders[1].textContent).toBe("active-org");
+    // Alphabetical: active-org before stale-org, regardless of pushedAt
+    expect(orgHeaders[0].textContent).toBe("active-org");
+    expect(orgHeaders[1].textContent).toBe("stale-org");
   });
 
   it("each org group has a scrollable region with aria-label", async () => {

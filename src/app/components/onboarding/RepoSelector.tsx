@@ -223,20 +223,18 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   const sortedOrgStates = createMemo(() => {
     const states = orgStates();
-    // Defer sorting during initial load to prevent layout shift as orgs trickle in.
-    // After initial load (all orgs resolved), sorting stays active during retries
-    // because loadedCount is not reset by retryOrg.
+    // Defer sorting until all orgs have loaded: prevents layout shift during
+    // trickle-in, and ensures each org's type ("user" vs "org") is resolved
+    // from fetchOrgs before we sort on it. loadedCount is not reset by retryOrg,
+    // so sorting stays active during retries.
     if (loadedCount() < props.selectedOrgs.length) return states;
-    const maxPushedAt = new Map(
-      states.map((s) => [
-        s.org,
-        s.repos.reduce((max, r) => r.pushedAt && r.pushedAt > max ? r.pushedAt : max, ""),
-      ])
-    );
+    // Order: personal org first, then remaining orgs alphabetically.
+    // Repos within each org retain their existing recency order from fetchRepos.
     return [...states].sort((a, b) => {
-      const aMax = maxPushedAt.get(a.org) ?? "";
-      const bMax = maxPushedAt.get(b.org) ?? "";
-      return aMax > bMax ? -1 : aMax < bMax ? 1 : 0;
+      const aIsUser = a.type === "user" ? 0 : 1;
+      const bIsUser = b.type === "user" ? 0 : 1;
+      if (aIsUser !== bIsUser) return aIsUser - bIsUser;
+      return a.org.localeCompare(b.org, "en");
     });
   });
 
