@@ -2,6 +2,7 @@ import {
   createSignal,
   createEffect,
   createMemo,
+  untrack,
   Show,
   Index,
   For,
@@ -141,27 +142,29 @@ export default function RepoSelector(props: RepoSelectorProps) {
         await Promise.allSettled(promises);
       }
 
-      // After all org repos have loaded, trigger upstream discovery if enabled
+      // After all org repos have loaded, trigger upstream discovery if enabled.
+      // Use untrack to prevent reactive prop reads from re-triggering the effect.
       if (props.showUpstreamDiscovery && version === effectVersion) {
-        const currentUser = user();
+        const currentUser = untrack(() => user());
         const discoveryClient = getClient();
         if (currentUser && discoveryClient) {
           setDiscoveringUpstream(true);
           setDiscoveredRepos([]);
           setDiscoveryCapped(false);
-          // Build exclude set from all org repos + already-selected repos + current upstream repos
           const allOrgFullNames = new Set<string>();
           for (const state of orgStates()) {
             for (const repo of state.repos) {
               allOrgFullNames.add(repo.fullName);
             }
           }
-          for (const repo of props.selected) {
-            allOrgFullNames.add(repo.fullName);
-          }
-          for (const repo of props.upstreamRepos ?? []) {
-            allOrgFullNames.add(repo.fullName);
-          }
+          untrack(() => {
+            for (const repo of props.selected) {
+              allOrgFullNames.add(repo.fullName);
+            }
+            for (const repo of props.upstreamRepos ?? []) {
+              allOrgFullNames.add(repo.fullName);
+            }
+          });
           void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames)
             .then((repos) => {
               if (version !== effectVersion) return;
