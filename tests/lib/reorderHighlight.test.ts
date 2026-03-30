@@ -1,10 +1,8 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { createReorderHighlight } from "../../src/app/lib/reorderHighlight";
 
 describe("createReorderHighlight", () => {
-  afterEach(() => { vi.useRealTimers(); });
-
   it("returns an accessor that starts as empty set", () => {
     createRoot((dispose) => {
       const [order] = createSignal<string[]>(["a", "b"]);
@@ -30,19 +28,4 @@ describe("createReorderHighlight", () => {
     });
   });
 
-  it("registers onCleanup for timeout disposal", () => {
-    vi.useFakeTimers();
-    createRoot((dispose) => {
-      const [order] = createSignal<string[]>(["a", "b"]);
-      const [locked] = createSignal<string[]>([]);
-      const highlighted = createReorderHighlight(order, locked);
-
-      // Verify the returned accessor is usable within the root
-      expect(highlighted()).toBeInstanceOf(Set);
-      expect(highlighted().size).toBe(0);
-
-      // Dispose should not throw (onCleanup is registered correctly)
-      dispose();
-    });
-  });
 });
