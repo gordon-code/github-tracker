@@ -31,7 +31,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 ```sh
 pnpm install
 pnpm run dev        # Start Vite dev server
-pnpm test           # Run browser tests (130 tests)
+pnpm test           # Run unit/component tests
 pnpm run typecheck  # TypeScript check
 pnpm run build      # Production build (~241KB JS, ~31KB CSS)
 ```

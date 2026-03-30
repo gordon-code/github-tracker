@@ -6,7 +6,6 @@ import userEvent from "@testing-library/user-event";
 
 vi.mock("../../src/app/stores/auth", () => ({
   setAuthFromPat: vi.fn(),
-  validateToken: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("../../src/app/lib/pat", async (importOriginal) => {
@@ -66,7 +65,6 @@ function mockFetchNetworkError() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(authStore.validateToken).mockResolvedValue(true);
   mockFetchOk();
   Object.defineProperty(window, "location", {
     configurable: true,
@@ -119,13 +117,27 @@ describe("LoginPage — PAT form navigation", () => {
     screen.getByLabelText("Personal access token");
   });
 
-  it("PAT form shows submit button and instructions", async () => {
+  it("PAT form shows submit button and token creation links", async () => {
     const user = userEvent.setup();
     render(() => <LoginPage />);
     await user.click(screen.getByText("Use a Personal Access Token"));
     screen.getByRole("button", { name: "Sign in" });
     screen.getByRole("link", { name: /Classic token/i });
-    screen.getByRole("link", { name: /Fine-grained token/i });
+    screen.getByRole("link", { name: /Fine-grained tokens/i });
+  });
+
+  it("shows classic token as recommended", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    screen.getByText(/recommended/i);
+  });
+
+  it("shows fine-grained limitations inline", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    screen.getByText(/only access one org at a time/i);
   });
 
   it("clicking 'Use OAuth instead' returns to OAuth view and clears state", async () => {
@@ -185,7 +197,7 @@ describe("LoginPage — PAT form validation", () => {
     expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
   });
 
-  it("calls navigate('/') on successful validation", async () => {
+  it("calls setAuthFromPat with token and user data, then navigates", async () => {
     vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
     mockFetchOk();
     const user = await openPatForm();
@@ -194,7 +206,10 @@ describe("LoginPage — PAT form validation", () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true });
     });
-    expect(authStore.setAuthFromPat).toHaveBeenCalled();
+    expect(authStore.setAuthFromPat).toHaveBeenCalledWith(
+      "ghp_" + "a".repeat(36),
+      githubUser,
+    );
   });
 
   it("shows 'Verifying...' and disables button while submitting", async () => {
@@ -213,6 +228,20 @@ describe("LoginPage — PAT form validation", () => {
     resolveFetch({ ok: true, status: 200, json: () => Promise.resolve(githubUser) } as Response);
   });
 
+  it("re-enables button after successful submission", async () => {
+    vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
+    mockFetchOk();
+    const user = await openPatForm();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp_" + "a".repeat(36));
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalled();
+    });
+    // finally block should have run — button no longer disabled
+    const btn = screen.getByRole("button", { name: "Sign in" });
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
+
   it("shows 'Network error' on fetch failure", async () => {
     vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
     mockFetchNetworkError();
@@ -223,6 +252,19 @@ describe("LoginPage — PAT form validation", () => {
       expect(screen.getByRole("alert").textContent).toContain("Network error");
     });
     expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+  });
+
+  it("re-enables button after network error", async () => {
+    vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
+    mockFetchNetworkError();
+    const user = await openPatForm();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp_" + "a".repeat(36));
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      screen.getByRole("alert");
+    });
+    const btn = screen.getByRole("button", { name: "Sign in" });
+    expect(btn.hasAttribute("disabled")).toBe(false);
   });
 
   it("does not navigate when user switches to OAuth during validation", async () => {
@@ -241,10 +283,10 @@ describe("LoginPage — PAT form validation", () => {
     await user.click(screen.getByText("Use OAuth instead"));
     // Resolve fetch as successful — but user already left
     resolveFetch({ ok: true, status: 200, json: () => Promise.resolve(githubUser) } as Response);
-    // Wait a tick for the async handler to complete
-    await new Promise((r) => setTimeout(r, 50));
-    // Token was never stored and navigation never happened
-    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    // Wait for async handler to settle
+    await waitFor(() => {
+      expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    });
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

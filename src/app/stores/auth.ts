@@ -45,8 +45,9 @@ export function setAuth(response: TokenExchangeResponse): void {
   console.info("[auth] access token set (localStorage)");
 }
 
-export function setAuthFromPat(token: string): void {
+export function setAuthFromPat(token: string, userData: GitHubUser): void {
   setAuth({ access_token: token });
+  setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat" });
 }
 

@@ -1,12 +1,10 @@
 import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { setAuthFromPat, validateToken } from "../stores/auth";
+import { setAuthFromPat, type GitHubUser } from "../stores/auth";
 import {
   isValidPatFormat,
-  PAT_FINE_GRAINED_PERMISSIONS,
   GITHUB_PAT_URL,
   GITHUB_FINE_GRAINED_PAT_URL,
-  PAT_FINE_GRAINED_NOTIFICATIONS_CAVEAT,
 } from "../lib/pat";
 import { buildAuthorizeUrl } from "../lib/oauth";
 
@@ -27,15 +25,13 @@ export default function LoginPage() {
     if (submitting()) return;
     const validation = isValidPatFormat(patInput());
     if (!validation.valid) {
-      setPatError(validation.error!);
+      setPatError(validation.error);
       return;
     }
     setSubmitting(true);
     setPatError(null);
     const trimmedToken = patInput().trim();
     try {
-      // Validate token BEFORE storing to prevent half-set state and
-      // distinguish network errors from invalid tokens
       const resp = await fetch("https://api.github.com/user", {
         headers: {
           Authorization: `Bearer ${trimmedToken}`,
@@ -49,21 +45,16 @@ export default function LoginPage() {
             ? "Token is invalid — check that you entered it correctly"
             : `GitHub returned ${resp.status} — try again later`
         );
-        setSubmitting(false);
         return;
       }
-      if (!showPatForm()) {
-        setSubmitting(false);
-        return;
-      }
-      // Token is valid — store it and populate user data
-      setAuthFromPat(trimmedToken);
-      await validateToken();
+      if (!showPatForm()) return;
+      const userData = (await resp.json()) as GitHubUser;
+      setAuthFromPat(trimmedToken, userData);
       setPatInput("");
-      setSubmitting(false);
       navigate("/", { replace: true });
     } catch {
       setPatError("Network error — please try again");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -120,36 +111,25 @@ export default function LoginPage() {
                       >
                         Classic token
                       </a>
-                      {" "}(fine for personal use) — select these scopes:
+                      {" "}(recommended) — works across all orgs. Select these scopes:
                     </p>
                     <ul class="list-disc list-inside space-y-0.5 text-base-content/70">
-                      <li><code>repo</code> — access repository data (issues, PRs, actions)</li>
-                      <li><code>read:org</code> — read organization membership</li>
-                      <li><code>notifications</code> — access notification status</li>
+                      <li><code>repo</code></li>
+                      <li><code>read:org</code> <span class="text-base-content/40">(under admin:org)</span></li>
+                      <li><code>notifications</code></li>
                     </ul>
                   </div>
 
-                  <div>
-                    <p class="font-medium mb-1">
-                      <a
-                        href={GITHUB_FINE_GRAINED_PAT_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="link link-primary"
-                      >
-                        Fine-grained token
-                      </a>
-                      {" "}(recommended by GitHub) — set repository access to "All repositories", then enable:
-                    </p>
-                    <ul class="list-disc list-inside space-y-0.5 text-base-content/70">
-                      {PAT_FINE_GRAINED_PERMISSIONS.repository.map((perm) => (
-                        <li>{perm}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <p class="text-warning text-xs">
-                    {PAT_FINE_GRAINED_NOTIFICATIONS_CAVEAT}
+                  <p class="text-base-content/50">
+                    <a
+                      href={GITHUB_FINE_GRAINED_PAT_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="link"
+                    >
+                      Fine-grained tokens
+                    </a>
+                    {" "}also work, but only access one org at a time and do not support notifications. Add read-only permissions for Actions, Contents, Issues, and Pull requests.
                   </p>
                 </div>
 

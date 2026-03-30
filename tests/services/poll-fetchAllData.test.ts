@@ -547,6 +547,44 @@ describe("fetchAllData — notification gate 403 auto-disable", () => {
     expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
     expect(fetchWorkflowRuns).toHaveBeenCalled();
   });
+
+  it("shows PAT-specific 403 notification when authMethod is 'pat'", async () => {
+    vi.resetModules();
+
+    // Override config mock to include authMethod: "pat" for this test
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        authMethod: "pat",
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const { pushNotification } = await import("../../src/app/lib/errors");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    // First call — sets _lastSuccessfulFetch
+    await fetchAllData();
+
+    // Second call — gate fires a 403
+    mockOctokit.request.mockRejectedValueOnce({ status: 403 });
+    await fetchAllData();
+
+    // PAT-specific message should mention fine-grained tokens
+    expect(pushNotification).toHaveBeenCalledWith(
+      "notifications",
+      expect.stringContaining("fine-grained tokens do not support notifications"),
+      "warning"
+    );
+  });
 });
 
 // ── qa-4: Concurrency verification ────────────────────────────────────────────

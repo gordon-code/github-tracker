@@ -136,7 +136,7 @@ async function hasNotificationChanges(): Promise<boolean> {
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
       pushNotification("notifications", config.authMethod === "pat"
-        ? "Notifications API returned 403 — fine-grained tokens may not support notifications"
+        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope"
         : "Notifications API returned 403 — check that the notifications scope is granted", "warning");
       _notifGateDisabled = true;
     }

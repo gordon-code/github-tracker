@@ -1,4 +1,8 @@
-export function isValidPatFormat(token: string): { valid: boolean; error?: string } {
+export type PatValidationResult =
+  | { valid: true }
+  | { valid: false; error: string };
+
+export function isValidPatFormat(token: string): PatValidationResult {
   const trimmed = token.trim();
   if (trimmed.length === 0) {
     return { valid: false, error: "Please enter a token" };
@@ -18,28 +22,15 @@ export function isValidPatFormat(token: string): { valid: boolean; error?: strin
     return { valid: false, error: "Token contains invalid characters — check that you copied it correctly" };
   }
 
-  const minLength = isClassic ? 40 : 47;
+  // Classic PATs are exactly 40 chars. Fine-grained PATs are ~93 chars;
+  // use 80 as a safe lower bound to catch clearly truncated tokens.
+  const minLength = isClassic ? 40 : 80;
   if (trimmed.length < minLength) {
     return { valid: false, error: "Token appears truncated — check that you copied the full value" };
   }
 
   return { valid: true };
 }
-
-export const PAT_FINE_GRAINED_PERMISSIONS = {
-  repository: [
-    "Actions: Read-only",
-    "Contents: Read-only",
-    "Issues: Read-only",
-    "Metadata: Read-only",
-    "Pull requests: Read-only",
-  ],
-} as const;
-
-// Fine-grained PATs cannot access the Notifications API (GET /notifications returns 403).
-// The app gracefully handles this — the notifications gate auto-disables on 403.
-export const PAT_FINE_GRAINED_NOTIFICATIONS_CAVEAT =
-  "Fine-grained tokens cannot access notifications — the app will skip notification-based polling optimization and still function correctly.";
 
 export const GITHUB_PAT_URL = "https://github.com/settings/tokens/new";
 export const GITHUB_FINE_GRAINED_PAT_URL = "https://github.com/settings/personal-access-tokens/new";
