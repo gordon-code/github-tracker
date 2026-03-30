@@ -59,13 +59,6 @@ export default function RepoSelector(props: RepoSelectorProps) {
     // Version counter: if selectedOrgs changes while fetches are in-flight,
     // stale callbacks check this and bail out instead of writing to state.
     const version = ++effectVersion;
-    if (orgs.length === 0) {
-      setOrgStates([]);
-      setLoadedCount(0);
-      return;
-    }
-
-    // Initialize all orgs as loading
     setOrgStates(
       orgs.map((org) => ({
         org,
@@ -76,6 +69,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
       }))
     );
     setLoadedCount(0);
+
+    if (orgs.length === 0 && !props.showUpstreamDiscovery) {
+      return;
+    }
 
     const client = getClient();
     if (!client) {
@@ -89,58 +86,60 @@ export default function RepoSelector(props: RepoSelectorProps) {
         }))
       );
       setLoadedCount(orgs.length);
-      return;
+      if (!props.showUpstreamDiscovery) return;
     }
 
     // Fetch org type info first, then repos incrementally
     void (async () => {
-      let entries: OrgEntry[];
-      if (preloadedEntries != null) {
-        entries = preloadedEntries;
-      } else {
-        try {
-          entries = await fetchOrgs(client);
-        } catch {
-          entries = [];
-        }
-      }
-
-      if (version !== effectVersion) return;
-
-      const typeMap = new Map<string, "org" | "user">(
-        entries.map((e) => [e.login, e.type])
-      );
-
-      // Fetch repos for each org independently so results trickle in
-      const promises = orgs.map(async (org) => {
-        const type = typeMap.get(org) ?? "org";
-        try {
-          const repos = await fetchRepos(client, org, type);
-          if (version !== effectVersion) return;
-          setOrgStates((prev) =>
-            prev.map((s) =>
-              s.org === org ? { ...s, type, repos, loading: false } : s
-            )
-          );
-        } catch (err) {
-          if (version !== effectVersion) return;
-          const message =
-            err instanceof Error ? err.message : "Failed to load repositories";
-          setOrgStates((prev) =>
-            prev.map((s) =>
-              s.org === org
-                ? { ...s, type, repos: [], loading: false, error: message }
-                : s
-            )
-          );
-        } finally {
-          if (version === effectVersion) {
-            setLoadedCount((c) => c + 1);
+      if (orgs.length > 0 && client) {
+        let entries: OrgEntry[];
+        if (preloadedEntries != null) {
+          entries = preloadedEntries;
+        } else {
+          try {
+            entries = await fetchOrgs(client);
+          } catch {
+            entries = [];
           }
         }
-      });
 
-      await Promise.allSettled(promises);
+        if (version !== effectVersion) return;
+
+        const typeMap = new Map<string, "org" | "user">(
+          entries.map((e) => [e.login, e.type])
+        );
+
+        // Fetch repos for each org independently so results trickle in
+        const promises = orgs.map(async (org) => {
+          const type = typeMap.get(org) ?? "org";
+          try {
+            const repos = await fetchRepos(client, org, type);
+            if (version !== effectVersion) return;
+            setOrgStates((prev) =>
+              prev.map((s) =>
+                s.org === org ? { ...s, type, repos, loading: false } : s
+              )
+            );
+          } catch (err) {
+            if (version !== effectVersion) return;
+            const message =
+              err instanceof Error ? err.message : "Failed to load repositories";
+            setOrgStates((prev) =>
+              prev.map((s) =>
+                s.org === org
+                  ? { ...s, type, repos: [], loading: false, error: message }
+                  : s
+              )
+            );
+          } finally {
+            if (version === effectVersion) {
+              setLoadedCount((c) => c + 1);
+            }
+          }
+        });
+
+        await Promise.allSettled(promises);
+      }
 
       // After all org repos have loaded, trigger upstream discovery if enabled
       if (props.showUpstreamDiscovery && version === effectVersion) {
