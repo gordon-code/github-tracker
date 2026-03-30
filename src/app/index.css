@@ -127,6 +127,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-slow-pulse,
   .animate-toast-in, .animate-toast-out,
   .animate-drawer-in, .animate-drawer-out,
   .animate-overlay-in, .animate-overlay-out,
