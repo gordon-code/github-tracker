@@ -8,7 +8,8 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 - **Pull Requests Tab** — Open PRs with CI check status indicators (green/yellow/red dots). Draft badges, reviewer names.
 - **Actions Tab** — GHA workflow runs grouped by repo and workflow. Accordion collapse, PR run toggle.
 - **Onboarding Wizard** — Two-step org/repo selection with search filtering and bulk select.
-- **Settings Page** — Refresh interval, notification preferences, theme (light/dark/system), density, GitHub Actions limits.
+- **PAT Authentication** — Optional Personal Access Token login as alternative to OAuth. Client-side format validation, detailed token creation instructions for classic and fine-grained PATs.
+- **Settings Page** — Refresh interval, notification preferences, theme (light/dark/system), density, GitHub Actions limits. Shows current auth method and hides OAuth-specific options for PAT users.
 - **Desktop Notifications** — New item alerts with per-type toggles and batching.
 - **Ignore System** — Hide specific items with an "N ignored" badge and unignore popover.
 - **Dark Mode** — System-aware with flash prevention via inline script + CSP SHA-256 hash.
@@ -30,7 +31,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 ```sh
 pnpm install
 pnpm run dev        # Start Vite dev server
-pnpm test           # Run browser tests (130 tests)
+pnpm test           # Run unit/component tests
 pnpm run typecheck  # TypeScript check
 pnpm run build      # Production build (~241KB JS, ~31KB CSS)
 ```
@@ -57,6 +58,7 @@ src/
       config.ts     # Zod v4-validated config with localStorage persistence
       view.ts       # View state (tabs, sorting, ignored items, filters)
     lib/
+      pat.ts            # PAT format validation and token creation instruction constants
       notifications.ts  # Desktop notification permission, detection, and dispatch
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
@@ -72,6 +74,7 @@ tests/
 ## Security
 
 - Strict CSP: `script-src 'self'` (SHA-256 exception for dark mode script only)
+- PAT tokens stored in `localStorage` (same key as OAuth tokens) — single-user personal dashboard threat model
 - OAuth CSRF protection via `crypto.getRandomValues` state parameter
 - CORS locked to exact origin (strict equality, no substring matching)
 - Access token stored in `localStorage` under app-specific key; CSP prevents XSS token theft

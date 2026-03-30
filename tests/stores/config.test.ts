@@ -45,6 +45,7 @@ describe("ConfigSchema", () => {
     expect(result.defaultTab).toBe("issues");
     expect(result.rememberLastTab).toBe(true);
     expect(result.onboardingComplete).toBe(false);
+    expect(result.authMethod).toBe("oauth");
   });
 
   it("fills missing fields from defaults when partial input given", () => {

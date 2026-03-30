@@ -46,6 +46,7 @@ export const ConfigSchema = z.object({
   defaultTab: z.enum(["issues", "pullRequests", "actions"]).default("issues"),
   rememberLastTab: z.boolean().default(true),
   onboardingComplete: z.boolean().default(false),
+  authMethod: z.enum(["oauth", "pat"]).default("oauth"),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

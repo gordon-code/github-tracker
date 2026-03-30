@@ -260,26 +260,28 @@ export default function SettingsPage() {
               </div>
             </Show>
 
-            <div class="border-t border-base-300 pt-3">
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-sm font-medium text-base-content">
-                    Organization Access
-                  </p>
-                  <p class="text-xs text-base-content/60">
-                    Request access for restricted orgs on GitHub — new orgs sync when you return
-                  </p>
+            <Show when={config.authMethod !== "pat"}>
+              <div class="border-t border-base-300 pt-3">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-base-content">
+                      Organization Access
+                    </p>
+                    <p class="text-xs text-base-content/60">
+                      Request access for restricted orgs on GitHub — new orgs sync when you return
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGrantOrgs}
+                    disabled={merging()}
+                    class="btn btn-sm btn-outline"
+                  >
+                    {merging() ? "Syncing..." : "Manage org access"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleGrantOrgs}
-                  disabled={merging()}
-                  class="btn btn-sm btn-outline"
-                >
-                  {merging() ? "Syncing..." : "Manage org access"}
-                </button>
               </div>
-            </div>
+            </Show>
 
             <div class="border-t border-base-300 pt-3">
               <div class="flex items-center justify-between">
@@ -561,6 +563,14 @@ export default function SettingsPage() {
 
         {/* Section 7: Data */}
         <Section title="Data">
+          {/* Authentication method */}
+          <SettingRow
+            label="Authentication"
+            description="Current sign-in method"
+          >
+            <span class="text-sm">{config.authMethod === "pat" ? "Personal Access Token" : "OAuth"}</span>
+          </SettingRow>
+
           {/* Clear cache */}
           <SettingRow
             label="Clear cache"
