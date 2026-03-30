@@ -298,54 +298,6 @@ describe("updateConfig (real export)", () => {
     });
   });
 
-  it("preserves non-default values when updating a different field", () => {
-    createRoot((dispose) => {
-      // Set several fields to non-default values
-      updateConfig({ theme: "dark", refreshInterval: 120, itemsPerPage: 50 });
-      // Now update a single unrelated field
-      updateConfig({ hotPollInterval: 60 });
-      // All previously-set fields must survive
-      expect(config.hotPollInterval).toBe(60);
-      expect(config.theme).toBe("dark");
-      expect(config.refreshInterval).toBe(120);
-      expect(config.itemsPerPage).toBe(50);
-      dispose();
-    });
-  });
-
-  it("preserves onboardingComplete when updating refreshInterval", () => {
-    createRoot((dispose) => {
-      updateConfig({ onboardingComplete: true });
-      updateConfig({ refreshInterval: 600 });
-      expect(config.refreshInterval).toBe(600);
-      expect(config.onboardingComplete).toBe(true);
-      dispose();
-    });
-  });
-
-  it("preserves nested notifications when updating a top-level field", () => {
-    createRoot((dispose) => {
-      updateConfig({
-        notifications: { enabled: true, issues: true, pullRequests: false, workflowRuns: true },
-      });
-      updateConfig({ viewDensity: "compact" });
-      expect(config.viewDensity).toBe("compact");
-      expect(config.notifications.enabled).toBe(true);
-      expect(config.notifications.pullRequests).toBe(false);
-      dispose();
-    });
-  });
-
-  it("preserves selectedOrgs when updating theme", () => {
-    createRoot((dispose) => {
-      updateConfig({ selectedOrgs: ["my-org", "other-org"] });
-      updateConfig({ theme: "forest" });
-      expect(config.theme).toBe("forest");
-      expect(config.selectedOrgs).toEqual(["my-org", "other-org"]);
-      dispose();
-    });
-  });
-
   it("does nothing when called with empty object", () => {
     createRoot((dispose) => {
       updateConfig({ theme: "dark" });
@@ -361,6 +313,71 @@ describe("updateConfig (real export)", () => {
       updateConfig({ theme: "forest", hotPollInterval: 5 }); // hotPollInterval below min
       expect(config.theme).toBe("dark");
       expect(config.hotPollInterval).toBe(30);
+      dispose();
+    });
+  });
+
+  // Structural guard: updating ANY single field must never wipe other fields.
+  // Catches Zod v4 .partial().safeParse() default inflation (BUG-001 class).
+  it.each([
+    ["selectedOrgs", { selectedOrgs: ["new-org"] }],
+    ["selectedRepos", { selectedRepos: [{ owner: "x", name: "y", fullName: "x/y" }] }],
+    ["upstreamRepos", { upstreamRepos: [{ owner: "u", name: "v", fullName: "u/v" }] }],
+    ["trackedUsers", { trackedUsers: [{ login: "bob", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: null }] }],
+    ["refreshInterval", { refreshInterval: 120 }],
+    ["hotPollInterval", { hotPollInterval: 60 }],
+    ["maxWorkflowsPerRepo", { maxWorkflowsPerRepo: 10 }],
+    ["maxRunsPerWorkflow", { maxRunsPerWorkflow: 5 }],
+    ["notifications", { notifications: { enabled: true, issues: false, pullRequests: true, workflowRuns: false } }],
+    ["theme", { theme: "dark" as const }],
+    ["viewDensity", { viewDensity: "compact" as const }],
+    ["itemsPerPage", { itemsPerPage: 50 }],
+    ["defaultTab", { defaultTab: "actions" as const }],
+    ["rememberLastTab", { rememberLastTab: false }],
+    ["onboardingComplete", { onboardingComplete: true }],
+    ["authMethod", { authMethod: "pat" as const }],
+  ])("updating only %s preserves all other fields", (fieldName, patch) => {
+    createRoot((dispose) => {
+      // Seed config with non-default values for every field
+      const seed = {
+        selectedOrgs: ["seed-org"],
+        selectedRepos: [{ owner: "s", name: "r", fullName: "s/r" }],
+        upstreamRepos: [{ owner: "a", name: "b", fullName: "a/b" }],
+        trackedUsers: [{ login: "alice", avatarUrl: "https://avatars.githubusercontent.com/u/2", name: "Alice" }],
+        refreshInterval: 600,
+        hotPollInterval: 45,
+        maxWorkflowsPerRepo: 8,
+        maxRunsPerWorkflow: 2,
+        notifications: { enabled: true, issues: false, pullRequests: false, workflowRuns: true },
+        theme: "dracula" as const,
+        viewDensity: "compact" as const,
+        itemsPerPage: 50,
+        defaultTab: "pullRequests" as const,
+        rememberLastTab: false,
+        onboardingComplete: true,
+        authMethod: "pat" as const,
+      };
+      updateConfig(seed);
+
+      // Snapshot before the single-field update
+      const before = JSON.parse(JSON.stringify(config));
+
+      // Apply the single-field patch
+      updateConfig(patch);
+
+      // The patched field should have changed
+      expect((config as Record<string, unknown>)[fieldName]).toEqual(
+        (patch as Record<string, unknown>)[fieldName]
+      );
+
+      // Every OTHER field must be identical to the snapshot
+      for (const key of Object.keys(before)) {
+        if (key === fieldName) continue;
+        expect(
+          (config as Record<string, unknown>)[key],
+          `updateConfig({ ${fieldName} }) must not change ${key}`
+        ).toEqual((before as Record<string, unknown>)[key]);
+      }
       dispose();
     });
   });

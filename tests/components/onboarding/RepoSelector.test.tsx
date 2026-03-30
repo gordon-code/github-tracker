@@ -436,7 +436,8 @@ describe("RepoSelector — upstream discovery", () => {
     expect(api.discoverUpstreamRepos).toHaveBeenCalledWith(
       expect.anything(),
       "testuser",
-      expect.any(Set)
+      expect.any(Set),
+      undefined
     );
   });
 

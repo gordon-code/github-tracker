@@ -354,6 +354,47 @@ describe("discoverUpstreamRepos", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({ owner: "my-org", name: "my-repo", fullName: "my-org/my-repo" });
   });
+
+  it("discovers repos from tracked users in addition to primary user", async () => {
+    const octokit = makeOctokit(
+      async () => ({}),
+      async (_query: string, vars: unknown) => {
+        const v = vars as { q: string };
+        if (v.q.includes("involves:primary") && v.q.includes("is:issue")) {
+          return makeSearchPage(["org/primary-repo"]);
+        }
+        if (v.q.includes("involves:tracked1") && v.q.includes("is:issue")) {
+          return makeSearchPage(["org/tracked1-repo"]);
+        }
+        return makeSearchPage([]);
+      }
+    );
+
+    const trackedUsers = [makeTrackedUser("tracked1")];
+    const result = await discoverUpstreamRepos(octokit as never, "primary", new Set(), trackedUsers);
+    const names = result.map((r) => r.fullName);
+    expect(names).toContain("org/primary-repo");
+    expect(names).toContain("org/tracked1-repo");
+  });
+
+  it("deduplicates repos found by both primary and tracked users", async () => {
+    const octokit = makeOctokit(
+      async () => ({}),
+      async (_query: string, vars: unknown) => {
+        const v = vars as { q: string };
+        if (v.q.includes("is:issue")) {
+          // Both users discover the same repo
+          return makeSearchPage(["org/shared-repo"]);
+        }
+        return makeSearchPage([]);
+      }
+    );
+
+    const trackedUsers = [makeTrackedUser("tracked1")];
+    const result = await discoverUpstreamRepos(octokit as never, "primary", new Set(), trackedUsers);
+    expect(result).toHaveLength(1);
+    expect(result[0].fullName).toBe("org/shared-repo");
+  });
 });
 
 // ── multi-user search (fetchIssuesAndPullRequests with trackedUsers) ───────────
@@ -471,16 +512,14 @@ describe("multi-user search", () => {
       async () => ({}),
       async (_query: string, vars: unknown) => {
         const v = vars as Record<string, unknown>;
-        // Heavy backfill query has 'ids' variable
         if ("ids" in v) return makeBackfillResponse([]);
-        // Light combined query: distinguish by issueQ content
+        // Both main and tracked user searches are now repo-scoped;
+        // distinguish by the involves: login in the query
         const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ?.includes("repo:")) {
-          // Main user search (scoped to repos)
+        if (issueQ?.includes("involves:mainuser") || issueQ?.includes("involves:trackeduser")) {
           return makeLightCombinedResponse([{ databaseId: sharedIssueId, repoFullName: "org/repo" }]);
         }
-        // Tracked user search (unscoped)
-        return makeLightCombinedResponse([{ databaseId: sharedIssueId, repoFullName: "org/repo" }]);
+        return makeLightCombinedResponse([]);
       }
     );
 
@@ -506,14 +545,17 @@ describe("multi-user search", () => {
         const v = vars as Record<string, unknown>;
         if ("ids" in v) return makeBackfillResponse([]);
         const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ?.includes("repo:")) {
+        if (issueQ?.includes("involves:mainuser")) {
           return makeLightCombinedResponse([{ databaseId: mainIssueId, repoFullName: "org/repo" }]);
         }
-        // Tracked user has both the shared one and a unique one
-        return makeLightCombinedResponse([
-          { databaseId: mainIssueId, repoFullName: "org/repo" },
-          { databaseId: trackedOnlyIssueId, repoFullName: "org/other-repo" },
-        ]);
+        if (issueQ?.includes("involves:trackeduser")) {
+          // Tracked user has both the shared one and a unique one
+          return makeLightCombinedResponse([
+            { databaseId: mainIssueId, repoFullName: "org/repo" },
+            { databaseId: trackedOnlyIssueId, repoFullName: "org/repo" },
+          ]);
+        }
+        return makeLightCombinedResponse([]);
       }
     );
 
@@ -541,8 +583,7 @@ describe("multi-user search", () => {
         const v = vars as Record<string, unknown>;
         if ("ids" in v) return makeBackfillResponse([]);
         const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ?.includes("repo:")) {
-          // Main user: only shared item
+        if (issueQ?.includes("involves:mainuser")) {
           return makeLightCombinedResponse([{ databaseId: sharedId, repoFullName: "org/repo" }]);
         }
         if (issueQ?.includes("involves:usera")) {
@@ -609,7 +650,7 @@ describe("multi-user search", () => {
         const v = vars as Record<string, unknown>;
         if ("ids" in v) return makeBackfillResponse([]);
         const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ?.includes("repo:")) {
+        if (issueQ?.includes("involves:mainuser")) {
           return makeLightCombinedResponse([{ databaseId: 1001, repoFullName: "org/repo" }]);
         }
         // Tracked user search fails
@@ -626,7 +667,6 @@ describe("multi-user search", () => {
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].id).toBe(1001);
     expect(result.issues[0].surfacedBy).toEqual(["mainuser"]);
-    // Error is captured (graphqlGlobalUserSearch uses "global-search:" prefix internally)
     expect(result.errors.length).toBeGreaterThan(0);
     expect(callCount).toBeGreaterThan(0);
   });
@@ -641,16 +681,13 @@ describe("multi-user search", () => {
       async (_query: string, vars: unknown) => {
         const v = vars as Record<string, unknown>;
         if ("ids" in v) {
-          // Heavy backfill: return enrichment for the PR
           return makeBackfillResponse([prId]);
         }
         const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ?.includes("repo:")) {
-          // Main user light search: includes a PR
+        if (issueQ?.includes("involves:mainuser") || issueQ?.includes("involves:trackeduser")) {
           return makeLightCombinedResponse([], [{ databaseId: prId, nodeId: prNodeId, repoFullName: "org/repo" }]);
         }
-        // Tracked user search: same PR
-        return makeLightCombinedResponse([], [{ databaseId: prId, nodeId: prNodeId, repoFullName: "org/repo" }]);
+        return makeLightCombinedResponse([]);
       }
     );
 
@@ -660,42 +697,30 @@ describe("multi-user search", () => {
 
     expect(result.pullRequests).toHaveLength(1);
     const pr = result.pullRequests[0];
-    // surfacedBy survives enrichment (spread preserves it since PREnrichmentData lacks surfacedBy)
     expect(pr.surfacedBy).toContain("mainuser");
     expect(pr.surfacedBy).toContain("trackeduser");
-    // And it's fully enriched
     expect(pr.enriched).toBe(true);
     expect(pr.checkStatus).toBe("success");
   });
 
-  it("empty repos with tracked users still runs tracked user searches", async () => {
-    const trackedIssueId = 9001;
-
+  it("empty repos returns empty results even with tracked users", async () => {
     const octokit = makeOctokit(
-      async () => ({}),
-      async (_query: string, vars: unknown) => {
-        const v = vars as Record<string, unknown>;
-        if ("ids" in v) return makeBackfillResponse([]);
-        // Only tracked user search should run (no repo: qualifier)
-        const issueQ = v["issueQ"] as string | undefined;
-        if (issueQ && !issueQ.includes("repo:")) {
-          return makeLightCombinedResponse([{ databaseId: trackedIssueId, repoFullName: "org/tracked-repo" }]);
-        }
-        return makeLightCombinedResponse([]);
-      }
+      async () => { throw new Error("should not be called"); },
+      async () => { throw new Error("should not be called"); }
     );
 
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
-      [], // empty repos — skip main user search
+      [], // empty repos — tracked user searches are also repo-scoped
       "mainuser",
       undefined,
       [makeTrackedUser("trackeduser")]
     );
 
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0].id).toBe(trackedIssueId);
-    expect(result.issues[0].surfacedBy).toEqual(["trackeduser"]);
+    expect(result.issues).toEqual([]);
+    expect(result.pullRequests).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(octokit.graphql).not.toHaveBeenCalled();
   });
 
   it("surfacedBy logins are always lowercase", async () => {

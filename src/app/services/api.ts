@@ -1201,52 +1201,6 @@ function mergeEnrichment(
 }
 
 /**
- * Global (unscoped) light search for a single tracked user — no repo: qualifiers.
- * Returns the same LightSearchResult shape as graphqlLightCombinedSearch.
- */
-async function graphqlGlobalUserSearch(
-  octokit: GitHubOctokit,
-  userLogin: string
-): Promise<LightSearchResult> {
-  if (!VALID_TRACKED_LOGIN.test(userLogin)) {
-    return {
-      issues: [],
-      pullRequests: [],
-      prNodeIds: [],
-      errors: [{ repo: "global-search", statusCode: null, message: "Invalid userLogin", retryable: false }],
-    };
-  }
-
-  const issueSeen = new Set<number>();
-  const issues: Issue[] = [];
-  const prMap = new Map<number, PullRequest>();
-  const nodeIdMap = new Map<number, string>();
-  const errors: ApiError[] = [];
-  const ISSUE_CAP = 1000;
-  const PR_CAP = 1000;
-
-  const issueQ = `is:issue is:open involves:${userLogin}`;
-  const prInvQ = `is:pr is:open involves:${userLogin}`;
-  const prRevQ = `is:pr is:open review-requested:${userLogin}`;
-
-  try {
-    await executeLightCombinedQuery(
-      octokit, issueQ, prInvQ, prRevQ, `global-search:${userLogin}`,
-      issueSeen, issues, prMap, nodeIdMap, errors, ISSUE_CAP, PR_CAP,
-    );
-  } catch (err) {
-    const { statusCode, message } = extractRejectionError(err);
-    errors.push({ repo: `global-search:${userLogin}`, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
-  }
-
-  const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= PR_CAP) pullRequests.splice(PR_CAP);
-  const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
-
-  return { issues, pullRequests, prNodeIds, errors };
-}
-
-/**
  * Merges tracked user search results into the main issue/PR maps.
  * Items already present get the tracked user's login appended to surfacedBy.
  * New items are added with surfacedBy: [trackedLogin].
@@ -1309,8 +1263,8 @@ export async function fetchIssuesAndPullRequests(
 
   const hasTrackedUsers = (trackedUsers?.length ?? 0) > 0;
 
-  // Early exit when there is nothing to search
-  if (repos.length === 0 && !hasTrackedUsers) {
+  // Early exit — tracked user searches are scoped to repos, so no repos = no results
+  if (repos.length === 0) {
     return { issues: [], pullRequests: [], errors: [] };
   }
 
@@ -1353,9 +1307,9 @@ export async function fetchIssuesAndPullRequests(
     ? fetchPREnrichment(octokit, mainNodeIds)
     : Promise.resolve({ enrichments: new Map<number, PREnrichmentData>(), errors: [] as ApiError[] });
 
-  // Tracked user global searches — run in parallel with main backfill
-  const trackedSearchPromise = hasTrackedUsers
-    ? Promise.allSettled(trackedUsers!.map((u) => graphqlGlobalUserSearch(octokit, u.login)))
+  // Tracked user searches — scoped to the same repos as the main user
+  const trackedSearchPromise = hasTrackedUsers && repos.length > 0
+    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, repos, u.login)))
     : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
 
   const [mainBackfill, trackedResults] = await Promise.all([mainBackfillPromise, trackedSearchPromise]);
@@ -2075,14 +2029,14 @@ export async function validateGitHubUser(
  * Discovers repos the user participates in but doesn't own, via unscoped
  * GraphQL search (no repo: qualifiers). Returns up to 100 repos sorted
  * alphabetically, excluding any in the provided excludeRepos set.
+ * When trackedUsers is provided, also discovers repos those users participate in.
  */
 export async function discoverUpstreamRepos(
   octokit: GitHubOctokit,
   userLogin: string,
-  excludeRepos: Set<string>
+  excludeRepos: Set<string>,
+  trackedUsers?: TrackedUser[]
 ): Promise<RepoRef[]> {
-  if (!VALID_TRACKED_LOGIN.test(userLogin)) return [];
-
   const repoNames = new Set<string>();
   const errors: ApiError[] = [];
   const CAP = 100;
@@ -2095,21 +2049,32 @@ export async function discoverUpstreamRepos(
     return true;
   }
 
-  const issueQ = `is:issue is:open involves:${userLogin}`;
-  const prQ = `is:pr is:open involves:${userLogin}`;
+  function discoverForUser(login: string) {
+    const issueQ = `is:issue is:open involves:${login}`;
+    const prQ = `is:pr is:open involves:${login}`;
+    return Promise.allSettled([
+      paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
+        octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,
+        (node) => extractRepoName(node),
+        () => repoNames.size, CAP,
+      ),
+      paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
+        octokit, LIGHT_PR_SEARCH_QUERY, prQ, `upstream-prs:${login}`, errors,
+        (node) => extractRepoName(node),
+        () => repoNames.size, CAP,
+      ),
+    ]);
+  }
 
-  await Promise.allSettled([
-    paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
-      octokit, ISSUES_SEARCH_QUERY, issueQ, "upstream-issues", errors,
-      (node) => extractRepoName(node),
-      () => repoNames.size, CAP,
-    ),
-    paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
-      octokit, LIGHT_PR_SEARCH_QUERY, prQ, "upstream-prs", errors,
-      (node) => extractRepoName(node),
-      () => repoNames.size, CAP,
-    ),
-  ]);
+  // Collect all valid logins to discover for
+  const logins: string[] = [];
+  if (VALID_TRACKED_LOGIN.test(userLogin)) logins.push(userLogin);
+  for (const u of trackedUsers ?? []) {
+    if (VALID_TRACKED_LOGIN.test(u.login)) logins.push(u.login);
+  }
+  if (logins.length === 0) return [];
+
+  await Promise.allSettled(logins.map((login) => discoverForUser(login)));
 
   if (errors.length > 0) {
     pushNotification(

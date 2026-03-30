@@ -115,6 +115,7 @@ export default function OnboardingWizard() {
                   showUpstreamDiscovery={true}
                   upstreamRepos={upstreamRepos()}
                   onUpstreamChange={setUpstreamRepos}
+                  trackedUsers={config.trackedUsers}
                 />
               </Match>
             </Switch>

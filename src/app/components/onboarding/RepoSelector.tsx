@@ -25,6 +25,7 @@ interface RepoSelectorProps {
   showUpstreamDiscovery?: boolean;
   upstreamRepos?: RepoRef[];
   onUpstreamChange?: (repos: RepoRef[]) => void;
+  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
 }
 
 interface OrgRepoState {
@@ -165,7 +166,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
               allOrgFullNames.add(repo.fullName);
             }
           });
-          void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames)
+          void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames, props.trackedUsers)
             .then((repos) => {
               if (version !== effectVersion) return;
               setDiscoveredRepos(repos);

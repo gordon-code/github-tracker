@@ -323,6 +323,7 @@ export default function SettingsPage() {
                   showUpstreamDiscovery={true}
                   upstreamRepos={localUpstream()}
                   onUpstreamChange={handleUpstreamChange}
+                  trackedUsers={config.trackedUsers}
                 />
               </div>
             </Show>
