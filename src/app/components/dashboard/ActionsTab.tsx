@@ -186,6 +186,7 @@ export default function ActionsTab(props: ActionsTabProps) {
       // Peek: surface changed runs in collapsed repos
       const peeks = new Map<string, PeekUpdate>();
       const peekCounts = new Map<string, number>();
+      const peekFirstLabels = new Map<string, string>();
       for (const run of runs) {
         if (changed.has(run.id)) {
           const isCollapsed = !viewState.expandedRepos.actions[run.repoFullName];
@@ -193,15 +194,15 @@ export default function ActionsTab(props: ActionsTabProps) {
             const count = (peekCounts.get(run.repoFullName) ?? 0) + 1;
             peekCounts.set(run.repoFullName, count);
             if (count === 1) {
+              peekFirstLabels.set(run.repoFullName, run.name);
               peeks.set(run.repoFullName, {
                 itemLabel: run.name,
                 newStatus: run.conclusion ?? run.status,
               });
             } else {
-              const existing = peeks.get(run.repoFullName)!;
               peeks.set(run.repoFullName, {
-                itemLabel: `${existing.itemLabel.split(" + ")[0]} + ${count - 1} more`,
-                newStatus: existing.newStatus,
+                itemLabel: `${peekFirstLabels.get(run.repoFullName)} + ${count - 1} more`,
+                newStatus: peeks.get(run.repoFullName)!.newStatus,
               });
             }
           }

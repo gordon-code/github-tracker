@@ -326,6 +326,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       // Peek: surface changed items in collapsed repos
       const peeks = new Map<string, PeekUpdate>();
       const peekCounts = new Map<string, number>();
+      const peekFirstLabels = new Map<string, string>();
       for (const pr of prs) {
         if (changed.has(pr.id)) {
           const isCollapsed = !viewState.expandedRepos.pullRequests[pr.repoFullName];
@@ -333,15 +334,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             const count = (peekCounts.get(pr.repoFullName) ?? 0) + 1;
             peekCounts.set(pr.repoFullName, count);
             if (count === 1) {
+              const label = `#${pr.number} ${pr.title}`;
+              peekFirstLabels.set(pr.repoFullName, label);
               peeks.set(pr.repoFullName, {
-                itemLabel: `#${pr.number} ${pr.title}`,
+                itemLabel: label,
                 newStatus: pr.checkStatus ?? pr.reviewDecision ?? "updated",
               });
             } else {
-              const existing = peeks.get(pr.repoFullName)!;
               peeks.set(pr.repoFullName, {
-                itemLabel: `${existing.itemLabel.split(" + ")[0]} + ${count - 1} more`,
-                newStatus: existing.newStatus,
+                itemLabel: `${peekFirstLabels.get(pr.repoFullName)} + ${count - 1} more`,
+                newStatus: peeks.get(pr.repoFullName)!.newStatus,
               });
             }
           }

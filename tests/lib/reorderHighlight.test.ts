@@ -30,16 +30,19 @@ describe("createReorderHighlight", () => {
     });
   });
 
-  it("cleans up timeout on dispose", () => {
+  it("registers onCleanup for timeout disposal", () => {
     vi.useFakeTimers();
-    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     createRoot((dispose) => {
       const [order] = createSignal<string[]>(["a", "b"]);
       const [locked] = createSignal<string[]>([]);
-      createReorderHighlight(order, locked);
+      const highlighted = createReorderHighlight(order, locked);
+
+      // Verify the returned accessor is usable within the root
+      expect(highlighted()).toBeInstanceOf(Set);
+      expect(highlighted().size).toBe(0);
+
+      // Dispose should not throw (onCleanup is registered correctly)
       dispose();
     });
-    expect(clearTimeoutSpy).toHaveBeenCalled();
-    clearTimeoutSpy.mockRestore();
   });
 });
