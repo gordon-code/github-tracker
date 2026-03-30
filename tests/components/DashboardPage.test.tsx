@@ -386,11 +386,11 @@ describe("DashboardPage — onHotData integration", () => {
       expect(capturedOnHotData).not.toBeNull();
     });
 
-    // Verify initial state shows pending
+    // Verify initial state shows pending (collapsed summary shows "1 PR" with pending count)
     const user = userEvent.setup();
     await user.click(screen.getByText("Pull Requests"));
     await waitFor(() => {
-      expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+      screen.getByText("1 PR");
     });
 
     // Simulate hot poll returning a status update (generation=0 matches default mock)
@@ -402,7 +402,8 @@ describe("DashboardPage — onHotData integration", () => {
     }]]);
     capturedOnHotData!(prUpdates, new Map(), 0);
 
-    // The StatusDot should update from "Checks in progress" to "All checks passed"
+    // Expand the repo to verify the StatusDot updated
+    await user.click(screen.getByText("owner/repo"));
     await waitFor(() => {
       expect(screen.getByLabelText("All checks passed")).toBeTruthy();
     });
@@ -427,6 +428,12 @@ describe("DashboardPage — onHotData integration", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("1 PR");
+    });
+
+    // Expand repo to see StatusDot
+    await user.click(screen.getByText("owner/repo"));
     await waitFor(() => {
       expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
     });
