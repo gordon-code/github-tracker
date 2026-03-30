@@ -25,7 +25,10 @@ export const RepoRefSchema = z.object({
 
 export const TrackedUserSchema = z.object({
   login: z.string(),
-  avatarUrl: z.string().url(),
+  avatarUrl: z.string().url().refine(
+    (u) => u.startsWith("https://avatars.githubusercontent.com/"),
+    "Avatar URL must be from GitHub CDN"
+  ),
   name: z.string().nullable(),
 });
 

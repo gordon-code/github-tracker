@@ -1,4 +1,4 @@
-import { createSignal, createEffect, untrack, onCleanup } from "solid-js";
+import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
@@ -91,14 +91,18 @@ onAuthCleared(resetPollState);
 // silently seeds all items (including the new tracked user's) without flooding
 // the user with "new item" notifications for pre-existing content.
 // Use a flag to skip the initial run (module-level mount).
+// Wrapped in createRoot to provide a reactive owner at module scope (per SolidJS gotcha).
+// Subscribes to array length only — fires on add/remove, not property mutations.
 let _trackedUsersMounted = false;
-createEffect(() => {
-  void (config.trackedUsers?.length ?? 0); // reactive subscription
-  if (!_trackedUsersMounted) {
-    _trackedUsersMounted = true;
-    return;
-  }
-  untrack(() => _resetNotificationState());
+createRoot(() => {
+  createEffect(() => {
+    void (config.trackedUsers?.length ?? 0);
+    if (!_trackedUsersMounted) {
+      _trackedUsersMounted = true;
+      return;
+    }
+    untrack(() => _resetNotificationState());
+  });
 });
 
 /**
