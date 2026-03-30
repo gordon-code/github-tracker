@@ -1,6 +1,6 @@
 import { render } from "@solidjs/testing-library";
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
-import { updateViewState } from "../../src/app/stores/view";
+import { resetViewState } from "../../src/app/stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../src/app/services/api";
 import type { JSX } from "solid-js";
 
@@ -103,17 +103,5 @@ export function renderWithRouter(
 }
 
 export function resetViewStore(): void {
-  updateViewState({
-    lastActiveTab: "issues",
-    sortPreferences: {},
-    ignoredItems: [],
-    globalFilter: { org: null, repo: null },
-    tabFilters: {
-      issues: { role: "all", comments: "all" },
-      pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all" },
-      actions: { conclusion: "all", event: "all" },
-    },
-    showPrRuns: false,
-    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-  });
+  resetViewState();
 }
