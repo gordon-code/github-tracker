@@ -397,16 +397,14 @@ export default function ActionsTab(props: ActionsTabProps) {
                   </button>
                   <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
                 </div>
-                <Show when={!isExpanded() && peekUpdates().has(repoGroup.repoFullName)}>
-                  <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
-                    <span class="loading loading-spinner loading-xs text-primary/60" />
-                    <span class="truncate flex-1">
-                      {peekUpdates().get(repoGroup.repoFullName)!.itemLabel}
-                    </span>
-                    <span class="badge badge-xs badge-primary">
-                      {peekUpdates().get(repoGroup.repoFullName)!.newStatus}
-                    </span>
-                  </div>
+                <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
+                  {(peek) => (
+                    <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                      <span class="loading loading-spinner loading-xs text-primary/60" />
+                      <span class="truncate flex-1">{peek().itemLabel}</span>
+                      <span class="badge badge-xs badge-primary">{peek().newStatus}</span>
+                    </div>
+                  )}
                 </Show>
 
                 {/* Workflow cards grid */}
