@@ -108,7 +108,7 @@ function makeHeavyPRNode(databaseId: number, _nodeId?: string) {
   };
 }
 
-const rateLimit = { remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() };
+const rateLimit = { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() };
 
 function makeSearchResponse<T>(nodes: T[], hasNextPage = false) {
   return {

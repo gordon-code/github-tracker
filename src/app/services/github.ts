@@ -16,6 +16,7 @@ const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
 type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
 interface RateLimitInfo {
+  limit: number;
   remaining: number;
   resetAt: Date;
 }
@@ -33,8 +34,13 @@ export function getGraphqlRateLimit(): RateLimitInfo | null {
   return _graphqlRateLimit();
 }
 
-export function updateGraphqlRateLimit(rateLimit: { remaining: number; resetAt: string }): void {
+function safePositiveInt(raw: number | undefined, fallback: number): number {
+  return raw != null && Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+export function updateGraphqlRateLimit(rateLimit: { limit: number; remaining: number; resetAt: string }): void {
   _setGraphqlRateLimit({
+    limit: safePositiveInt(rateLimit.limit, _graphqlRateLimit()?.limit ?? 5000),
     remaining: rateLimit.remaining,
     resetAt: new Date(rateLimit.resetAt), // ISO 8601 string → Date
   });
@@ -43,8 +49,11 @@ export function updateGraphqlRateLimit(rateLimit: { remaining: number; resetAt: 
 export function updateRateLimitFromHeaders(headers: Record<string, string>): void {
   const remaining = headers["x-ratelimit-remaining"];
   const reset = headers["x-ratelimit-reset"];
+  const limit = headers["x-ratelimit-limit"];
   if (remaining !== undefined && reset !== undefined) {
+    const parsedLimit = limit !== undefined ? parseInt(limit, 10) : NaN;
     _setCoreRateLimit({
+      limit: safePositiveInt(parsedLimit, 5000),
       remaining: parseInt(remaining, 10),
       resetAt: new Date(parseInt(reset, 10) * 1000),
     });

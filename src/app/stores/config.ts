@@ -72,10 +72,16 @@ export const [config, setConfig] = createStore<Config>(loadConfig());
 
 export function updateConfig(partial: Partial<Config>): void {
   const validated = ConfigSchema.partial().safeParse(partial);
-  if (!validated.success) return; // reject invalid updates
+  if (!validated.success) return;
+  // Only merge keys the caller actually provided: Zod .partial().safeParse()
+  // still applies per-field .default() values for absent keys, inflating
+  // validated.data with defaults that would overwrite live state.
+  const filtered = Object.fromEntries(
+    (Object.keys(partial) as (keyof Config)[]).map((k) => [k, validated.data[k]])
+  );
   setConfig(
     produce((draft) => {
-      Object.assign(draft, validated.data);
+      Object.assign(draft, filtered);
     })
   );
 }

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -305,18 +305,79 @@ describe("getGraphqlRateLimit", () => {
 
   it("converts ISO 8601 resetAt string to Date", () => {
     const iso = "2024-06-01T12:00:00Z";
-    updateGraphqlRateLimit({ remaining: 4500, resetAt: iso });
+    updateGraphqlRateLimit({ limit: 5000, remaining: 4500, resetAt: iso });
     const rl = getGraphqlRateLimit();
     expect(rl).not.toBeNull();
+    expect(rl!.limit).toBe(5000);
     expect(rl!.remaining).toBe(4500);
     expect(rl!.resetAt).toBeInstanceOf(Date);
     expect(rl!.resetAt.getTime()).toBe(new Date(iso).getTime());
   });
 
-  it("overwrites previous value on subsequent updates", () => {
-    updateGraphqlRateLimit({ remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
-    updateGraphqlRateLimit({ remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+  it("stores limit from Enterprise Cloud (10000)", () => {
+    updateGraphqlRateLimit({ limit: 10000, remaining: 9500, resetAt: "2024-06-01T12:00:00Z" });
     const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(10000);
+    expect(rl!.remaining).toBe(9500);
+  });
+
+  it("overwrites previous value on subsequent updates", () => {
+    updateGraphqlRateLimit({ limit: 5000, remaining: 5000, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ limit: 5000, remaining: 3000, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(5000);
     expect(rl!.remaining).toBe(3000);
+  });
+
+  it("falls back to previous limit when zero is provided", () => {
+    updateGraphqlRateLimit({ limit: 5000, remaining: 100, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ limit: 0, remaining: 50, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(5000);
+    expect(rl!.remaining).toBe(50);
+  });
+
+  it("falls back to previous limit when negative is provided", () => {
+    updateGraphqlRateLimit({ limit: 10000, remaining: 100, resetAt: "2024-06-01T12:00:00Z" });
+    updateGraphqlRateLimit({ limit: -1, remaining: 50, resetAt: "2024-06-01T13:00:00Z" });
+    const rl = getGraphqlRateLimit();
+    expect(rl!.limit).toBe(10000);
+  });
+});
+
+// ── updateRateLimitFromHeaders ───────────────────────────────────────────────
+
+describe("updateRateLimitFromHeaders", () => {
+  it("parses limit from x-ratelimit-limit header", () => {
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "4500",
+      "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+      "x-ratelimit-limit": "10000",
+    });
+    const rl = getCoreRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.limit).toBe(10000);
+    expect(rl!.remaining).toBe(4500);
+  });
+
+  it("falls back to 5000 when x-ratelimit-limit header is absent", () => {
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+    });
+    const rl = getCoreRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.limit).toBe(5000);
+  });
+
+  it("falls back to 5000 when x-ratelimit-limit header is malformed", () => {
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "4999",
+      "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+      "x-ratelimit-limit": "abc",
+    });
+    const rl = getCoreRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.limit).toBe(5000);
   });
 });

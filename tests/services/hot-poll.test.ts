@@ -74,7 +74,7 @@ function makeOctokit(
 ) {
   return {
     request: vi.fn(requestImpl ?? (() => Promise.resolve({ data: {}, headers: {} }))),
-    graphql: vi.fn(graphqlImpl ?? (() => Promise.resolve({ nodes: [], rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }))),
+    graphql: vi.fn(graphqlImpl ?? (() => Promise.resolve({ nodes: [], rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }))),
     hook: { before: vi.fn() },
   };
 }
@@ -106,7 +106,7 @@ describe("fetchHotPRStatus", () => {
         reviewDecision: "APPROVED",
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_node1"]);
@@ -127,7 +127,7 @@ describe("fetchHotPRStatus", () => {
         reviewDecision: null,
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_node2"]);
@@ -143,7 +143,7 @@ describe("fetchHotPRStatus", () => {
         reviewDecision: null,
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_node3"]);
@@ -238,7 +238,7 @@ describe("rebuildHotSets", () => {
   it("populates hot PRs for pending/null checkStatus with nodeId", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
     mockGetClient.mockReturnValue(octokit);
 
@@ -311,7 +311,7 @@ describe("rebuildHotSets", () => {
         data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
         headers: {},
       }),
-      () => Promise.resolve({ nodes: [], rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
+      () => Promise.resolve({ nodes: [], rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
     );
     mockGetClient.mockReturnValue(octokit);
 
@@ -370,7 +370,7 @@ describe("fetchHotData", () => {
         reviewDecision: "APPROVED",
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
     const octokit = makeOctokit(undefined, graphqlFn);
     mockGetClient.mockReturnValue(octokit);
@@ -684,7 +684,7 @@ describe("fetchHotPRStatus null/missing nodes", () => {
           commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
         },
       ],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_null", "PR_valid"]);
@@ -698,7 +698,7 @@ describe("fetchHotPRStatus null/missing nodes", () => {
         { databaseId: null, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [] } },
         { databaseId: 77, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
       ],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_nulldb", "PR_ok"]);
@@ -717,7 +717,7 @@ describe("fetchHotPRStatus edge cases", () => {
         reviewDecision: null,
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_behind"]);
@@ -737,7 +737,7 @@ describe("fetchHotPRStatus edge cases", () => {
             reviewDecision: null,
             commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
           }],
-          rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
         });
       }
       return Promise.reject(new Error("rate limited"));
@@ -768,7 +768,7 @@ describe("rebuildHotSets caps", () => {
 
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
     mockGetClient.mockReturnValue(octokit);
 
@@ -820,7 +820,7 @@ describe("fetchHotData eviction edge cases", () => {
             { databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
             { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
           ],
-          rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
         });
       }
       // Second fetch: only PR 2 should be queried
@@ -828,7 +828,7 @@ describe("fetchHotData eviction edge cases", () => {
         nodes: [
           { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
         ],
-        rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
       });
     });
     const octokit = makeOctokit(undefined, graphqlFn);
@@ -864,7 +864,7 @@ describe("fetchHotData eviction edge cases", () => {
         reviewDecision: "APPROVED",
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
     const octokit = makeOctokit(undefined, graphqlFn);
     mockGetClient.mockReturnValue(octokit);
@@ -893,7 +893,7 @@ describe("fetchHotData eviction edge cases", () => {
         reviewDecision: null,
         commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
       }],
-      rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
     const octokit = makeOctokit(undefined, graphqlFn);
     mockGetClient.mockReturnValue(octokit);
@@ -945,7 +945,7 @@ describe("fetchHotData hadErrors", () => {
       }),
       () => Promise.resolve({
         nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } }],
-        rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
       }),
     );
     mockGetClient.mockReturnValue(octokit);
@@ -977,7 +977,7 @@ describe("fetchHotData hadErrors", () => {
   it("returns hadErrors=true when a run fetch fails", async () => {
     const octokit = makeOctokit(
       () => Promise.reject(new Error("network error")),
-      () => Promise.resolve({ nodes: [], rateLimit: { remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
+      () => Promise.resolve({ nodes: [], rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
     );
     mockGetClient.mockReturnValue(octokit);
 
@@ -997,10 +997,10 @@ describe("fetchHotPRStatus updateGraphqlRateLimit", () => {
     const { updateGraphqlRateLimit } = await import("../../src/app/services/github");
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } }],
-      rateLimit: { remaining: 4200, resetAt: "2026-01-01T01:00:00Z" },
+      rateLimit: { limit: 5000, remaining: 4200, resetAt: "2026-01-01T01:00:00Z" },
     }));
 
     await fetchHotPRStatus(octokit as never, ["PR_rl"]);
-    expect(updateGraphqlRateLimit).toHaveBeenCalledWith({ remaining: 4200, resetAt: "2026-01-01T01:00:00Z" });
+    expect(updateGraphqlRateLimit).toHaveBeenCalledWith({ limit: 5000, remaining: 4200, resetAt: "2026-01-01T01:00:00Z" });
   });
 });

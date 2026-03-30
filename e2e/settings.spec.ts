@@ -25,7 +25,7 @@ async function setupAuth(page: Page) {
       json: {
         data: {
           search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          rateLimit: { remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          rateLimit: { limit: 5000, remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
         },
       },
     })
