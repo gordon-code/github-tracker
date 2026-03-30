@@ -143,8 +143,9 @@ describe("loadConfig", () => {
   });
 });
 
-// Each updateConfig test creates its own isolated store to avoid shared state
-describe("updateConfig", () => {
+// Tests SolidJS store merge mechanics in isolation (does NOT exercise the real
+// updateConfig export — see "updateConfig (real export)" block below for that).
+describe("store merge behavior (produce + Object.assign)", () => {
   function makeStore() {
     const [cfg, setCfg] = createStore(ConfigSchema.parse({}));
     const update = (partial: Partial<ReturnType<typeof ConfigSchema.parse>>) => {
@@ -214,10 +215,7 @@ describe("updateConfig", () => {
 
 describe("updateConfig (real export)", () => {
   beforeEach(() => {
-    createRoot((dispose) => {
-      resetConfig();
-      dispose();
-    });
+    resetConfig();
   });
 
   it("applies valid partial updates", () => {
@@ -240,6 +238,54 @@ describe("updateConfig (real export)", () => {
     createRoot((dispose) => {
       updateConfig({ hotPollInterval: 999 }); // above max of 120
       expect(config.hotPollInterval).toBe(30); // unchanged from default
+      dispose();
+    });
+  });
+
+  it("preserves non-default values when updating a different field", () => {
+    createRoot((dispose) => {
+      // Set several fields to non-default values
+      updateConfig({ theme: "dark", refreshInterval: 120, itemsPerPage: 50 });
+      // Now update a single unrelated field
+      updateConfig({ hotPollInterval: 60 });
+      // All previously-set fields must survive
+      expect(config.hotPollInterval).toBe(60);
+      expect(config.theme).toBe("dark");
+      expect(config.refreshInterval).toBe(120);
+      expect(config.itemsPerPage).toBe(50);
+      dispose();
+    });
+  });
+
+  it("preserves onboardingComplete when updating refreshInterval", () => {
+    createRoot((dispose) => {
+      updateConfig({ onboardingComplete: true });
+      updateConfig({ refreshInterval: 600 });
+      expect(config.refreshInterval).toBe(600);
+      expect(config.onboardingComplete).toBe(true);
+      dispose();
+    });
+  });
+
+  it("preserves nested notifications when updating a top-level field", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        notifications: { enabled: true, issues: true, pullRequests: false, workflowRuns: true },
+      });
+      updateConfig({ viewDensity: "compact" });
+      expect(config.viewDensity).toBe("compact");
+      expect(config.notifications.enabled).toBe(true);
+      expect(config.notifications.pullRequests).toBe(false);
+      dispose();
+    });
+  });
+
+  it("preserves selectedOrgs when updating theme", () => {
+    createRoot((dispose) => {
+      updateConfig({ selectedOrgs: ["my-org", "other-org"] });
+      updateConfig({ theme: "forest" });
+      expect(config.theme).toBe("forest");
+      expect(config.selectedOrgs).toEqual(["my-org", "other-org"]);
       dispose();
     });
   });
