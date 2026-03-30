@@ -108,7 +108,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       }
 
       if (tabFilter.user !== "all") {
-        const surfacedBy = issue.surfacedBy ?? [props.userLogin];
+        const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
         if (!surfacedBy.includes(tabFilter.user)) return false;
       }
 

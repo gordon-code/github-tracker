@@ -191,7 +191,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       }
 
       if (tabFilters.user !== "all") {
-        const surfacedBy = pr.surfacedBy ?? [props.userLogin];
+        const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
         if (!surfacedBy.includes(tabFilters.user)) return false;
       }
 
