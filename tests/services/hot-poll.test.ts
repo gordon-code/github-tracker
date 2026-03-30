@@ -653,6 +653,87 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("calls onStart with correct IDs and onEnd after cycle", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+      workflowRuns: [makeWorkflowRun({ id: 7, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      const [prIds, runIds] = onStart.mock.calls[0];
+      expect(prIds).toBeInstanceOf(Set);
+      expect(prIds.has(42)).toBe(true);
+      expect(runIds).toBeInstanceOf(Set);
+      expect(runIds.has(7)).toBe(true);
+      expect(onEnd).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("does not call onStart when hot sets are empty", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    clearHotSets();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).not.toHaveBeenCalled();
+      expect(onEnd).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("calls onEnd on destroy when a cycle was active", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      // Let one cycle start
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      // onEnd fires from the completed cycle's finally block
+      expect(onEnd).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("does not call onEnd on destroy when no cycle ran", async () => {
+    const onHotData = vi.fn();
+    const onEnd = vi.fn();
+    mockGetClient.mockReturnValue(makeOctokit());
+
+    // No hot items → cycle will skip (no onStart)
+    clearHotSets();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createHotPollCoordinator(() => 10, onHotData, { onEnd });
+      coordinator.destroy();
+      expect(onEnd).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
   it("does not schedule when interval is 0", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());

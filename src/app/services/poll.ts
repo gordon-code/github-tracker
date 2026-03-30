@@ -565,13 +565,18 @@ export function createHotPollCoordinator(
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let chainGeneration = 0;
   let consecutiveFailures = 0;
+  let startedCycle = false; // tracks whether onStart was called for the active chain
   const MAX_BACKOFF_MULTIPLIER = 8; // caps at 8× the base interval
 
   function destroy(): void {
     // Invalidates any in-flight cycle(); createEffect captures the new value as the next chain's seed
     chainGeneration++;
     consecutiveFailures = 0;
-    options?.onEnd?.(); // Clear shimmer indicators on coordinator destruction
+    // Clear shimmer only if an onStart was active (avoids spurious onEnd on init)
+    if (startedCycle) {
+      startedCycle = false;
+      options?.onEnd?.();
+    }
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
       timeoutId = null;
@@ -607,6 +612,7 @@ export function createHotPollCoordinator(
       return;
     }
 
+    startedCycle = true;
     options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
     try {
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
@@ -627,6 +633,7 @@ export function createHotPollCoordinator(
       pushError("hot-poll", message, true);
     } finally {
       if (myGeneration === chainGeneration) {
+        startedCycle = false;
         options?.onEnd?.();
       }
     }

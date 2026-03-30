@@ -128,6 +128,30 @@ describe("WorkflowRunRow", () => {
     expect(row?.className).toContain("px-4");
   });
 
+  it("applies shimmer class when isPolling is true", () => {
+    const { container } = render(() => (
+      <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" isPolling={true} />
+    ));
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(true);
+    expect(container.querySelector(".loading-spinner")).toBeTruthy();
+  });
+
+  it("does not apply shimmer when isPolling is false", () => {
+    const { container } = render(() => (
+      <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" isPolling={false} />
+    ));
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+    expect(container.querySelector(".loading-spinner")).toBeFalsy();
+  });
+
+  it("does not apply shimmer when isPolling is omitted", () => {
+    const { container } = render(() => (
+      <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" />
+    ));
+    expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+    expect(container.querySelector(".loading-spinner")).toBeFalsy();
+  });
+
   it("applies flash class when isFlashing is true", () => {
     const { container } = render(() => (
       <WorkflowRunRow run={makeWorkflowRun()} onIgnore={() => {}} density="comfortable" isFlashing={true} />
