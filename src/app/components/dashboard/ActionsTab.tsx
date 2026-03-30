@@ -11,7 +11,8 @@ import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
-import { orderRepoGroups, detectReorderedRepos } from "../../lib/grouping";
+import { orderRepoGroups, type PeekUpdate } from "../../lib/grouping";
+import { createReorderHighlight } from "../../lib/reorderHighlight";
 
 interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
@@ -137,14 +138,11 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneExpandedRepos("actions", names);
   });
 
-  interface PeekUpdate {
-    itemLabel: string;
-    newStatus: string;
-  }
   const [peekUpdates, setPeekUpdates] = createSignal<ReadonlyMap<string, PeekUpdate>>(new Map());
   let peekTimeout: ReturnType<typeof setTimeout> | undefined;
 
   let prevRunValues = new Map<number, { status: string; conclusion: string | null }>();
+  let prevRunValuesInitialized = false;
   let flashRunTimeout: ReturnType<typeof setTimeout> | undefined;
   const [flashingRunIds, setFlashingRunIds] = createSignal<ReadonlySet<number>>(new Set());
 
@@ -152,7 +150,8 @@ export default function ActionsTab(props: ActionsTabProps) {
     const runs = props.workflowRuns;
     const hotIds = props.hotPollingRunIds;
 
-    if (prevRunValues.size === 0) {
+    if (!prevRunValuesInitialized) {
+      prevRunValuesInitialized = true;
       prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
       return;
     }
@@ -160,7 +159,9 @@ export default function ActionsTab(props: ActionsTabProps) {
     // Only detect changes for hot-polled items — full refresh replaces all data
     // and would cause mass flashing if not gated.
     if (!hotIds || hotIds.size === 0) {
-      prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
+      for (const run of runs) {
+        prevRunValues.set(run.id, { status: run.status, conclusion: run.conclusion });
+      }
       return;
     }
 
@@ -173,7 +174,9 @@ export default function ActionsTab(props: ActionsTabProps) {
       }
     }
 
-    prevRunValues = new Map(runs.map(r => [r.id, { status: r.status, conclusion: r.conclusion }]));
+    for (const run of runs) {
+      prevRunValues.set(run.id, { status: run.status, conclusion: run.conclusion });
+    }
 
     if (changed.size > 0) {
       setFlashingRunIds(prev => new Set([...prev, ...changed]));
@@ -182,14 +185,25 @@ export default function ActionsTab(props: ActionsTabProps) {
 
       // Peek: surface changed runs in collapsed repos
       const peeks = new Map<string, PeekUpdate>();
+      const peekCounts = new Map<string, number>();
       for (const run of runs) {
         if (changed.has(run.id)) {
           const isCollapsed = !viewState.expandedRepos.actions[run.repoFullName];
           if (isCollapsed) {
-            peeks.set(run.repoFullName, {
-              itemLabel: run.name,
-              newStatus: run.conclusion ?? run.status,
-            });
+            const count = (peekCounts.get(run.repoFullName) ?? 0) + 1;
+            peekCounts.set(run.repoFullName, count);
+            if (count === 1) {
+              peeks.set(run.repoFullName, {
+                itemLabel: run.name,
+                newStatus: run.conclusion ?? run.status,
+              });
+            } else {
+              const existing = peeks.get(run.repoFullName)!;
+              peeks.set(run.repoFullName, {
+                itemLabel: `${existing.itemLabel.split(" + ")[0]} + ${count - 1} more`,
+                newStatus: existing.newStatus,
+              });
+            }
           }
         }
       }
@@ -259,34 +273,13 @@ export default function ActionsTab(props: ActionsTabProps) {
     pruneLockedRepos("actions", names);
   });
 
-  let prevRepoOrderActions: string[] = [];
-  let prevLockedOrderActions: string[] = [];
-  let highlightTimeoutActions: ReturnType<typeof setTimeout> | undefined;
-  const [highlightedReposActions, setHighlightedReposActions] = createSignal<ReadonlySet<string>>(new Set());
-
-  createEffect(() => {
-    const currentOrder = repoGroups().map(g => g.repoFullName);
-    const currentLocked = viewState.lockedRepos.actions;
-
-    const lockedChanged = currentLocked.length !== prevLockedOrderActions.length
-      || currentLocked.some((r, i) => r !== prevLockedOrderActions[i]);
-
-    if (prevRepoOrderActions.length > 0 && !lockedChanged) {
-      const moved = detectReorderedRepos(prevRepoOrderActions, currentOrder);
-      if (moved.size > 0) {
-        setHighlightedReposActions(moved);
-        clearTimeout(highlightTimeoutActions);
-        highlightTimeoutActions = setTimeout(() => setHighlightedReposActions(new Set<string>()), 1500);
-      }
-    }
-
-    prevRepoOrderActions = currentOrder;
-    prevLockedOrderActions = [...currentLocked];
-  });
+  const highlightedReposActions = createReorderHighlight(
+    () => repoGroups().map(g => g.repoFullName),
+    () => viewState.lockedRepos.actions,
+  );
   onCleanup(() => {
     clearTimeout(flashRunTimeout);
     clearTimeout(peekTimeout);
-    clearTimeout(highlightTimeoutActions);
   });
 
   return (

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue } from "../../services/api";
@@ -15,7 +15,8 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, detectReorderedRepos } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 
 export interface IssuesTabProps {
@@ -187,31 +188,10 @@ export default function IssuesTab(props: IssuesTabProps) {
     pruneLockedRepos("issues", names);
   });
 
-  let prevRepoOrderIssues: string[] = [];
-  let prevLockedOrderIssues: string[] = [];
-  let highlightTimeoutIssues: ReturnType<typeof setTimeout> | undefined;
-  const [highlightedReposIssues, setHighlightedReposIssues] = createSignal<ReadonlySet<string>>(new Set());
-
-  createEffect(() => {
-    const currentOrder = repoGroups().map(g => g.repoFullName);
-    const currentLocked = viewState.lockedRepos.issues;
-
-    const lockedChanged = currentLocked.length !== prevLockedOrderIssues.length
-      || currentLocked.some((r, i) => r !== prevLockedOrderIssues[i]);
-
-    if (prevRepoOrderIssues.length > 0 && !lockedChanged) {
-      const moved = detectReorderedRepos(prevRepoOrderIssues, currentOrder);
-      if (moved.size > 0) {
-        setHighlightedReposIssues(moved);
-        clearTimeout(highlightTimeoutIssues);
-        highlightTimeoutIssues = setTimeout(() => setHighlightedReposIssues(new Set<string>()), 1500);
-      }
-    }
-
-    prevRepoOrderIssues = currentOrder;
-    prevLockedOrderIssues = [...currentLocked];
-  });
-  onCleanup(() => clearTimeout(highlightTimeoutIssues));
+  const highlightedReposIssues = createReorderHighlight(
+    () => repoGroups().map(g => g.repoFullName),
+    () => viewState.lockedRepos.issues,
+  );
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("issues", field, direction);

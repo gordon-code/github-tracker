@@ -22,6 +22,7 @@ import {
 import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
+import { setsEqual } from "../../lib/collections";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -219,14 +220,6 @@ async function pollFetch(): Promise<DashboardData> {
 
 const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
-
-function setsEqual<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean {
-  if (a.size !== b.size) return false;
-  for (const item of a) {
-    if (!b.has(item)) return false;
-  }
-  return true;
-}
 
 export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());

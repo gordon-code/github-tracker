@@ -175,4 +175,52 @@ describe("WorkflowSummaryCard", () => {
     const card = container.firstElementChild as HTMLElement;
     expect(card.className).toContain("border-l-warning");
   });
+
+  it("passes isPolling to WorkflowRunRow when hotPollingRunIds contains run ID", () => {
+    const runs = [
+      makeWorkflowRun({ id: 10, conclusion: null, status: "in_progress" }),
+      makeWorkflowRun({ id: 20, conclusion: "success", status: "completed" }),
+    ];
+    const hotPollingRunIds = new Set([10]);
+    const { container } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="CI"
+        runs={runs}
+        expanded={true}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+        density="comfortable"
+        hotPollingRunIds={hotPollingRunIds}
+      />
+    ));
+    const rows = container.querySelectorAll("[class*='flex items-center gap-3']");
+    // First row (id=10, in hot poll set) should have shimmer
+    expect(rows[0]?.classList.contains("animate-shimmer")).toBe(true);
+    // Second row (id=20, not in hot poll set) should not
+    expect(rows[1]?.classList.contains("animate-shimmer")).toBe(false);
+  });
+
+  it("passes isFlashing to WorkflowRunRow when flashingRunIds contains run ID", () => {
+    const runs = [
+      makeWorkflowRun({ id: 10, conclusion: "success", status: "completed" }),
+      makeWorkflowRun({ id: 20, conclusion: "success", status: "completed" }),
+    ];
+    const flashingRunIds = new Set([20]);
+    const { container } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="CI"
+        runs={runs}
+        expanded={true}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+        density="comfortable"
+        flashingRunIds={flashingRunIds}
+      />
+    ));
+    const rows = container.querySelectorAll("[class*='flex items-center gap-3']");
+    // First row (id=10, not flashing) should not have flash
+    expect(rows[0]?.classList.contains("animate-flash")).toBe(false);
+    // Second row (id=20, flashing) should have flash
+    expect(rows[1]?.classList.contains("animate-flash")).toBe(true);
+  });
 });

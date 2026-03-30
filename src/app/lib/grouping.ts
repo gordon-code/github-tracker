@@ -49,16 +49,21 @@ export function slicePageGroups<T>(
   return groups.slice(start, end);
 }
 
+export interface PeekUpdate {
+  itemLabel: string;
+  newStatus: string;
+}
+
 export function orderRepoGroups<G extends { repoFullName: string }>(
   groups: G[],
   lockedOrder: string[]
 ): G[] {
-  const lockedSet = new Set(lockedOrder);
+  const lockedIndex = new Map(lockedOrder.map((name, i) => [name, i]));
   const locked: G[] = [];
   const unlocked: G[] = [];
 
   for (const group of groups) {
-    if (lockedSet.has(group.repoFullName)) {
+    if (lockedIndex.has(group.repoFullName)) {
       locked.push(group);
     } else {
       unlocked.push(group);
@@ -66,7 +71,7 @@ export function orderRepoGroups<G extends { repoFullName: string }>(
   }
 
   locked.sort((a, b) =>
-    lockedOrder.indexOf(a.repoFullName) - lockedOrder.indexOf(b.repoFullName)
+    (lockedIndex.get(a.repoFullName) ?? 0) - (lockedIndex.get(b.repoFullName) ?? 0)
   );
 
   return [...locked, ...unlocked];

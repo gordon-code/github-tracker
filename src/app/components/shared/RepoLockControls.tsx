@@ -13,7 +13,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
     return {
       isLocked: idx !== -1,
       isFirst: idx === 0,
-      isLast: idx === list.length - 1,
+      isLast: idx !== -1 && idx === list.length - 1,
     };
   });
 

@@ -734,6 +734,33 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("calls onEnd on error/throw path", async () => {
+    const onHotData = vi.fn();
+    const onStart = vi.fn();
+    const onEnd = vi.fn();
+    // getClient() returns a valid client so onStart fires, but fetchHotData rejects
+    const octokit = makeOctokit();
+    mockGetClient.mockReturnValue(octokit);
+    // Make the graphql call throw (fetchHotData will throw)
+    octokit.graphql = vi.fn().mockRejectedValue(new Error("network failure"));
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+    });
+
+    const { pushError } = await import("../../src/app/lib/errors");
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData, { onStart, onEnd });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onStart).toHaveBeenCalledTimes(1);
+      expect(onEnd).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
   it("does not schedule when interval is 0", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());

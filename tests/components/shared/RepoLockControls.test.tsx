@@ -82,7 +82,7 @@ describe("RepoLockControls", () => {
     expect(downBtn.disabled).toBe(true);
   });
 
-  it("stopPropagation — parent click NOT triggered on button click", () => {
+  it("stopPropagation — parent click NOT triggered on locked button click", () => {
     lockRepo("issues", "owner/repo");
     const parentClick = vi.fn();
     render(() => (
@@ -91,6 +91,17 @@ describe("RepoLockControls", () => {
       </div>
     ));
     fireEvent.click(screen.getByLabelText("Unpin owner/repo"));
+    expect(parentClick).not.toHaveBeenCalled();
+  });
+
+  it("stopPropagation — parent click NOT triggered on pin button click", () => {
+    const parentClick = vi.fn();
+    render(() => (
+      <div onClick={parentClick}>
+        <RepoLockControls tab="issues" repoFullName="owner/repo" />
+      </div>
+    ));
+    fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
     expect(parentClick).not.toHaveBeenCalled();
   });
 });
