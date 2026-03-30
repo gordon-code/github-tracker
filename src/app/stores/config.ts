@@ -76,8 +76,9 @@ export function updateConfig(partial: Partial<Config>): void {
   // Only merge keys the caller actually provided: Zod .partial().safeParse()
   // still applies per-field .default() values for absent keys, inflating
   // validated.data with defaults that would overwrite live state.
-  const keysProvided = Object.keys(partial) as (keyof Config)[];
-  const filtered = Object.fromEntries(keysProvided.map((k) => [k, validated.data[k]]));
+  const filtered = Object.fromEntries(
+    (Object.keys(partial) as (keyof Config)[]).map((k) => [k, validated.data[k]])
+  );
   setConfig(
     produce((draft) => {
       Object.assign(draft, filtered);

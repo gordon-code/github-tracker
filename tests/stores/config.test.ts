@@ -213,6 +213,7 @@ describe("store merge behavior (produce + Object.assign)", () => {
 });
 
 describe("updateConfig (real export)", () => {
+  // resetConfig() only calls setConfig(defaults) — no reactive effects, safe outside a root
   beforeEach(() => {
     resetConfig();
   });
