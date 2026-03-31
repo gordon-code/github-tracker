@@ -321,7 +321,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar with SortDropdown */}
-      <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <SortDropdown
           options={sortOptions}
           value={sortPref().field}
