@@ -240,6 +240,8 @@ export default function DashboardPage() {
     updateViewState({ lastActiveTab: tab });
   }
 
+  const [clockTick, setClockTick] = createSignal(0);
+
   onMount(() => {
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
@@ -306,14 +308,20 @@ export default function DashboardPage() {
       });
     }
 
+    // Wall-clock tick keeps relative time displays fresh between full poll cycles.
+    const clockInterval = setInterval(() => setClockTick((t) => t + 1), 60_000);
+
     onCleanup(() => {
       _coordinator()?.destroy();
       _setCoordinator(null);
       _hotCoordinator()?.destroy();
       _setHotCoordinator(null);
       clearHotSets();
+      clearInterval(clockInterval);
     });
   });
+
+  const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
   const tabCounts = createMemo(() => ({
     issues: dashboardData.issues.length,
@@ -336,22 +344,23 @@ export default function DashboardPage() {
       <Header />
 
       {/* Offset for fixed header */}
-      <div class="pt-14 flex flex-col h-screen">
-        {/* Single constrained panel: tabs + filters + content */}
-        <div class="max-w-6xl mx-auto w-full flex flex-col flex-1 min-h-0 bg-base-100 shadow-lg border-x border-base-300">
-          <TabBar
-            activeTab={activeTab()}
-            onTabChange={handleTabChange}
-            counts={tabCounts()}
-          />
+      <div class="pt-14 min-h-[calc(100vh-3.5rem)] flex flex-col">
+        <div class="max-w-6xl mx-auto w-full bg-base-100 shadow-lg border-x border-base-300 flex-1">
+          <div class="sticky top-14 z-40 bg-base-100">
+            <TabBar
+              activeTab={activeTab()}
+              onTabChange={handleTabChange}
+              counts={tabCounts()}
+            />
 
-          <FilterBar
-            isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
-            lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-            onRefresh={() => _coordinator()?.manualRefresh()}
-          />
+            <FilterBar
+              isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
+              lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
+              onRefresh={() => _coordinator()?.manualRefresh()}
+            />
+          </div>
 
-          <main class="flex-1 overflow-auto">
+          <main class="pb-12">
             <Switch>
               <Match when={activeTab() === "issues"}>
                 <IssuesTab
@@ -361,6 +370,7 @@ export default function DashboardPage() {
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}
+                  refreshTick={refreshTick()}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -372,6 +382,7 @@ export default function DashboardPage() {
                   trackedUsers={config.trackedUsers}
                   hotPollingPRIds={hotPollingPRIds()}
                   monitoredRepos={config.monitoredRepos}
+                  refreshTick={refreshTick()}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>
@@ -379,6 +390,7 @@ export default function DashboardPage() {
                   workflowRuns={dashboardData.workflowRuns}
                   loading={dashboardData.loading}
                   hasUpstreamRepos={config.upstreamRepos.length > 0}
+                  refreshTick={refreshTick()}
                   hotPollingRunIds={hotPollingRunIds()}
                 />
               </Match>
@@ -386,7 +398,7 @@ export default function DashboardPage() {
           </main>
         </div>
 
-        <footer class="border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50 shrink-0">
+        <footer class="fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">
           <div class="max-w-6xl mx-auto w-full px-4 grid grid-cols-3 items-center">
             <div />
             <div class="flex items-center justify-center gap-3">

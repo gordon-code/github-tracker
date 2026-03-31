@@ -9,6 +9,7 @@ interface WorkflowSummaryCardProps {
   onToggle: () => void;
   onIgnoreRun: (run: WorkflowRun) => void;
   density: "compact" | "comfortable";
+  refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
   flashingRunIds?: ReadonlySet<number>;
 }
@@ -109,6 +110,7 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
                 run={run}
                 onIgnore={props.onIgnoreRun}
                 density={props.density}
+                refreshTick={props.refreshTick}
                 isPolling={props.hotPollingRunIds?.has(run.id)}
                 isFlashing={props.flashingRunIds?.has(run.id)}
               />

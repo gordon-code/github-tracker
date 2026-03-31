@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -18,6 +18,7 @@ import { deriveInvolvementRoles } from "../../lib/format";
 import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
+import RepoGitHubLink from "../shared/RepoGitHubLink";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -26,6 +27,7 @@ export interface IssuesTabProps {
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
   monitoredRepos?: RepoRef[];
+  refreshTick?: number;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -117,6 +119,8 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (tabFilter.comments === "has" && issue.comments === 0) return false;
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
       }
+
+      if (viewState.hideDepDashboard && issue.title === "Dependency Dashboard") return false;
 
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
@@ -219,7 +223,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Sort dropdown + filter chips + ignore badge toolbar */}
-      <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <SortDropdown
           options={sortOptions}
           value={sortPref().field}
@@ -242,6 +246,17 @@ export default function IssuesTab(props: IssuesTabProps) {
             setPage(0);
           }}
         />
+        <button
+          onClick={() => {
+            updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
+            setPage(0);
+          }}
+          class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
+          aria-pressed={!viewState.hideDepDashboard}
+          title="Toggle visibility of Dependency Dashboard issues"
+        >
+          Show Dep Dashboard
+        </button>
         <div class="flex-1" />
         <ExpandCollapseButtons
           onExpandAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), true)}
@@ -333,6 +348,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                           </span>
                         </Show>
                       </button>
+                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
                       <RepoLockControls tab="issues" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={isExpanded()}>
@@ -347,6 +363,8 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 title={issue.title}
                                 author={issue.userLogin}
                                 createdAt={issue.createdAt}
+                                updatedAt={issue.updatedAt}
+                                refreshTick={props.refreshTick}
                                 url={issue.htmlUrl}
                                 labels={issue.labels}
                                 onIgnore={() => handleIgnore(issue)}

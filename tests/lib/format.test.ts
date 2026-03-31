@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -57,6 +57,113 @@ describe("relativeTime", () => {
     expect(relativeTime("not-a-date")).toBe("");
     expect(relativeTime("")).toBe("");
     expect(relativeTime("garbage-2026-13-99")).toBe("");
+  });
+
+  it("clamps future timestamps to 'now' (clock skew)", () => {
+    const future = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    expect(relativeTime(future)).toMatch(/now/i);
+  });
+});
+
+describe("shortRelativeTime", () => {
+  const MOCK_NOW = new Date("2026-03-21T12:00:00.000Z").getTime();
+
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(MOCK_NOW);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 'now' for under 60 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 30 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns compact minutes for 5 minutes ago", () => {
+    const isoString = new Date(MOCK_NOW - 5 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("5m");
+  });
+
+  it("returns compact hours for 3 hours ago", () => {
+    const isoString = new Date(MOCK_NOW - 3 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("3h");
+  });
+
+  it("returns compact days for 7 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 7 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("7d");
+  });
+
+  it("returns 'now' for exactly 59 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 59 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns '1m' for exactly 60 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1m");
+  });
+
+  it("returns '29d' for 29 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 29 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("29d");
+  });
+
+  it("returns '1mo' for 30 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1mo");
+  });
+
+  it("returns compact months for 45 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 45 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1mo");
+  });
+
+  it("returns '2mo' for 2 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 2 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("2mo");
+  });
+
+  it("returns '11mo' for 11 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 11 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("11mo");
+  });
+
+  it("returns '1y' for 12 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 12 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
+  });
+
+  it("returns '11mo' for 359 days ago (just before year boundary)", () => {
+    const isoString = new Date(MOCK_NOW - 359 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("11mo");
+  });
+
+  it("returns '1y' for 360 days ago (exact year boundary at 12×30)", () => {
+    const isoString = new Date(MOCK_NOW - 360 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
+  });
+
+  it("returns compact years for 400 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 400 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
+  });
+
+  it("returns 'now' for future timestamps (clock skew)", () => {
+    const isoString = new Date(MOCK_NOW + 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns 'now' for future timestamps beyond 60s", () => {
+    const future = new Date(MOCK_NOW + 5 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(future)).toBe("now");
+  });
+
+  it("returns empty string for invalid input", () => {
+    expect(shortRelativeTime("not-a-date")).toBe("");
+    expect(shortRelativeTime("")).toBe("");
   });
 });
 
@@ -118,6 +225,11 @@ describe("formatDuration", () => {
 
   it("returns '<1s' for sub-second duration", () => {
     expect(formatDuration("2026-03-21T10:00:00.000Z", "2026-03-21T10:00:00.500Z")).toBe("<1s");
+  });
+
+  it("returns '--' for invalid date strings", () => {
+    expect(formatDuration("not-a-date", "2026-03-21T10:00:00Z")).toBe("--");
+    expect(formatDuration("2026-03-21T10:00:00Z", "not-a-date")).toBe("--");
   });
 });
 

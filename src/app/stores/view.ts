@@ -72,6 +72,7 @@ export const ViewStateSchema = z.object({
     actions: { conclusion: "all", event: "all" },
   }),
   showPrRuns: z.boolean().default(false),
+  hideDepDashboard: z.boolean().default(true),
   expandedRepos: z.object({
     issues: z.record(z.string(), z.boolean()).default({}),
     pullRequests: z.record(z.string(), z.boolean()).default({}),
@@ -126,6 +127,7 @@ export function resetViewState(): void {
       actions: { conclusion: "all", event: "all" },
     },
     showPrRuns: false,
+    hideDepDashboard: true,
     expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
     lockedRepos: { issues: [], pullRequests: [], actions: [] },
   });
@@ -199,13 +201,20 @@ export function setTabFilter<T extends keyof TabFilterField>(
   );
 }
 
+const tabFilterDefaults: Record<string, Record<string, string>> = {
+  issues: IssueFiltersSchema.parse({}) as Record<string, string>,
+  pullRequests: PullRequestFiltersSchema.parse({}) as Record<string, string>,
+  actions: ActionsFiltersSchema.parse({}) as Record<string, string>,
+};
+
 export function resetTabFilter<T extends keyof TabFilterField>(
   tab: T,
   field: TabFilterField[T]
 ): void {
+  const defaultValue = tabFilterDefaults[tab]?.[field as string] ?? "all";
   setViewState(
     produce((draft) => {
-      (draft.tabFilters[tab] as Record<string, string>)[field as string] = "all";
+      (draft.tabFilters[tab] as Record<string, string>)[field as string] = defaultValue;
     })
   );
 }

@@ -22,6 +22,7 @@ import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
+import RepoGitHubLink from "../shared/RepoGitHubLink";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -31,6 +32,7 @@ export interface PullRequestsTabProps {
   trackedUsers?: TrackedUser[];
   hotPollingPRIds?: ReadonlySet<number>;
   monitoredRepos?: RepoRef[];
+  refreshTick?: number;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -319,7 +321,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar with SortDropdown */}
-      <div class="flex items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <SortDropdown
           options={sortOptions}
           value={sortPref().field}
@@ -488,6 +490,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           </span>
                         </Show>
                       </button>
+                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
                       <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
@@ -511,6 +514,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 title={pr.title}
                                 author={pr.userLogin}
                                 createdAt={pr.createdAt}
+                                updatedAt={pr.updatedAt}
+                                refreshTick={props.refreshTick}
                                 url={pr.htmlUrl}
                                 labels={pr.labels}
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}

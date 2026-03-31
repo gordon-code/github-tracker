@@ -5,8 +5,9 @@ const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
  * Uses Intl.RelativeTimeFormat for natural language output.
  */
 export function relativeTime(isoString: string): string {
-  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffMs = Date.now() - Date.parse(isoString);
   if (isNaN(diffMs)) return "";
+  if (diffMs < 0) return rtf.format(0, "second");
   const diffSec = Math.floor(diffMs / 1000);
 
   if (diffSec < 60) return rtf.format(-diffSec, "second");
@@ -19,6 +20,28 @@ export function relativeTime(isoString: string): string {
   const diffMonth = Math.floor(diffDay / 30);
   if (diffMonth < 12) return rtf.format(-diffMonth, "month");
   return rtf.format(-Math.floor(diffMonth / 12), "year");
+}
+
+/**
+ * Formats an ISO date string as a compact relative time string (e.g., "3h", "7d", "2mo").
+ * Returns "now" for differences under 60 seconds or future timestamps (clock skew).
+ * Returns "" for invalid input.
+ */
+export function shortRelativeTime(isoString: string): string {
+  const diffMs = Date.now() - Date.parse(isoString);
+  if (isNaN(diffMs)) return "";
+  if (diffMs < 0) return "now";
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth}mo`;
+  return `${Math.floor(diffMonth / 12)}y`;
 }
 
 /**
@@ -40,8 +63,8 @@ export function labelTextColor(hexColor: string): string {
 export function formatDuration(startedAt: string, completedAt: string | null): string {
   if (!startedAt) return "--";
   if (!completedAt) return "--";
-  const diffMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (diffMs <= 0) return "--";
+  const diffMs = Date.parse(completedAt) - Date.parse(startedAt);
+  if (isNaN(diffMs) || diffMs <= 0) return "--";
   const totalSec = Math.floor(diffMs / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);

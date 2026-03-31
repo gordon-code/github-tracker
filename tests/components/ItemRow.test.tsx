@@ -1,14 +1,18 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
+
+const MOCK_NOW = new Date("2026-03-30T12:00:00Z").getTime();
 
 const defaultProps = {
   repo: "octocat/Hello-World",
   number: 42,
   title: "Fix a bug",
   author: "octocat",
-  createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+  createdAt: "2026-03-30T10:00:00Z", // 2h before MOCK_NOW
+  updatedAt: "2026-03-30T11:30:00Z", // 30m before MOCK_NOW (differs from createdAt by >60s)
   url: "https://github.com/octocat/Hello-World/issues/42",
   labels: [{ name: "bug", color: "d73a4a" }],
   onIgnore: vi.fn(),
@@ -16,6 +20,9 @@ const defaultProps = {
 };
 
 describe("ItemRow", () => {
+  beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(MOCK_NOW); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it("renders repo badge", () => {
     render(() => <ItemRow {...defaultProps} />);
     screen.getByText("octocat/Hello-World");
@@ -38,11 +45,11 @@ describe("ItemRow", () => {
   });
 
   it("renders relative time for createdAt", () => {
-    render(() => <ItemRow {...defaultProps} />);
-    // Should show something like "2 hours ago"
-    const timeEl = screen.getByTitle(defaultProps.createdAt);
-    expect(timeEl).toBeDefined();
-    expect(timeEl.textContent).toMatch(/hour/i);
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    // Should show compact format like "2h"
+    const timeEl = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    expect(timeEl).not.toBeNull();
+    expect(timeEl!.textContent).toBe("2h");
   });
 
   it("renders children slot when provided", () => {
@@ -165,5 +172,129 @@ describe("ItemRow", () => {
     const { container } = render(() => <ItemRow {...defaultProps} isFlashing={true} isPolling={true} />);
     expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
     expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+  });
+
+  it("shows both dates when updatedAt meaningfully differs from createdAt", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    // createdAt=2h ago → "2h", updatedAt=30m ago → "30m"
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.textContent).toBe("2h");
+    expect(created!.getAttribute("title")).toBe(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
+    expect(updated!.textContent).toBe("30m");
+    expect(updated!.getAttribute("title")).toBe(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
+    // Middle dot separator is a <span> with aria-hidden
+    const dot = container.querySelector('span[aria-hidden="true"]');
+    expect(dot).not.toBeNull();
+    expect(dot!.textContent).toBe("\u00B7");
+  });
+
+  it("shows single date when createdAt equals updatedAt (zero diff)", () => {
+    const sameDate = "2026-03-30T11:00:00Z";
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt={sameDate} updatedAt={sameDate} />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+  });
+
+  it("shows single date when updatedAt is within 60s of createdAt", () => {
+    const { container } = render(() => (
+      <ItemRow
+        {...defaultProps}
+        createdAt="2026-03-30T11:59:00Z"
+        updatedAt="2026-03-30T11:59:30Z"
+      />
+    ));
+    // Only one time element — no dot separator
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+  });
+
+  it("shows single date when updatedAt is exactly 60s after createdAt", () => {
+    const { container } = render(() => (
+      <ItemRow
+        {...defaultProps}
+        createdAt="2026-03-30T11:59:00Z"
+        updatedAt="2026-03-30T12:00:00Z"
+      />
+    ));
+    // diff === 60_000ms, condition is <=, so still suppressed
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+  });
+
+  it("shows single date when both compact values are identical (display-equality guard)", () => {
+    // Both 3 days ago — createdAt 3d+2min ago, updatedAt exactly 3d ago, both display "3d"
+    const createdAt = new Date(MOCK_NOW - (3 * 24 * 60 * 60 + 2 * 60) * 1000).toISOString();
+    const updatedAt = new Date(MOCK_NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt={createdAt} updatedAt={updatedAt} />
+    ));
+    // diff > 60s but both show "3d" — no dot separator
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelector(`time[datetime="${createdAt}"]`)!.textContent).toBe("3d");
+  });
+
+  it("suppresses update display when both dates are invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="not-a-date" updatedAt="also-invalid" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+    expect(container.querySelector("time")!.textContent).toBe("");
+  });
+
+  it("suppresses update display when createdAt is valid but updatedAt is invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="2026-03-30T10:00:00Z" updatedAt="not-a-date" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+  });
+
+  it("suppresses update display when updatedAt is valid but createdAt is invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="not-a-date" updatedAt="2026-03-30T11:30:00Z" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+  });
+
+  it("renders correct datetime attributes on time elements", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    const timeEls = container.querySelectorAll("time");
+    expect(timeEls.length).toBe(2);
+    expect(timeEls[0].getAttribute("datetime")).toBe(defaultProps.createdAt);
+    expect(timeEls[1].getAttribute("datetime")).toBe(defaultProps.updatedAt);
+  });
+
+  it("shows verbose aria-label for created and updated spans", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
+    expect(updated!.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
+  });
+
+  it("refreshTick forces time display update", () => {
+    const [tick, setTick] = createSignal(0);
+    let mockNow = MOCK_NOW;
+    vi.mocked(Date.now).mockImplementation(() => mockNow);
+
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} refreshTick={tick()} />
+    ));
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.textContent).toBe("2h");
+    expect(updated!.textContent).toBe("30m");
+
+    // Advance mock time by 3 hours and bump refreshTick
+    mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
+    setTick(1);
+
+    expect(created!.textContent).toBe("5h");
+    // updatedAt was 30m before MOCK_NOW; after +3h it is 3h30m ago → Math.floor(210/60) = 3 → "3h"
+    expect(updated!.textContent).toBe("3h");
   });
 });

@@ -8,6 +8,7 @@ import {
   unignoreItem,
   setSortPreference,
   setGlobalFilter,
+  resetAllTabFilters,
   initViewPersistence,
   ViewStateSchema,
   toggleExpandedRepo,
@@ -189,6 +190,7 @@ describe("ViewStateSchema", () => {
     expect(result.sortPreferences).toEqual({});
     expect(result.ignoredItems).toEqual([]);
     expect(result.globalFilter).toEqual({ org: null, repo: null });
+    expect(result.hideDepDashboard).toBe(true);
   });
 
   it("handles missing fields with defaults", () => {
@@ -304,5 +306,32 @@ describe("resetViewState", () => {
     expect("org/repo-b" in viewState.expandedRepos.issues).toBe(false);
     expect("org/repo-c" in viewState.expandedRepos.pullRequests).toBe(false);
     expect("org/repo-d" in viewState.expandedRepos.actions).toBe(false);
+  });
+});
+
+describe("hideDepDashboard", () => {
+  beforeEach(() => resetViewState());
+
+  it("defaults to true", () => {
+    expect(viewState.hideDepDashboard).toBe(true);
+  });
+
+  it("can be toggled via updateViewState", () => {
+    updateViewState({ hideDepDashboard: false });
+    expect(viewState.hideDepDashboard).toBe(false);
+    updateViewState({ hideDepDashboard: true });
+    expect(viewState.hideDepDashboard).toBe(true);
+  });
+
+  it("is not affected by resetAllTabFilters", () => {
+    updateViewState({ hideDepDashboard: false });
+    resetAllTabFilters("issues");
+    expect(viewState.hideDepDashboard).toBe(false);
+  });
+
+  it("is reset by resetViewState", () => {
+    updateViewState({ hideDepDashboard: false });
+    resetViewState();
+    expect(viewState.hideDepDashboard).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
-import { For, JSX, Show } from "solid-js";
+import { createMemo, For, JSX, Show } from "solid-js";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
 
 export interface ItemRowProps {
@@ -9,6 +9,8 @@ export interface ItemRowProps {
   title: string;
   author: string;
   createdAt: string;
+  updatedAt: string;
+  refreshTick?: number;
   url: string;
   labels: { name: string; color: string }[];
   children?: JSX.Element;
@@ -24,6 +26,33 @@ export interface ItemRowProps {
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
+
+  // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
+  const staticDateInfo = createMemo(() => {
+    const createdTitle = `Created: ${new Date(props.createdAt).toLocaleString()}`;
+    const updatedTitle = `Updated: ${new Date(props.updatedAt).toLocaleString()}`;
+    const diffMs = Date.parse(props.updatedAt) - Date.parse(props.createdAt);
+    return { createdTitle, updatedTitle, diffMs };
+  });
+
+  // Reading props.refreshTick registers it as a SolidJS reactive dependency,
+  // forcing this memo to re-evaluate when the tick changes. Date.now() alone
+  // is not tracked by SolidJS's dependency system.
+  const dateDisplay = createMemo(() => {
+    void props.refreshTick;
+    const created = shortRelativeTime(props.createdAt);
+    const updated = shortRelativeTime(props.updatedAt);
+    const createdLabel = `Created ${relativeTime(props.createdAt)}`;
+    const updatedLabel = `Updated ${relativeTime(props.updatedAt)}`;
+    return { created, updated, createdLabel, updatedLabel };
+  });
+
+  const shouldShowUpdated = createMemo(() => {
+    const { diffMs } = staticDateInfo();
+    if (diffMs <= 60_000) return false;
+    const { created, updated } = dateDisplay();
+    return created !== "" && updated !== "" && created !== updated;
+  });
 
   return (
     <div
@@ -102,7 +131,25 @@ export default function ItemRow(props: ItemRowProps) {
         <Show when={props.surfacedByBadge !== undefined}>
           <div class="relative z-10">{props.surfacedByBadge}</div>
         </Show>
-        <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
+        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+          <time
+            datetime={props.createdAt}
+            title={staticDateInfo().createdTitle}
+            aria-label={dateDisplay().createdLabel}
+          >
+            {dateDisplay().created}
+          </time>
+          <Show when={shouldShowUpdated()}>
+            <span aria-hidden="true">{"\u00B7"}</span>
+            <time
+              datetime={props.updatedAt}
+              title={staticDateInfo().updatedTitle}
+              aria-label={dateDisplay().updatedLabel}
+            >
+              {dateDisplay().updated}
+            </time>
+          </Show>
+        </span>
         <Show when={props.isPolling}>
           <span class="loading loading-spinner loading-xs text-base-content/40" />
         </Show>

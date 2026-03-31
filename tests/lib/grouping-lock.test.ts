@@ -60,10 +60,17 @@ describe("detectReorderedRepos", () => {
     expect(detectReorderedRepos(prev, curr)).toEqual(new Set());
   });
 
-  it("ignores removed repos", () => {
-    const prev = ["org/a", "org/b"];
-    const curr = ["org/b"];
-    // org/b was at index 1, now at index 0 -> moved
-    expect(detectReorderedRepos(prev, curr)).toEqual(new Set(["org/b"]));
+  it("does not flash remaining repos when a repo is removed", () => {
+    const prev = ["org/a", "org/b", "org/c"];
+    const curr = ["org/b", "org/c"];
+    // org/a removed — org/b and org/c kept same relative order
+    expect(detectReorderedRepos(prev, curr)).toEqual(new Set());
+  });
+
+  it("detects reorder even when a repo is simultaneously removed", () => {
+    const prev = ["org/a", "org/b", "org/c"];
+    const curr = ["org/c", "org/b"];
+    // org/a removed, and org/b + org/c swapped relative order
+    expect(detectReorderedRepos(prev, curr)).toEqual(new Set(["org/b", "org/c"]));
   });
 });

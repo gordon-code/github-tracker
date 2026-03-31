@@ -1,10 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import WorkflowRunRow from "../../src/app/components/dashboard/WorkflowRunRow";
 import { makeWorkflowRun } from "../helpers/index";
 
+const MOCK_NOW = new Date("2026-03-30T12:00:00Z").getTime();
+
 describe("WorkflowRunRow", () => {
+  beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(MOCK_NOW); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it("renders run name", () => {
     const run = makeWorkflowRun({ name: "CI Build" });
     render(() => (
@@ -21,15 +27,33 @@ describe("WorkflowRunRow", () => {
     screen.getByText("feat: my cool feature");
   });
 
-  it("shows relative time", () => {
-    const run = makeWorkflowRun({ createdAt: "2024-01-10T08:00:00Z" });
-    render(() => (
+  it("shows relative time in a semantic <time> element", () => {
+    const createdAt = new Date(MOCK_NOW - 2 * 60 * 60 * 1000).toISOString();
+    const run = makeWorkflowRun({ createdAt });
+    const { container } = render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
     ));
-    // relativeTime returns a human-readable string; just verify something renders
-    // We can't assert exact text as it depends on current date, but the element should exist
-    const container = screen.getByText("CI").closest("div");
-    expect(container).toBeDefined();
+    const timeEl = container.querySelector("time");
+    expect(timeEl).not.toBeNull();
+    expect(timeEl!.getAttribute("datetime")).toBe(createdAt);
+    expect(timeEl!.getAttribute("title")).toBe(`Created: ${new Date(createdAt).toLocaleString()}`);
+    expect(timeEl!.textContent).toMatch(/2 hours? ago/);
+  });
+
+  it("updates time display when refreshTick changes", () => {
+    let mockNow = MOCK_NOW;
+    vi.mocked(Date.now).mockImplementation(() => mockNow);
+    const createdAt = new Date(MOCK_NOW - 2 * 60 * 60 * 1000).toISOString();
+    const run = makeWorkflowRun({ createdAt });
+    const [tick, setTick] = createSignal(0);
+    const { container } = render(() => (
+      <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" refreshTick={tick()} />
+    ));
+    const timeEl = container.querySelector("time");
+    expect(timeEl!.textContent).toMatch(/2 hours? ago/);
+    mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
+    setTick(1);
+    expect(timeEl!.textContent).toMatch(/5 hours? ago/);
   });
 
   it("renders status indicator for success conclusion", () => {

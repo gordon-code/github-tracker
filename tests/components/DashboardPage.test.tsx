@@ -180,6 +180,28 @@ describe("DashboardPage — tab switching", () => {
   });
 });
 
+describe("DashboardPage — clock tick", () => {
+  it("creates a 60s interval to keep relative time displays fresh", () => {
+    const spy = vi.spyOn(globalThis, "setInterval");
+    render(() => <DashboardPage />);
+    expect(spy.mock.calls.some(([, ms]) => ms === 60_000)).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("clears the clock interval on unmount", () => {
+    const setSpy = vi.spyOn(globalThis, "setInterval");
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+    const { unmount } = render(() => <DashboardPage />);
+    const clockCallIdx = setSpy.mock.calls.findIndex(([, ms]) => ms === 60_000);
+    expect(clockCallIdx).not.toBe(-1);
+    const clockIntervalId = setSpy.mock.results[clockCallIdx].value;
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(clockIntervalId);
+    setSpy.mockRestore();
+    clearSpy.mockRestore();
+  });
+});
+
 describe("DashboardPage — data flow", () => {
   it("passes fetched issues to IssuesTab", async () => {
     const issues = [

@@ -11,6 +11,7 @@ import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
+import RepoGitHubLink from "../shared/RepoGitHubLink";
 import { orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
@@ -19,6 +20,7 @@ interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
   hasUpstreamRepos?: boolean;
+  refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
 }
 
@@ -318,6 +320,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                       </span>
                     </Show>
                   </button>
+                  <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
                   <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
                 </div>
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
@@ -347,6 +350,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                               onToggle={() => toggleWorkflow(wfKey)}
                               onIgnoreRun={handleIgnore}
                               density={config.viewDensity}
+                              refreshTick={props.refreshTick}
                               hotPollingRunIds={props.hotPollingRunIds}
                               flashingRunIds={flashingRunIds()}
                             />
