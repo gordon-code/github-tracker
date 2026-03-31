@@ -90,13 +90,17 @@ onAuthCleared(resetPollState);
 // When tracked users or monitored repos change, reset notification state so the
 // next poll cycle silently seeds items without flooding "new item" notifications.
 // Tracks a serialized key (sorted logins/fullNames) so swapping entries at the
-// same array length still triggers the reset.
+// same array length still triggers the reset. Boolean mount flags ensure the
+// initial effect run is always skipped (key="" is a valid state for empty arrays).
+let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
+let _monitoredReposMounted = false;
 let _monitoredReposKey = "";
 createRoot(() => {
   createEffect(() => {
     const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
-    if (_trackedUsersKey === "") {
+    if (!_trackedUsersMounted) {
+      _trackedUsersMounted = true;
       _trackedUsersKey = key;
       return;
     }
@@ -108,7 +112,8 @@ createRoot(() => {
 
   createEffect(() => {
     const key = (config.monitoredRepos ?? []).map((r) => r.fullName).sort().join(",");
-    if (_monitoredReposKey === "") {
+    if (!_monitoredReposMounted) {
+      _monitoredReposMounted = true;
       _monitoredReposKey = key;
       return;
     }
