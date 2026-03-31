@@ -5,8 +5,9 @@ const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
  * Uses Intl.RelativeTimeFormat for natural language output.
  */
 export function relativeTime(isoString: string): string {
-  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffMs = Date.now() - Date.parse(isoString);
   if (isNaN(diffMs)) return "";
+  if (diffMs < 0) return rtf.format(0, "second");
   const diffSec = Math.floor(diffMs / 1000);
 
   if (diffSec < 60) return rtf.format(-diffSec, "second");
@@ -23,7 +24,8 @@ export function relativeTime(isoString: string): string {
 
 /**
  * Formats an ISO date string as a compact relative time string (e.g., "3h", "7d", "2mo").
- * Returns "now" for differences under 60 seconds, "" for invalid input.
+ * Returns "now" for differences under 60 seconds or future timestamps (clock skew).
+ * Returns "" for invalid input.
  */
 export function shortRelativeTime(isoString: string): string {
   const diffMs = Date.now() - Date.parse(isoString);

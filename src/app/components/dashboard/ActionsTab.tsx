@@ -19,6 +19,7 @@ interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
   hasUpstreamRepos?: boolean;
+  refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
 }
 
@@ -347,6 +348,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                               onToggle={() => toggleWorkflow(wfKey)}
                               onIgnoreRun={handleIgnore}
                               density={config.viewDensity}
+                              refreshTick={props.refreshTick}
                               hotPollingRunIds={props.hotPollingRunIds}
                               flashingRunIds={flashingRunIds()}
                             />

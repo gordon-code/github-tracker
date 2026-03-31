@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import type { Config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -8,6 +8,7 @@ interface WorkflowRunRowProps {
   run: WorkflowRun;
   onIgnore: (run: WorkflowRun) => void;
   density: Config["viewDensity"];
+  refreshTick?: number;
   isPolling?: boolean;
   isFlashing?: boolean;
 }
@@ -131,6 +132,13 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
   const paddingClass = () =>
     props.density === "compact" ? "py-1.5 px-3" : "py-2.5 px-4";
 
+  // Re-run on refreshTick to keep relative time current.
+  // Date.now() is not reactive in SolidJS; refreshTick is the explicit invalidation signal.
+  const timeLabel = createMemo(() => {
+    void props.refreshTick;
+    return relativeTime(props.run.createdAt);
+  });
+
   return (
     <div
       class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
@@ -171,9 +179,13 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
         {durationLabel(props.run)}
       </span>
 
-      <span class="text-xs text-base-content/40 shrink-0">
-        {relativeTime(props.run.createdAt)}
-      </span>
+      <time
+        class="text-xs text-base-content/40 shrink-0"
+        datetime={props.run.createdAt}
+        title={new Date(props.run.createdAt).toLocaleString()}
+      >
+        {timeLabel()}
+      </time>
 
       <Show when={props.isPolling}>
         <span class="loading loading-spinner loading-xs text-base-content/40" />

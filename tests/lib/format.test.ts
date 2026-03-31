@@ -58,6 +58,11 @@ describe("relativeTime", () => {
     expect(relativeTime("")).toBe("");
     expect(relativeTime("garbage-2026-13-99")).toBe("");
   });
+
+  it("clamps future timestamps to 'now' (clock skew)", () => {
+    const future = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    expect(relativeTime(future)).toMatch(/now/i);
+  });
 });
 
 describe("shortRelativeTime", () => {
@@ -91,9 +96,39 @@ describe("shortRelativeTime", () => {
     expect(shortRelativeTime(isoString)).toBe("7d");
   });
 
+  it("returns 'now' for exactly 59 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 59 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns '1m' for exactly 60 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1m");
+  });
+
+  it("returns '29d' for 29 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 29 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("29d");
+  });
+
+  it("returns '1mo' for 30 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1mo");
+  });
+
   it("returns compact months for 45 days ago", () => {
     const isoString = new Date(MOCK_NOW - 45 * 24 * 60 * 60 * 1000).toISOString();
     expect(shortRelativeTime(isoString)).toBe("1mo");
+  });
+
+  it("returns '11mo' for 11 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 11 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("11mo");
+  });
+
+  it("returns '1y' for 12 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 12 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
   });
 
   it("returns compact years for 400 days ago", () => {

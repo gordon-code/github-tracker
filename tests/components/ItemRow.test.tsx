@@ -185,6 +185,15 @@ describe("ItemRow", () => {
     expect(dot!.textContent).toBe("\u00B7");
   });
 
+  it("shows single date when createdAt equals updatedAt (zero diff)", () => {
+    const sameDate = "2026-03-30T11:00:00Z";
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt={sameDate} updatedAt={sameDate} />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(screen.queryByTitle(`Updated: ${new Date(sameDate).toLocaleString()}`)).toBeNull();
+  });
+
   it("shows single date when updatedAt is within 60s of createdAt", () => {
     const { container } = render(() => (
       <ItemRow
@@ -220,6 +229,14 @@ describe("ItemRow", () => {
     // diff > 60s but both show "3d" — no dot separator span
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
     expect(screen.getByTitle(`Created: ${new Date(createdAt).toLocaleString()}`).textContent).toBe("3d");
+  });
+
+  it("renders correct datetime attributes on time elements", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    const timeEls = container.querySelectorAll("time");
+    expect(timeEls.length).toBe(2);
+    expect(timeEls[0].getAttribute("datetime")).toBe(defaultProps.createdAt);
+    expect(timeEls[1].getAttribute("datetime")).toBe(defaultProps.updatedAt);
   });
 
   it("shows verbose aria-label for created and updated spans", () => {

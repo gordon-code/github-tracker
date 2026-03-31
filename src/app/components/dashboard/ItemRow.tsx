@@ -27,19 +27,28 @@ export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
-  const timeInfo = createMemo(() => {
+  // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
+  const staticDateInfo = createMemo(() => {
+    const createdTitle = `Created: ${new Date(props.createdAt).toLocaleString()}`;
+    const updatedTitle = `Updated: ${new Date(props.updatedAt).toLocaleString()}`;
+    const diffMs = Date.parse(props.updatedAt) - Date.parse(props.createdAt);
+    return { createdTitle, updatedTitle, diffMs };
+  });
+
+  // Reactive date display — re-run on refreshTick to keep relative times current.
+  // Date.now() is not reactive in SolidJS; refreshTick is the explicit invalidation signal.
+  const dateDisplay = createMemo(() => {
     void props.refreshTick;
     const created = shortRelativeTime(props.createdAt);
     const updated = shortRelativeTime(props.updatedAt);
     const createdLabel = `Created ${relativeTime(props.createdAt)}`;
     const updatedLabel = `Updated ${relativeTime(props.updatedAt)}`;
-    const createdTitle = `Created: ${new Date(props.createdAt).toLocaleString()}`;
-    const updatedTitle = `Updated: ${new Date(props.updatedAt).toLocaleString()}`;
-    const diffMs = Date.parse(props.updatedAt) - Date.parse(props.createdAt);
-    return { created, updated, createdLabel, updatedLabel, createdTitle, updatedTitle, diffMs };
+    return { created, updated, createdLabel, updatedLabel };
   });
+
   const hasUpdate = createMemo(() => {
-    const { diffMs, created, updated } = timeInfo();
+    const { diffMs } = staticDateInfo();
+    const { created, updated } = dateDisplay();
     if (diffMs <= 60_000) return false;
     return created !== "" && updated !== "" && created !== updated;
   });
@@ -124,19 +133,19 @@ export default function ItemRow(props: ItemRowProps) {
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
           <time
             datetime={props.createdAt}
-            title={timeInfo().createdTitle}
-            aria-label={timeInfo().createdLabel}
+            title={staticDateInfo().createdTitle}
+            aria-label={dateDisplay().createdLabel}
           >
-            {timeInfo().created}
+            {dateDisplay().created}
           </time>
           <Show when={hasUpdate()}>
             <span aria-hidden="true">{"\u00B7"}</span>
             <time
               datetime={props.updatedAt}
-              title={timeInfo().updatedTitle}
-              aria-label={timeInfo().updatedLabel}
+              title={staticDateInfo().updatedTitle}
+              aria-label={dateDisplay().updatedLabel}
             >
-              {timeInfo().updated}
+              {dateDisplay().updated}
             </time>
           </Show>
         </span>

@@ -383,6 +383,7 @@ export default function DashboardPage() {
                   workflowRuns={dashboardData.workflowRuns}
                   loading={dashboardData.loading}
                   hasUpstreamRepos={config.upstreamRepos.length > 0}
+                  refreshTick={refreshTick()}
                   hotPollingRunIds={hotPollingRunIds()}
                 />
               </Match>
