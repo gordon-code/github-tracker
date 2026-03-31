@@ -7,6 +7,7 @@ import {
   Match,
 } from "solid-js";
 import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
+import { pushNotification } from "../../lib/errors";
 import { fetchOrgs, type OrgEntry, type RepoRef } from "../../services/api";
 import { getClient } from "../../services/github";
 import RepoSelector from "./RepoSelector";
@@ -67,7 +68,11 @@ export default function OnboardingWizard() {
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    try {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
+    }
     window.location.replace("/dashboard");
   }
 

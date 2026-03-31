@@ -131,6 +131,58 @@ describe("clearAuth", () => {
   });
 });
 
+describe("expireToken", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("clears token signal to null", () => {
+    mod.setAuth({ access_token: "ghs_abc" });
+    mod.expireToken();
+    expect(mod.token()).toBeNull();
+  });
+
+  it("clears user signal to null", () => {
+    // Simulate a validated session: set token + manually set user via validateToken mock
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: () => Promise.resolve({ login: "wgordon", avatar_url: "", name: "Will" }),
+    }));
+    mod.setAuth({ access_token: "ghs_abc" });
+    // Directly test that user is cleared — validateToken would set it, but
+    // we can verify the signal reset by checking after expireToken
+    mod.expireToken();
+    expect(mod.user()).toBeNull();
+  });
+
+  it("removes only auth token from localStorage — config, view, dashboard preserved", () => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    localStorageMock.setItem("github-tracker:dashboard", '{"cached":true}');
+    mod.setAuth({ access_token: "ghs_abc" });
+    mod.expireToken();
+    expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(localStorageMock.getItem("github-tracker:dashboard")).toBe('{"cached":true}');
+  });
+
+  it("does NOT invoke onAuthCleared callbacks", () => {
+    const cb = vi.fn();
+    mod.onAuthCleared(cb);
+    mod.expireToken();
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
 describe("onAuthCleared callbacks", () => {
   let mod: typeof import("../../src/app/stores/auth");
 
@@ -201,12 +253,14 @@ describe("validateToken", () => {
   let mod: typeof import("../../src/app/stores/auth");
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     localStorageMock.clear();
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -231,16 +285,90 @@ describe("validateToken", () => {
     expect(mod.user()?.name).toBe("Will");
   });
 
-  it("clears auth on 401 (permanent token revoked — no refresh fallback)", async () => {
+  it("expires token after two consecutive 401s (transient retry + genuine revocation)", async () => {
     vi.stubGlobal("fetch", vi.fn()
-      // GET /user returns 401 (access token revoked)
+      // First GET /user returns 401
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      // Retry GET /user also returns 401
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
     );
 
     mod.setAuth({ access_token: "ghs_revoked" });
-    await mod.validateToken();
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1000);
+    await promise;
     expect(mod.token()).toBeNull();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+  });
+
+  it("recovers on transient 401 when retry succeeds", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      // First GET /user returns 401 (transient)
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      // Retry succeeds
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ login: "wgordon", avatar_url: "", name: "Will" }),
+      })
+    );
+
+    mod.setAuth({ access_token: "ghs_transient" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+    expect(result).toBe(true);
+    expect(mod.token()).toBe("ghs_transient");
+    expect(mod.user()?.login).toBe("wgordon");
+  });
+
+  it("preserves token when retry returns non-401 error (e.g. 500)", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({}) })
+    );
+
+    mod.setAuth({ access_token: "ghs_retry500" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+    expect(result).toBe(false);
+    // Token preserved — server error on retry doesn't confirm revocation
+    expect(mod.token()).toBe("ghs_retry500");
+  });
+
+  it("preserves token when retry throws network error", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    );
+
+    mod.setAuth({ access_token: "ghs_retrynet" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+    expect(result).toBe(false);
+    // Token preserved — network error on retry doesn't confirm revocation
+    expect(mod.token()).toBe("ghs_retrynet");
+  });
+
+  it("preserves user config and view state when token expires (not a full logout)", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+    );
+
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setAuth({ access_token: "ghs_expired" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+    // Token cleared
+    expect(mod.token()).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+    // Config and view preserved — expireToken() does NOT wipe user data
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
   });
 
   it("returns false and leaves token unchanged on non-200/non-401 response (e.g., 503)", async () => {

@@ -19,7 +19,8 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { clearAuth, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
@@ -191,7 +192,7 @@ async function pollFetch(): Promise<DashboardData> {
         try {
           localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
         } catch {
-          // localStorage full or unavailable — non-fatal
+          pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
         }
       }, 0);
     } else {
@@ -208,9 +209,9 @@ async function pollFetch(): Promise<DashboardData> {
         : null;
 
     if (status === 401) {
-      // Hard redirect (not navigate()) forces a full page reload, which clears
-      // module-level state like _coordinator and dashboardData for the next user.
-      clearAuth();
+      // Token invalid — clear token only, preserve user config/view/dashboard.
+      // Hard redirect forces a full page reload, clearing module-level state.
+      expireToken();
       window.location.replace("/login");
     }
     setDashboardData("loading", false);
