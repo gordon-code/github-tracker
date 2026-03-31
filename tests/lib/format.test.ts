@@ -121,6 +121,11 @@ describe("shortRelativeTime", () => {
     expect(shortRelativeTime(isoString)).toBe("1mo");
   });
 
+  it("returns '2mo' for 2 months ago", () => {
+    const isoString = new Date(MOCK_NOW - 2 * 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("2mo");
+  });
+
   it("returns '11mo' for 11 months ago", () => {
     const isoString = new Date(MOCK_NOW - 11 * 30 * 24 * 60 * 60 * 1000).toISOString();
     expect(shortRelativeTime(isoString)).toBe("11mo");

@@ -45,11 +45,11 @@ describe("ItemRow", () => {
   });
 
   it("renders relative time for createdAt", () => {
-    render(() => <ItemRow {...defaultProps} />);
+    const { container } = render(() => <ItemRow {...defaultProps} />);
     // Should show compact format like "2h"
-    const timeEl = screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
-    expect(timeEl).toBeDefined();
-    expect(timeEl.textContent).toBe("2h");
+    const timeEl = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    expect(timeEl).not.toBeNull();
+    expect(timeEl!.textContent).toBe("2h");
   });
 
   it("renders children slot when provided", () => {
@@ -177,8 +177,12 @@ describe("ItemRow", () => {
   it("shows both dates when updatedAt meaningfully differs from createdAt", () => {
     const { container } = render(() => <ItemRow {...defaultProps} />);
     // createdAt=2h ago → "2h", updatedAt=30m ago → "30m"
-    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("2h");
-    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("30m");
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.textContent).toBe("2h");
+    expect(created!.getAttribute("title")).toBe(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
+    expect(updated!.textContent).toBe("30m");
+    expect(updated!.getAttribute("title")).toBe(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
     // Middle dot separator is a <span> with aria-hidden
     const dot = container.querySelector('span[aria-hidden="true"]');
     expect(dot).not.toBeNull();
@@ -191,7 +195,7 @@ describe("ItemRow", () => {
       <ItemRow {...defaultProps} createdAt={sameDate} updatedAt={sameDate} />
     ));
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
-    expect(screen.queryByTitle(`Updated: ${new Date(sameDate).toLocaleString()}`)).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
   });
 
   it("shows single date when updatedAt is within 60s of createdAt", () => {
@@ -202,9 +206,9 @@ describe("ItemRow", () => {
         updatedAt="2026-03-30T11:59:30Z"
       />
     ));
-    // Only one time span — no dot separator span
+    // Only one time element — no dot separator
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
-    expect(screen.queryByTitle(`Updated: ${new Date("2026-03-30T11:59:30Z").toLocaleString()}`)).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
   });
 
   it("shows single date when updatedAt is exactly 60s after createdAt", () => {
@@ -226,9 +230,18 @@ describe("ItemRow", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} createdAt={createdAt} updatedAt={updatedAt} />
     ));
-    // diff > 60s but both show "3d" — no dot separator span
+    // diff > 60s but both show "3d" — no dot separator
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
-    expect(screen.getByTitle(`Created: ${new Date(createdAt).toLocaleString()}`).textContent).toBe("3d");
+    expect(container.querySelector(`time[datetime="${createdAt}"]`)!.textContent).toBe("3d");
+  });
+
+  it("suppresses update display when dates are invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="not-a-date" updatedAt="also-invalid" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+    expect(container.querySelector("time")!.textContent).toBe("");
   });
 
   it("renders correct datetime attributes on time elements", () => {
@@ -240,35 +253,32 @@ describe("ItemRow", () => {
   });
 
   it("shows verbose aria-label for created and updated spans", () => {
-    render(() => <ItemRow {...defaultProps} />);
-    const createdSpan = screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
-    const updatedSpan = screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
-    expect(createdSpan.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
-    expect(updatedSpan.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
+    expect(updated!.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
   });
 
   it("refreshTick forces time display update", () => {
     const [tick, setTick] = createSignal(0);
     let mockNow = MOCK_NOW;
-    vi.spyOn(Date, "now").mockImplementation(() => mockNow);
+    vi.mocked(Date.now).mockImplementation(() => mockNow);
 
-    // createdAt is 2h before MOCK_NOW → displays "2h"
-    // updatedAt is 30m before MOCK_NOW → displays "30m"
-    render(() => (
-      <ItemRow
-        {...defaultProps}
-        refreshTick={tick()}
-      />
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} refreshTick={tick()} />
     ));
-    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("2h");
-    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("30m");
+    const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
+    const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
+    expect(created!.textContent).toBe("2h");
+    expect(updated!.textContent).toBe("30m");
 
     // Advance mock time by 3 hours and bump refreshTick
     mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
     setTick(1);
 
-    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("5h");
+    expect(created!.textContent).toBe("5h");
     // updatedAt was 30m before MOCK_NOW; after +3h it is 3h30m ago → Math.floor(210/60) = 3 → "3h"
-    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("3h");
+    expect(updated!.textContent).toBe("3h");
   });
 });

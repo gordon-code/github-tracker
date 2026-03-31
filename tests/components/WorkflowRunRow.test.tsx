@@ -36,12 +36,13 @@ describe("WorkflowRunRow", () => {
     const timeEl = container.querySelector("time");
     expect(timeEl).not.toBeNull();
     expect(timeEl!.getAttribute("datetime")).toBe(createdAt);
+    expect(timeEl!.getAttribute("title")).toBe(`Created: ${new Date(createdAt).toLocaleString()}`);
     expect(timeEl!.textContent).toMatch(/2 hours? ago/);
   });
 
   it("updates time display when refreshTick changes", () => {
     let mockNow = MOCK_NOW;
-    vi.spyOn(Date, "now").mockImplementation(() => mockNow);
+    vi.mocked(Date.now).mockImplementation(() => mockNow);
     const createdAt = new Date(MOCK_NOW - 2 * 60 * 60 * 1000).toISOString();
     const run = makeWorkflowRun({ createdAt });
     const [tick, setTick] = createSignal(0);

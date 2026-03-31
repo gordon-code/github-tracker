@@ -315,7 +315,12 @@ export default function DashboardPage() {
     });
   });
 
-  const refreshTick = createMemo(() => dashboardData.lastRefreshedAt?.getTime() ?? 0);
+  // Wall-clock tick keeps relative time displays fresh between full poll cycles.
+  const [clockTick, setClockTick] = createSignal(0);
+  const clockInterval = setInterval(() => setClockTick((t) => t + 1), 60_000);
+  onCleanup(() => clearInterval(clockInterval));
+
+  const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
   const tabCounts = createMemo(() => ({
     issues: dashboardData.issues.length,

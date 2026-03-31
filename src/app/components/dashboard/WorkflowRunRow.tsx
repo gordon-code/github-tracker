@@ -132,8 +132,9 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
   const paddingClass = () =>
     props.density === "compact" ? "py-1.5 px-3" : "py-2.5 px-4";
 
-  // Re-run on refreshTick to keep relative time current.
-  // Date.now() is not reactive in SolidJS; refreshTick is the explicit invalidation signal.
+  const createdTitle = createMemo(() => `Created: ${new Date(props.run.createdAt).toLocaleString()}`);
+
+  // void refreshTick — Date.now() is not reactive in SolidJS
   const timeLabel = createMemo(() => {
     void props.refreshTick;
     return relativeTime(props.run.createdAt);
@@ -182,7 +183,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
       <time
         class="text-xs text-base-content/40 shrink-0"
         datetime={props.run.createdAt}
-        title={new Date(props.run.createdAt).toLocaleString()}
+        title={createdTitle()}
       >
         {timeLabel()}
       </time>

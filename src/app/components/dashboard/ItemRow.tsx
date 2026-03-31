@@ -35,8 +35,7 @@ export default function ItemRow(props: ItemRowProps) {
     return { createdTitle, updatedTitle, diffMs };
   });
 
-  // Reactive date display — re-run on refreshTick to keep relative times current.
-  // Date.now() is not reactive in SolidJS; refreshTick is the explicit invalidation signal.
+  // void refreshTick — Date.now() is not reactive in SolidJS
   const dateDisplay = createMemo(() => {
     void props.refreshTick;
     const created = shortRelativeTime(props.createdAt);
@@ -46,7 +45,7 @@ export default function ItemRow(props: ItemRowProps) {
     return { created, updated, createdLabel, updatedLabel };
   });
 
-  const hasUpdate = createMemo(() => {
+  const shouldShowUpdated = createMemo(() => {
     const { diffMs } = staticDateInfo();
     if (diffMs <= 60_000) return false;
     const { created, updated } = dateDisplay();
@@ -138,7 +137,7 @@ export default function ItemRow(props: ItemRowProps) {
           >
             {dateDisplay().created}
           </time>
-          <Show when={hasUpdate()}>
+          <Show when={shouldShowUpdated()}>
             <span aria-hidden="true">{"\u00B7"}</span>
             <time
               datetime={props.updatedAt}
