@@ -1570,7 +1570,7 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
       "octocat",
       undefined,
       undefined,
-      [{ fullName: "org/monitored" }]
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
     );
     expect(result.issues).toEqual([]);
     expect(result.pullRequests).toEqual([]);
@@ -1603,7 +1603,7 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
       "octocat",
       undefined,
       undefined,
-      [{ fullName: "org/monitored" }]
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
     );
 
     // Unfiltered queries should not contain 'involves:'
@@ -1657,7 +1657,7 @@ describe("fetchIssuesAndPullRequests — all repos monitored (edge case)", () =>
       "octocat",
       undefined,
       undefined,
-      [{ fullName: "org/repo1" }]  // all repos monitored
+      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
     );
 
     // Items returned from unfiltered search
@@ -1754,7 +1754,7 @@ describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tra
       "octocat",
       undefined,
       [botUser],
-      [{ fullName: "org/monitored" }]
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
     );
 
     // Both issues are present (no dedup since different IDs)
@@ -1856,7 +1856,7 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       "octocat",
       undefined,
       undefined,
-      [{ fullName: "org/monitored" }]
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
     );
 
     // Partial issue data recovered
@@ -1894,14 +1894,15 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       "octocat",
       undefined,
       undefined,
-      [{ fullName: "org/monitored" }]
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
     );
 
     // No results recovered
     expect(result.issues).toHaveLength(0);
     expect(result.pullRequests).toHaveLength(0);
-    // Error recorded
+    // Error recorded with retryable flag (network error → statusCode null → retryable)
     expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatchObject({ retryable: true });
   });
 });
 
@@ -1934,7 +1935,7 @@ describe("fetchIssuesAndPullRequests — all monitored + tracked users skips inv
       "octocat",
       undefined,
       [botUser],
-      [{ fullName: "org/repo1" }]  // all repos monitored
+      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
     );
 
     // No involves: queries for tracked user (since normalRepos is empty, tracked search is skipped)
@@ -1980,7 +1981,7 @@ describe("fetchIssuesAndPullRequests — onLightData suppression when all monito
       "octocat",
       onLightData,
       undefined,
-      [{ fullName: "org/repo1" }]  // all repos monitored
+      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
     );
 
     // onLightData NOT called (main user search skipped, unfiltered results come after)

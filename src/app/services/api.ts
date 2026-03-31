@@ -430,8 +430,6 @@ const PR_SEARCH_QUERY = `
   }
 `;
 
-// ── GraphQL combined search query ─────────────────────────────────────────────
-
 // ── Two-phase rendering: light + heavy queries ───────────────────────────────
 
 const LIGHT_PR_FRAGMENT = `
@@ -1105,13 +1103,13 @@ async function graphqlLightCombinedSearch(
 
   if (issues.length >= SEARCH_RESULT_CAP) {
     console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/issues", `Issue search results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
     issues.splice(SEARCH_RESULT_CAP);
   }
 
   if (prMap.size >= SEARCH_RESULT_CAP) {
     console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/prs", `PR search results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
   }
 
   const pullRequests = [...prMap.values()];
@@ -1211,13 +1209,13 @@ async function graphqlUnfilteredSearch(
 
   if (issues.length >= SEARCH_RESULT_CAP) {
     console.warn(`[api] Unfiltered issue results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/unfiltered-issues", `Monitored repo issue results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/unfiltered-issues", `Monitored repo issue results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
     issues.splice(SEARCH_RESULT_CAP);
   }
 
   if (prMap.size >= SEARCH_RESULT_CAP) {
     console.warn(`[api] Unfiltered PR results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/unfiltered-prs", `Monitored repo PR results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/unfiltered-prs", `Monitored repo PR results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
   }
 
   const pullRequests = [...prMap.values()];
@@ -1412,7 +1410,7 @@ export async function fetchIssuesAndPullRequests(
   userLogin: string,
   onLightData?: (data: FetchIssuesAndPRsResult) => void,
   trackedUsers?: TrackedUser[],
-  monitoredRepos?: { fullName: string }[],
+  monitoredRepos?: RepoRef[],
 ): Promise<FetchIssuesAndPRsResult> {
   if (!octokit) throw new Error("No GitHub client available");
 
@@ -1619,7 +1617,7 @@ async function graphqlSearchIssues(
 
   if (issues.length >= SEARCH_RESULT_CAP) {
     console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/issues", `Issue search results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
     issues.splice(SEARCH_RESULT_CAP);
   }
 
@@ -1759,7 +1757,7 @@ async function graphqlSearchPRs(
 
   if (prMap.size >= SEARCH_RESULT_CAP) {
     console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
+    pushNotification("search/prs", `PR search results capped at ${SEARCH_RESULT_CAP.toLocaleString()} — some items are hidden`, "warning");
   }
 
   // Fork PR fallback: for PRs with null checkStatus where head repo owner differs from base
