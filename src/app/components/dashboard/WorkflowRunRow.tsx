@@ -134,7 +134,9 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   const createdTitle = createMemo(() => `Created: ${new Date(props.run.createdAt).toLocaleString()}`);
 
-  // void refreshTick — Date.now() is not reactive in SolidJS
+  // Reading props.refreshTick registers it as a SolidJS reactive dependency,
+  // forcing this memo to re-evaluate when the tick changes. Date.now() alone
+  // is not tracked by SolidJS's dependency system.
   const timeLabel = createMemo(() => {
     void props.refreshTick;
     return relativeTime(props.run.createdAt);

@@ -602,12 +602,12 @@ describe("IssuesTab", () => {
     screen.getByText("Normal issue");
   });
 
-  it("shows Dependency Dashboard issues when toggle is active", () => {
+  it("shows Dependency Dashboard issues when hideDepDashboard is false", () => {
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard" }),
       makeIssue({ id: 2, title: "Normal issue" }),
     ];
-    viewStore.setTabFilter("issues", "depDashboard", "show");
+    viewStore.updateViewState({ hideDepDashboard: false });
     setAllExpanded("issues", ["owner/repo"], true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Dependency Dashboard");
@@ -633,5 +633,15 @@ describe("IssuesTab", () => {
     // Click again to hide
     await user.click(screen.getByText("Show Dep Dashboard"));
     expect(screen.queryByText("Dependency Dashboard")).toBeNull();
+  });
+
+  it("renders repo header link to GitHub issues", () => {
+    const issues = [makeIssue({ id: 1 })];
+    setAllExpanded("issues", ["owner/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    const link = screen.getByLabelText("Open owner/repo issues on GitHub");
+    expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/issues");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 });

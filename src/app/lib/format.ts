@@ -63,7 +63,7 @@ export function labelTextColor(hexColor: string): string {
 export function formatDuration(startedAt: string, completedAt: string | null): string {
   if (!startedAt) return "--";
   if (!completedAt) return "--";
-  const diffMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  const diffMs = Date.parse(completedAt) - Date.parse(startedAt);
   if (diffMs <= 0) return "--";
   const totalSec = Math.floor(diffMs / 1000);
   const h = Math.floor(totalSec / 3600);

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -18,7 +18,7 @@ import { deriveInvolvementRoles } from "../../lib/format";
 import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
-import ExternalLinkIcon from "../shared/ExternalLinkIcon";
+import RepoGitHubLink from "../shared/RepoGitHubLink";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -120,7 +120,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
       }
 
-      if (tabFilter.depDashboard === "hide" && issue.title === "Dependency Dashboard") return false;
+      if (viewState.hideDepDashboard && issue.title === "Dependency Dashboard") return false;
 
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
@@ -248,12 +248,11 @@ export default function IssuesTab(props: IssuesTabProps) {
         />
         <button
           onClick={() => {
-            const next = viewState.tabFilters.issues.depDashboard === "show" ? "hide" : "show";
-            setTabFilter("issues", "depDashboard", next);
+            updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
             setPage(0);
           }}
-          class={`btn btn-xs rounded-full ${viewState.tabFilters.issues.depDashboard === "show" ? "btn-primary" : "btn-ghost text-base-content/50"}`}
-          aria-pressed={viewState.tabFilters.issues.depDashboard === "show"}
+          class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
+          aria-pressed={!viewState.hideDepDashboard}
           title="Toggle visibility of Dependency Dashboard issues"
         >
           Show Dep Dashboard
@@ -349,16 +348,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                           </span>
                         </Show>
                       </button>
-                      <a
-                        href={`https://github.com/${repoGroup.repoFullName}/issues`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
-                        title={`Open ${repoGroup.repoFullName} issues on GitHub`}
-                        aria-label={`Open ${repoGroup.repoFullName} issues on GitHub`}
-                      >
-                        <ExternalLinkIcon />
-                      </a>
+                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
                       <RepoLockControls tab="issues" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={isExpanded()}>

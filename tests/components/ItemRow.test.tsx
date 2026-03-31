@@ -235,13 +235,29 @@ describe("ItemRow", () => {
     expect(container.querySelector(`time[datetime="${createdAt}"]`)!.textContent).toBe("3d");
   });
 
-  it("suppresses update display when dates are invalid", () => {
+  it("suppresses update display when both dates are invalid", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} createdAt="not-a-date" updatedAt="also-invalid" />
     ));
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
     expect(container.querySelectorAll("time").length).toBe(1);
     expect(container.querySelector("time")!.textContent).toBe("");
+  });
+
+  it("suppresses update display when createdAt is valid but updatedAt is invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="2026-03-30T10:00:00Z" updatedAt="not-a-date" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
+  });
+
+  it("suppresses update display when updatedAt is valid but createdAt is invalid", () => {
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt="not-a-date" updatedAt="2026-03-30T11:30:00Z" />
+    ));
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(container.querySelectorAll("time").length).toBe(1);
   });
 
   it("renders correct datetime attributes on time elements", () => {

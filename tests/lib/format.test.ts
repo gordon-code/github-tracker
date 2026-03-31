@@ -136,6 +136,16 @@ describe("shortRelativeTime", () => {
     expect(shortRelativeTime(isoString)).toBe("1y");
   });
 
+  it("returns '11mo' for 359 days ago (just before year boundary)", () => {
+    const isoString = new Date(MOCK_NOW - 359 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("11mo");
+  });
+
+  it("returns '1y' for 360 days ago (exact year boundary at 12×30)", () => {
+    const isoString = new Date(MOCK_NOW - 360 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
+  });
+
   it("returns compact years for 400 days ago", () => {
     const isoString = new Date(MOCK_NOW - 400 * 24 * 60 * 60 * 1000).toISOString();
     expect(shortRelativeTime(isoString)).toBe("1y");

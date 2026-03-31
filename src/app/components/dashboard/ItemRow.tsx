@@ -35,7 +35,9 @@ export default function ItemRow(props: ItemRowProps) {
     return { createdTitle, updatedTitle, diffMs };
   });
 
-  // void refreshTick — Date.now() is not reactive in SolidJS
+  // Reading props.refreshTick registers it as a SolidJS reactive dependency,
+  // forcing this memo to re-evaluate when the tick changes. Date.now() alone
+  // is not tracked by SolidJS's dependency system.
   const dateDisplay = createMemo(() => {
     void props.refreshTick;
     const created = shortRelativeTime(props.createdAt);

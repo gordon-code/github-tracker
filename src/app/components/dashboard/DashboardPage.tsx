@@ -240,6 +240,8 @@ export default function DashboardPage() {
     updateViewState({ lastActiveTab: tab });
   }
 
+  const [clockTick, setClockTick] = createSignal(0);
+
   onMount(() => {
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
@@ -306,19 +308,18 @@ export default function DashboardPage() {
       });
     }
 
+    // Wall-clock tick keeps relative time displays fresh between full poll cycles.
+    const clockInterval = setInterval(() => setClockTick((t) => t + 1), 60_000);
+
     onCleanup(() => {
       _coordinator()?.destroy();
       _setCoordinator(null);
       _hotCoordinator()?.destroy();
       _setHotCoordinator(null);
       clearHotSets();
+      clearInterval(clockInterval);
     });
   });
-
-  // Wall-clock tick keeps relative time displays fresh between full poll cycles.
-  const [clockTick, setClockTick] = createSignal(0);
-  const clockInterval = setInterval(() => setClockTick((t) => t + 1), 60_000);
-  onCleanup(() => clearInterval(clockInterval));
 
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 

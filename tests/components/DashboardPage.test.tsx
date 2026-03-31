@@ -188,14 +188,15 @@ describe("DashboardPage — clock tick", () => {
     spy.mockRestore();
   });
 
-  it("clears the interval on unmount", () => {
+  it("clears the clock interval on unmount", () => {
     const setSpy = vi.spyOn(globalThis, "setInterval");
     const clearSpy = vi.spyOn(globalThis, "clearInterval");
     const { unmount } = render(() => <DashboardPage />);
-    const clockCall = setSpy.mock.calls.find(([, ms]) => ms === 60_000);
-    expect(clockCall).toBeDefined();
+    const clockCallIdx = setSpy.mock.calls.findIndex(([, ms]) => ms === 60_000);
+    expect(clockCallIdx).not.toBe(-1);
+    const clockIntervalId = setSpy.mock.results[clockCallIdx].value;
     unmount();
-    expect(clearSpy).toHaveBeenCalled();
+    expect(clearSpy).toHaveBeenCalledWith(clockIntervalId);
     setSpy.mockRestore();
     clearSpy.mockRestore();
   });

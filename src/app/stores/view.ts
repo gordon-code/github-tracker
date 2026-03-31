@@ -9,7 +9,6 @@ const IssueFiltersSchema = z.object({
   role: z.enum(["all", "author", "assignee"]).default("all"),
   comments: z.enum(["all", "has", "none"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
-  depDashboard: z.enum(["hide", "show"]).default("hide"),
 });
 
 const PullRequestFiltersSchema = z.object({
@@ -64,15 +63,16 @@ export const ViewStateSchema = z.object({
     })
     .default({ org: null, repo: null }),
   tabFilters: z.object({
-    issues: IssueFiltersSchema.default({ role: "all", comments: "all", user: "all", depDashboard: "hide" }),
+    issues: IssueFiltersSchema.default({ role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
   }).default({
-    issues: { role: "all", comments: "all", user: "all", depDashboard: "hide" },
+    issues: { role: "all", comments: "all", user: "all" },
     pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
   }),
   showPrRuns: z.boolean().default(false),
+  hideDepDashboard: z.boolean().default(true),
   expandedRepos: z.object({
     issues: z.record(z.string(), z.boolean()).default({}),
     pullRequests: z.record(z.string(), z.boolean()).default({}),
@@ -122,11 +122,12 @@ export function resetViewState(): void {
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
     tabFilters: {
-      issues: { role: "all", comments: "all", user: "all", depDashboard: "hide" },
+      issues: { role: "all", comments: "all", user: "all" },
       pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
       actions: { conclusion: "all", event: "all" },
     },
     showPrRuns: false,
+    hideDepDashboard: true,
     expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
     lockedRepos: { issues: [], pullRequests: [], actions: [] },
   });
@@ -224,9 +225,7 @@ export function resetAllTabFilters(
   setViewState(
     produce((draft) => {
       if (tab === "issues") {
-        const depDashboard = draft.tabFilters.issues.depDashboard;
         draft.tabFilters.issues = IssueFiltersSchema.parse({});
-        draft.tabFilters.issues.depDashboard = depDashboard;
       } else if (tab === "pullRequests") {
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else {

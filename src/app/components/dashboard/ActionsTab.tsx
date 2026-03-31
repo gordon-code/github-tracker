@@ -11,7 +11,7 @@ import type { FilterChipGroupDef } from "../shared/FilterChips";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
-import ExternalLinkIcon from "../shared/ExternalLinkIcon";
+import RepoGitHubLink from "../shared/RepoGitHubLink";
 import { orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
@@ -320,16 +320,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                       </span>
                     </Show>
                   </button>
-                  <a
-                    href={`https://github.com/${repoGroup.repoFullName}/actions`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
-                    title={`Open ${repoGroup.repoFullName} actions on GitHub`}
-                    aria-label={`Open ${repoGroup.repoFullName} actions on GitHub`}
-                  >
-                    <ExternalLinkIcon />
-                  </a>
+                  <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
                   <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
                 </div>
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>

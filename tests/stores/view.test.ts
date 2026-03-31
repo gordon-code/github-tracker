@@ -8,8 +8,6 @@ import {
   unignoreItem,
   setSortPreference,
   setGlobalFilter,
-  setTabFilter,
-  resetTabFilter,
   resetAllTabFilters,
   initViewPersistence,
   ViewStateSchema,
@@ -310,21 +308,29 @@ describe("resetViewState", () => {
   });
 });
 
-describe("depDashboard filter reset", () => {
+describe("hideDepDashboard", () => {
   beforeEach(() => resetViewState());
 
-  it("resetTabFilter resets depDashboard to 'hide' (not 'all')", () => {
-    setTabFilter("issues", "depDashboard", "show");
-    expect(viewState.tabFilters.issues.depDashboard).toBe("show");
-    resetTabFilter("issues", "depDashboard");
-    expect(viewState.tabFilters.issues.depDashboard).toBe("hide");
+  it("defaults to true", () => {
+    expect(viewState.hideDepDashboard).toBe(true);
   });
 
-  it("resetAllTabFilters preserves depDashboard value", () => {
-    setTabFilter("issues", "depDashboard", "show");
-    setTabFilter("issues", "role", "author");
+  it("can be toggled via updateViewState", () => {
+    updateViewState({ hideDepDashboard: false });
+    expect(viewState.hideDepDashboard).toBe(false);
+    updateViewState({ hideDepDashboard: true });
+    expect(viewState.hideDepDashboard).toBe(true);
+  });
+
+  it("is not affected by resetAllTabFilters", () => {
+    updateViewState({ hideDepDashboard: false });
     resetAllTabFilters("issues");
-    expect(viewState.tabFilters.issues.role).toBe("all");
-    expect(viewState.tabFilters.issues.depDashboard).toBe("show");
+    expect(viewState.hideDepDashboard).toBe(false);
+  });
+
+  it("is reset by resetViewState", () => {
+    updateViewState({ hideDepDashboard: false });
+    resetViewState();
+    expect(viewState.hideDepDashboard).toBe(true);
   });
 });
