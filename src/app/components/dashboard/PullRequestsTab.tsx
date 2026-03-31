@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
-import type { PullRequest } from "../../services/api";
+import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -30,7 +30,7 @@ export interface PullRequestsTabProps {
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
   hotPollingPRIds?: ReadonlySet<number>;
-  monitoredRepos?: { fullName: string }[];
+  monitoredRepos?: RepoRef[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";

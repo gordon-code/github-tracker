@@ -210,6 +210,8 @@ const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 // App bot accounts. Case-sensitive [bot] is intentional — GitHub always uses lowercase.
 const VALID_TRACKED_LOGIN = /^[A-Za-z0-9-]{1,39}(\[bot\])?$/;
 
+const SEARCH_RESULT_CAP = 1000;
+
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -342,6 +344,23 @@ interface ForkQueryResponse {
 
 // ── GraphQL search query constants ───────────────────────────────────────────
 
+const LIGHT_ISSUE_FRAGMENT = `
+  fragment LightIssueFields on Issue {
+    databaseId
+    number
+    title
+    state
+    url
+    createdAt
+    updatedAt
+    author { login avatarUrl }
+    labels(first: 10) { nodes { name color } }
+    assignees(first: 10) { nodes { login } }
+    repository { nameWithOwner }
+    comments { totalCount }
+  }
+`;
+
 const ISSUES_SEARCH_QUERY = `
   query($q: String!, $cursor: String) {
     search(query: $q, type: ISSUE, first: 50, after: $cursor) {
@@ -349,23 +368,13 @@ const ISSUES_SEARCH_QUERY = `
       pageInfo { hasNextPage endCursor }
       nodes {
         ... on Issue {
-          databaseId
-          number
-          title
-          state
-          url
-          createdAt
-          updatedAt
-          author { login avatarUrl }
-          labels(first: 10) { nodes { name color } }
-          assignees(first: 10) { nodes { login } }
-          repository { nameWithOwner }
-          comments { totalCount }
+          ...LightIssueFields
         }
       }
     }
     rateLimit { limit remaining resetAt }
   }
+  ${LIGHT_ISSUE_FRAGMENT}
 `;
 
 const PR_SEARCH_QUERY = `
@@ -457,18 +466,7 @@ const LIGHT_COMBINED_SEARCH_QUERY = `
       pageInfo { hasNextPage endCursor }
       nodes {
         ... on Issue {
-          databaseId
-          number
-          title
-          state
-          url
-          createdAt
-          updatedAt
-          author { login avatarUrl }
-          labels(first: 10) { nodes { name color } }
-          assignees(first: 10) { nodes { login } }
-          repository { nameWithOwner }
-          comments { totalCount }
+          ...LightIssueFields
         }
       }
     }
@@ -492,6 +490,7 @@ const LIGHT_COMBINED_SEARCH_QUERY = `
     }
     rateLimit { limit remaining resetAt }
   }
+  ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
 `;
 
@@ -507,18 +506,7 @@ const UNFILTERED_SEARCH_QUERY = `
       pageInfo { hasNextPage endCursor }
       nodes {
         ... on Issue {
-          databaseId
-          number
-          title
-          state
-          url
-          createdAt
-          updatedAt
-          author { login avatarUrl }
-          labels(first: 10) { nodes { name color } }
-          assignees(first: 10) { nodes { login } }
-          repository { nameWithOwner }
-          comments { totalCount }
+          ...LightIssueFields
         }
       }
     }
@@ -533,6 +521,7 @@ const UNFILTERED_SEARCH_QUERY = `
     }
     rateLimit { limit remaining resetAt }
   }
+  ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
 `;
 
@@ -1095,8 +1084,6 @@ async function graphqlLightCombinedSearch(
   const prMap = new Map<number, PullRequest>();
   const nodeIdMap = new Map<number, string>();
   const errors: ApiError[] = [];
-  const ISSUE_CAP = 1000;
-  const PR_CAP = 1000;
 
   await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
@@ -1108,7 +1095,7 @@ async function graphqlLightCombinedSearch(
     try {
       await executeLightCombinedQuery(
         octokit, issueQ, prInvQ, prRevQ, batchLabel,
-        issueSeen, issues, prMap, nodeIdMap, errors, ISSUE_CAP, PR_CAP,
+        issueSeen, issues, prMap, nodeIdMap, errors, SEARCH_RESULT_CAP, SEARCH_RESULT_CAP,
       );
     } catch (err) {
       const { statusCode, message } = extractRejectionError(err);
@@ -1116,19 +1103,19 @@ async function graphqlLightCombinedSearch(
     }
   }));
 
-  if (issues.length >= ISSUE_CAP) {
-    console.warn(`[api] Issue search results capped at ${ISSUE_CAP}`);
+  if (issues.length >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
-    issues.splice(ISSUE_CAP);
+    issues.splice(SEARCH_RESULT_CAP);
   }
 
-  if (prMap.size >= PR_CAP) {
-    console.warn(`[api] PR search results capped at ${PR_CAP}`);
+  if (prMap.size >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
   }
 
   const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= PR_CAP) pullRequests.splice(PR_CAP);
+  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
   const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
 
   return { issues, pullRequests, prNodeIds, errors };
@@ -1152,8 +1139,6 @@ async function graphqlUnfilteredSearch(
   const prMap = new Map<number, PullRequest>();
   const nodeIdMap = new Map<number, string>();
   const errors: ApiError[] = [];
-  const ISSUE_CAP = 1000;
-  const PR_CAP = 1000;
 
   await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
@@ -1191,31 +1176,31 @@ async function graphqlUnfilteredSearch(
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
 
       for (const node of response.issues.nodes) {
-        if (issues.length >= ISSUE_CAP) break;
+        if (issues.length >= SEARCH_RESULT_CAP) break;
         if (!node) continue;
         processIssueNode(node, issueSeen, issues);
       }
       for (const node of response.prs.nodes) {
-        if (prMap.size >= PR_CAP) break;
+        if (prMap.size >= SEARCH_RESULT_CAP) break;
         if (!node) continue;
         processLightPRNode(node, prMap, nodeIdMap);
       }
 
       if (isPartial) return;
 
-      if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < ISSUE_CAP) {
+      if (response.issues.pageInfo.hasNextPage && response.issues.pageInfo.endCursor && issues.length < SEARCH_RESULT_CAP) {
         await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
           octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
           (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, ISSUE_CAP, response.issues.pageInfo.endCursor,
+          () => issues.length, SEARCH_RESULT_CAP, response.issues.pageInfo.endCursor,
         );
       }
 
-      if (response.prs.pageInfo.hasNextPage && response.prs.pageInfo.endCursor && prMap.size < PR_CAP) {
+      if (response.prs.pageInfo.hasNextPage && response.prs.pageInfo.endCursor && prMap.size < SEARCH_RESULT_CAP) {
         await paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
           octokit, LIGHT_PR_SEARCH_QUERY, prQ, batchLabel, errors,
           (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, PR_CAP, response.prs.pageInfo.endCursor,
+          () => prMap.size, SEARCH_RESULT_CAP, response.prs.pageInfo.endCursor,
         );
       }
     } catch (err) {
@@ -1224,19 +1209,19 @@ async function graphqlUnfilteredSearch(
     }
   }));
 
-  if (issues.length >= ISSUE_CAP) {
-    console.warn(`[api] Unfiltered issue results capped at ${ISSUE_CAP}`);
+  if (issues.length >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] Unfiltered issue results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/unfiltered-issues", `Monitored repo issue results capped at 1,000 — some items are hidden`, "warning");
-    issues.splice(ISSUE_CAP);
+    issues.splice(SEARCH_RESULT_CAP);
   }
 
-  if (prMap.size >= PR_CAP) {
-    console.warn(`[api] Unfiltered PR results capped at ${PR_CAP}`);
+  if (prMap.size >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] Unfiltered PR results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/unfiltered-prs", `Monitored repo PR results capped at 1,000 — some items are hidden`, "warning");
   }
 
   const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= PR_CAP) pullRequests.splice(PR_CAP);
+  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
   const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
   return { issues, pullRequests, prNodeIds, errors };
 }
@@ -1482,11 +1467,11 @@ export async function fetchIssuesAndPullRequests(
     ? fetchPREnrichment(octokit, mainNodeIds)
     : Promise.resolve({ enrichments: new Map<number, PREnrichmentData>(), errors: [] as ApiError[] });
 
-  // Tracked user searches — scoped to normalRepos (monitored repos are already covered by
-  // graphqlUnfilteredSearch, so running involves: on them would only duplicate work)
-  const trackedSearchRepos = normalRepos.length > 0 ? normalRepos : repos;
-  const trackedSearchPromise = hasTrackedUsers && repos.length > 0
-    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, trackedSearchRepos, u.login)))
+  // Tracked user searches — scoped to normalRepos only. Monitored repos are already
+  // covered by graphqlUnfilteredSearch (all open items, no user qualifier), so running
+  // involves: on them would duplicate work and add spurious surfacedBy annotations.
+  const trackedSearchPromise = hasTrackedUsers && normalRepos.length > 0
+    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, normalRepos, u.login)))
     : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
 
   // Unfiltered search for monitored repos — runs in parallel with tracked searches
@@ -1590,7 +1575,6 @@ async function graphqlSearchIssues(
   const seen = new Set<number>();
   const issues: Issue[] = [];
   const errors: ApiError[] = [];
-  const CAP = 1000;
 
   const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
@@ -1622,7 +1606,7 @@ async function graphqlSearchIssues(
         return true;
       },
       () => issues.length,
-      CAP,
+      SEARCH_RESULT_CAP,
     );
   }));
 
@@ -1633,10 +1617,10 @@ async function graphqlSearchIssues(
     }
   }
 
-  if (issues.length >= CAP) {
-    console.warn(`[api] Issue search results capped at ${CAP}`);
+  if (issues.length >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/issues", `Issue search results capped at 1,000 — some items are hidden`, "warning");
-    issues.splice(CAP);
+    issues.splice(SEARCH_RESULT_CAP);
   }
 
   return { issues, errors };
@@ -1684,7 +1668,6 @@ async function graphqlSearchPRs(
   const prMap = new Map<number, PullRequest>();
   const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
   const errors: ApiError[] = [];
-  const CAP = 1000;
 
   function processPRNode(node: GraphQLPRNode): boolean {
     if (node.databaseId == null || !node.repository) return false;
@@ -1761,7 +1744,7 @@ async function graphqlSearchPRs(
       await paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
         octokit, PR_SEARCH_QUERY, queryString,
         `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-        errors, processPRNode, () => prMap.size, CAP,
+        errors, processPRNode, () => prMap.size, SEARCH_RESULT_CAP,
       );
     })
   );
@@ -1774,8 +1757,8 @@ async function graphqlSearchPRs(
     }
   }
 
-  if (prMap.size >= CAP) {
-    console.warn(`[api] PR search results capped at ${CAP}`);
+  if (prMap.size >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
     pushNotification("search/prs", `PR search results capped at 1,000 — some items are hidden`, "warning");
   }
 
@@ -1849,7 +1832,7 @@ async function graphqlSearchPRs(
   }
 
   const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= CAP) pullRequests.splice(CAP);
+  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
   return { pullRequests, errors };
 }
 

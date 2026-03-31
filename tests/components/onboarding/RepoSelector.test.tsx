@@ -780,4 +780,22 @@ describe("RepoSelector — monitor toggle", () => {
       false
     );
   });
+
+  it("hides monitor toggle for upstream repos even when selected", async () => {
+    const selected: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    const upstreamRepos: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        onMonitorToggle={vi.fn()}
+        upstreamRepos={upstreamRepos}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("repo-a"));
+    // Monitor toggle should not appear for upstream repos
+    expect(screen.queryByLabelText(/monitor all activity/i)).toBeNull();
+  });
 });

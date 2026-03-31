@@ -326,7 +326,7 @@ export default function SettingsPage() {
                   onUpstreamChange={handleUpstreamChange}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}
-                  onMonitorToggle={(repo, monitored) => setMonitoredRepo(repo, monitored)}
+                  onMonitorToggle={setMonitoredRepo}
                 />
               </div>
             </Show>

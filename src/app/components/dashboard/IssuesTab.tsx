@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
-import type { Issue } from "../../services/api";
+import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
@@ -25,7 +25,7 @@ export interface IssuesTabProps {
   userLogin: string;
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
-  monitoredRepos?: { fullName: string }[];
+  monitoredRepos?: RepoRef[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";

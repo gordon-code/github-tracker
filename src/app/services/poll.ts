@@ -92,6 +92,9 @@ onAuthCleared(resetPollState);
 // Tracks a serialized key (sorted logins/fullNames) so swapping entries at the
 // same array length still triggers the reset. Boolean mount flags ensure the
 // initial effect run is always skipped (key="" is a valid state for empty arrays).
+// NOTE: Mount flags are intentionally permanent (module lifetime) and NOT cleared
+// by resetPollState(). The createRoot runs once at module load; the effects
+// continue tracking config changes across auth cycles without re-mounting.
 let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
 let _monitoredReposMounted = false;

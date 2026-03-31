@@ -254,7 +254,7 @@ describe("IssuesTab — monitored repos filter bypass", () => {
         issues={issues}
         userLogin="me"
         allUsers={[{ login: "me", label: "Me" }, { login: "other-user", label: "other-user" }]}
-        monitoredRepos={[{ fullName: "org/monitored" }]}
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
       />
     ));
 
@@ -288,7 +288,7 @@ describe("IssuesTab — monitored repos filter bypass", () => {
       <IssuesTab
         issues={issues}
         userLogin="me"
-        monitoredRepos={[{ fullName: "org/monitored" }]}
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
       />
     ));
 

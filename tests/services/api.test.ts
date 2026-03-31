@@ -1803,3 +1803,190 @@ describe("VALID_TRACKED_LOGIN — rejects GraphQL-unsafe characters", () => {
     expect(octokit.request).not.toHaveBeenCalled();
   });
 });
+
+describe("fetchIssuesAndPullRequests — unfiltered search error handling", () => {
+  it("returns partial results when unfiltered GraphQL query throws with partial data", async () => {
+    const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
+    const issueNode = {
+      databaseId: 4001,
+      number: 1,
+      title: "Partial issue",
+      state: "open",
+      url: "https://github.com/org/monitored/issues/1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+      author: { login: "someone", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+      labels: { nodes: [] },
+      assignees: { nodes: [] },
+      repository: { nameWithOwner: "org/monitored" },
+      comments: { totalCount: 0 },
+    };
+
+    let callCount = 0;
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async () => {
+        callCount++;
+        // First call is for unfiltered search — throw with partial data
+        if (callCount === 1) {
+          const err = Object.assign(new Error("Partial failure"), {
+            data: {
+              issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [issueNode] },
+              prs: null,
+              rateLimit: { limit: 5000, remaining: 4998, resetAt: new Date(Date.now() + 3600000).toISOString() },
+            },
+          });
+          throw err;
+        }
+        // No other searches expected (normalRepos is empty)
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [{ fullName: "org/monitored" }]
+    );
+
+    // Partial issue data recovered
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].id).toBe(4001);
+    // Error recorded
+    expect(result.errors.some(e => e.retryable)).toBe(true);
+  });
+
+  it("records error when unfiltered GraphQL query throws with no data", async () => {
+    const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
+
+    let callCount = 0;
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error("Total failure");
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [{ fullName: "org/monitored" }]
+    );
+
+    // No results recovered
+    expect(result.issues).toHaveLength(0);
+    expect(result.pullRequests).toHaveLength(0);
+    // Error recorded
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe("fetchIssuesAndPullRequests — all monitored + tracked users skips involves: search", () => {
+  it("does not fire tracked user involves: search when all repos are monitored", async () => {
+    const queriesUsed: string[] = [];
+    const repo = { owner: "org", name: "repo1", fullName: "org/repo1" };
+    const botUser = { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/u/27347476", name: null, type: "bot" as const };
+
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async (_query: string, variables: unknown) => {
+        const vars = variables as Record<string, unknown>;
+        if (vars.issueQ) queriesUsed.push(vars.issueQ as string);
+        if (vars.prInvQ) queriesUsed.push(vars.prInvQ as string);
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    await fetchIssuesAndPullRequests(
+      octokit as never,
+      [repo],
+      "octocat",
+      undefined,
+      [botUser],
+      [{ fullName: "org/repo1" }]  // all repos monitored
+    );
+
+    // No involves: queries for tracked user (since normalRepos is empty, tracked search is skipped)
+    const involvesQueries = queriesUsed.filter(q => q.includes("involves:dependabot"));
+    expect(involvesQueries).toHaveLength(0);
+  });
+});
+
+describe("fetchIssuesAndPullRequests — onLightData suppression when all monitored", () => {
+  it("does not call onLightData when all repos are monitored", async () => {
+    const repo = { owner: "org", name: "repo1", fullName: "org/repo1" };
+    const issueNode = {
+      databaseId: 5001,
+      number: 1,
+      title: "Monitored issue",
+      state: "open",
+      url: "https://github.com/org/repo1/issues/1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+      author: { login: "someone", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+      labels: { nodes: [] },
+      assignees: { nodes: [] },
+      repository: { nameWithOwner: "org/repo1" },
+      comments: { totalCount: 0 },
+    };
+
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async () => ({
+        issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [issueNode] },
+        prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      })
+    );
+
+    const onLightData = vi.fn();
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [repo],
+      "octocat",
+      onLightData,
+      undefined,
+      [{ fullName: "org/repo1" }]  // all repos monitored
+    );
+
+    // onLightData NOT called (main user search skipped, unfiltered results come after)
+    expect(onLightData).not.toHaveBeenCalled();
+    // But final result still has the issue
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].id).toBe(5001);
+  });
+});
