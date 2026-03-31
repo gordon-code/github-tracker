@@ -26,6 +26,7 @@ export interface IssuesTabProps {
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
   monitoredRepos?: RepoRef[];
+  refreshTick?: number;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -347,6 +348,8 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 title={issue.title}
                                 author={issue.userLogin}
                                 createdAt={issue.createdAt}
+                                updatedAt={issue.updatedAt}
+                                refreshTick={props.refreshTick}
                                 url={issue.htmlUrl}
                                 labels={issue.labels}
                                 onIgnore={() => handleIgnore(issue)}

@@ -1,6 +1,6 @@
-import { For, JSX, Show } from "solid-js";
+import { createMemo, For, JSX, Show } from "solid-js";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { relativeTime, labelTextColor, formatCount } from "../../lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
 
 export interface ItemRowProps {
@@ -9,6 +9,8 @@ export interface ItemRowProps {
   title: string;
   author: string;
   createdAt: string;
+  updatedAt: string;
+  refreshTick?: number;
   url: string;
   labels: { name: string; color: string }[];
   children?: JSX.Element;
@@ -24,6 +26,28 @@ export interface ItemRowProps {
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
+
+  const createdDisplay = createMemo(() => {
+    void props.refreshTick;
+    return shortRelativeTime(props.createdAt);
+  });
+  const updatedDisplay = createMemo(() => {
+    void props.refreshTick;
+    return shortRelativeTime(props.updatedAt);
+  });
+  const createdAriaLabel = createMemo(() => {
+    void props.refreshTick;
+    return `Created ${relativeTime(props.createdAt)}`;
+  });
+  const updatedAriaLabel = createMemo(() => {
+    void props.refreshTick;
+    return `Updated ${relativeTime(props.updatedAt)}`;
+  });
+  const hasUpdate = createMemo(() => {
+    const diff = new Date(props.updatedAt).getTime() - new Date(props.createdAt).getTime();
+    if (diff <= 60_000) return false;
+    return createdDisplay() !== updatedDisplay();
+  });
 
   return (
     <div
@@ -102,7 +126,23 @@ export default function ItemRow(props: ItemRowProps) {
         <Show when={props.surfacedByBadge !== undefined}>
           <div class="relative z-10">{props.surfacedByBadge}</div>
         </Show>
-        <span title={props.createdAt}>{relativeTime(props.createdAt)}</span>
+        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+          <span
+            title={`Created: ${props.createdAt}`}
+            aria-label={createdAriaLabel()}
+          >
+            {createdDisplay()}
+          </span>
+          <Show when={hasUpdate()}>
+            <span aria-hidden="true">{"\u00B7"}</span>
+            <span
+              title={`Updated: ${props.updatedAt}`}
+              aria-label={updatedAriaLabel()}
+            >
+              {updatedDisplay()}
+            </span>
+          </Show>
+        </span>
         <Show when={props.isPolling}>
           <span class="loading loading-spinner loading-xs text-base-content/40" />
         </Show>

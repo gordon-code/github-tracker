@@ -315,6 +315,8 @@ export default function DashboardPage() {
     });
   });
 
+  const refreshTick = createMemo(() => dashboardData.lastRefreshedAt?.getTime() ?? 0);
+
   const tabCounts = createMemo(() => ({
     issues: dashboardData.issues.length,
     pullRequests: dashboardData.pullRequests.length,
@@ -361,6 +363,7 @@ export default function DashboardPage() {
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}
+                  refreshTick={refreshTick()}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -372,6 +375,7 @@ export default function DashboardPage() {
                   trackedUsers={config.trackedUsers}
                   hotPollingPRIds={hotPollingPRIds()}
                   monitoredRepos={config.monitoredRepos}
+                  refreshTick={refreshTick()}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>

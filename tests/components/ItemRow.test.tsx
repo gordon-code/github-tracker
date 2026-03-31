@@ -1,14 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
+
+const MOCK_NOW = new Date("2026-03-30T12:00:00Z").getTime();
 
 const defaultProps = {
   repo: "octocat/Hello-World",
   number: 42,
   title: "Fix a bug",
   author: "octocat",
-  createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+  createdAt: "2026-03-30T10:00:00Z", // 2h before MOCK_NOW
+  updatedAt: "2026-03-30T11:30:00Z", // 30m before MOCK_NOW (differs from createdAt by >60s)
   url: "https://github.com/octocat/Hello-World/issues/42",
   labels: [{ name: "bug", color: "d73a4a" }],
   onIgnore: vi.fn(),
@@ -16,6 +19,9 @@ const defaultProps = {
 };
 
 describe("ItemRow", () => {
+  beforeEach(() => { vi.spyOn(Date, "now").mockReturnValue(MOCK_NOW); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it("renders repo badge", () => {
     render(() => <ItemRow {...defaultProps} />);
     screen.getByText("octocat/Hello-World");
@@ -39,10 +45,10 @@ describe("ItemRow", () => {
 
   it("renders relative time for createdAt", () => {
     render(() => <ItemRow {...defaultProps} />);
-    // Should show something like "2 hours ago"
-    const timeEl = screen.getByTitle(defaultProps.createdAt);
+    // Should show compact format like "2h"
+    const timeEl = screen.getByTitle(`Created: ${defaultProps.createdAt}`);
     expect(timeEl).toBeDefined();
-    expect(timeEl.textContent).toMatch(/hour/i);
+    expect(timeEl.textContent).toMatch(/^\d+h$/);
   });
 
   it("renders children slot when provided", () => {

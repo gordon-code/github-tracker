@@ -31,6 +31,7 @@ export interface PullRequestsTabProps {
   trackedUsers?: TrackedUser[];
   hotPollingPRIds?: ReadonlySet<number>;
   monitoredRepos?: RepoRef[];
+  refreshTick?: number;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -511,6 +512,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 title={pr.title}
                                 author={pr.userLogin}
                                 createdAt={pr.createdAt}
+                                updatedAt={pr.updatedAt}
+                                refreshTick={props.refreshTick}
                                 url={pr.htmlUrl}
                                 labels={pr.labels}
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
