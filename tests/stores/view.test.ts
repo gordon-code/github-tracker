@@ -8,6 +8,9 @@ import {
   unignoreItem,
   setSortPreference,
   setGlobalFilter,
+  setTabFilter,
+  resetTabFilter,
+  resetAllTabFilters,
   initViewPersistence,
   ViewStateSchema,
   toggleExpandedRepo,
@@ -304,5 +307,24 @@ describe("resetViewState", () => {
     expect("org/repo-b" in viewState.expandedRepos.issues).toBe(false);
     expect("org/repo-c" in viewState.expandedRepos.pullRequests).toBe(false);
     expect("org/repo-d" in viewState.expandedRepos.actions).toBe(false);
+  });
+});
+
+describe("depDashboard filter reset", () => {
+  beforeEach(() => resetViewState());
+
+  it("resetTabFilter resets depDashboard to 'hide' (not 'all')", () => {
+    setTabFilter("issues", "depDashboard", "show");
+    expect(viewState.tabFilters.issues.depDashboard).toBe("show");
+    resetTabFilter("issues", "depDashboard");
+    expect(viewState.tabFilters.issues.depDashboard).toBe("hide");
+  });
+
+  it("resetAllTabFilters preserves depDashboard value", () => {
+    setTabFilter("issues", "depDashboard", "show");
+    setTabFilter("issues", "role", "author");
+    resetAllTabFilters("issues");
+    expect(viewState.tabFilters.issues.role).toBe("all");
+    expect(viewState.tabFilters.issues.depDashboard).toBe("show");
   });
 });

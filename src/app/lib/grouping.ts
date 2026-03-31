@@ -76,12 +76,19 @@ export function detectReorderedRepos(
   previousOrder: string[],
   currentOrder: string[]
 ): Set<string> {
+  // Filter both lists to only repos present in both — ignoring additions/removals
+  // so that inserting or removing a repo doesn't flag everything below it as "moved".
+  const currentSet = new Set(currentOrder);
+  const prevCommon = previousOrder.filter((r) => currentSet.has(r));
+  const prevSet = new Set(previousOrder);
+  const curCommon = currentOrder.filter((r) => prevSet.has(r));
+
   const moved = new Set<string>();
-  const prevIndex = new Map(previousOrder.map((name, i) => [name, i]));
-  for (let i = 0; i < currentOrder.length; i++) {
-    const prev = prevIndex.get(currentOrder[i]);
+  const prevIndex = new Map(prevCommon.map((name, i) => [name, i]));
+  for (let i = 0; i < curCommon.length; i++) {
+    const prev = prevIndex.get(curCommon[i]);
     if (prev !== undefined && prev !== i) {
-      moved.add(currentOrder[i]);
+      moved.add(curCommon[i]);
     }
   }
   return moved;

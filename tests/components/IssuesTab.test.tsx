@@ -590,4 +590,48 @@ describe("IssuesTab", () => {
     screen.getByText("org/repo-b");
     screen.getByText("Repo B issue 0");
   });
+
+  it("hides Dependency Dashboard issues by default", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard" }),
+      makeIssue({ id: 2, title: "Normal issue" }),
+    ];
+    setAllExpanded("issues", ["owner/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    expect(screen.queryByText("Dependency Dashboard")).toBeNull();
+    screen.getByText("Normal issue");
+  });
+
+  it("shows Dependency Dashboard issues when toggle is active", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard" }),
+      makeIssue({ id: 2, title: "Normal issue" }),
+    ];
+    viewStore.setTabFilter("issues", "depDashboard", "show");
+    setAllExpanded("issues", ["owner/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Dependency Dashboard");
+    screen.getByText("Normal issue");
+  });
+
+  it("toggles Dependency Dashboard visibility via pill button", async () => {
+    const user = userEvent.setup();
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard" }),
+      makeIssue({ id: 2, title: "Normal issue" }),
+    ];
+    setAllExpanded("issues", ["owner/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+
+    // Hidden by default
+    expect(screen.queryByText("Dependency Dashboard")).toBeNull();
+
+    // Click toggle pill to show
+    await user.click(screen.getByText("Show Dep Dashboard"));
+    screen.getByText("Dependency Dashboard");
+
+    // Click again to hide
+    await user.click(screen.getByText("Show Dep Dashboard"));
+    expect(screen.queryByText("Dependency Dashboard")).toBeNull();
+  });
 });

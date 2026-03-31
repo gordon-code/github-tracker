@@ -22,6 +22,7 @@ import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
+import ExternalLinkIcon from "../shared/ExternalLinkIcon";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -489,6 +490,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           </span>
                         </Show>
                       </button>
+                      <a
+                        href={`https://github.com/${repoGroup.repoFullName}/pulls`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="opacity-0 group-hover/repo-header:opacity-100 focus:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
+                        title={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
+                        aria-label={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
+                      >
+                        <ExternalLinkIcon />
+                      </a>
                       <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>

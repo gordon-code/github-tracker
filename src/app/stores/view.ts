@@ -9,6 +9,7 @@ const IssueFiltersSchema = z.object({
   role: z.enum(["all", "author", "assignee"]).default("all"),
   comments: z.enum(["all", "has", "none"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
+  depDashboard: z.enum(["hide", "show"]).default("hide"),
 });
 
 const PullRequestFiltersSchema = z.object({
@@ -63,11 +64,11 @@ export const ViewStateSchema = z.object({
     })
     .default({ org: null, repo: null }),
   tabFilters: z.object({
-    issues: IssueFiltersSchema.default({ role: "all", comments: "all", user: "all" }),
+    issues: IssueFiltersSchema.default({ role: "all", comments: "all", user: "all", depDashboard: "hide" }),
     pullRequests: PullRequestFiltersSchema.default({ role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
   }).default({
-    issues: { role: "all", comments: "all", user: "all" },
+    issues: { role: "all", comments: "all", user: "all", depDashboard: "hide" },
     pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
   }),
@@ -121,7 +122,7 @@ export function resetViewState(): void {
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
     tabFilters: {
-      issues: { role: "all", comments: "all", user: "all" },
+      issues: { role: "all", comments: "all", user: "all", depDashboard: "hide" },
       pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
       actions: { conclusion: "all", event: "all" },
     },
@@ -199,13 +200,20 @@ export function setTabFilter<T extends keyof TabFilterField>(
   );
 }
 
+const tabFilterDefaults: Record<string, Record<string, string>> = {
+  issues: IssueFiltersSchema.parse({}) as Record<string, string>,
+  pullRequests: PullRequestFiltersSchema.parse({}) as Record<string, string>,
+  actions: ActionsFiltersSchema.parse({}) as Record<string, string>,
+};
+
 export function resetTabFilter<T extends keyof TabFilterField>(
   tab: T,
   field: TabFilterField[T]
 ): void {
+  const defaultValue = tabFilterDefaults[tab]?.[field as string] ?? "all";
   setViewState(
     produce((draft) => {
-      (draft.tabFilters[tab] as Record<string, string>)[field as string] = "all";
+      (draft.tabFilters[tab] as Record<string, string>)[field as string] = defaultValue;
     })
   );
 }
@@ -216,7 +224,9 @@ export function resetAllTabFilters(
   setViewState(
     produce((draft) => {
       if (tab === "issues") {
+        const depDashboard = draft.tabFilters.issues.depDashboard;
         draft.tabFilters.issues = IssueFiltersSchema.parse({});
+        draft.tabFilters.issues.depDashboard = depDashboard;
       } else if (tab === "pullRequests") {
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else {
