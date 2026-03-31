@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-uEFqyYCMaNy1Su5VmWLZ1hOCRBjkhm4+ieHHxQW6d3Y='; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' blob: data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-uEFqyYCMaNy1Su5VmWLZ1hOCRBjkhm4+ieHHxQW6d3Y='; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' blob: data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests; report-uri https://o284235.ingest.us.sentry.io/api/4511122822922240/security/?sentry_key=4dc4335a9746201c02ff2107c0d20f73
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()
