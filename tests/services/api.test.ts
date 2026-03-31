@@ -1615,6 +1615,68 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
   });
 });
 
+describe("fetchIssuesAndPullRequests — all repos monitored (edge case)", () => {
+  it("skips main user light search and returns items from unfiltered search only", async () => {
+    const queriesUsed: string[] = [];
+    const repo = { owner: "org", name: "repo1", fullName: "org/repo1" };
+
+    const issueNode = {
+      databaseId: 3001,
+      number: 1,
+      title: "All-monitored issue",
+      state: "open",
+      url: "https://github.com/org/repo1/issues/1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+      author: { login: "someone", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+      labels: { nodes: [] },
+      assignees: { nodes: [] },
+      repository: { nameWithOwner: "org/repo1" },
+      comments: { totalCount: 0 },
+    };
+
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async (_query: string, variables: unknown) => {
+        const vars = variables as Record<string, unknown>;
+        if (vars.issueQ) queriesUsed.push(vars.issueQ as string);
+        return {
+          issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [issueNode] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [repo],
+      "octocat",
+      undefined,
+      undefined,
+      [{ fullName: "org/repo1" }]  // all repos monitored
+    );
+
+    // Items returned from unfiltered search
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].id).toBe(3001);
+
+    // No involves: query (main user search skipped since normalRepos is empty)
+    const involvesQueries = queriesUsed.filter(q => q.includes("involves:octocat"));
+    expect(involvesQueries).toHaveLength(0);
+
+    // Unfiltered query was issued (no involves: qualifier)
+    const unfilteredQueries = queriesUsed.filter(q => !q.includes("involves:") && !q.includes("review-requested:"));
+    expect(unfilteredQueries.length).toBeGreaterThan(0);
+
+    // Item has no surfacedBy (unfiltered search items aren't attributed to a user)
+    expect(result.issues[0].surfacedBy).toBeUndefined();
+  });
+});
+
 // ── fetchIssuesAndPullRequests — cross-feature integration (monitored + bot) ──
 
 describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tracked user", () => {

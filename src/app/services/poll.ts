@@ -87,35 +87,35 @@ export function resetPollState(): void {
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
 onAuthCleared(resetPollState);
 
-// When tracked users change, reset notification state so the next poll cycle
-// silently seeds all items (including the new tracked user's) without flooding
-// the user with "new item" notifications for pre-existing content.
-// Use a flag to skip the initial run (module-level mount).
-// Wrapped in createRoot to provide a reactive owner at module scope (per SolidJS gotcha).
-// Subscribes to array length only — fires on add/remove, not property mutations.
-let _trackedUsersMounted = false;
+// When tracked users or monitored repos change, reset notification state so the
+// next poll cycle silently seeds items without flooding "new item" notifications.
+// Tracks a serialized key (sorted logins/fullNames) so swapping entries at the
+// same array length still triggers the reset.
+let _trackedUsersKey = "";
+let _monitoredReposKey = "";
 createRoot(() => {
   createEffect(() => {
-    void (config.trackedUsers?.length ?? 0);
-    if (!_trackedUsersMounted) {
-      _trackedUsersMounted = true;
+    const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
+    if (_trackedUsersKey === "") {
+      _trackedUsersKey = key;
       return;
     }
-    untrack(() => _resetNotificationState());
+    if (key !== _trackedUsersKey) {
+      _trackedUsersKey = key;
+      untrack(() => _resetNotificationState());
+    }
   });
-});
 
-// When monitoredRepos changes, reset notification state so the next poll cycle
-// silently seeds the newly monitored repo's items without flooding with notifications.
-let _monitoredReposMounted = false;
-createRoot(() => {
   createEffect(() => {
-    void (config.monitoredRepos?.length ?? 0);
-    if (!_monitoredReposMounted) {
-      _monitoredReposMounted = true;
+    const key = (config.monitoredRepos ?? []).map((r) => r.fullName).sort().join(",");
+    if (_monitoredReposKey === "") {
+      _monitoredReposKey = key;
       return;
     }
-    untrack(() => _resetNotificationState());
+    if (key !== _monitoredReposKey) {
+      _monitoredReposKey = key;
+      untrack(() => _resetNotificationState());
+    }
   });
 });
 
