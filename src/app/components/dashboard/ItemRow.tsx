@@ -122,20 +122,22 @@ export default function ItemRow(props: ItemRowProps) {
           <div class="relative z-10">{props.surfacedByBadge}</div>
         </Show>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
-          <span
+          <time
+            datetime={props.createdAt}
             title={timeInfo().createdTitle}
             aria-label={timeInfo().createdLabel}
           >
             {timeInfo().created}
-          </span>
+          </time>
           <Show when={hasUpdate()}>
             <span aria-hidden="true">{"\u00B7"}</span>
-            <span
+            <time
+              datetime={props.updatedAt}
               title={timeInfo().updatedTitle}
               aria-label={timeInfo().updatedLabel}
             >
               {timeInfo().updated}
-            </span>
+            </time>
           </Show>
         </span>
         <Show when={props.isPolling}>
