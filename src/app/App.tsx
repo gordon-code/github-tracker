@@ -1,16 +1,37 @@
-import { createSignal, createEffect, onMount, Show, type JSX } from "solid-js";
+import { createSignal, createEffect, onMount, Show, ErrorBoundary, lazy, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
-import { isAuthenticated, validateToken } from "./stores/auth";
+import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
-import DashboardPage from "./components/dashboard/DashboardPage";
-import OnboardingWizard from "./components/onboarding/OnboardingWizard";
-import SettingsPage from "./components/settings/SettingsPage";
 import PrivacyPage from "./pages/PrivacyPage";
+
+const DashboardPage = lazy(() => import("./components/dashboard/DashboardPage"));
+const OnboardingWizard = lazy(() => import("./components/onboarding/OnboardingWizard"));
+const SettingsPage = lazy(() => import("./components/settings/SettingsPage"));
+
+function ChunkErrorFallback() {
+  return (
+    <div class="min-h-screen flex items-center justify-center bg-base-200">
+      <div class="card bg-base-100 shadow-md p-8 flex flex-col items-center gap-4 max-w-sm">
+        <p class="text-error font-medium">Failed to load page</p>
+        <p class="text-sm text-base-content/60 text-center">
+          A new version may have been deployed. Reloading should fix this.
+        </p>
+        <button
+          type="button"
+          class="btn btn-neutral"
+          onClick={() => window.location.reload()}
+        >
+          Reload page
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Auth guard: redirects unauthenticated users to /login.
 // On page load, validates the localStorage token with GitHub API.
@@ -138,17 +159,25 @@ export default function App() {
     evictStaleEntries(24 * 60 * 60 * 1000).catch(() => {
       // Non-fatal — stale eviction failure is acceptable
     });
+
+    // Preload dashboard chunk in parallel with token validation to avoid
+    // a sequential waterfall (validateToken → chunk fetch)
+    if (localStorage.getItem?.(AUTH_STORAGE_KEY)) {
+      void import("./components/dashboard/DashboardPage");
+    }
   });
 
   return (
-    <Router>
-      <Route path="/" component={RootRedirect} />
-      <Route path="/login" component={LoginPage} />
-      <Route path="/oauth/callback" component={OAuthCallback} />
-      <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
-      <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
-      <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
-      <Route path="/privacy" component={PrivacyPage} />
-    </Router>
+    <ErrorBoundary fallback={(err) => { console.error("[app] Route render failed:", err); return <ChunkErrorFallback />; }}>
+      <Router>
+        <Route path="/" component={RootRedirect} />
+        <Route path="/login" component={LoginPage} />
+        <Route path="/oauth/callback" component={OAuthCallback} />
+        <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
+        <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
+        <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
+        <Route path="/privacy" component={PrivacyPage} />
+      </Router>
+    </ErrorBoundary>
   );
 }

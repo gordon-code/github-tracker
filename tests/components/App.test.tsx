@@ -51,8 +51,12 @@ vi.mock("../../src/app/stores/cache", async (importOriginal) => {
 });
 
 // Mock heavy page/component dependencies
+let dashboardShouldThrow = false;
 vi.mock("../../src/app/components/dashboard/DashboardPage", () => ({
-  default: () => <div data-testid="dashboard-page">Dashboard</div>,
+  default: () => {
+    if (dashboardShouldThrow) throw new Error("chunk load failed");
+    return <div data-testid="dashboard-page">Dashboard</div>;
+  },
 }));
 vi.mock("../../src/app/components/onboarding/OnboardingWizard", () => ({
   default: () => <div data-testid="onboarding-wizard">Onboarding</div>,
@@ -73,6 +77,7 @@ describe("App", () => {
     vi.resetAllMocks();
     mockIsAuthenticated = false;
     mockValidateToken = async () => false;
+    dashboardShouldThrow = false;
     // Re-apply default mock implementations that are needed across tests
     vi.mocked(cacheStore.evictStaleEntries).mockResolvedValue(0);
     // Reset config to defaults
@@ -158,5 +163,29 @@ describe("App", () => {
 
   it("all routes are registered: /, /login, /oauth/callback, /onboarding, /dashboard, /settings", () => {
     expect(() => render(() => <App />)).not.toThrow();
+  });
+
+  it("shows error fallback and logs when a lazy route component throws", async () => {
+    dashboardShouldThrow = true;
+    mockIsAuthenticated = true;
+    configStore.updateConfig({ onboardingComplete: true });
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(() => <App />);
+
+    await waitFor(() => {
+      screen.getByText("Failed to load page");
+      screen.getByText("A new version may have been deployed. Reloading should fix this.");
+      screen.getByRole("button", { name: "Reload page" });
+    });
+
+    // Verify the error is logged (not silently swallowed) for observability
+    expect(spy).toHaveBeenCalledWith(
+      "[app] Route render failed:",
+      expect.any(Error),
+    );
+
+    spy.mockRestore();
   });
 });
