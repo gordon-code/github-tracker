@@ -64,7 +64,7 @@ export function formatDuration(startedAt: string, completedAt: string | null): s
   if (!startedAt) return "--";
   if (!completedAt) return "--";
   const diffMs = Date.parse(completedAt) - Date.parse(startedAt);
-  if (diffMs <= 0) return "--";
+  if (isNaN(diffMs) || diffMs <= 0) return "--";
   const totalSec = Math.floor(diffMs / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);

@@ -190,6 +190,7 @@ describe("ViewStateSchema", () => {
     expect(result.sortPreferences).toEqual({});
     expect(result.ignoredItems).toEqual([]);
     expect(result.globalFilter).toEqual({ org: null, repo: null });
+    expect(result.hideDepDashboard).toBe(true);
   });
 
   it("handles missing fields with defaults", () => {

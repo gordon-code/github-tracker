@@ -226,6 +226,11 @@ describe("formatDuration", () => {
   it("returns '<1s' for sub-second duration", () => {
     expect(formatDuration("2026-03-21T10:00:00.000Z", "2026-03-21T10:00:00.500Z")).toBe("<1s");
   });
+
+  it("returns '--' for invalid date strings", () => {
+    expect(formatDuration("not-a-date", "2026-03-21T10:00:00Z")).toBe("--");
+    expect(formatDuration("2026-03-21T10:00:00Z", "not-a-date")).toBe("--");
+  });
 });
 
 describe("prSizeCategory", () => {
