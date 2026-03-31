@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup, untrack } from "solid-js";
+import { pushNotification } from "../lib/errors";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 
@@ -332,7 +333,7 @@ export function initViewPersistence(): void {
       try {
         localStorage.setItem(VIEW_STORAGE_KEY, json);
       } catch {
-        // QuotaExceededError — silently fail rather than kill the reactive graph
+        pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
       }
     }, 200);
     onCleanup(() => {

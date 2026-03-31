@@ -1,6 +1,6 @@
-import { createSignal, Show, onCleanup } from "solid-js";
+import { createSignal, createMemo, Show, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig } from "../../stores/config";
+import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
@@ -53,6 +53,10 @@ export default function SettingsPage() {
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
   const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
+
+  const monitoredRepoNames = createMemo(() =>
+    config.monitoredRepos.map(r => r.fullName).join(", ")
+  );
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -142,6 +146,7 @@ export default function SettingsPage() {
         selectedOrgs: config.selectedOrgs,
         selectedRepos: config.selectedRepos,
         upstreamRepos: config.upstreamRepos,
+        monitoredRepos: config.monitoredRepos,
         trackedUsers: config.trackedUsers,
         refreshInterval: config.refreshInterval,
         hotPollInterval: config.hotPollInterval,
@@ -304,6 +309,15 @@ export default function SettingsPage() {
                       Tracking {localRepos().length} repos will use significant API quota per poll cycle
                     </p>
                   </Show>
+                  <Show when={config.monitoredRepos.length > 0}>
+                    <p class="text-xs text-info flex items-center gap-1 mt-0.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      Monitoring all: {monitoredRepoNames()}
+                    </p>
+                  </Show>
                 </div>
                 <button
                   type="button"
@@ -324,6 +338,8 @@ export default function SettingsPage() {
                   upstreamRepos={localUpstream()}
                   onUpstreamChange={handleUpstreamChange}
                   trackedUsers={config.trackedUsers}
+                  monitoredRepos={config.monitoredRepos}
+                  onMonitorToggle={setMonitoredRepo}
                 />
               </div>
             </Show>

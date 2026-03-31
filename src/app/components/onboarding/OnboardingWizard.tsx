@@ -7,6 +7,7 @@ import {
   Match,
 } from "solid-js";
 import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
+import { pushNotification } from "../../lib/errors";
 import { fetchOrgs, type OrgEntry, type RepoRef } from "../../services/api";
 import { getClient } from "../../services/github";
 import RepoSelector from "./RepoSelector";
@@ -18,6 +19,9 @@ export default function OnboardingWizard() {
   );
   const [upstreamRepos, setUpstreamRepos] = createSignal<RepoRef[]>(
     config.upstreamRepos.length > 0 ? [...config.upstreamRepos] : []
+  );
+  const [monitoredRepos, setMonitoredRepos] = createSignal<RepoRef[]>(
+    config.monitoredRepos.length > 0 ? [...config.monitoredRepos] : []
   );
 
   const [loading, setLoading] = createSignal(true);
@@ -57,10 +61,15 @@ export default function OnboardingWizard() {
       selectedOrgs: uniqueOrgs,
       selectedRepos: selectedRepos(),
       upstreamRepos: upstreamRepos(),
+      monitoredRepos: monitoredRepos(),
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    try {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
+    }
     window.location.replace("/dashboard");
   }
 
@@ -116,6 +125,14 @@ export default function OnboardingWizard() {
                   upstreamRepos={upstreamRepos()}
                   onUpstreamChange={setUpstreamRepos}
                   trackedUsers={config.trackedUsers}
+                  monitoredRepos={monitoredRepos()}
+                  onMonitorToggle={(repo, monitored) => {
+                    if (monitored) {
+                      setMonitoredRepos((prev) => prev.some((r) => r.fullName === repo.fullName) ? prev : [...prev, repo]);
+                    } else {
+                      setMonitoredRepos((prev) => prev.filter((r) => r.fullName !== repo.fullName));
+                    }
+                  }}
                 />
               </Match>
             </Switch>

@@ -682,3 +682,56 @@ describe("SettingsPage — Manage org access button", () => {
     expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SettingsPage — monitor toggle wiring", () => {
+  it("shows monitored repos indicator when repos are monitored", () => {
+    updateConfig({
+      selectedRepos: [
+        { owner: "org", name: "repo1", fullName: "org/repo1" },
+        { owner: "org", name: "repo2", fullName: "org/repo2" },
+      ],
+      monitoredRepos: [
+        { owner: "org", name: "repo1", fullName: "org/repo1" },
+        { owner: "org", name: "repo2", fullName: "org/repo2" },
+      ],
+    });
+    renderSettings();
+
+    const indicator = screen.getByText(/Monitoring all:/);
+    expect(indicator.textContent).toContain("org/repo1");
+    expect(indicator.textContent).toContain("org/repo2");
+  });
+
+  it("hides monitored repos indicator when no repos are monitored", () => {
+    updateConfig({ monitoredRepos: [] });
+    renderSettings();
+
+    expect(screen.queryByText(/Monitoring all:/)).toBeNull();
+  });
+
+  it("includes monitoredRepos in exported settings JSON", async () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }],
+      monitoredRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }],
+    });
+    renderSettings();
+
+    // Trigger export
+    const exportBtn = screen.getByRole("button", { name: /export/i });
+    const user = userEvent.setup();
+    const blobParts: BlobPart[] = [];
+    const originalBlob = globalThis.Blob;
+    globalThis.Blob = class MockBlob extends originalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        if (parts) blobParts.push(...parts);
+      }
+    } as typeof Blob;
+
+    await user.click(exportBtn);
+
+    globalThis.Blob = originalBlob;
+    const json = JSON.parse(blobParts[0] as string);
+    expect(json.monitoredRepos).toEqual([{ owner: "org", name: "repo1", fullName: "org/repo1" }]);
+  });
+});

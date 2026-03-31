@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
+import { pushNotification } from "../lib/errors";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
 export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
@@ -40,9 +41,13 @@ export { user };
 // ── Actions ─────────────────────────────────────────────────────────────────
 
 export function setAuth(response: TokenExchangeResponse): void {
-  localStorage.setItem(AUTH_STORAGE_KEY, response.access_token);
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, response.access_token);
+  } catch {
+    pushNotification("localStorage:auth", "Auth token write failed — storage may be full. Token exists in memory only this session.", "warning");
+  }
   _setToken(response.access_token);
-  console.info("[auth] access token set (localStorage)");
+  console.info("[auth] access token set");
 }
 
 export function setAuthFromPat(token: string, userData: GitHubUser): void {
@@ -89,37 +94,77 @@ export function clearAuth(): void {
   }
 }
 
+/** Clear only the auth token. Preserves all user data (config, view state, dashboard
+ *  cache) so the same user's preferences and cached data survive re-authentication.
+ *  Used when a token becomes invalid (expired PAT, revoked OAuth) — NOT for explicit
+ *  logout. Full data wipe (cross-user data isolation) is handled by clearAuth()
+ *  which is reserved for explicit user actions (Sign out, Reset all).
+ *
+ *  Callers MUST navigate away after calling this (e.g., window.location.replace or
+ *  router navigate to /login). The poll coordinator is not stopped here — page
+ *  navigation handles teardown. Use clearAuth() if not navigating. */
+export function expireToken(): void {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  _setToken(null);
+  setUser(null);
+  console.info("[auth] token expired (user data preserved)");
+}
+
+const VALIDATE_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+} as const;
+
 export async function validateToken(): Promise<boolean> {
   const currentToken = _token();
   if (!currentToken) return false;
 
+  const headers = { ...VALIDATE_HEADERS, Authorization: `Bearer ${currentToken}` };
+
+  function handleSuccess(userData: GitHubUser): true {
+    setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
+    navigator.storage?.persist?.()?.catch(() => {});
+    return true;
+  }
+
   try {
-    const resp = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${currentToken}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
+    const resp = await fetch("https://api.github.com/user", { headers });
 
     if (resp.ok) {
-      const userData = (await resp.json()) as GitHubUser;
-      setUser({
-        login: userData.login,
-        avatar_url: userData.avatar_url,
-        name: userData.name,
-      });
-      return true;
+      return handleSuccess((await resp.json()) as GitHubUser);
     }
 
     if (resp.status === 401) {
-      const method = config.authMethod;
+      // GitHub API can return transient 401s due to database replication lag.
+      // Retry once after a delay before invalidating the token.
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const retry = await fetch("https://api.github.com/user", { headers });
+        if (retry.ok) {
+          return handleSuccess((await retry.json()) as GitHubUser);
+        }
+        if (retry.status !== 401) {
+          // Non-auth error on retry (e.g. 500) — preserve token, try next load
+          return false;
+        }
+      } catch {
+        // Network error on retry — preserve token, try next load
+        return false;
+      }
+
+      // Guard: if the token was replaced during the retry window (e.g., user
+      // re-authenticated via OAuth callback), don't invalidate the new token.
+      if (_token() !== currentToken) {
+        return false;
+      }
+
+      // Both attempts returned 401 — token is genuinely invalid
       console.info(
-        method === "pat"
-          ? "[auth] PAT invalid or expired — clearing auth"
-          : "[auth] access token invalid — clearing auth"
+        config.authMethod === "pat"
+          ? "[auth] PAT invalid or expired — clearing token"
+          : "[auth] access token invalid — clearing token"
       );
-      clearAuth();
+      expireToken();
       return false;
     }
 

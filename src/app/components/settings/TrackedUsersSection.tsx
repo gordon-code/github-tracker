@@ -118,11 +118,16 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
               <span class="text-sm font-medium truncate">
                 {trackedUser.name ?? trackedUser.login}
               </span>
-              <Show when={trackedUser.name}>
-                <span class="text-xs text-base-content/60 truncate">
-                  {trackedUser.login}
-                </span>
-              </Show>
+              <div class="flex items-center gap-1">
+                <Show when={trackedUser.name}>
+                  <span class="text-xs text-base-content/60 truncate">
+                    {trackedUser.login}
+                  </span>
+                </Show>
+                <Show when={trackedUser.type === "bot"}>
+                  <span class="badge badge-xs badge-outline" aria-label={`${trackedUser.login} is a bot account`}>bot</span>
+                </Show>
+              </div>
             </div>
             <button
               type="button"

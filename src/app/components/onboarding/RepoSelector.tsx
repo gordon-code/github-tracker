@@ -10,6 +10,7 @@ import {
 import { fetchOrgs, fetchRepos, discoverUpstreamRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
 import { getClient } from "../../services/github";
 import { user } from "../../stores/auth";
+import type { TrackedUser } from "../../stores/config";
 import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
@@ -25,7 +26,9 @@ interface RepoSelectorProps {
   showUpstreamDiscovery?: boolean;
   upstreamRepos?: RepoRef[];
   onUpstreamChange?: (repos: RepoRef[]) => void;
-  trackedUsers?: { login: string; avatarUrl: string; name: string | null }[];
+  trackedUsers?: TrackedUser[];
+  monitoredRepos?: RepoRef[];
+  onMonitorToggle?: (repo: RepoRef, monitored: boolean) => void;
 }
 
 interface OrgRepoState {
@@ -223,6 +226,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
   const selectedSet = createMemo(() =>
     new Set(props.selected.map((r) => r.fullName))
+  );
+
+  const monitoredSet = createMemo(() =>
+    new Set((props.monitoredRepos ?? []).map((r) => r.fullName))
   );
 
   const sortedOrgStates = createMemo(() => {
@@ -527,26 +534,51 @@ export default function RepoSelector(props: RepoSelectorProps) {
                         {(repo) => {
                           return (
                             <li>
-                              <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200">
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected(repo().fullName)}
-                                  onChange={() => toggleRepo(repo())}
-                                  class="checkbox checkbox-primary checkbox-sm mt-0.5"
-                                />
-                                <div class="min-w-0 flex-1">
-                                  <div class="flex items-center gap-2">
-                                    <span class="min-w-0 truncate text-sm font-medium text-base-content">
-                                      {repo().name}
-                                    </span>
-                                    <Show when={repo().pushedAt}>
-                                      <span class="ml-auto shrink-0 text-xs text-base-content/60">
-                                        {relativeTime(repo().pushedAt!)}
+                              <div class="flex items-center">
+                                <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200 flex-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected(repo().fullName)}
+                                    onChange={() => toggleRepo(repo())}
+                                    class="checkbox checkbox-primary checkbox-sm mt-0.5"
+                                  />
+                                  <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2">
+                                      <span class="min-w-0 truncate text-sm font-medium text-base-content">
+                                        {repo().name}
                                       </span>
-                                    </Show>
+                                      <Show when={repo().pushedAt}>
+                                        <span class="ml-auto shrink-0 text-xs text-base-content/60">
+                                          {relativeTime(repo().pushedAt!)}
+                                        </span>
+                                      </Show>
+                                    </div>
                                   </div>
-                                </div>
-                              </label>
+                                </label>
+                                <Show when={isSelected(repo().fullName) && props.onMonitorToggle && !upstreamSelectedSet().has(repo().fullName)}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      props.onMonitorToggle?.(toRepoRef(repo()), !monitoredSet().has(repo().fullName));
+                                    }}
+                                    class="btn btn-ghost btn-sm btn-circle mr-2"
+                                    classList={{
+                                      "text-info": monitoredSet().has(repo().fullName),
+                                      "text-base-content/20": !monitoredSet().has(repo().fullName),
+                                    }}
+                                    title={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
+                                    aria-label={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
+                                    aria-pressed={monitoredSet().has(repo().fullName)}
+                                  >
+                                    {/* Heroicons eye outline 16px */}
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                  </button>
+                                </Show>
+                              </div>
                             </li>
                           );
                         }}

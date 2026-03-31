@@ -87,21 +87,45 @@ export function resetPollState(): void {
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
 onAuthCleared(resetPollState);
 
-// When tracked users change, reset notification state so the next poll cycle
-// silently seeds all items (including the new tracked user's) without flooding
-// the user with "new item" notifications for pre-existing content.
-// Use a flag to skip the initial run (module-level mount).
-// Wrapped in createRoot to provide a reactive owner at module scope (per SolidJS gotcha).
-// Subscribes to array length only — fires on add/remove, not property mutations.
+// When tracked users or monitored repos change, reset notification state so the
+// next poll cycle silently seeds items without flooding "new item" notifications.
+// Tracks a serialized key (sorted logins/fullNames) so swapping entries at the
+// same array length still triggers the reset. Boolean mount flags ensure the
+// initial effect run is always skipped (key="" is a valid state for empty arrays).
+// NOTE: Mount flags are intentionally permanent (module lifetime) and NOT cleared
+// by resetPollState(). The createRoot runs once at module load; the effects
+// continue tracking config changes across auth cycles without re-mounting.
 let _trackedUsersMounted = false;
+let _trackedUsersKey = "";
+let _monitoredReposMounted = false;
+let _monitoredReposKey = "";
 createRoot(() => {
   createEffect(() => {
-    void (config.trackedUsers?.length ?? 0);
+    const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
     if (!_trackedUsersMounted) {
       _trackedUsersMounted = true;
+      _trackedUsersKey = key;
       return;
     }
-    untrack(() => _resetNotificationState());
+    if (key !== _trackedUsersKey) {
+      _trackedUsersKey = key;
+      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
+      untrack(() => _resetNotificationState());
+    }
+  });
+
+  createEffect(() => {
+    const key = (config.monitoredRepos ?? []).map((r) => r.fullName).sort().join(",");
+    if (!_monitoredReposMounted) {
+      _monitoredReposMounted = true;
+      _monitoredReposKey = key;
+      return;
+    }
+    if (key !== _monitoredReposKey) {
+      _monitoredReposKey = key;
+      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
+      untrack(() => _resetNotificationState());
+    }
   });
 });
 
@@ -215,10 +239,13 @@ export async function fetchAllData(
   }
 
   const trackedUsers = config.trackedUsers ?? [];
+  const monitoredRepos = config.monitoredRepos ?? [];
 
   // Issues + PRs use a two-phase approach: light query first (phase 1),
   // then heavy backfill (phase 2). Workflow runs use REST core.
   // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
+  // Note: monitoredRepos are NOT added to combinedRepos for workflow runs —
+  // Actions fetches are already per selectedRepo.
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
     fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, onLightData ? (lightData) => {
       // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
@@ -228,7 +255,7 @@ export async function fetchAllData(
         workflowRuns: [],
         errors: lightData.errors,
       });
-    } : undefined, trackedUsers),
+    } : undefined, trackedUsers, monitoredRepos),
     fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 
@@ -433,7 +460,7 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
-    if ((pr.checkStatus === "pending" || pr.checkStatus === null) && pr.nodeId) {
+    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;

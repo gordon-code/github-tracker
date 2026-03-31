@@ -38,12 +38,14 @@ function makeUserResponse(overrides: {
   login?: string;
   avatar_url?: string;
   name?: string | null;
+  type?: string;
 } = {}) {
   return {
     data: {
       login: overrides.login ?? "octocat",
       avatar_url: overrides.avatar_url ?? "https://avatars.githubusercontent.com/u/583231?v=4",
       name: overrides.name !== undefined ? overrides.name : "The Octocat",
+      type: overrides.type ?? "User",
     },
   };
 }
@@ -105,6 +107,7 @@ describe("validateGitHubUser", () => {
       login: "octocat",
       avatarUrl: "https://avatars.githubusercontent.com/u/583231?v=4",
       name: "The Octocat",
+      type: "user",
     });
     expect(octokit.request).toHaveBeenCalledWith("GET /users/{username}", { username: "octocat" });
   });
@@ -489,6 +492,7 @@ function makeTrackedUser(login: string): TrackedUser {
     login,
     avatarUrl: `https://avatars.githubusercontent.com/u/99999`,
     name: login,
+    type: "user",
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { ConfigSchema, loadConfig, config, updateConfig, resetConfig } from "../../src/app/stores/config";
+import { ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 
@@ -159,6 +159,58 @@ describe("ConfigSchema — upstream repos and tracked users", () => {
       upstreamRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
     });
     expect(result.upstreamRepos).toHaveLength(1);
+  });
+
+  it("TrackedUserSchema defaults type to 'user' when omitted", () => {
+    const result = TrackedUserSchema.parse({
+      login: "octocat",
+      avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+      name: null,
+    });
+    expect(result.type).toBe("user");
+  });
+
+  it("TrackedUserSchema accepts type:'bot'", () => {
+    const result = TrackedUserSchema.parse({
+      login: "dependabot[bot]",
+      avatarUrl: "https://avatars.githubusercontent.com/u/27347476",
+      name: null,
+      type: "bot",
+    });
+    expect(result.type).toBe("bot");
+  });
+
+  it("TrackedUserSchema accepts type:'user'", () => {
+    const result = TrackedUserSchema.parse({
+      login: "octocat",
+      avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+      name: null,
+      type: "user",
+    });
+    expect(result.type).toBe("user");
+  });
+
+  it("TrackedUserSchema rejects invalid type value", () => {
+    expect(() => TrackedUserSchema.parse({
+      login: "octocat",
+      avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+      name: null,
+      type: "organization",
+    })).toThrow();
+  });
+
+  it("ConfigSchema preserves tracked user type through round-trip", () => {
+    const result = ConfigSchema.parse({
+      trackedUsers: [
+        {
+          login: "dependabot[bot]",
+          avatarUrl: "https://avatars.githubusercontent.com/u/27347476",
+          name: null,
+          type: "bot",
+        },
+      ],
+    });
+    expect(result.trackedUsers[0].type).toBe("bot");
   });
 });
 
@@ -323,7 +375,7 @@ describe("updateConfig (real export)", () => {
     ["selectedOrgs", { selectedOrgs: ["new-org"] }],
     ["selectedRepos", { selectedRepos: [{ owner: "x", name: "y", fullName: "x/y" }] }],
     ["upstreamRepos", { upstreamRepos: [{ owner: "u", name: "v", fullName: "u/v" }] }],
-    ["trackedUsers", { trackedUsers: [{ login: "bob", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: null }] }],
+    ["trackedUsers", { trackedUsers: [{ login: "bob", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: null, type: "user" as const }] }],
     ["refreshInterval", { refreshInterval: 120 }],
     ["hotPollInterval", { hotPollInterval: 60 }],
     ["maxWorkflowsPerRepo", { maxWorkflowsPerRepo: 10 }],
@@ -343,7 +395,7 @@ describe("updateConfig (real export)", () => {
         selectedOrgs: ["seed-org"],
         selectedRepos: [{ owner: "s", name: "r", fullName: "s/r" }],
         upstreamRepos: [{ owner: "a", name: "b", fullName: "a/b" }],
-        trackedUsers: [{ login: "alice", avatarUrl: "https://avatars.githubusercontent.com/u/2", name: "Alice" }],
+        trackedUsers: [{ login: "alice", avatarUrl: "https://avatars.githubusercontent.com/u/2", name: "Alice", type: "user" as const }],
         refreshInterval: 600,
         hotPollInterval: 45,
         maxWorkflowsPerRepo: 8,
@@ -373,6 +425,8 @@ describe("updateConfig (real export)", () => {
       // Every OTHER field must be identical to the snapshot
       for (const key of Object.keys(before)) {
         if (key === fieldName) continue;
+        // monitoredRepos is pruned when selectedRepos changes — skip the cross-check for that case
+        if (fieldName === "selectedRepos" && key === "monitoredRepos") continue;
         expect(
           (config as Record<string, unknown>)[key],
           `updateConfig({ ${fieldName} }) must not change ${key}`
@@ -380,5 +434,172 @@ describe("updateConfig (real export)", () => {
       }
       dispose();
     });
+  });
+});
+
+// ── monitoredRepos config schema + setMonitoredRepo (C3) ─────────────────────
+
+describe("ConfigSchema — monitoredRepos", () => {
+  it("defaults monitoredRepos to empty array", () => {
+    const result = ConfigSchema.parse({});
+    expect(result.monitoredRepos).toEqual([]);
+  });
+
+  it("accepts valid monitoredRepos", () => {
+    const result = ConfigSchema.parse({
+      monitoredRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    expect(result.monitoredRepos).toHaveLength(1);
+    expect(result.monitoredRepos[0].fullName).toBe("org/repo");
+  });
+});
+
+describe("updateConfig — monitoredRepos pruning on selectedRepos change", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("prunes monitoredRepos when selectedRepos removes a repo", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+        ],
+        monitoredRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+        ],
+      });
+      // Remove org/b from selectedRepos
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+      });
+      expect(config.monitoredRepos).toHaveLength(1);
+      expect(config.monitoredRepos[0].fullName).toBe("org/a");
+      dispose();
+    });
+  });
+
+  it("does not prune monitoredRepos when selectedRepos is not in the update", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+        monitoredRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+      });
+      // Update theme only
+      updateConfig({ theme: "dark" });
+      expect(config.monitoredRepos).toHaveLength(1);
+      dispose();
+    });
+  });
+});
+
+describe("setMonitoredRepo (C3)", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("adds a repo to monitoredRepos when monitored=true and repo is in selectedRepos", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+      });
+      setMonitoredRepo({ owner: "org", name: "a", fullName: "org/a" }, true);
+      expect(config.monitoredRepos).toHaveLength(1);
+      expect(config.monitoredRepos[0].fullName).toBe("org/a");
+      dispose();
+    });
+  });
+
+  it("is idempotent — adding same repo twice results in one entry", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+      });
+      setMonitoredRepo({ owner: "org", name: "a", fullName: "org/a" }, true);
+      setMonitoredRepo({ owner: "org", name: "a", fullName: "org/a" }, true);
+      expect(config.monitoredRepos).toHaveLength(1);
+      dispose();
+    });
+  });
+
+  it("removes a repo from monitoredRepos when monitored=false", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+        ],
+        monitoredRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+        ],
+      });
+      setMonitoredRepo({ owner: "org", name: "a", fullName: "org/a" }, false);
+      expect(config.monitoredRepos).toHaveLength(1);
+      expect(config.monitoredRepos[0].fullName).toBe("org/b");
+      dispose();
+    });
+  });
+
+  it("is idempotent — removing non-monitored repo is a no-op", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+        monitoredRepos: [],
+      });
+      setMonitoredRepo({ owner: "org", name: "a", fullName: "org/a" }, false);
+      expect(config.monitoredRepos).toHaveLength(0);
+      dispose();
+    });
+  });
+
+  it("rejects repo not in selectedRepos — does not add to monitoredRepos", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "org", name: "a", fullName: "org/a" }],
+      });
+      setMonitoredRepo({ owner: "org", name: "notselected", fullName: "org/notselected" }, true);
+      expect(config.monitoredRepos).toHaveLength(0);
+      dispose();
+    });
+  });
+
+  it("enforces max 10 monitored repos", () => {
+    createRoot((dispose) => {
+      const repos = Array.from({ length: 11 }, (_, i) => ({
+        owner: "org",
+        name: `repo-${i}`,
+        fullName: `org/repo-${i}`,
+      }));
+      updateConfig({ selectedRepos: repos, monitoredRepos: repos.slice(0, 10) });
+      // 10 is the max — adding an 11th should be rejected
+      setMonitoredRepo(repos[10], true);
+      expect(config.monitoredRepos).toHaveLength(10);
+      dispose();
+    });
+  });
+});
+
+describe("ConfigSchema — monitoredRepos max constraint", () => {
+  it("rejects more than 10 monitored repos at schema level", () => {
+    const repos = Array.from({ length: 11 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+    const result = ConfigSchema.safeParse({ monitoredRepos: repos });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts exactly 10 monitored repos", () => {
+    const repos = Array.from({ length: 10 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+    const result = ConfigSchema.safeParse({ monitoredRepos: repos });
+    expect(result.success).toBe(true);
   });
 });

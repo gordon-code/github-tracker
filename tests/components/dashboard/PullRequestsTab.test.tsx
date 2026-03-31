@@ -164,7 +164,7 @@ describe("PullRequestsTab — user filter logic", () => {
 describe("PullRequestsTab — avatar badge", () => {
   it("renders avatar img for PRs surfaced by tracked users", () => {
     const trackedUsers: TrackedUser[] = [
-      { login: "tracked1", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: "Tracked One" },
+      { login: "tracked1", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: "Tracked One", type: "user" as const },
     ];
     const prs = [
       makePullRequest({ id: 1, title: "Tracked PR", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
@@ -186,5 +186,78 @@ describe("PullRequestsTab — avatar badge", () => {
 
     const img = screen.getByAltText("tracked1");
     expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/1");
+  });
+});
+
+// ── PullRequestsTab — monitored repos bypass (C6) ─────────────────────────────
+
+describe("PullRequestsTab — monitored repos filter bypass", () => {
+  it("shows PR from monitored repo even when user filter excludes it", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Monitored PR", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
+    ];
+    setTabFilter("pullRequests", "user", "me");
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other-user", label: "other-user" }]}
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Monitored PR");
+  });
+
+  it("hides PR from non-monitored repo when user filter excludes it", () => {
+    const prs = [
+      makePullRequest({ id: 100, title: "Non-monitored PR", repoFullName: "org/regular", surfacedBy: ["other-user"] }),
+    ];
+    setTabFilter("pullRequests", "user", "me");
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other-user", label: "other-user" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(screen.queryByText("Non-monitored PR")).toBeNull();
+  });
+
+  it("renders 'Monitoring all' badge on monitored PR repo group header", () => {
+    const prs = [
+      makePullRequest({ id: 200, title: "PR in monitored repo", repoFullName: "org/monitored", surfacedBy: ["me"] }),
+    ];
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Monitoring all");
+  });
+
+  it("does not render 'Monitoring all' badge on non-monitored PR repo group header", () => {
+    const prs = [
+      makePullRequest({ id: 300, title: "PR in regular repo", repoFullName: "org/regular", surfacedBy: ["me"] }),
+    ];
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(screen.queryByText("Monitoring all")).toBeNull();
   });
 });

@@ -26,6 +26,7 @@ vi.mock("@solidjs/router", () => ({
 const authClearCallbacks: (() => void)[] = [];
 vi.mock("../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
+  expireToken: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
   isAuthenticated: () => true,
@@ -127,6 +128,7 @@ beforeEach(async () => {
   capturedFetchAll = null;
   capturedOnHotData = null;
   vi.mocked(authStore.clearAuth).mockClear();
+  vi.mocked(authStore.expireToken).mockClear();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -296,18 +298,20 @@ describe("DashboardPage — auth error handling", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("calls clearAuth and redirects to /login on 401 error (permanent token revoked)", async () => {
+  it("calls expireToken (not clearAuth) and redirects to /login on 401 error", async () => {
     const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(authStore.clearAuth).toHaveBeenCalledOnce();
+      expect(authStore.expireToken).toHaveBeenCalledOnce();
       expect(mockLocationReplace).toHaveBeenCalledWith("/login");
     });
+    // clearAuth should NOT be called — user config/view preserved on token failure
+    expect(authStore.clearAuth).not.toHaveBeenCalled();
   });
 
-  it("does not call clearAuth for non-401 errors", async () => {
+  it("does not call expireToken or clearAuth for non-401 errors", async () => {
     const err500 = Object.assign(new Error("Server Error"), { status: 500 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err500);
 
@@ -315,6 +319,7 @@ describe("DashboardPage — auth error handling", () => {
     // Flush all pending microtasks so the rejected promise settles
     await Promise.resolve();
     await Promise.resolve();
+    expect(authStore.expireToken).not.toHaveBeenCalled();
     expect(authStore.clearAuth).not.toHaveBeenCalled();
     expect(mockLocationReplace).not.toHaveBeenCalledWith("/login");
   });

@@ -18,6 +18,8 @@ vi.mock("../../../src/app/components/onboarding/RepoSelector", () => ({
     orgEntries?: OrgEntry[];
     selected: RepoRef[];
     onChange: (s: RepoRef[]) => void;
+    monitoredRepos?: RepoRef[];
+    onMonitorToggle?: (repo: RepoRef, monitored: boolean) => void;
   }) => (
     <div data-testid="repo-selector">
       <span data-testid="repo-selector-orgs">
@@ -32,7 +34,18 @@ vi.mock("../../../src/app/components/onboarding/RepoSelector", () => ({
       >
         Select Repo
       </button>
+      <button
+        onClick={() =>
+          props.onMonitorToggle?.(
+            { owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" },
+            true
+          )
+        }
+      >
+        Toggle Monitor
+      </button>
       <span>Repos: {props.selected.length}</span>
+      <span data-testid="monitored-count">Monitored: {(props.monitoredRepos ?? []).length}</span>
     </div>
   ),
 }));
@@ -47,7 +60,7 @@ vi.mock("../../../src/app/components/shared/LoadingSpinner", () => ({
 // Mock config store
 vi.mock("../../../src/app/stores/config", () => ({
   CONFIG_STORAGE_KEY: "github-tracker:config",
-  config: { selectedOrgs: [], selectedRepos: [], upstreamRepos: [] },
+  config: { selectedOrgs: [], selectedRepos: [], upstreamRepos: [], monitoredRepos: [], trackedUsers: [] },
   updateConfig: vi.fn(),
 }));
 
@@ -257,5 +270,28 @@ describe("OnboardingWizard", () => {
     });
     await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
     expect(window.location.replace).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("passes monitoredRepos to updateConfig on finish (C4)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+
+    await waitFor(() => screen.getByTestId("repo-selector"));
+
+    // Select a repo first
+    await user.click(screen.getByText("Select Repo"));
+    // Toggle monitor for that repo
+    await user.click(screen.getByText("Toggle Monitor"));
+
+    await waitFor(() => screen.getByText(/Finish Setup \(1 repo\)/));
+    await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
+
+    expect(configStore.updateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monitoredRepos: [{ owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" }],
+        selectedRepos: [{ owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" }],
+      })
+    );
   });
 });
