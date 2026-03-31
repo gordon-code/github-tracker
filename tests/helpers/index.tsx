@@ -53,6 +53,7 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
     labels: [],
     reviewDecision: null,
     totalReviewCount: 0,
+    enriched: true,
     surfacedBy: ["testuser"],
     ...overrides,
   };

@@ -59,7 +59,9 @@ vi.mock("../../src/app/lib/errors", () => ({
 import { updateConfig, resetConfig } from "../../src/app/stores/config";
 
 // Import poll.ts — triggers createRoot + createEffect registration at module scope
-import "../../src/app/services/poll";
+import { fetchAllData, resetPollState } from "../../src/app/services/poll";
+import { getClient } from "../../src/app/services/github";
+import { fetchIssuesAndPullRequests, fetchWorkflowRuns } from "../../src/app/services/api";
 
 describe("poll.ts — notification reset reactive effects", () => {
   beforeEach(() => {
@@ -122,5 +124,74 @@ describe("poll.ts — notification reset reactive effects", () => {
     });
 
     expect(mockResetNotifState).toHaveBeenCalled();
+  });
+});
+
+describe("poll.ts — notifications gate bypass on config change", () => {
+  const mockRequest = vi.fn();
+
+  beforeEach(() => {
+    resetPollState();
+    resetConfig();
+    mockRequest.mockReset();
+    mockRequest.mockResolvedValue({
+      data: [],
+      headers: { "last-modified": "Thu, 20 Mar 2026 12:00:00 GMT" },
+    });
+    vi.mocked(getClient).mockReturnValue({
+      request: mockRequest,
+      graphql: vi.fn(),
+      hook: { before: vi.fn() },
+    } as never);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue({
+      issues: [], pullRequests: [], errors: [],
+    });
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue({
+      workflowRuns: [], errors: [],
+    } as never);
+  });
+
+  it("bypasses notifications gate after monitoredRepos change", async () => {
+    // First call — no _lastSuccessfulFetch, gate skipped
+    await fetchAllData();
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    // Second call — _lastSuccessfulFetch set, gate fires
+    await fetchAllData();
+    expect(mockRequest).toHaveBeenCalledWith("GET /notifications", expect.anything());
+    mockRequest.mockClear();
+
+    // Change monitoredRepos — should null _lastSuccessfulFetch
+    updateConfig({
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+      monitoredRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+
+    // Third call — gate bypassed because _lastSuccessfulFetch was nulled
+    await fetchAllData();
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("bypasses notifications gate after trackedUsers change", async () => {
+    // First call — sets _lastSuccessfulFetch
+    await fetchAllData();
+
+    // Second call — gate fires
+    await fetchAllData();
+    mockRequest.mockClear();
+
+    // Change trackedUsers — should null _lastSuccessfulFetch
+    updateConfig({
+      trackedUsers: [{
+        login: "octocat",
+        avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+        name: "Octocat",
+        type: "user" as const,
+      }],
+    });
+
+    // Next call — gate bypassed
+    await fetchAllData();
+    expect(mockRequest).not.toHaveBeenCalled();
   });
 });

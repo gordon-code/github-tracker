@@ -206,7 +206,7 @@ describe("resetPollState", () => {
   it("clears hot sets and resets generation", async () => {
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_x" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_x" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
     expect(getHotPollGeneration()).toBe(1);
@@ -235,7 +235,7 @@ describe("rebuildHotSets", () => {
     expect(getHotPollGeneration()).toBe(2);
   });
 
-  it("populates hot PRs for pending/null checkStatus with nodeId", async () => {
+  it("populates hot PRs for enriched pending checkStatus with nodeId", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -245,20 +245,20 @@ describe("rebuildHotSets", () => {
     rebuildHotSets({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" }),
-        makePullRequest({ id: 2, checkStatus: null, nodeId: "PR_b" }),
-        makePullRequest({ id: 3, checkStatus: "success", nodeId: "PR_c" }), // should be skipped
-        makePullRequest({ id: 4, checkStatus: "pending" }), // no nodeId, should be skipped
+        makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" }),
+        makePullRequest({ id: 2, checkStatus: null, enriched: true, nodeId: "PR_b" }), // null checkStatus — skipped (not pending)
+        makePullRequest({ id: 3, checkStatus: "success", enriched: true, nodeId: "PR_c" }), // resolved — skipped
+        makePullRequest({ id: 4, checkStatus: "pending", enriched: true }), // no nodeId — skipped
+        makePullRequest({ id: 5, checkStatus: "pending", enriched: false, nodeId: "PR_e" }), // not enriched — skipped
       ],
     });
 
     await fetchHotData();
-    // Verify graphql was called with only the 2 eligible node IDs
+    // Verify graphql was called with only the 1 eligible node ID
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
     const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
-    expect(calledIds).toHaveLength(2);
+    expect(calledIds).toHaveLength(1);
     expect(calledIds).toContain("PR_a");
-    expect(calledIds).toContain("PR_b");
   });
 
   it("populates hot runs for queued/in_progress, skips completed", async () => {
@@ -377,7 +377,7 @@ describe("fetchHotData", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_x" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_x" })],
     });
 
     // First fetch — PR is hot, returns success -> evicts
@@ -603,7 +603,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
     });
 
     const { pushError } = await import("../../src/app/lib/errors");
@@ -661,7 +661,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+      pullRequests: [makePullRequest({ id: 42, checkStatus: "pending", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
       workflowRuns: [makeWorkflowRun({ id: 7, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -746,7 +746,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 42, nodeId: "PR_node42", repoFullName: "o/r" })],
+      pullRequests: [makePullRequest({ id: 42, checkStatus: "pending", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
     });
 
     const { pushError } = await import("../../src/app/lib/errors");
@@ -868,7 +868,7 @@ describe("rebuildHotSets caps", () => {
 
   it("caps hot PRs at MAX_HOT_PRS (200)", async () => {
     const prs = Array.from({ length: 250 }, (_, i) =>
-      makePullRequest({ id: i + 1, checkStatus: "pending", nodeId: `PR_${i}` })
+      makePullRequest({ id: i + 1, checkStatus: "pending", enriched: true, nodeId: `PR_${i}` })
     );
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -945,8 +945,8 @@ describe("fetchHotData eviction edge cases", () => {
     rebuildHotSets({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_one" }),
-        makePullRequest({ id: 2, checkStatus: "pending", nodeId: "PR_two" }),
+        makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_one" }),
+        makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_two" }),
       ],
     });
 
@@ -979,7 +979,7 @@ describe("fetchHotData eviction edge cases", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_merged" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_merged" })],
     });
 
     const first = await fetchHotData();
@@ -1008,7 +1008,7 @@ describe("fetchHotData eviction edge cases", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 2, checkStatus: null, nodeId: "PR_closed" })],
+      pullRequests: [makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_closed" })],
     });
 
     await fetchHotData();
@@ -1022,7 +1022,7 @@ describe("clearHotSets", () => {
   it("empties both hot maps so next fetchHotData is a no-op", async () => {
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -1060,7 +1060,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -1074,7 +1074,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
     });
 
     const { hadErrors, prUpdates } = await fetchHotData();

@@ -563,7 +563,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
                                       props.onMonitorToggle?.(toRepoRef(repo()), !monitoredSet().has(repo().fullName));
                                     }}
                                     class="btn btn-ghost btn-sm btn-circle mr-2"
-                                    classList={{ "opacity-40": !monitoredSet().has(repo().fullName) }}
+                                    classList={{
+                                      "text-info": monitoredSet().has(repo().fullName),
+                                      "text-base-content/20": !monitoredSet().has(repo().fullName),
+                                    }}
                                     title={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
                                     aria-label={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
                                     aria-pressed={monitoredSet().has(repo().fullName)}

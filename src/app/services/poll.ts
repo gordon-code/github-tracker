@@ -109,6 +109,7 @@ createRoot(() => {
     }
     if (key !== _trackedUsersKey) {
       _trackedUsersKey = key;
+      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
       untrack(() => _resetNotificationState());
     }
   });
@@ -122,6 +123,7 @@ createRoot(() => {
     }
     if (key !== _monitoredReposKey) {
       _monitoredReposKey = key;
+      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
       untrack(() => _resetNotificationState());
     }
   });
@@ -458,7 +460,7 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
-    if ((pr.checkStatus === "pending" || pr.checkStatus === null) && pr.nodeId) {
+    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;

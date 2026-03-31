@@ -18,10 +18,12 @@ export function resolveTheme(theme: ThemeId): string {
   return prefersDark ? AUTO_DARK_THEME : AUTO_LIGHT_THEME;
 }
 
+const REPO_SEGMENT = /^[A-Za-z0-9._-]{1,100}$/;
+
 export const RepoRefSchema = z.object({
-  owner: z.string(),
-  name: z.string(),
-  fullName: z.string(),
+  owner: z.string().regex(REPO_SEGMENT),
+  name: z.string().regex(REPO_SEGMENT),
+  fullName: z.string().regex(/^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/),
 });
 
 export const TrackedUserSchema = z.object({
