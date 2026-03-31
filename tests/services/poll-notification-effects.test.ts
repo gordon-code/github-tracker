@@ -95,6 +95,18 @@ describe("poll.ts — notification reset reactive effects", () => {
     expect(mockResetNotifState).not.toHaveBeenCalled();
   });
 
+  it("resets notification state when monitoredRepos cleared to empty", () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+      monitoredRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    mockResetNotifState.mockClear();
+
+    updateConfig({ monitoredRepos: [] });
+
+    expect(mockResetNotifState).toHaveBeenCalled();
+  });
+
   it("detects swap at same array length (key-based comparison)", () => {
     updateConfig({
       selectedRepos: [

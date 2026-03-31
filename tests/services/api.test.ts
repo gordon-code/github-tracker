@@ -475,7 +475,7 @@ describe("fetchIssues", () => {
     const result = await fetchIssues(
       octokit as never,
       [testRepo],
-      "bad user" // contains space — fails VALID_LOGIN
+      "bad user" // contains space — fails VALID_TRACKED_LOGIN
     );
 
     expect(result.issues).toEqual([]);
@@ -1903,6 +1903,71 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
     // Error recorded with retryable flag (network error → statusCode null → retryable)
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors[0]).toMatchObject({ retryable: true });
+  });
+
+  it("recovers PR data when issues is null but prs has data (symmetric partial case)", async () => {
+    const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
+    // Fixture matches GraphQLLightPRNode — no heavy fields (additions, commits, etc.)
+    const prNode = {
+      id: "PR_kwDOtest4501",
+      databaseId: 4501,
+      number: 1,
+      title: "Partial PR",
+      state: "open",
+      isDraft: false,
+      url: "https://github.com/org/monitored/pull/1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-02T00:00:00Z",
+      author: { login: "someone", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+      repository: { nameWithOwner: "org/monitored" },
+      headRefName: "fix/thing",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [] },
+    };
+
+    let callCount = 0;
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async () => {
+        callCount++;
+        if (callCount === 1) {
+          const err = Object.assign(new Error("Partial failure"), {
+            data: {
+              issues: null,
+              prs: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [prNode] },
+              rateLimit: { limit: 5000, remaining: 4998, resetAt: new Date(Date.now() + 3600000).toISOString() },
+            },
+          });
+          throw err;
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+    );
+
+    // PR data recovered from partial response
+    expect(result.pullRequests).toHaveLength(1);
+    expect(result.pullRequests[0].id).toBe(4501);
+    // Issues empty (null coalesced to empty)
+    expect(result.issues).toHaveLength(0);
+    // Error recorded
+    expect(result.errors.some(e => e.retryable)).toBe(true);
   });
 });
 

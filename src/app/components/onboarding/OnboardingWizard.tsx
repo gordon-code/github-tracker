@@ -57,14 +57,11 @@ export default function OnboardingWizard() {
 
   function handleFinish() {
     const uniqueOrgs = [...new Set(selectedRepos().map((r) => r.owner))];
-    // Prune monitoredRepos to only repos still in selectedRepos
-    const selectedSet = new Set(selectedRepos().map((r) => r.fullName));
-    const prunedMonitoredRepos = monitoredRepos().filter((r) => selectedSet.has(r.fullName));
     updateConfig({
       selectedOrgs: uniqueOrgs,
       selectedRepos: selectedRepos(),
       upstreamRepos: upstreamRepos(),
-      monitoredRepos: prunedMonitoredRepos,
+      monitoredRepos: monitoredRepos(),
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload

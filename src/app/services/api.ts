@@ -914,8 +914,6 @@ export interface FetchIssuesAndPRsResult {
 interface LightSearchResult {
   issues: Issue[];
   pullRequests: PullRequest[];
-  /** GraphQL node IDs for phase 2 backfill */
-  prNodeIds: string[];
   errors: ApiError[];
 }
 
@@ -1058,6 +1056,32 @@ async function executeLightCombinedQuery(
   }
 }
 
+/** Cap-check, notify, and assemble a LightSearchResult from working collections. */
+function finalizeSearchResult(
+  issues: Issue[],
+  prMap: Map<number, PullRequest>,
+  errors: ApiError[],
+  issueSource: string,
+  prSource: string,
+  issueLabel: string,
+  prLabel: string,
+): LightSearchResult {
+  if (issues.length >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] ${issueLabel} capped at ${SEARCH_RESULT_CAP}`);
+    pushNotification(issueSource, `${issueLabel} capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
+    issues.splice(SEARCH_RESULT_CAP);
+  }
+
+  if (prMap.size >= SEARCH_RESULT_CAP) {
+    console.warn(`[api] ${prLabel} capped at ${SEARCH_RESULT_CAP}`);
+    pushNotification(prSource, `${prLabel} capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
+  }
+
+  const pullRequests = [...prMap.values()];
+  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
+  return { issues, pullRequests, errors };
+}
+
 /**
  * Phase 1: light combined search. Fetches issues fully and PRs with minimal fields.
  * Returns light PRs (enriched: false) and their GraphQL node IDs for phase 2 backfill.
@@ -1071,7 +1095,6 @@ async function graphqlLightCombinedSearch(
     return {
       issues: [],
       pullRequests: [],
-      prNodeIds: [],
       errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }],
     };
   }
@@ -1101,22 +1124,11 @@ async function graphqlLightCombinedSearch(
     }
   }));
 
-  if (issues.length >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/issues", `Issue search results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-    issues.splice(SEARCH_RESULT_CAP);
-  }
-
-  if (prMap.size >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/prs", `PR search results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-  }
-
-  const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
-  const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
-
-  return { issues, pullRequests, prNodeIds, errors };
+  return finalizeSearchResult(
+    issues, prMap, errors,
+    "search/issues", "search/prs",
+    "Issue search results", "PR search results",
+  );
 }
 
 /**
@@ -1129,7 +1141,7 @@ async function graphqlUnfilteredSearch(
   octokit: GitHubOctokit,
   repos: RepoRef[]
 ): Promise<LightSearchResult> {
-  if (repos.length === 0) return { issues: [], pullRequests: [], prNodeIds: [], errors: [] };
+  if (repos.length === 0) return { issues: [], pullRequests: [], errors: [] };
 
   const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
   const issueSeen = new Set<number>();
@@ -1207,21 +1219,11 @@ async function graphqlUnfilteredSearch(
     }
   }));
 
-  if (issues.length >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] Unfiltered issue results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/unfiltered-issues", `Monitored repo issue results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-    issues.splice(SEARCH_RESULT_CAP);
-  }
-
-  if (prMap.size >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] Unfiltered PR results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/unfiltered-prs", `Monitored repo PR results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-  }
-
-  const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
-  const prNodeIds = pullRequests.map((pr) => nodeIdMap.get(pr.id)).filter((id): id is string => id != null);
-  return { issues, pullRequests, prNodeIds, errors };
+  return finalizeSearchResult(
+    issues, prMap, errors,
+    "search/unfiltered-issues", "search/unfiltered-prs",
+    "Monitored repo issue results", "Monitored repo PR results",
+  );
 }
 
 // ── Two-phase: heavy backfill ─────────────────────────────────────────────────
@@ -1356,7 +1358,6 @@ function mergeEnrichment(
  * Merges tracked user search results into the main issue/PR maps.
  * Items already present get the tracked user's login appended to surfacedBy.
  * New items are added with surfacedBy: [trackedLogin].
- * Returns a union of all prNodeIds for backfill.
  */
 function mergeTrackedUserResults(
   issueMap: Map<number, Issue>,
@@ -1475,7 +1476,7 @@ export async function fetchIssuesAndPullRequests(
   // Unfiltered search for monitored repos — runs in parallel with tracked searches
   const unfilteredPromise = monitoredReposList.length > 0
     ? graphqlUnfilteredSearch(octokit, monitoredReposList)
-    : Promise.resolve({ issues: [], pullRequests: [], prNodeIds: [], errors: [] } as LightSearchResult);
+    : Promise.resolve({ issues: [], pullRequests: [], errors: [] } as LightSearchResult);
 
   const [mainBackfill, trackedResults, unfilteredResult] = await Promise.all([
     mainBackfillPromise,
@@ -2210,7 +2211,7 @@ export async function validateGitHubUser(
     login: raw.login.toLowerCase(),
     avatarUrl,
     name: raw.name ?? null,
-    type: raw.type === "Bot" ? "bot" as const : "user" as const,
+    type: raw.type === "Bot" ? "bot" : "user",
   };
 }
 

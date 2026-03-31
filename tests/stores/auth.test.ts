@@ -5,6 +5,11 @@ vi.mock("../../src/app/stores/cache", () => ({
   clearCache: vi.fn().mockResolvedValue(undefined),
 }));
 
+const mockPushNotification = vi.fn();
+vi.mock("../../src/app/lib/errors", () => ({
+  pushNotification: (...args: unknown[]) => mockPushNotification(...args),
+}));
+
 // Mock localStorage with full control (same pattern as config.test.ts)
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -67,6 +72,24 @@ describe("setAuth / token signal", () => {
     vi.resetModules();
     const fresh = await import("../../src/app/stores/auth");
     expect(fresh.token()).toBe("ghs_persisted");
+  });
+
+  it("sets token in memory and warns when localStorage.setItem throws", () => {
+    const origSetItem = localStorageMock.setItem;
+    localStorageMock.setItem = () => { throw new DOMException("QuotaExceededError"); };
+    mockPushNotification.mockClear();
+
+    try {
+      mod.setAuth({ access_token: "ghs_quota" });
+      expect(mod.token()).toBe("ghs_quota");
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        "localStorage:auth",
+        expect.stringContaining("storage may be full"),
+        "warning",
+      );
+    } finally {
+      localStorageMock.setItem = origSetItem;
+    }
   });
 });
 
@@ -349,6 +372,26 @@ describe("validateToken", () => {
     expect(result).toBe(false);
     // Token preserved — network error on retry doesn't confirm revocation
     expect(mod.token()).toBe("ghs_retrynet");
+  });
+
+  it("does not invalidate a new token set during the retry window (race condition guard)", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      // First GET /user returns 401
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      // Retry also returns 401 — but token was replaced mid-window
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+    );
+
+    mod.setAuth({ access_token: "ghs_old" });
+    const promise = mod.validateToken();
+    // Simulate user re-authenticating during the 1-second retry delay
+    mod.setAuth({ access_token: "ghs_new" });
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+    expect(result).toBe(false);
+    // The NEW token must survive — guard prevents expireToken() from running
+    expect(mod.token()).toBe("ghs_new");
+    expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghs_new");
   });
 
   it("preserves user config and view state when token expires (not a full logout)", async () => {
