@@ -4,7 +4,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 
 ## Features
 
-- **Issues Tab** — Open issues where you're the creator, assignee, or mentioned. Sortable, filterable, paginated.
+- **Issues Tab** — Open issues where you're the creator, assignee, or mentioned. Sortable, filterable, paginated. Dependency Dashboard issues hidden by default (toggleable).
 - **Pull Requests Tab** — Open PRs with CI check status indicators (green/yellow/red dots). Draft badges, reviewer names.
 - **Actions Tab** — GHA workflow runs grouped by repo and workflow. Accordion collapse, PR run toggle.
 - **Onboarding Wizard** — Two-step org/repo selection with search filtering and bulk select.
