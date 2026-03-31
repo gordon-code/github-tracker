@@ -431,17 +431,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                         </Show>
-                        <a
-                          href={`https://github.com/${repoGroup.repoFullName}/pulls`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary"
-                          title={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
-                          aria-label={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
-                        >
-                          <ExternalLinkIcon />
-                        </a>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
@@ -501,6 +490,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           </span>
                         </Show>
                       </button>
+                      <a
+                        href={`https://github.com/${repoGroup.repoFullName}/pulls`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
+                        title={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
+                        aria-label={`Open ${repoGroup.repoFullName} pull requests on GitHub`}
+                      >
+                        <ExternalLinkIcon />
+                      </a>
                       <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
