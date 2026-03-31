@@ -38,8 +38,8 @@ export default function ItemRow(props: ItemRowProps) {
   const hasUpdate = createMemo(() => {
     const diff = new Date(props.updatedAt).getTime() - new Date(props.createdAt).getTime();
     if (diff <= 60_000) return false;
-    if (timeInfo().created === "" || timeInfo().updated === "") return false;
-    return timeInfo().created !== timeInfo().updated;
+    const { created, updated } = timeInfo();
+    return created !== "" && updated !== "" && created !== updated;
   });
 
   return (
