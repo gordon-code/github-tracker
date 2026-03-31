@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
 
 const MOCK_NOW = new Date("2026-03-30T12:00:00Z").getTime();
@@ -171,5 +172,71 @@ describe("ItemRow", () => {
     const { container } = render(() => <ItemRow {...defaultProps} isFlashing={true} isPolling={true} />);
     expect(container.firstElementChild?.classList.contains("animate-flash")).toBe(true);
     expect(container.firstElementChild?.classList.contains("animate-shimmer")).toBe(false);
+  });
+
+  it("shows both dates when updatedAt meaningfully differs from createdAt", () => {
+    const { container } = render(() => <ItemRow {...defaultProps} />);
+    // createdAt=2h ago → "2h", updatedAt=30m ago → "30m"
+    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("2h");
+    expect(screen.getByTitle(`Updated: ${defaultProps.updatedAt}`).textContent).toBe("30m");
+    // Middle dot separator is a <span> with aria-hidden
+    const dot = container.querySelector('span[aria-hidden="true"]');
+    expect(dot).not.toBeNull();
+    expect(dot!.textContent).toBe("\u00B7");
+  });
+
+  it("shows single date when updatedAt is within 60s of createdAt", () => {
+    const { container } = render(() => (
+      <ItemRow
+        {...defaultProps}
+        createdAt="2026-03-30T11:59:00Z"
+        updatedAt="2026-03-30T11:59:30Z"
+      />
+    ));
+    // Only one time span — no dot separator span
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(screen.queryByTitle(`Updated: 2026-03-30T11:59:30Z`)).toBeNull();
+  });
+
+  it("shows single date when both compact values are identical (display-equality guard)", () => {
+    // Both 3 days ago — createdAt 3d+2min ago, updatedAt exactly 3d ago, both display "3d"
+    const createdAt = new Date(MOCK_NOW - (3 * 24 * 60 * 60 + 2 * 60) * 1000).toISOString();
+    const updatedAt = new Date(MOCK_NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const { container } = render(() => (
+      <ItemRow {...defaultProps} createdAt={createdAt} updatedAt={updatedAt} />
+    ));
+    // diff > 60s but both show "3d" — no dot separator span
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
+    expect(screen.getByTitle(`Created: ${createdAt}`).textContent).toBe("3d");
+  });
+
+  it("shows verbose aria-label for created and updated spans", () => {
+    render(() => <ItemRow {...defaultProps} />);
+    const createdSpan = screen.getByTitle(`Created: ${defaultProps.createdAt}`);
+    const updatedSpan = screen.getByTitle(`Updated: ${defaultProps.updatedAt}`);
+    expect(createdSpan.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
+    expect(updatedSpan.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
+  });
+
+  it("refreshTick forces time display update", () => {
+    const [tick, setTick] = createSignal(0);
+    let mockNow = MOCK_NOW;
+    vi.spyOn(Date, "now").mockImplementation(() => mockNow);
+
+    // createdAt is 2h before MOCK_NOW → displays "2h"
+    render(() => (
+      <ItemRow
+        {...defaultProps}
+        updatedAt={defaultProps.createdAt}
+        refreshTick={tick()}
+      />
+    ));
+    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("2h");
+
+    // Advance mock time by 3 hours and bump refreshTick
+    mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
+    setTick(1);
+
+    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("5h");
   });
 });
