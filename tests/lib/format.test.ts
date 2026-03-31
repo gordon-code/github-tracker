@@ -106,6 +106,11 @@ describe("shortRelativeTime", () => {
     expect(shortRelativeTime(isoString)).toBe("now");
   });
 
+  it("returns 'now' for future timestamps beyond 60s", () => {
+    const future = new Date(MOCK_NOW + 5 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(future)).toBe("now");
+  });
+
   it("returns empty string for invalid input", () => {
     expect(shortRelativeTime("not-a-date")).toBe("");
     expect(shortRelativeTime("")).toBe("");

@@ -224,19 +224,22 @@ describe("ItemRow", () => {
     vi.spyOn(Date, "now").mockImplementation(() => mockNow);
 
     // createdAt is 2h before MOCK_NOW → displays "2h"
+    // updatedAt is 30m before MOCK_NOW → displays "30m"
     render(() => (
       <ItemRow
         {...defaultProps}
-        updatedAt={defaultProps.createdAt}
         refreshTick={tick()}
       />
     ));
     expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("2h");
+    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("30m");
 
     // Advance mock time by 3 hours and bump refreshTick
     mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
     setTick(1);
 
     expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("5h");
+    // updatedAt was 30m before MOCK_NOW; after +3h it is 3h30m ago → Math.floor(210/60) = 3 → "3h"
+    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("3h");
   });
 });
