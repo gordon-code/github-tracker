@@ -48,8 +48,8 @@ export default function ItemRow(props: ItemRowProps) {
 
   const hasUpdate = createMemo(() => {
     const { diffMs } = staticDateInfo();
-    const { created, updated } = dateDisplay();
     if (diffMs <= 60_000) return false;
+    const { created, updated } = dateDisplay();
     return created !== "" && updated !== "" && created !== updated;
   });
 
