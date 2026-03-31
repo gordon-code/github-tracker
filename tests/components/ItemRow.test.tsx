@@ -49,7 +49,7 @@ describe("ItemRow", () => {
     // Should show compact format like "2h"
     const timeEl = screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
     expect(timeEl).toBeDefined();
-    expect(timeEl.textContent).toMatch(/^\d+h$/);
+    expect(timeEl.textContent).toBe("2h");
   });
 
   it("renders children slot when provided", () => {
@@ -196,6 +196,18 @@ describe("ItemRow", () => {
     // Only one time span — no dot separator span
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
     expect(screen.queryByTitle(`Updated: ${new Date("2026-03-30T11:59:30Z").toLocaleString()}`)).toBeNull();
+  });
+
+  it("shows single date when updatedAt is exactly 60s after createdAt", () => {
+    const { container } = render(() => (
+      <ItemRow
+        {...defaultProps}
+        createdAt="2026-03-30T11:59:00Z"
+        updatedAt="2026-03-30T12:00:00Z"
+      />
+    ));
+    // diff === 60_000ms, condition is <=, so still suppressed
+    expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
   });
 
   it("shows single date when both compact values are identical (display-equality guard)", () => {

@@ -33,12 +33,14 @@ export default function ItemRow(props: ItemRowProps) {
     const updated = shortRelativeTime(props.updatedAt);
     const createdLabel = `Created ${relativeTime(props.createdAt)}`;
     const updatedLabel = `Updated ${relativeTime(props.updatedAt)}`;
-    return { created, updated, createdLabel, updatedLabel };
+    const createdTitle = `Created: ${new Date(props.createdAt).toLocaleString()}`;
+    const updatedTitle = `Updated: ${new Date(props.updatedAt).toLocaleString()}`;
+    const diffMs = Date.parse(props.updatedAt) - Date.parse(props.createdAt);
+    return { created, updated, createdLabel, updatedLabel, createdTitle, updatedTitle, diffMs };
   });
   const hasUpdate = createMemo(() => {
-    const diff = new Date(props.updatedAt).getTime() - new Date(props.createdAt).getTime();
-    if (diff <= 60_000) return false;
-    const { created, updated } = timeInfo();
+    const { diffMs, created, updated } = timeInfo();
+    if (diffMs <= 60_000) return false;
     return created !== "" && updated !== "" && created !== updated;
   });
 
@@ -121,7 +123,7 @@ export default function ItemRow(props: ItemRowProps) {
         </Show>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
           <span
-            title={`Created: ${new Date(props.createdAt).toLocaleString()}`}
+            title={timeInfo().createdTitle}
             aria-label={timeInfo().createdLabel}
           >
             {timeInfo().created}
@@ -129,7 +131,7 @@ export default function ItemRow(props: ItemRowProps) {
           <Show when={hasUpdate()}>
             <span aria-hidden="true">{"\u00B7"}</span>
             <span
-              title={`Updated: ${new Date(props.updatedAt).toLocaleString()}`}
+              title={timeInfo().updatedTitle}
               aria-label={timeInfo().updatedLabel}
             >
               {timeInfo().updated}
