@@ -27,26 +27,19 @@ export default function ItemRow(props: ItemRowProps) {
   const isCompact = () => props.density === "compact";
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
-  const createdDisplay = createMemo(() => {
+  const timeInfo = createMemo(() => {
     void props.refreshTick;
-    return shortRelativeTime(props.createdAt);
-  });
-  const updatedDisplay = createMemo(() => {
-    void props.refreshTick;
-    return shortRelativeTime(props.updatedAt);
-  });
-  const createdAriaLabel = createMemo(() => {
-    void props.refreshTick;
-    return `Created ${relativeTime(props.createdAt)}`;
-  });
-  const updatedAriaLabel = createMemo(() => {
-    void props.refreshTick;
-    return `Updated ${relativeTime(props.updatedAt)}`;
+    const created = shortRelativeTime(props.createdAt);
+    const updated = shortRelativeTime(props.updatedAt);
+    const createdLabel = `Created ${relativeTime(props.createdAt)}`;
+    const updatedLabel = `Updated ${relativeTime(props.updatedAt)}`;
+    return { created, updated, createdLabel, updatedLabel };
   });
   const hasUpdate = createMemo(() => {
     const diff = new Date(props.updatedAt).getTime() - new Date(props.createdAt).getTime();
     if (diff <= 60_000) return false;
-    return createdDisplay() !== updatedDisplay();
+    if (timeInfo().created === "" || timeInfo().updated === "") return false;
+    return timeInfo().created !== timeInfo().updated;
   });
 
   return (
@@ -128,18 +121,18 @@ export default function ItemRow(props: ItemRowProps) {
         </Show>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
           <span
-            title={`Created: ${props.createdAt}`}
-            aria-label={createdAriaLabel()}
+            title={`Created: ${new Date(props.createdAt).toLocaleString()}`}
+            aria-label={timeInfo().createdLabel}
           >
-            {createdDisplay()}
+            {timeInfo().created}
           </span>
           <Show when={hasUpdate()}>
             <span aria-hidden="true">{"\u00B7"}</span>
             <span
-              title={`Updated: ${props.updatedAt}`}
-              aria-label={updatedAriaLabel()}
+              title={`Updated: ${new Date(props.updatedAt).toLocaleString()}`}
+              aria-label={timeInfo().updatedLabel}
             >
-              {updatedDisplay()}
+              {timeInfo().updated}
             </span>
           </Show>
         </span>

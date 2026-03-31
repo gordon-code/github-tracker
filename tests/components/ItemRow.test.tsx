@@ -47,7 +47,7 @@ describe("ItemRow", () => {
   it("renders relative time for createdAt", () => {
     render(() => <ItemRow {...defaultProps} />);
     // Should show compact format like "2h"
-    const timeEl = screen.getByTitle(`Created: ${defaultProps.createdAt}`);
+    const timeEl = screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
     expect(timeEl).toBeDefined();
     expect(timeEl.textContent).toMatch(/^\d+h$/);
   });
@@ -177,8 +177,8 @@ describe("ItemRow", () => {
   it("shows both dates when updatedAt meaningfully differs from createdAt", () => {
     const { container } = render(() => <ItemRow {...defaultProps} />);
     // createdAt=2h ago → "2h", updatedAt=30m ago → "30m"
-    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("2h");
-    expect(screen.getByTitle(`Updated: ${defaultProps.updatedAt}`).textContent).toBe("30m");
+    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("2h");
+    expect(screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`).textContent).toBe("30m");
     // Middle dot separator is a <span> with aria-hidden
     const dot = container.querySelector('span[aria-hidden="true"]');
     expect(dot).not.toBeNull();
@@ -195,7 +195,7 @@ describe("ItemRow", () => {
     ));
     // Only one time span — no dot separator span
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
-    expect(screen.queryByTitle(`Updated: 2026-03-30T11:59:30Z`)).toBeNull();
+    expect(screen.queryByTitle(`Updated: ${new Date("2026-03-30T11:59:30Z").toLocaleString()}`)).toBeNull();
   });
 
   it("shows single date when both compact values are identical (display-equality guard)", () => {
@@ -207,13 +207,13 @@ describe("ItemRow", () => {
     ));
     // diff > 60s but both show "3d" — no dot separator span
     expect(container.querySelector('span[aria-hidden="true"]')).toBeNull();
-    expect(screen.getByTitle(`Created: ${createdAt}`).textContent).toBe("3d");
+    expect(screen.getByTitle(`Created: ${new Date(createdAt).toLocaleString()}`).textContent).toBe("3d");
   });
 
   it("shows verbose aria-label for created and updated spans", () => {
     render(() => <ItemRow {...defaultProps} />);
-    const createdSpan = screen.getByTitle(`Created: ${defaultProps.createdAt}`);
-    const updatedSpan = screen.getByTitle(`Updated: ${defaultProps.updatedAt}`);
+    const createdSpan = screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
+    const updatedSpan = screen.getByTitle(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
     expect(createdSpan.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
     expect(updatedSpan.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
   });
@@ -231,12 +231,12 @@ describe("ItemRow", () => {
         refreshTick={tick()}
       />
     ));
-    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("2h");
+    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("2h");
 
     // Advance mock time by 3 hours and bump refreshTick
     mockNow = MOCK_NOW + 3 * 60 * 60 * 1000;
     setTick(1);
 
-    expect(screen.getByTitle(`Created: ${defaultProps.createdAt}`).textContent).toBe("5h");
+    expect(screen.getByTitle(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`).textContent).toBe("5h");
   });
 });

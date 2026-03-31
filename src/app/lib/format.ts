@@ -26,8 +26,9 @@ export function relativeTime(isoString: string): string {
  * Returns "now" for differences under 60 seconds, "" for invalid input.
  */
 export function shortRelativeTime(isoString: string): string {
-  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffMs = Date.now() - Date.parse(isoString);
   if (isNaN(diffMs)) return "";
+  if (diffMs < 0) return "now";
   const diffSec = Math.floor(diffMs / 1000);
   if (diffSec < 60) return "now";
   const diffMin = Math.floor(diffSec / 60);
