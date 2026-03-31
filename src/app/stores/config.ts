@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
 import { createEffect } from "solid-js";
+import { pushNotification } from "../lib/errors";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
 
@@ -39,7 +40,7 @@ export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
   upstreamRepos: z.array(RepoRefSchema).default([]),
-  monitoredRepos: z.array(RepoRefSchema).default([]),
+  monitoredRepos: z.array(RepoRefSchema).max(10).default([]),
   trackedUsers: z.array(TrackedUserSchema).max(10).default([]),
   refreshInterval: z.number().min(0).max(3600).default(300),
   hotPollInterval: z.number().min(10).max(120).default(30),
@@ -110,6 +111,7 @@ export function setMonitoredRepo(repo: z.infer<typeof RepoRefSchema>, monitored:
       if (monitored) {
         const inSelected = draft.selectedRepos.some((r) => r.fullName === repo.fullName);
         if (!inSelected) return;
+        if (draft.monitoredRepos.length >= 10) return;
         const alreadyMonitored = draft.monitoredRepos.some((r) => r.fullName === repo.fullName);
         if (!alreadyMonitored) {
           draft.monitoredRepos.push(repo);
@@ -132,7 +134,11 @@ export function initConfigPersistence(): void {
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
+      try {
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
+      } catch {
+        pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
+      }
     }, 200);
   });
 }

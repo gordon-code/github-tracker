@@ -565,4 +565,41 @@ describe("setMonitoredRepo (C3)", () => {
       dispose();
     });
   });
+
+  it("enforces max 10 monitored repos", () => {
+    createRoot((dispose) => {
+      const repos = Array.from({ length: 11 }, (_, i) => ({
+        owner: "org",
+        name: `repo-${i}`,
+        fullName: `org/repo-${i}`,
+      }));
+      updateConfig({ selectedRepos: repos, monitoredRepos: repos.slice(0, 10) });
+      // 10 is the max — adding an 11th should be rejected
+      setMonitoredRepo(repos[10], true);
+      expect(config.monitoredRepos).toHaveLength(10);
+      dispose();
+    });
+  });
+});
+
+describe("ConfigSchema — monitoredRepos max constraint", () => {
+  it("rejects more than 10 monitored repos at schema level", () => {
+    const repos = Array.from({ length: 11 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+    const result = ConfigSchema.safeParse({ monitoredRepos: repos });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts exactly 10 monitored repos", () => {
+    const repos = Array.from({ length: 10 }, (_, i) => ({
+      owner: "org",
+      name: `repo-${i}`,
+      fullName: `org/repo-${i}`,
+    }));
+    const result = ConfigSchema.safeParse({ monitoredRepos: repos });
+    expect(result.success).toBe(true);
+  });
 });
