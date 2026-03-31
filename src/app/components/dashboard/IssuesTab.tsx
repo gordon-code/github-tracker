@@ -332,6 +332,17 @@ export default function IssuesTab(props: IssuesTabProps) {
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                         </Show>
+                        <a
+                          href={`https://github.com/${repoGroup.repoFullName}/issues`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary"
+                          title={`Open ${repoGroup.repoFullName} issues on GitHub`}
+                          aria-label={`Open ${repoGroup.repoFullName} issues on GitHub`}
+                        >
+                          <ExternalLinkIcon />
+                        </a>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
@@ -349,16 +360,6 @@ export default function IssuesTab(props: IssuesTabProps) {
                           </span>
                         </Show>
                       </button>
-                      <a
-                        href={`https://github.com/${repoGroup.repoFullName}/issues`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="opacity-0 group-hover/repo-header:opacity-100 focus:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
-                        title={`Open ${repoGroup.repoFullName} issues on GitHub`}
-                        aria-label={`Open ${repoGroup.repoFullName} issues on GitHub`}
-                      >
-                        <ExternalLinkIcon />
-                      </a>
                       <RepoLockControls tab="issues" repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={isExpanded()}>

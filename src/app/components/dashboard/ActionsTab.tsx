@@ -296,6 +296,17 @@ export default function ActionsTab(props: ActionsTabProps) {
                   >
                     <ChevronIcon size="md" rotated={!isExpanded()} />
                     {repoGroup.repoFullName}
+                    <a
+                      href={`https://github.com/${repoGroup.repoFullName}/actions`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      class="opacity-0 group-hover/repo-header:opacity-100 focus-visible:opacity-100 transition-opacity text-base-content/40 hover:text-primary"
+                      title={`Open ${repoGroup.repoFullName} actions on GitHub`}
+                      aria-label={`Open ${repoGroup.repoFullName} actions on GitHub`}
+                    >
+                      <ExternalLinkIcon />
+                    </a>
                     <Show when={!isExpanded()}>
                       <span class="ml-auto text-xs font-normal text-base-content/60">
                         {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
@@ -320,16 +331,6 @@ export default function ActionsTab(props: ActionsTabProps) {
                       </span>
                     </Show>
                   </button>
-                  <a
-                    href={`https://github.com/${repoGroup.repoFullName}/actions`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="opacity-0 group-hover/repo-header:opacity-100 focus:opacity-100 transition-opacity text-base-content/40 hover:text-primary px-1"
-                    title={`Open ${repoGroup.repoFullName} actions on GitHub`}
-                    aria-label={`Open ${repoGroup.repoFullName} actions on GitHub`}
-                  >
-                    <ExternalLinkIcon />
-                  </a>
                   <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
                 </div>
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
