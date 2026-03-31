@@ -22,6 +22,26 @@ export function relativeTime(isoString: string): string {
 }
 
 /**
+ * Formats an ISO date string as a compact relative time string (e.g., "3h", "7d", "2mo").
+ * Returns "now" for differences under 60 seconds, "" for invalid input.
+ */
+export function shortRelativeTime(isoString: string): string {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  if (isNaN(diffMs)) return "";
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth}mo`;
+  return `${Math.floor(diffMonth / 12)}y`;
+}
+
+/**
  * Computes text color (black or white) for a GitHub label hex color.
  * Based on perceived luminance.
  */

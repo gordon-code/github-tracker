@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -57,6 +57,58 @@ describe("relativeTime", () => {
     expect(relativeTime("not-a-date")).toBe("");
     expect(relativeTime("")).toBe("");
     expect(relativeTime("garbage-2026-13-99")).toBe("");
+  });
+});
+
+describe("shortRelativeTime", () => {
+  const MOCK_NOW = new Date("2026-03-21T12:00:00.000Z").getTime();
+
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(MOCK_NOW);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 'now' for under 60 seconds ago", () => {
+    const isoString = new Date(MOCK_NOW - 30 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns compact minutes for 5 minutes ago", () => {
+    const isoString = new Date(MOCK_NOW - 5 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("5m");
+  });
+
+  it("returns compact hours for 3 hours ago", () => {
+    const isoString = new Date(MOCK_NOW - 3 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("3h");
+  });
+
+  it("returns compact days for 7 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 7 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("7d");
+  });
+
+  it("returns compact months for 45 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 45 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1mo");
+  });
+
+  it("returns compact years for 400 days ago", () => {
+    const isoString = new Date(MOCK_NOW - 400 * 24 * 60 * 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("1y");
+  });
+
+  it("returns 'now' for future timestamps (clock skew)", () => {
+    const isoString = new Date(MOCK_NOW + 60 * 1000).toISOString();
+    expect(shortRelativeTime(isoString)).toBe("now");
+  });
+
+  it("returns empty string for invalid input", () => {
+    expect(shortRelativeTime("not-a-date")).toBe("");
+    expect(shortRelativeTime("")).toBe("");
   });
 });
 
