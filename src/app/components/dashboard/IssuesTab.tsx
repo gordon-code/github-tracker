@@ -25,6 +25,7 @@ export interface IssuesTabProps {
   userLogin: string;
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
+  monitoredRepos?: { fullName: string }[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -66,6 +67,10 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const upstreamRepoSet = createMemo(() =>
     new Set((config.upstreamRepos ?? []).map(r => r.fullName))
+  );
+
+  const monitoredRepoNameSet = createMemo(() =>
+    new Set((props.monitoredRepos ?? []).map(r => r.fullName))
   );
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
@@ -114,10 +119,13 @@ export default function IssuesTab(props: IssuesTabProps) {
       }
 
       if (tabFilter.user !== "all") {
-        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
-        if (validUser) {
-          const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
-          if (!surfacedBy.includes(tabFilter.user)) return false;
+        // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
+        if (!monitoredRepoNameSet().has(issue.repoFullName)) {
+          const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
+          if (validUser) {
+            const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
+            if (!surfacedBy.includes(tabFilter.user)) return false;
+          }
         }
       }
 
@@ -305,6 +313,9 @@ export default function IssuesTab(props: IssuesTabProps) {
                       >
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
+                        <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
+                          <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                        </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>

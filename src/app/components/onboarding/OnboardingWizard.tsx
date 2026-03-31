@@ -19,6 +19,9 @@ export default function OnboardingWizard() {
   const [upstreamRepos, setUpstreamRepos] = createSignal<RepoRef[]>(
     config.upstreamRepos.length > 0 ? [...config.upstreamRepos] : []
   );
+  const [monitoredRepos, setMonitoredRepos] = createSignal<RepoRef[]>(
+    config.monitoredRepos.length > 0 ? [...config.monitoredRepos] : []
+  );
 
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
@@ -53,10 +56,14 @@ export default function OnboardingWizard() {
 
   function handleFinish() {
     const uniqueOrgs = [...new Set(selectedRepos().map((r) => r.owner))];
+    // Prune monitoredRepos to only repos still in selectedRepos
+    const selectedSet = new Set(selectedRepos().map((r) => r.fullName));
+    const prunedMonitoredRepos = monitoredRepos().filter((r) => selectedSet.has(r.fullName));
     updateConfig({
       selectedOrgs: uniqueOrgs,
       selectedRepos: selectedRepos(),
       upstreamRepos: upstreamRepos(),
+      monitoredRepos: prunedMonitoredRepos,
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload
@@ -116,6 +123,14 @@ export default function OnboardingWizard() {
                   upstreamRepos={upstreamRepos()}
                   onUpstreamChange={setUpstreamRepos}
                   trackedUsers={config.trackedUsers}
+                  monitoredRepos={monitoredRepos()}
+                  onMonitorToggle={(repo, monitored) => {
+                    if (monitored) {
+                      setMonitoredRepos((prev) => prev.some((r) => r.fullName === repo.fullName) ? prev : [...prev, repo]);
+                    } else {
+                      setMonitoredRepos((prev) => prev.filter((r) => r.fullName !== repo.fullName));
+                    }
+                  }}
                 />
               </Match>
             </Switch>

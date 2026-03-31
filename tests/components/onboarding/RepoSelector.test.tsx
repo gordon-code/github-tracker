@@ -691,3 +691,93 @@ describe("RepoSelector — upstream discovery", () => {
     });
   });
 });
+
+// ── Monitor toggle (C4) ────────────────────────────────────────────────────────
+
+describe("RepoSelector — monitor toggle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "myorg") return Promise.resolve(myorgRepos);
+      return Promise.resolve([]);
+    });
+  });
+
+  it("does not render monitor toggle when onMonitorToggle prop is absent", async () => {
+    const selected: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("repo-a"));
+    expect(screen.queryByLabelText(/monitor all activity/i)).toBeNull();
+  });
+
+  it("renders monitor toggle only for selected repos", async () => {
+    const selected: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    // repo-b is not selected
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        onMonitorToggle={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("repo-a"));
+    // Toggle for selected repo-a should be present
+    screen.getByLabelText("Monitor all activity");
+    // Toggle for unselected repo-b should not be present
+    expect(screen.queryAllByLabelText(/monitor all activity/i)).toHaveLength(1);
+  });
+
+  it("calls onMonitorToggle with repo and monitored=true when repo is not monitored", async () => {
+    const onMonitorToggle = vi.fn();
+    const selected: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        onMonitorToggle={onMonitorToggle}
+        monitoredRepos={[]}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("repo-a"));
+    const btn = screen.getByLabelText("Monitor all activity");
+    btn.click();
+    expect(onMonitorToggle).toHaveBeenCalledWith(
+      { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" },
+      true
+    );
+  });
+
+  it("calls onMonitorToggle with monitored=false when repo is already monitored", async () => {
+    const onMonitorToggle = vi.fn();
+    const selected: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    const monitoredRepos: RepoRef[] = [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }];
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={selected}
+        onChange={vi.fn()}
+        onMonitorToggle={onMonitorToggle}
+        monitoredRepos={monitoredRepos}
+      />
+    ));
+
+    await waitFor(() => screen.getByText("repo-a"));
+    const btn = screen.getByLabelText("Stop monitoring all activity");
+    btn.click();
+    expect(onMonitorToggle).toHaveBeenCalledWith(
+      { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" },
+      false
+    );
+  });
+});

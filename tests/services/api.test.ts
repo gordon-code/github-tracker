@@ -6,6 +6,7 @@ import {
   fetchIssues,
   fetchPullRequests,
   fetchWorkflowRuns,
+  validateGitHubUser,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
@@ -112,7 +113,7 @@ describe("fetchRepos", () => {
   it("returns repos for an org via paginate.iterator", async () => {
     const octokit = makeBasicOctokit();
     const result = await fetchRepos(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       "acme-corp",
       "org"
     );
@@ -129,7 +130,7 @@ describe("fetchRepos", () => {
   it("passes sort=pushed and direction=desc to paginate.iterator", async () => {
     const octokit = makeBasicOctokit();
     await fetchRepos(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       "acme-corp",
       "org"
     );
@@ -142,7 +143,7 @@ describe("fetchRepos", () => {
   it("passes sort=pushed and direction=desc for user repos", async () => {
     const octokit = makeBasicOctokit();
     await fetchRepos(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       "octocat",
       "user"
     );
@@ -155,7 +156,7 @@ describe("fetchRepos", () => {
   it("returns repos for a user account via paginate.iterator", async () => {
     const octokit = makeBasicOctokit();
     const result = await fetchRepos(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       "octocat",
       "user"
     );
@@ -205,7 +206,7 @@ describe("fetchIssues", () => {
   it("returns issues from GraphQL search results", async () => {
     const octokit = makeIssueOctokit();
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -218,7 +219,7 @@ describe("fetchIssues", () => {
   it("uses GraphQL search with involves qualifier", async () => {
     const octokit = makeIssueOctokit();
     await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -236,7 +237,7 @@ describe("fetchIssues", () => {
   it("includes repo qualifiers in GraphQL search query", async () => {
     const octokit = makeIssueOctokit();
     await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -250,7 +251,7 @@ describe("fetchIssues", () => {
   it("maps GraphQL fields to camelCase issue shape", async () => {
     const octokit = makeIssueOctokit();
     const { issues } = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -269,7 +270,7 @@ describe("fetchIssues", () => {
   it("returns empty result when repos is empty", async () => {
     const octokit = makeIssueOctokit();
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [],
       "octocat"
     );
@@ -288,7 +289,7 @@ describe("fetchIssues", () => {
 
     const octokit = makeIssueOctokit();
     await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       repos,
       "octocat"
     );
@@ -307,7 +308,7 @@ describe("fetchIssues", () => {
     // Both batches return the same databaseId
     const octokit = makeIssueOctokit(async () => makeGraphqlIssueResponse([graphqlIssueNode]));
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       repos,
       "octocat"
     );
@@ -330,7 +331,7 @@ describe("fetchIssues", () => {
     });
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -347,7 +348,7 @@ describe("fetchIssues", () => {
     const octokit = makeIssueOctokit(async () => makeGraphqlIssueResponse(manyNodes, true, 1500));
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -375,7 +376,7 @@ describe("fetchIssues", () => {
     }));
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -398,7 +399,7 @@ describe("fetchIssues", () => {
     });
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -435,7 +436,7 @@ describe("fetchIssues", () => {
     });
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -458,7 +459,7 @@ describe("fetchIssues", () => {
     }));
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -472,7 +473,7 @@ describe("fetchIssues", () => {
   it("rejects invalid userLogin with error instead of injecting into query", async () => {
     const octokit = makeIssueOctokit();
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "bad user" // contains space — fails VALID_LOGIN
     );
@@ -505,7 +506,7 @@ describe("fetchIssues", () => {
     });
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       repos,
       "octocat"
     );
@@ -583,7 +584,7 @@ describe("fetchPullRequests", () => {
     });
 
     await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -597,7 +598,7 @@ describe("fetchPullRequests", () => {
     const octokit = makePROctokit();
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -638,7 +639,7 @@ describe("fetchPullRequests", () => {
       } as typeof graphqlPRNode;
       const octokit = makePROctokit(async () => makeGraphqlPRResponse([node]));
       const { pullRequests } = await fetchPullRequests(
-        octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+        octokit as never,
         [testRepo],
         "octocat"
       );
@@ -656,7 +657,7 @@ describe("fetchPullRequests", () => {
     const octokit = makePROctokit(async () => makeGraphqlPRResponse([nodeWithOverlap]));
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -672,7 +673,7 @@ describe("fetchPullRequests", () => {
       const node = { ...graphqlPRNode, databaseId: 300, reviewDecision: decision } as typeof graphqlPRNode;
       const octokit = makePROctokit(async () => makeGraphqlPRResponse([node]));
       const { pullRequests } = await fetchPullRequests(
-        octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+        octokit as never,
         [testRepo],
         "octocat"
       );
@@ -685,7 +686,7 @@ describe("fetchPullRequests", () => {
     const octokit = makePROctokit(async () => makeGraphqlPRResponse([graphqlPRNode]));
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -719,7 +720,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -744,7 +745,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -767,7 +768,7 @@ describe("fetchPullRequests", () => {
     const octokit = makePROctokit(async () => makeGraphqlPRResponse([malformedNode]));
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -793,7 +794,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -830,7 +831,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -880,7 +881,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -924,7 +925,7 @@ describe("fetchPullRequests", () => {
     });
 
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -961,7 +962,7 @@ describe("fetchPullRequests", () => {
     });
 
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -981,7 +982,7 @@ describe("fetchPullRequests", () => {
     }));
 
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -1004,7 +1005,7 @@ describe("fetchPullRequests", () => {
     });
 
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -1050,7 +1051,7 @@ describe("fetchPullRequests", () => {
     });
 
     const { pullRequests } = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "octocat"
     );
@@ -1066,7 +1067,7 @@ describe("fetchPullRequests", () => {
   it("returns empty result when repos is empty", async () => {
     const octokit = makePROctokit();
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [],
       "octocat"
     );
@@ -1105,7 +1106,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       3
@@ -1119,7 +1120,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       3
@@ -1142,7 +1143,7 @@ describe("fetchWorkflowRuns", () => {
     const maxWorkflows = 3;
     const maxRuns = 1;
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       maxWorkflows,
       maxRuns
@@ -1163,7 +1164,7 @@ describe("fetchWorkflowRuns", () => {
 
     const maxWorkflows = 1;
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       maxWorkflows,
       10
@@ -1178,7 +1179,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       10
@@ -1199,7 +1200,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       3
@@ -1227,7 +1228,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       10
@@ -1245,7 +1246,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       10
@@ -1268,7 +1269,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       10
@@ -1285,7 +1286,7 @@ describe("fetchWorkflowRuns", () => {
     const octokit = makeOctokitForRuns();
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       10
@@ -1308,7 +1309,7 @@ describe("empty userLogin short-circuit", () => {
     };
 
     const result = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "" // empty userLogin
     );
@@ -1324,7 +1325,7 @@ describe("empty userLogin short-circuit", () => {
     const octokit = { request, graphql, paginate: { iterator: vi.fn() } };
 
     const result = await fetchPullRequests(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       "" // empty userLogin
     );
@@ -1378,7 +1379,7 @@ describe("fetchWorkflowRuns pagination", () => {
     };
 
     const { workflowRuns } = await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       25
@@ -1413,7 +1414,7 @@ describe("fetchWorkflowRuns pagination", () => {
     };
 
     await fetchWorkflowRuns(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
+      octokit as never,
       [testRepo],
       5,
       3
@@ -1421,5 +1422,322 @@ describe("fetchWorkflowRuns pagination", () => {
 
     // Only 1 page request should be made
     expect(requestCount).toBe(1);
+  });
+});
+
+// ── validateGitHubUser — bot login and type detection (C1) ───────────────────
+
+function makeUserOctokit(userData: {
+  login: string;
+  avatar_url: string;
+  name: string | null;
+  type: string;
+}) {
+  return makeOctokit(async () => ({ data: userData }));
+}
+
+describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => {
+  it("accepts regular user login", async () => {
+    const octokit = makeUserOctokit({
+      login: "octocat",
+      avatar_url: "https://avatars.githubusercontent.com/u/583231",
+      name: "The Octocat",
+      type: "User",
+    });
+    const result = await validateGitHubUser(
+      octokit as never,
+      "octocat"
+    );
+    expect(result).not.toBeNull();
+    expect(result?.type).toBe("user");
+  });
+
+  it("accepts bot login with [bot] suffix", async () => {
+    const octokit = makeUserOctokit({
+      login: "dependabot[bot]",
+      avatar_url: "https://avatars.githubusercontent.com/u/27347476",
+      name: null,
+      type: "Bot",
+    });
+    const result = await validateGitHubUser(
+      octokit as never,
+      "dependabot[bot]"
+    );
+    expect(result).not.toBeNull();
+    expect(result?.type).toBe("bot");
+    expect(result?.login).toBe("dependabot[bot]");
+  });
+
+  it("accepts another bot login — khepri-bot[bot]", async () => {
+    const octokit = makeUserOctokit({
+      login: "khepri-bot[bot]",
+      avatar_url: "https://avatars.githubusercontent.com/u/999",
+      name: null,
+      type: "Bot",
+    });
+    const result = await validateGitHubUser(
+      octokit as never,
+      "khepri-bot[bot]"
+    );
+    expect(result).not.toBeNull();
+    expect(result?.type).toBe("bot");
+  });
+
+  it("returns type:user when API returns type:User", async () => {
+    const octokit = makeUserOctokit({
+      login: "regular-user",
+      avatar_url: "https://avatars.githubusercontent.com/u/1",
+      name: "Regular User",
+      type: "User",
+    });
+    const result = await validateGitHubUser(
+      octokit as never,
+      "regular-user"
+    );
+    expect(result?.type).toBe("user");
+  });
+
+  it("returns null for [bot] alone (no base login)", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(
+      octokit as never,
+      "[bot]"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null for login with arbitrary bracket content", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(
+      octokit as never,
+      "user[evil]"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null for [Bot] (case-sensitive — only [bot] accepted)", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(
+      octokit as never,
+      "user[Bot]"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null for user[bot][bot] (double suffix)", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(
+      octokit as never,
+      "user[bot][bot]"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null on 404 for bot login", async () => {
+    const octokit = makeOctokit(async () => {
+      const err = Object.assign(new Error("Not Found"), { status: 404 });
+      throw err;
+    });
+    const result = await validateGitHubUser(
+      octokit as never,
+      "nonexistent[bot]"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("throws on network error", async () => {
+    const octokit = makeOctokit(async () => {
+      throw new Error("Network error");
+    });
+    await expect(
+      validateGitHubUser(
+        octokit as never,
+        "dependabot[bot]"
+      )
+    ).rejects.toThrow("Network error");
+  });
+});
+
+// ── fetchIssuesAndPullRequests — monitoredRepos partition (C5) ────────────────
+
+describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
+  it("returns empty result with no repos even when monitoredRepos provided", async () => {
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const octokit = makeOctokit(async () => ({ data: {} }), async () => ({}));
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [],
+      "octocat",
+      undefined,
+      undefined,
+      [{ fullName: "org/monitored" }]
+    );
+    expect(result.issues).toEqual([]);
+    expect(result.pullRequests).toEqual([]);
+  });
+
+  it("unfiltered search query does not contain 'involves:'", async () => {
+    const queriesUsed: string[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables: unknown) => {
+        const vars = variables as Record<string, unknown>;
+        if (vars.issueQ) queriesUsed.push(vars.issueQ as string);
+        if (vars.prQ) queriesUsed.push(vars.prQ as string);
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          // Also handle regular combined search format
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
+    await fetchIssuesAndPullRequests(
+      octokit as never,
+      [monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [{ fullName: "org/monitored" }]
+    );
+
+    // Unfiltered queries should not contain 'involves:'
+    const unfilteredQueries = queriesUsed.filter(q => !q.includes("involves:") && !q.includes("review-requested:"));
+    expect(unfilteredQueries.length).toBeGreaterThan(0);
+    for (const q of unfilteredQueries) {
+      expect(q).not.toContain("involves:");
+    }
+  });
+});
+
+// ── fetchIssuesAndPullRequests — cross-feature integration (monitored + bot) ──
+
+describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tracked user", () => {
+  const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
+  const normalRepo = { owner: "org", name: "normal", fullName: "org/normal" };
+
+  const monitoredIssueNode = {
+    databaseId: 2001,
+    number: 1,
+    title: "Monitored repo issue",
+    state: "open",
+    url: "https://github.com/org/monitored/issues/1",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-02T00:00:00Z",
+    author: { login: "someone", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+    labels: { nodes: [] },
+    assignees: { nodes: [] },
+    repository: { nameWithOwner: "org/monitored" },
+    comments: { totalCount: 0 },
+  };
+
+  const botIssueNode = {
+    databaseId: 2002,
+    number: 2,
+    title: "Bot-surfaced issue",
+    state: "open",
+    url: "https://github.com/org/normal/issues/2",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-02T00:00:00Z",
+    author: { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/u/27347476" },
+    labels: { nodes: [] },
+    assignees: { nodes: [] },
+    repository: { nameWithOwner: "org/normal" },
+    comments: { totalCount: 0 },
+  };
+
+  it("deduplicates issues when same item appears in both monitored and bot searches", async () => {
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async (_query: string, variables: unknown) => {
+        const vars = variables as Record<string, unknown>;
+        // Unfiltered search for monitored repo returns monitoredIssueNode
+        if (vars.issueQ && typeof vars.issueQ === "string" && !String(vars.issueQ).includes("involves:")) {
+          return {
+            issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [monitoredIssueNode] },
+            prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            rateLimit: { limit: 5000, remaining: 4990, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          };
+        }
+        // Bot tracked user search on normal repos returns botIssueNode
+        if (vars.issueQ && String(vars.issueQ).includes("involves:dependabot")) {
+          return {
+            issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [botIssueNode] },
+            prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            rateLimit: { limit: 5000, remaining: 4985, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          };
+        }
+        // Main user search returns nothing
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const botUser = { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/u/27347476", name: null, type: "bot" as const };
+    const result = await fetchIssuesAndPullRequests(
+      octokit as never,
+      [normalRepo, monitoredRepo],
+      "octocat",
+      undefined,
+      [botUser],
+      [{ fullName: "org/monitored" }]
+    );
+
+    // Both issues are present (no dedup since different IDs)
+    const ids = result.issues.map((i) => i.id);
+    expect(ids).toContain(2001); // monitored repo issue
+    expect(ids).toContain(2002); // bot-surfaced issue
+
+    // Bot issue has surfacedBy annotation
+    const botIssue = result.issues.find((i) => i.id === 2002);
+    expect(botIssue?.surfacedBy).toContain("dependabot[bot]");
+
+    // Monitored repo issue has no surfacedBy (no user qualifier)
+    const monitoredIssue = result.issues.find((i) => i.id === 2001);
+    expect(monitoredIssue?.surfacedBy).toBeUndefined();
+  });
+});
+
+// ── VALID_TRACKED_LOGIN — GraphQL injection character rejection ────────────────
+
+describe("VALID_TRACKED_LOGIN — rejects GraphQL-unsafe characters", () => {
+  it("rejects login with space", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(octokit as never, "user name");
+    expect(result).toBeNull();
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it("rejects login with colon", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(octokit as never, "user:name");
+    expect(result).toBeNull();
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it("rejects login with double quote", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(octokit as never, 'user"name');
+    expect(result).toBeNull();
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it("rejects login with newline", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+    const result = await validateGitHubUser(octokit as never, "user\nname");
+    expect(result).toBeNull();
+    expect(octokit.request).not.toHaveBeenCalled();
   });
 });

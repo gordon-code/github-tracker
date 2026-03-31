@@ -30,6 +30,7 @@ export interface PullRequestsTabProps {
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
   hotPollingPRIds?: ReadonlySet<number>;
+  monitoredRepos?: { fullName: string }[];
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -135,6 +136,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     new Set((config.upstreamRepos ?? []).map(r => r.fullName))
   );
 
+  const monitoredRepoNameSet = createMemo(() =>
+    new Set((props.monitoredRepos ?? []).map(r => r.fullName))
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     if (!users || users.length <= 1) return prFilterGroups;
@@ -199,10 +204,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       }
 
       if (tabFilters.user !== "all") {
-        const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
-        if (validUser) {
-          const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
-          if (!surfacedBy.includes(tabFilters.user)) return false;
+        // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
+        if (!monitoredRepoNameSet().has(pr.repoFullName)) {
+          const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
+          if (validUser) {
+            const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
+            if (!surfacedBy.includes(tabFilters.user)) return false;
+          }
         }
       }
 
@@ -418,6 +426,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       >
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
+                        <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
+                          <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                        </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>

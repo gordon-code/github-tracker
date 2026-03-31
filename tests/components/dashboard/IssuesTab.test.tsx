@@ -195,7 +195,7 @@ describe("IssuesTab — user filter logic", () => {
 describe("IssuesTab — avatar badge", () => {
   it("renders avatar img for items surfaced by tracked users", () => {
     const trackedUsers: TrackedUser[] = [
-      { login: "tracked1", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: "Tracked One" },
+      { login: "tracked1", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: "Tracked One", type: "user" as const },
     ];
     const issues = [
       makeIssue({ id: 1, title: "Tracked issue", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
@@ -236,5 +236,78 @@ describe("IssuesTab — avatar badge", () => {
     ));
 
     expect(container.querySelector(".avatar")).toBeNull();
+  });
+});
+
+// ── IssuesTab — monitored repos bypass (C6) ───────────────────────────────────
+
+describe("IssuesTab — monitored repos filter bypass", () => {
+  it("shows issue from monitored repo even when user filter excludes it", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Monitored issue", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
+    ];
+    setTabFilter("issues", "user", "me");
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other-user", label: "other-user" }]}
+        monitoredRepos={[{ fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Monitored issue");
+  });
+
+  it("hides issue from non-monitored repo when user filter excludes it", () => {
+    const issues = [
+      makeIssue({ id: 100, title: "Non-monitored issue", repoFullName: "org/regular", surfacedBy: ["other-user"] }),
+    ];
+    setTabFilter("issues", "user", "me");
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other-user", label: "other-user" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(screen.queryByText("Non-monitored issue")).toBeNull();
+  });
+
+  it("renders 'Monitoring all' badge on monitored repo group header", () => {
+    const issues = [
+      makeIssue({ id: 200, title: "Issue in monitored repo", repoFullName: "org/monitored", surfacedBy: ["me"] }),
+    ];
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Monitoring all");
+  });
+
+  it("does not render 'Monitoring all' badge on non-monitored repo group header", () => {
+    const issues = [
+      makeIssue({ id: 300, title: "Issue in regular repo", repoFullName: "org/regular", surfacedBy: ["me"] }),
+    ];
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(screen.queryByText("Monitoring all")).toBeNull();
   });
 });

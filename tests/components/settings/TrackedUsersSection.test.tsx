@@ -50,6 +50,7 @@ function makeUser(overrides: Partial<TrackedUser> = {}): TrackedUser {
     login: "octocat",
     avatarUrl: "https://avatars.githubusercontent.com/u/583231",
     name: "The Octocat",
+    type: "user",
     ...overrides,
   };
 }
@@ -304,5 +305,61 @@ describe("TrackedUsersSection — removing a user", () => {
     screen.getByRole("button", { name: /remove user1/i });
     screen.getByRole("button", { name: /remove user2/i });
     screen.getByRole("button", { name: /remove user3/i });
+  });
+});
+
+// ── Bot badge UI (C2) ─────────────────────────────────────────────────────────
+
+describe("TrackedUsersSection — bot badge", () => {
+  it("renders bot badge for type:bot user", () => {
+    const users = [
+      makeUser({ login: "dependabot[bot]", name: null, type: "bot" }),
+    ];
+    render(() => <TrackedUsersSection users={users} onSave={vi.fn()} />);
+    screen.getByLabelText("dependabot[bot] is a bot account");
+  });
+
+  it("does not render bot badge for type:user", () => {
+    const users = [makeUser({ login: "octocat", type: "user" })];
+    render(() => <TrackedUsersSection users={users} onSave={vi.fn()} />);
+    expect(screen.queryByText("bot")).toBeNull();
+  });
+
+  it("renders bot badge only for bot users in mixed list", () => {
+    const users = [
+      makeUser({ login: "octocat", type: "user" }),
+      makeUser({ login: "dependabot[bot]", name: null, type: "bot", avatarUrl: "https://avatars.githubusercontent.com/u/27347476" }),
+    ];
+    render(() => <TrackedUsersSection users={users} onSave={vi.fn()} />);
+    const badges = screen.getAllByLabelText("dependabot[bot] is a bot account");
+    expect(badges).toHaveLength(1);
+  });
+
+  it("renders bot badge text 'bot'", () => {
+    const users = [
+      makeUser({ login: "khepri-bot[bot]", name: null, type: "bot" }),
+    ];
+    render(() => <TrackedUsersSection users={users} onSave={vi.fn()} />);
+    const badge = screen.getByLabelText("khepri-bot[bot] is a bot account");
+    expect(badge.textContent).toBe("bot");
+  });
+});
+
+describe("TrackedUsersSection — bot input handling", () => {
+  it("lowercases bot login with [bot] suffix before calling validateGitHubUser", async () => {
+    const botUser = makeUser({ login: "khepri-bot[bot]", name: null, type: "bot" });
+    vi.mocked(apiModule.validateGitHubUser).mockResolvedValue(botUser);
+
+    const onSave = vi.fn();
+    render(() => <TrackedUsersSection users={[]} onSave={onSave} />);
+
+    const input = screen.getByRole("textbox", { name: /github username/i }) as HTMLInputElement;
+    // Use fireEvent.input instead of userEvent.type — userEvent interprets [bot] as a special key sequence
+    fireEvent.input(input, { target: { value: "Khepri-Bot[bot]" } });
+    fireEvent.click(screen.getByRole("button", { name: /add/i }));
+
+    await waitFor(() => {
+      expect(apiModule.validateGitHubUser).toHaveBeenCalledWith(expect.anything(), "khepri-bot[bot]");
+    });
   });
 });

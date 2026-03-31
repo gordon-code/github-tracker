@@ -359,6 +359,7 @@ export default function DashboardPage() {
                   userLogin={userLogin()}
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
+                  monitoredRepos={config.monitoredRepos}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -369,6 +370,7 @@ export default function DashboardPage() {
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
                   hotPollingPRIds={hotPollingPRIds()}
+                  monitoredRepos={config.monitoredRepos}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>

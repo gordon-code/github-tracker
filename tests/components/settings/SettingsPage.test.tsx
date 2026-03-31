@@ -682,3 +682,31 @@ describe("SettingsPage — Manage org access button", () => {
     expect(apiModule.fetchOrgs).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SettingsPage — monitor toggle wiring", () => {
+  it("includes monitoredRepos in exported settings JSON", async () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }],
+      monitoredRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }],
+    });
+    renderSettings();
+
+    // Trigger export
+    const exportBtn = screen.getByRole("button", { name: /export/i });
+    const user = userEvent.setup();
+    const blobParts: BlobPart[] = [];
+    const originalBlob = globalThis.Blob;
+    globalThis.Blob = class MockBlob extends originalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        if (parts) blobParts.push(...parts);
+      }
+    } as typeof Blob;
+
+    await user.click(exportBtn);
+
+    globalThis.Blob = originalBlob;
+    const json = JSON.parse(blobParts[0] as string);
+    expect(json.monitoredRepos).toEqual([{ owner: "org", name: "repo1", fullName: "org/repo1" }]);
+  });
+});

@@ -105,6 +105,20 @@ createRoot(() => {
   });
 });
 
+// When monitoredRepos changes, reset notification state so the next poll cycle
+// silently seeds the newly monitored repo's items without flooding with notifications.
+let _monitoredReposMounted = false;
+createRoot(() => {
+  createEffect(() => {
+    void (config.monitoredRepos?.length ?? 0);
+    if (!_monitoredReposMounted) {
+      _monitoredReposMounted = true;
+      return;
+    }
+    untrack(() => _resetNotificationState());
+  });
+});
+
 /**
  * Checks if anything changed since last poll using the Notifications API.
  * Returns true if there are new notifications (or first check), false if unchanged.
@@ -215,10 +229,13 @@ export async function fetchAllData(
   }
 
   const trackedUsers = config.trackedUsers ?? [];
+  const monitoredRepos = config.monitoredRepos ?? [];
 
   // Issues + PRs use a two-phase approach: light query first (phase 1),
   // then heavy backfill (phase 2). Workflow runs use REST core.
   // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
+  // Note: monitoredRepos are NOT added to combinedRepos for workflow runs —
+  // Actions fetches are already per selectedRepo.
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
     fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, onLightData ? (lightData) => {
       // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
@@ -228,7 +245,7 @@ export async function fetchAllData(
         workflowRuns: [],
         errors: lightData.errors,
       });
-    } : undefined, trackedUsers),
+    } : undefined, trackedUsers, monitoredRepos),
     fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
   ]);
 

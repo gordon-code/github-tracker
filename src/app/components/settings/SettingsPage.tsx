@@ -1,6 +1,6 @@
 import { createSignal, Show, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig } from "../../stores/config";
+import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
@@ -142,6 +142,7 @@ export default function SettingsPage() {
         selectedOrgs: config.selectedOrgs,
         selectedRepos: config.selectedRepos,
         upstreamRepos: config.upstreamRepos,
+        monitoredRepos: config.monitoredRepos,
         trackedUsers: config.trackedUsers,
         refreshInterval: config.refreshInterval,
         hotPollInterval: config.hotPollInterval,
@@ -324,6 +325,8 @@ export default function SettingsPage() {
                   upstreamRepos={localUpstream()}
                   onUpstreamChange={handleUpstreamChange}
                   trackedUsers={config.trackedUsers}
+                  monitoredRepos={config.monitoredRepos}
+                  onMonitorToggle={(repo, monitored) => setMonitoredRepo(repo, monitored)}
                 />
               </div>
             </Show>

@@ -30,6 +30,7 @@ export const TrackedUserSchema = z.object({
     "Avatar URL must be from GitHub CDN"
   ),
   name: z.string().nullable(),
+  type: z.enum(["user", "bot"]).default("user"),
 });
 
 export type TrackedUser = z.infer<typeof TrackedUserSchema>;
@@ -38,6 +39,7 @@ export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
   upstreamRepos: z.array(RepoRefSchema).default([]),
+  monitoredRepos: z.array(RepoRefSchema).default([]),
   trackedUsers: z.array(TrackedUserSchema).max(10).default([]),
   refreshInterval: z.number().min(0).max(3600).default(300),
   hotPollInterval: z.number().min(10).max(120).default(30),
@@ -94,6 +96,27 @@ export function updateConfig(partial: Partial<Config>): void {
   setConfig(
     produce((draft) => {
       Object.assign(draft, filtered);
+      if ("selectedRepos" in partial) {
+        const selectedSet = new Set(draft.selectedRepos.map((r) => r.fullName));
+        draft.monitoredRepos = draft.monitoredRepos.filter((r) => selectedSet.has(r.fullName));
+      }
+    })
+  );
+}
+
+export function setMonitoredRepo(repo: z.infer<typeof RepoRefSchema>, monitored: boolean): void {
+  setConfig(
+    produce((draft) => {
+      if (monitored) {
+        const inSelected = draft.selectedRepos.some((r) => r.fullName === repo.fullName);
+        if (!inSelected) return;
+        const alreadyMonitored = draft.monitoredRepos.some((r) => r.fullName === repo.fullName);
+        if (!alreadyMonitored) {
+          draft.monitoredRepos.push(repo);
+        }
+      } else {
+        draft.monitoredRepos = draft.monitoredRepos.filter((r) => r.fullName !== repo.fullName);
+      }
     })
   );
 }
