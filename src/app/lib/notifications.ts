@@ -100,7 +100,7 @@ function fireNotification(
   tag: string,
   url?: string
 ): void {
-  const n = new Notification(title, { body, tag, icon: "/favicon.ico" });
+  const n = new Notification(title, { body, tag, icon: "/assets/logo-192.png" });
   if (url) {
     const safeUrl = url;
     n.onclick = () => openUrl(safeUrl);

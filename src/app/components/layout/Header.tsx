@@ -29,7 +29,12 @@ export default function Header() {
     <>
       <header class="navbar fixed top-0 left-0 right-0 z-50 bg-base-100 border-b border-base-300 shadow-sm min-h-14">
         <div class="max-w-6xl mx-auto w-full flex items-center gap-4 px-4">
-        <span class="font-semibold text-base-content text-lg shrink-0">
+        <span class="font-semibold text-base-content text-lg shrink-0 inline-flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <defs><clipPath id="nav-lens"><circle cx="6.5" cy="6.5" r="5"/></clipPath></defs>
+            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001q.044.06.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1 1 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/>
+            <g clip-path="url(#nav-lens)"><g transform="translate(3.05,2.66) scale(0.32)"><path d="M15 13.25a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0Zm-12.5 6a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0Zm0-14.5a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0ZM5.75 6.5a1.75 1.75 0 1 0-.001-3.501A1.75 1.75 0 0 0 5.75 6.5Zm0 14.5a1.75 1.75 0 1 0-.001-3.501A1.75 1.75 0 0 0 5.75 21Zm12.5-6a1.75 1.75 0 1 0-.001-3.501A1.75 1.75 0 0 0 18.25 15Z"/><path d="M6.5 7.25c0 2.9 2.35 5.25 5.25 5.25h4.5V14h-4.5A6.75 6.75 0 0 1 5 7.25Z"/><path d="M5.75 16.75A.75.75 0 0 1 5 16V8a.75.75 0 0 1 1.5 0v8a.75.75 0 0 1-.75.75Z"/></g></g>
+          </svg>
           GitHub Tracker
         </span>
 
