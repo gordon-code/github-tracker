@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
-import * as viewStore from "../../src/app/stores/view";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { HotPRStatusUpdate, HotWorkflowRunUpdate } from "../../src/app/services/api";
 
@@ -73,6 +72,7 @@ let capturedOnHotData: ((
 let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
 let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
+let viewStore: typeof import("../../src/app/stores/view");
 
 beforeEach(async () => {
   // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
@@ -123,6 +123,7 @@ beforeEach(async () => {
   DashboardPage = dashboardModule.default;
   pollService = await import("../../src/app/services/poll");
   authStore = await import("../../src/app/stores/auth");
+  viewStore = await import("../../src/app/stores/view");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -199,6 +200,102 @@ describe("DashboardPage — clock tick", () => {
     expect(clearSpy).toHaveBeenCalledWith(clockIntervalId);
     setSpy.mockRestore();
     clearSpy.mockRestore();
+  });
+});
+
+describe("DashboardPage — tab badge counts", () => {
+  it("excludes Dependency Dashboard issues from badge count by default", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Real issue" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+        makeIssue({ id: 3, title: "Dependency Dashboard" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const issuesTab = screen.getByRole("tab", { name: /Issues/ });
+      expect(issuesTab.textContent).toContain("1");
+      expect(issuesTab.textContent).not.toContain("3");
+    });
+  });
+
+  it("updates badge dynamically when hideDepDashboard is toggled off", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Real issue" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    // hideDepDashboard defaults to true — badge shows 1
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("1");
+    });
+
+    // Toggle off — badge should update to 2
+    viewStore.updateViewState({ hideDepDashboard: false });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+    });
+  });
+
+  it("decrements badge on ignore and increments on un-ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Issue B" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+    });
+
+    // Ignore one item — badge should decrement to 1
+    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("1");
+    });
+
+    // Un-ignore — badge should increment back to 2
+    viewStore.unignoreItem("1");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+    });
+  });
+
+  it("excludes PR-triggered runs from badge count by default", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const actionsTab = screen.getByRole("tab", { name: /Actions/ });
+      expect(actionsTab.textContent).toContain("1");
+      expect(actionsTab.textContent).not.toContain("3");
+    });
   });
 });
 

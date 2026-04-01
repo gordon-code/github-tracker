@@ -301,6 +301,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
+    () => viewState.ignoredItems.length,
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -321,38 +322,41 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar with SortDropdown */}
-      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
-        <SortDropdown
-          options={sortOptions}
-          value={sortPref().field}
-          direction={sortPref().direction}
-          onChange={handleSort}
-        />
-        <FilterChips
-          groups={filterGroups()}
-          values={viewState.tabFilters.pullRequests}
-          onChange={(field, value) => {
-            setTabFilter("pullRequests", field as PullRequestFilterField, value);
-            setPage(0);
-          }}
-          onReset={(field) => {
-            resetTabFilter("pullRequests", field as PullRequestFilterField);
-            setPage(0);
-          }}
-          onResetAll={() => {
-            resetAllTabFilters("pullRequests");
-            setPage(0);
-          }}
-        />
-        <div class="flex-1" />
-        <ExpandCollapseButtons
-          onExpandAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), true)}
-          onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
-        />
-        <IgnoreBadge
-          items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
-          onUnignore={unignoreItem}
-        />
+      <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+          <SortDropdown
+            options={sortOptions}
+            value={sortPref().field}
+            direction={sortPref().direction}
+            onChange={handleSort}
+          />
+          <FilterChips
+            groups={filterGroups()}
+            values={viewState.tabFilters.pullRequests}
+            onChange={(field, value) => {
+              setTabFilter("pullRequests", field as PullRequestFilterField, value);
+              setPage(0);
+            }}
+            onReset={(field) => {
+              resetTabFilter("pullRequests", field as PullRequestFilterField);
+              setPage(0);
+            }}
+            onResetAll={() => {
+              resetAllTabFilters("pullRequests");
+              setPage(0);
+            }}
+          />
+        </div>
+        <div class="shrink-0 flex items-center gap-2 py-0.5">
+          <ExpandCollapseButtons
+            onExpandAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
+          />
+          <IgnoreBadge
+            items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
+            onUnignore={unignoreItem}
+          />
+        </div>
       </div>
 
       {/* Loading skeleton — only when no data exists yet */}

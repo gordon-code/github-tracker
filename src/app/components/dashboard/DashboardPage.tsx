@@ -323,11 +323,30 @@ export default function DashboardPage() {
 
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
-  const tabCounts = createMemo(() => ({
-    issues: dashboardData.issues.length,
-    pullRequests: dashboardData.pullRequests.length,
-    actions: dashboardData.workflowRuns.length,
-  }));
+  const tabCounts = createMemo(() => {
+    const ignoredByType = (type: string) =>
+      new Set(viewState.ignoredItems.filter((i) => i.type === type).map((i) => i.id));
+
+    const ignoredIssues = ignoredByType("issue");
+    const ignoredPRs = ignoredByType("pullRequest");
+    const ignoredRuns = ignoredByType("workflowRun");
+
+    return {
+      issues: dashboardData.issues.filter((i) => {
+        if (ignoredIssues.has(String(i.id))) return false;
+        if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") return false;
+        return true;
+      }).length,
+      pullRequests: dashboardData.pullRequests.filter(
+        (p) => !ignoredPRs.has(String(p.id))
+      ).length,
+      actions: dashboardData.workflowRuns.filter((w) => {
+        if (ignoredRuns.has(String(w.id))) return false;
+        if (!viewState.showPrRuns && w.isPrRun) return false;
+        return true;
+      }).length,
+    };
+  });
 
   const userLogin = createMemo(() => user()?.login ?? "");
   const allUsers = createMemo(() => {
