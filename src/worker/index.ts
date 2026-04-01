@@ -80,19 +80,29 @@ function getCorsHeaders(
 // The envelope DSN is validated against env.SENTRY_DSN to prevent open proxy abuse.
 const SENTRY_ENVELOPE_MAX_BYTES = 256 * 1024; // 256 KB — Sentry rejects >200KB compressed
 
-let _dsnCache: { dsn: string; parsed: { host: string; projectId: string } | null } | undefined;
+interface ParsedDsn { host: string; projectId: string; publicKey: string }
 
-/** Parse host and project ID from a Sentry DSN URL. Returns null if invalid. */
-function parseSentryDsn(dsn: string): { host: string; projectId: string } | null {
+let _dsnCache: { dsn: string; parsed: ParsedDsn | null } | undefined;
+
+/** Parse host, project ID, and public key from a Sentry DSN URL. Returns null if invalid. */
+function parseSentryDsn(dsn: string): ParsedDsn | null {
   if (!dsn) return null;
   try {
     const url = new URL(dsn);
     const projectId = url.pathname.split("/").filter(Boolean).pop() ?? "";
-    if (!url.hostname || !projectId) return null;
-    return { host: url.hostname, projectId };
+    if (!url.hostname || !projectId || !url.username) return null;
+    return { host: url.hostname, projectId, publicKey: url.username };
   } catch {
     return null;
   }
+}
+
+/** Get cached parsed DSN, re-parsing only when the DSN string changes. */
+function getOrCacheDsn(env: Env): ParsedDsn | null {
+  if (!_dsnCache || _dsnCache.dsn !== env.SENTRY_DSN) {
+    _dsnCache = { dsn: env.SENTRY_DSN, parsed: parseSentryDsn(env.SENTRY_DSN) };
+  }
+  return _dsnCache.parsed;
 }
 
 async function handleSentryTunnel(
@@ -103,10 +113,7 @@ async function handleSentryTunnel(
     return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
-  if (!_dsnCache || _dsnCache.dsn !== env.SENTRY_DSN) {
-    _dsnCache = { dsn: env.SENTRY_DSN, parsed: parseSentryDsn(env.SENTRY_DSN) };
-  }
-  const allowedDsn = _dsnCache.parsed;
+  const allowedDsn = getOrCacheDsn(env);
   if (!allowedDsn) {
     log("warn", "sentry_tunnel_not_configured", {}, request);
     return new Response(null, { status: 404, headers: SECURITY_HEADERS });
@@ -184,6 +191,106 @@ async function handleSentryTunnel(
     }, request);
     return new Response(null, { status: 502, headers: SECURITY_HEADERS });
   }
+}
+
+// ── CSP report tunnel ────────────────────────────────────────────────────
+// Receives browser CSP violation reports, scrubs OAuth params from URLs,
+// then forwards to Sentry's security ingest endpoint.
+const CSP_REPORT_MAX_BYTES = 64 * 1024;
+const CSP_OAUTH_PARAMS_RE = /([?&])(code|state|access_token)=[^&\s]*/g;
+
+function scrubReportUrl(url: unknown): string | undefined {
+  if (typeof url !== "string") return undefined;
+  return url.replace(CSP_OAUTH_PARAMS_RE, "$1$2=[REDACTED]");
+}
+
+function scrubCspReportBody(body: Record<string, unknown>): Record<string, unknown> {
+  const scrubbed = { ...body };
+  // Legacy report-uri format uses kebab-case keys
+  for (const key of ["document-uri", "blocked-uri", "source-file", "referrer"]) {
+    if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
+  }
+  // report-to format uses camelCase keys
+  for (const key of ["documentURL", "blockedURL", "sourceFile", "referrer"]) {
+    if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
+  }
+  return scrubbed;
+}
+
+async function handleCspReport(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return new Response(null, { status: 405, headers: SECURITY_HEADERS });
+  }
+
+  const allowedDsn = getOrCacheDsn(env);
+  if (!allowedDsn) {
+    return new Response(null, { status: 404, headers: SECURITY_HEADERS });
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await request.text();
+  } catch {
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
+  }
+
+  if (bodyText.length > CSP_REPORT_MAX_BYTES) {
+    log("warn", "csp_report_too_large", { body_length: bodyText.length }, request);
+    return new Response(null, { status: 413, headers: SECURITY_HEADERS });
+  }
+
+  const contentType = request.headers.get("Content-Type") ?? "";
+  let scrubbedPayloads: Array<Record<string, unknown>> = [];
+
+  try {
+    if (contentType.includes("application/reports+json")) {
+      // report-to format: array of report objects
+      const reports = JSON.parse(bodyText) as Array<{ type?: string; body?: Record<string, unknown> }>;
+      for (const report of reports) {
+        if (report.type === "csp-violation" && report.body) {
+          scrubbedPayloads.push({ "csp-report": scrubCspReportBody(report.body) });
+        }
+      }
+    } else {
+      // Legacy report-uri format: { "csp-report": { ... } }
+      const parsed = JSON.parse(bodyText) as { "csp-report"?: Record<string, unknown> };
+      if (parsed["csp-report"]) {
+        scrubbedPayloads.push({ "csp-report": scrubCspReportBody(parsed["csp-report"]) });
+      }
+    }
+  } catch {
+    log("warn", "csp_report_parse_failed", {}, request);
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
+  }
+
+  if (scrubbedPayloads.length === 0) {
+    return new Response(null, { status: 204, headers: SECURITY_HEADERS });
+  }
+
+  // Cap fan-out to prevent amplification from crafted report-to batches
+  if (scrubbedPayloads.length > 20) {
+    scrubbedPayloads = scrubbedPayloads.slice(0, 20);
+  }
+
+  // Sentry security endpoint expects individual csp-report JSON objects
+  const sentryUrl = `https://${allowedDsn.host}/api/${allowedDsn.projectId}/security/?sentry_key=${allowedDsn.publicKey}`;
+
+  const results = await Promise.all(
+    scrubbedPayloads.map((payload) =>
+      fetch(sentryUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/csp-report" },
+        body: JSON.stringify(payload),
+      }).catch(() => null)
+    )
+  );
+
+  log("info", "csp_report_forwarded", {
+    count: scrubbedPayloads.length,
+    sentry_ok: results.some((r) => r?.ok),
+  }, request);
+
+  return new Response(null, { status: 204, headers: SECURITY_HEADERS });
 }
 
 // GitHub OAuth code format validation (SDR-005): alphanumeric, 1-40 chars.
@@ -348,6 +455,11 @@ export default {
     // Sentry tunnel — same-origin proxy, no CORS needed (browser sends as first-party)
     if (url.pathname === "/api/error-reporting") {
       return handleSentryTunnel(request, env);
+    }
+
+    // CSP report tunnel — scrubs OAuth params before forwarding to Sentry
+    if (url.pathname === "/api/csp-report") {
+      return handleCspReport(request, env);
     }
 
     if (url.pathname === "/api/oauth/token") {

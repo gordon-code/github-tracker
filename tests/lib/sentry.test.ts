@@ -179,7 +179,7 @@ describe("beforeBreadcrumbHandler", () => {
   });
 
   it("keeps allowed console breadcrumbs", () => {
-    const prefixes = ["[auth]", "[api]", "[poll]", "[dashboard]", "[settings]"];
+    const prefixes = ["[app]", "[auth]", "[api]", "[poll]", "[dashboard]", "[settings]"];
     for (const prefix of prefixes) {
       const breadcrumb = {
         category: "console",

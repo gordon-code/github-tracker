@@ -11,6 +11,7 @@ export function scrubUrl(url: string): string {
 
 /** Allowed console breadcrumb prefixes — drop everything else. */
 const ALLOWED_CONSOLE_PREFIXES = [
+  "[app]",
   "[auth]",
   "[api]",
   "[poll]",
