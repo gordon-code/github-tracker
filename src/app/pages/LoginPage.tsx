@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { setAuthFromPat, type GitHubUser } from "../stores/auth";
 import {
@@ -10,6 +10,19 @@ import { buildAuthorizeUrl } from "../lib/oauth";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+
+  onMount(() => {
+    // Speculatively prefetch the dashboard chunk while the user is on the
+    // login page. By the time they authenticate, the chunk is cached.
+    const prefetch = () => {
+      import("../components/dashboard/DashboardPage").catch(() => {
+        console.warn("[app] Dashboard chunk prefetch failed");
+      });
+    };
+    "requestIdleCallback" in window
+      ? requestIdleCallback(prefetch)
+      : setTimeout(prefetch, 2000);
+  });
 
   const [showPatForm, setShowPatForm] = createSignal(false);
   const [patInput, setPatInput] = createSignal("");
