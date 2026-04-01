@@ -301,7 +301,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
-    () => viewState.ignoredItems.length,
+    () => viewState.ignoredItems.filter(i => i.type === "pullRequest").length,
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {

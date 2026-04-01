@@ -4,18 +4,18 @@ import { detectReorderedRepos } from "./grouping";
 export function createReorderHighlight(
   getRepoOrder: Accessor<string[]>,
   getLockedOrder: Accessor<string[]>,
-  getIgnoredCount?: Accessor<number>,
+  getIgnoredCount: Accessor<number>,
 ): Accessor<ReadonlySet<string>> {
   let prevOrder: string[] = [];
   let prevLocked: string[] = [];
-  let prevIgnoredCount = getIgnoredCount?.() ?? 0;
+  let prevIgnoredCount = getIgnoredCount();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const [highlighted, setHighlighted] = createSignal<ReadonlySet<string>>(new Set());
 
   createEffect(() => {
     const currentOrder = getRepoOrder();
     const currentLocked = getLockedOrder();
-    const currentIgnoredCount = getIgnoredCount?.() ?? 0;
+    const currentIgnoredCount = getIgnoredCount();
 
     const lockedChanged = currentLocked.length !== prevLocked.length
       || currentLocked.some((r, i) => r !== prevLocked[i]);

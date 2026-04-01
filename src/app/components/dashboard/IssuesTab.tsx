@@ -203,7 +203,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
-    () => viewState.ignoredItems.length,
+    () => viewState.ignoredItems.filter(i => i.type === "issue").length,
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {

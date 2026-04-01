@@ -219,8 +219,7 @@ describe("DashboardPage — tab badge counts", () => {
     render(() => <DashboardPage />);
     await waitFor(() => {
       const issuesTab = screen.getByRole("tab", { name: /Issues/ });
-      expect(issuesTab.textContent).toContain("1");
-      expect(issuesTab.textContent).not.toContain("3");
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("1");
     });
   });
 
@@ -238,17 +237,17 @@ describe("DashboardPage — tab badge counts", () => {
     render(() => <DashboardPage />);
     // hideDepDashboard defaults to true — badge shows 1
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("1");
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Toggle off — badge should update to 2
     viewStore.updateViewState({ hideDepDashboard: false });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
   });
 
-  it("decrements badge on ignore and increments on un-ignore", async () => {
+  it("decrements issue badge on ignore and increments on un-ignore", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 1, title: "Issue A" }),
@@ -262,19 +261,64 @@ describe("DashboardPage — tab badge counts", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
 
     // Ignore one item — badge should decrement to 1
     viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("1");
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Un-ignore — badge should increment back to 2
     viewStore.unignoreItem("1");
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent).toContain("2");
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("decrements PR badge on ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 10, title: "PR A" }),
+        makePullRequest({ id: 11, title: "PR B" }),
+        makePullRequest({ id: 12, title: "PR C" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+
+    viewStore.ignoreItem({ id: "10", type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("decrements Actions badge on ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    viewStore.ignoreItem({ id: "20", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
   });
 
@@ -292,9 +336,32 @@ describe("DashboardPage — tab badge counts", () => {
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      const actionsTab = screen.getByRole("tab", { name: /Actions/ });
-      expect(actionsTab.textContent).toContain("1");
-      expect(actionsTab.textContent).not.toContain("3");
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("includes PR-triggered runs in badge count when showPrRuns is enabled", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    // Default: showPrRuns=false — badge shows 1
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Toggle on — badge should update to 3
+    viewStore.updateViewState({ showPrRuns: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
   });
 });

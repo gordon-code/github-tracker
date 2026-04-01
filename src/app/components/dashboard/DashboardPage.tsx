@@ -324,6 +324,7 @@ export default function DashboardPage() {
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
   const tabCounts = createMemo(() => {
+    const { org, repo } = viewState.globalFilter;
     const ignoredByType = (type: string) =>
       new Set(viewState.ignoredItems.filter((i) => i.type === type).map((i) => i.id));
 
@@ -335,14 +336,21 @@ export default function DashboardPage() {
       issues: dashboardData.issues.filter((i) => {
         if (ignoredIssues.has(String(i.id))) return false;
         if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") return false;
+        if (repo && i.repoFullName !== repo) return false;
+        if (org && !i.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
-      pullRequests: dashboardData.pullRequests.filter(
-        (p) => !ignoredPRs.has(String(p.id))
-      ).length,
+      pullRequests: dashboardData.pullRequests.filter((p) => {
+        if (ignoredPRs.has(String(p.id))) return false;
+        if (repo && p.repoFullName !== repo) return false;
+        if (org && !p.repoFullName.startsWith(org + "/")) return false;
+        return true;
+      }).length,
       actions: dashboardData.workflowRuns.filter((w) => {
         if (ignoredRuns.has(String(w.id))) return false;
         if (!viewState.showPrRuns && w.isPrRun) return false;
+        if (repo && w.repoFullName !== repo) return false;
+        if (org && !w.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
     };

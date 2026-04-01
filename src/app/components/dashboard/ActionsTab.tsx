@@ -211,7 +211,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   const highlightedReposActions = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.actions,
-    () => viewState.ignoredItems.length,
+    () => viewState.ignoredItems.filter(i => i.type === "workflowRun").length,
   );
 
   return (
