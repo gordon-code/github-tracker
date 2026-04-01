@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .icon { fill: none; stroke: #24292f; }
+    @media (prefers-color-scheme: dark) {
+      .icon { stroke: #e6edf3; }
+    }
+  </style>
+
+  <!-- Magnifying glass (Lucide search, ISC — thickened for favicon clarity) -->
+  <circle cx="10.5" cy="10.5" r="7.5" class="icon" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="15.8" y1="15.8" x2="23" y2="23" class="icon" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

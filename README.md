@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/assets/logo.svg" width="96" height="96" alt="GitHub Tracker logo">
+</p>
+
 # GitHub Tracker
 
 Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple repos/orgs. Built with SolidJS on Cloudflare Workers.
@@ -7,7 +11,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 - **Issues Tab** — Open issues where you're the creator, assignee, or mentioned. Sortable, filterable, paginated. Dependency Dashboard issues hidden by default (toggleable).
 - **Pull Requests Tab** — Open PRs with CI check status indicators (green/yellow/red dots). Draft badges, reviewer names.
 - **Actions Tab** — GHA workflow runs grouped by repo and workflow. Accordion collapse, PR run toggle.
-- **Onboarding Wizard** — Two-step org/repo selection with search filtering and bulk select.
+- **Onboarding Wizard** — Single-step repo selection with search filtering and bulk select.
 - **PAT Authentication** — Optional Personal Access Token login as alternative to OAuth. Client-side format validation, detailed token creation instructions for classic and fine-grained PATs.
 - **Settings Page** — Refresh interval, notification preferences, theme (light/dark/system), density, GitHub Actions limits. Shows current auth method and hides OAuth-specific options for PAT users.
 - **Desktop Notifications** — New item alerts with per-type toggles and batching.
