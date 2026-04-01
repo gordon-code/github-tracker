@@ -14,7 +14,11 @@ export default function LoginPage() {
   onMount(() => {
     // Speculatively prefetch the dashboard chunk while the user is on the
     // login page. By the time they authenticate, the chunk is cached.
-    const prefetch = () => void import("../components/dashboard/DashboardPage");
+    const prefetch = () => {
+      import("../components/dashboard/DashboardPage").catch(() => {
+        console.warn("[app] Dashboard chunk prefetch failed");
+      });
+    };
     "requestIdleCallback" in window
       ? requestIdleCallback(prefetch)
       : setTimeout(prefetch, 2000);

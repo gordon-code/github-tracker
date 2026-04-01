@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onMount, Show, ErrorBoundary, lazy, type JSX } from "solid-js";
+import { createSignal, createEffect, onMount, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
@@ -12,6 +12,11 @@ import PrivacyPage from "./pages/PrivacyPage";
 const DashboardPage = lazy(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazy(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazy(() => import("./components/settings/SettingsPage"));
+
+function handleRouteError(err: unknown) {
+  console.error("[app] Route render failed:", err);
+  return <ChunkErrorFallback />;
+}
 
 function ChunkErrorFallback() {
   return (
@@ -163,21 +168,29 @@ export default function App() {
     // Preload dashboard chunk in parallel with token validation to avoid
     // a sequential waterfall (validateToken → chunk fetch)
     if (localStorage.getItem?.(AUTH_STORAGE_KEY)) {
-      void import("./components/dashboard/DashboardPage");
+      import("./components/dashboard/DashboardPage").catch(() => {
+        console.warn("[app] Dashboard chunk preload failed");
+      });
     }
   });
 
   return (
-    <ErrorBoundary fallback={(err) => { console.error("[app] Route render failed:", err); return <ChunkErrorFallback />; }}>
-      <Router>
-        <Route path="/" component={RootRedirect} />
-        <Route path="/login" component={LoginPage} />
-        <Route path="/oauth/callback" component={OAuthCallback} />
-        <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
-        <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
-        <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
-        <Route path="/privacy" component={PrivacyPage} />
-      </Router>
+    <ErrorBoundary fallback={handleRouteError}>
+      <Suspense fallback={
+        <div class="min-h-screen flex items-center justify-center bg-base-200">
+          <span class="loading loading-spinner loading-lg" aria-label="Loading" />
+        </div>
+      }>
+        <Router>
+          <Route path="/" component={RootRedirect} />
+          <Route path="/login" component={LoginPage} />
+          <Route path="/oauth/callback" component={OAuthCallback} />
+          <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
+          <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
+          <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
+          <Route path="/privacy" component={PrivacyPage} />
+        </Router>
+      </Suspense>
     </ErrorBoundary>
   );
 }

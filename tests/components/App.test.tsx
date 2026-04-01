@@ -52,6 +52,8 @@ vi.mock("../../src/app/stores/cache", async (importOriginal) => {
 
 // Mock heavy page/component dependencies
 let dashboardShouldThrow = false;
+let onboardingShouldThrow = false;
+let settingsShouldThrow = false;
 vi.mock("../../src/app/components/dashboard/DashboardPage", () => ({
   default: () => {
     if (dashboardShouldThrow) throw new Error("chunk load failed");
@@ -59,10 +61,16 @@ vi.mock("../../src/app/components/dashboard/DashboardPage", () => ({
   },
 }));
 vi.mock("../../src/app/components/onboarding/OnboardingWizard", () => ({
-  default: () => <div data-testid="onboarding-wizard">Onboarding</div>,
+  default: () => {
+    if (onboardingShouldThrow) throw new Error("chunk load failed");
+    return <div data-testid="onboarding-wizard">Onboarding</div>;
+  },
 }));
 vi.mock("../../src/app/components/settings/SettingsPage", () => ({
-  default: () => <div data-testid="settings-page">Settings</div>,
+  default: () => {
+    if (settingsShouldThrow) throw new Error("chunk load failed");
+    return <div data-testid="settings-page">Settings</div>;
+  },
 }));
 
 import * as configStore from "../../src/app/stores/config";
@@ -78,6 +86,8 @@ describe("App", () => {
     mockIsAuthenticated = false;
     mockValidateToken = async () => false;
     dashboardShouldThrow = false;
+    onboardingShouldThrow = false;
+    settingsShouldThrow = false;
     // Re-apply default mock implementations that are needed across tests
     vi.mocked(cacheStore.evictStaleEntries).mockResolvedValue(0);
     // Reset config to defaults
@@ -187,5 +197,61 @@ describe("App", () => {
     );
 
     spy.mockRestore();
+  });
+
+  it("shows error fallback when onboarding route throws", async () => {
+    onboardingShouldThrow = true;
+    mockIsAuthenticated = true;
+    configStore.updateConfig({ onboardingComplete: false });
+    window.history.pushState({}, "", "/onboarding");
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(() => <App />);
+
+    await waitFor(() => {
+      screen.getByText("Failed to load page");
+    });
+
+    spy.mockRestore();
+  });
+
+  it("shows error fallback when settings route throws", async () => {
+    settingsShouldThrow = true;
+    mockIsAuthenticated = true;
+    configStore.updateConfig({ onboardingComplete: true });
+    window.history.pushState({}, "", "/settings");
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(() => <App />);
+
+    await waitFor(() => {
+      screen.getByText("Failed to load page");
+    });
+
+    spy.mockRestore();
+  });
+
+  it("preloads dashboard chunk when auth token exists in localStorage", async () => {
+    // happy-dom's localStorage is a Proxy; use vi.stubGlobal with a mock
+    const store: Record<string, string> = { "github-tracker:auth-token": "test-token" };
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store[key] ?? null,
+      setItem: (key: string, val: string) => { store[key] = val; },
+      removeItem: (key: string) => { delete store[key]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    render(() => <App />);
+
+    await waitFor(() => {
+      expect(vi.mocked(cacheStore.evictStaleEntries)).toHaveBeenCalled();
+    });
+
+    vi.unstubAllGlobals();
+    warnSpy.mockRestore();
   });
 });
