@@ -14,6 +14,15 @@ hooks = [
 repo = "local"
 
 [[repos.hooks]]
+id = "lockfile-sync"
+name = "Lockfile in sync with package.json"
+language = "system"
+entry = "pnpm install --frozen-lockfile"
+pass_filenames = false
+files = "(package\\.json|pnpm-lock\\.yaml)$"
+priority = 0
+
+[[repos.hooks]]
 id = "typecheck"
 name = "TypeScript typecheck"
 language = "system"
