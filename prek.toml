@@ -14,6 +14,15 @@ hooks = [
 repo = "local"
 
 [[repos.hooks]]
+id = "lockfile-sync"
+name = "Lockfile in sync with package.json"
+language = "system"
+entry = "pnpm install --frozen-lockfile"
+pass_filenames = false
+files = "(package\\.json|pnpm-lock\\.yaml)$"
+priority = 0
+
+[[repos.hooks]]
 id = "typecheck"
 name = "TypeScript typecheck"
 language = "system"
@@ -35,7 +44,7 @@ priority = 0
 id = "csp-hash"
 name = "CSP hash verification"
 language = "system"
-entry = "node scripts/verify-csp-hash.mjs"
+entry = "bash scripts/verify-csp-hash.sh"
 pass_filenames = false
 always_run = true
 priority = 0

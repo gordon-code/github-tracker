@@ -186,16 +186,16 @@ describe("expireToken", () => {
     expect(mod.user()).toBeNull();
   });
 
-  it("removes only auth token from localStorage — config, view, dashboard preserved", () => {
+  it("removes auth token and dashboard cache from localStorage — config, view preserved", () => {
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
     localStorageMock.setItem("github-tracker:dashboard", '{"cached":true}');
     mod.setAuth({ access_token: "ghs_abc" });
     mod.expireToken();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dashboard")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
-    expect(localStorageMock.getItem("github-tracker:dashboard")).toBe('{"cached":true}');
   });
 
   it("does NOT invoke onAuthCleared callbacks", () => {
@@ -454,6 +454,89 @@ describe("validateToken", () => {
     expect(result).toBe(false);
     expect(freshMod.token()).toBe("ghs_permanent");
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghs_permanent");
+  });
+});
+
+describe("cross-tab auth sync", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("calls expireToken and redirects to /login when another tab clears the token", () => {
+    const replaceMock = vi.fn();
+    vi.stubGlobal("location", { ...window.location, replace: replaceMock });
+
+    mod.setAuth({ access_token: "ghs_abc" });
+    // Simulate another tab removing the token from localStorage
+    localStorageMock.removeItem("github-tracker:auth-token");
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: null,
+    }));
+
+    expect(mod.token()).toBeNull();
+    expect(replaceMock).toHaveBeenCalledWith("/login");
+  });
+
+  it("does not call expireToken when key does not match", () => {
+    mod.setAuth({ access_token: "ghs_abc" });
+    localStorageMock.removeItem("github-tracker:auth-token");
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:some-other-key",
+      newValue: null,
+    }));
+
+    // Token unchanged — wrong key means the listener is a no-op for this module
+    expect(mod.token()).toBe("ghs_abc");
+  });
+
+  it("does not call expireToken when newValue is not null", () => {
+    mod.setAuth({ access_token: "ghs_abc" });
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_new-token",
+    }));
+
+    // Token unchanged — non-null newValue means no sign-out occurred
+    expect(mod.token()).toBe("ghs_abc");
+  });
+
+  it("does not call expireToken when no token is set in memory", () => {
+    // No setAuth call — token signal is null, guard `_token()` prevents action
+    localStorageMock.removeItem("github-tracker:auth-token");
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: null,
+    }));
+
+    expect(mod.token()).toBeNull();
+  });
+
+  it("skips expireToken if localStorage was repopulated (rapid sign-out/sign-in race)", () => {
+    mod.setAuth({ access_token: "ghs_abc" });
+    // Do NOT remove from localStorage — simulates another tab signing back in
+    // immediately after signing out, so getItem returns a value when the event fires
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: null,
+    }));
+
+    // The listener bails out because localStorage.getItem(AUTH_STORAGE_KEY) !== null
+    expect(mod.token()).toBe("ghs_abc");
   });
 });
 

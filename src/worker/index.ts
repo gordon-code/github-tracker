@@ -3,7 +3,8 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   ALLOWED_ORIGIN: string;
-  SENTRY_DSN: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
+  SENTRY_DSN?: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
+  SENTRY_SECURITY_TOKEN?: string; // Optional: Sentry security token for Allowed Domains validation
 }
 
 // Predefined error strings only (SDR-006)
@@ -53,10 +54,43 @@ function errorResponse(
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
+  "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "DENY",
 };
+
+// Simple in-memory rate limiter for token exchange endpoint.
+// Not durable across isolate restarts, but catches burst abuse.
+// Note: CF-Connecting-IP is set by Cloudflare's proxy layer; if the workers.dev
+// route is enabled, an attacker could spoof this header. Disable the workers.dev
+// route in the Cloudflare dashboard for production use.
+const TOKEN_RATE_LIMIT = 10; // max requests per window
+const TOKEN_RATE_WINDOW_MS = 60_000; // 1 minute
+const _tokenRateMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkTokenRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = _tokenRateMap.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    _tokenRateMap.set(ip, { count: 1, resetAt: now + TOKEN_RATE_WINDOW_MS });
+    return true;
+  }
+  entry.count++;
+  if (entry.count > TOKEN_RATE_LIMIT) return false;
+  return true;
+}
+
+// Periodic cleanup to prevent unbounded map growth.
+// Only runs when the map exceeds a threshold to avoid O(N) scan on every request.
+const PRUNE_THRESHOLD = 100;
+function pruneTokenRateMap(): void {
+  if (_tokenRateMap.size < PRUNE_THRESHOLD) return;
+  const now = Date.now();
+  for (const [ip, entry] of _tokenRateMap) {
+    if (now >= entry.resetAt) _tokenRateMap.delete(ip);
+  }
+}
 
 // CORS: strict equality only (SDR-004)
 function getCorsHeaders(
@@ -82,6 +116,10 @@ const SENTRY_ENVELOPE_MAX_BYTES = 256 * 1024; // 256 KB — Sentry rejects >200K
 
 interface ParsedDsn { host: string; projectId: string; publicKey: string }
 
+// Module-level cache is safe here: value derived entirely from env.SENTRY_DSN
+// (a deployment constant, never user input). Shared across requests in the same
+// Worker isolate, which is intentional for performance. Do NOT follow this pattern
+// for request-scoped or user-controlled data.
 let _dsnCache: { dsn: string; parsed: ParsedDsn | null } | undefined;
 
 /** Parse host, project ID, and public key from a Sentry DSN URL. Returns null if invalid. */
@@ -99,8 +137,9 @@ function parseSentryDsn(dsn: string): ParsedDsn | null {
 
 /** Get cached parsed DSN, re-parsing only when the DSN string changes. */
 function getOrCacheDsn(env: Env): ParsedDsn | null {
-  if (!_dsnCache || _dsnCache.dsn !== env.SENTRY_DSN) {
-    _dsnCache = { dsn: env.SENTRY_DSN, parsed: parseSentryDsn(env.SENTRY_DSN) };
+  const dsn = env.SENTRY_DSN ?? "";
+  if (!_dsnCache || _dsnCache.dsn !== dsn) {
+    _dsnCache = { dsn, parsed: parseSentryDsn(dsn) };
   }
   return _dsnCache.parsed;
 }
@@ -171,9 +210,15 @@ async function handleSentryTunnel(
   // Forward to Sentry ingest endpoint
   const sentryUrl = `https://${allowedDsn.host}/api/${allowedDsn.projectId}/envelope/`;
   try {
+    const sentryHeaders: Record<string, string> = {
+      "Content-Type": "application/x-sentry-envelope",
+    };
+    if (env.SENTRY_SECURITY_TOKEN) {
+      sentryHeaders["X-Sentry-Token"] = env.SENTRY_SECURITY_TOKEN;
+    }
     const sentryResp = await fetch(sentryUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/x-sentry-envelope" },
+      headers: sentryHeaders,
       body,
     });
 
@@ -279,7 +324,10 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
     scrubbedPayloads.map((payload) =>
       fetch(sentryUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/csp-report" },
+        headers: {
+          "Content-Type": "application/csp-report",
+          ...(env.SENTRY_SECURITY_TOKEN ? { "X-Sentry-Token": env.SENTRY_SECURITY_TOKEN } : {}),
+        },
         body: JSON.stringify(payload),
       }).catch(() => null)
     )
@@ -306,6 +354,20 @@ async function handleTokenExchange(
   if (request.method !== "POST") {
     log("warn", "token_exchange_wrong_method", { method: request.method }, request);
     return errorResponse("method_not_allowed", 405, cors);
+  }
+
+  pruneTokenRateMap();
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (!checkTokenRateLimit(ip)) {
+    log("warn", "token_exchange_rate_limited", {}, request);
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        ...cors,
+        ...SECURITY_HEADERS,
+      },
+    });
   }
 
   log("info", "token_exchange_started", {}, request);

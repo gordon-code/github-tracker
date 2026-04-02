@@ -65,8 +65,12 @@ export async function setCacheEntry(
     ) {
       // Emergency eviction: delete oldest 50% of entries, then retry once
       await evictOldestPercent(50);
-      const db = await getDb();
-      await db.put("cache", entry);
+      try {
+        const db = await getDb();
+        await db.put("cache", entry);
+      } catch {
+        console.warn("[cache] Still over quota after emergency eviction — entry dropped");
+      }
     } else {
       throw err;
     }

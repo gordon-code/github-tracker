@@ -105,9 +105,10 @@ export function clearAuth(): void {
  *  navigation handles teardown. Use clearAuth() if not navigating. */
 export function expireToken(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(DASHBOARD_STORAGE_KEY);
   _setToken(null);
   setUser(null);
-  console.info("[auth] token expired (user data preserved)");
+  console.info("[auth] token expired (dashboard cache cleared)");
 }
 
 const VALIDATE_HEADERS = {
@@ -173,4 +174,17 @@ export async function validateToken(): Promise<boolean> {
     // Network error — permanent token survives transient failures
     return false;
   }
+}
+
+// Cross-tab auth sync: if another tab clears the token, this tab should also clear.
+// Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e: StorageEvent) => {
+    if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
+      // Re-check: a rapid sign-out/sign-in may have already replaced the token
+      if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
+      expireToken();
+      window.location.replace("/login");
+    }
+  });
 }

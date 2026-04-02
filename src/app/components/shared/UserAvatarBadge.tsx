@@ -31,8 +31,7 @@ export default function UserAvatarBadge(props: UserAvatarBadgeProps) {
         <For each={trackedUsers()}>
           {(u, i) => (
             <div
-              class="avatar"
-              style={i() > 0 ? { "margin-left": "-6px" } : {}}
+              class={`avatar${i() > 0 ? " -ml-1.5" : ""}`}
             >
               <div class="w-5 rounded-full ring-1 ring-base-100">
                 <img

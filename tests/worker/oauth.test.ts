@@ -14,13 +14,18 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   };
 }
 
+let _requestCounter = 0;
+
 function makeRequest(
   method: string,
   path: string,
   options: { body?: unknown; origin?: string; contentType?: string } = {}
 ): Request {
   const url = `https://gh.gordoncode.dev${path}`;
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    // Unique IP per request to avoid hitting the in-memory rate limiter across tests
+    "CF-Connecting-IP": `127.0.0.${++_requestCounter}`,
+  };
   if (options.origin !== undefined) {
     headers["Origin"] = options.origin;
   } else {
@@ -89,6 +94,88 @@ describe("Worker OAuth endpoint", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
+  });
+
+  // ── Rate limiting ────────────────────────────────────────────────────────
+
+  it("returns 429 after exceeding 10 requests per minute from the same IP", async () => {
+    const fixedIp = "10.0.0.99";
+    function makeRateLimitRequest() {
+      return new Request("https://gh.gordoncode.dev/api/oauth/token", {
+        method: "POST",
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": fixedIp,
+        },
+        body: JSON.stringify({ code: VALID_CODE }),
+      });
+    }
+
+    // Mock successful GitHub response
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ access_token: "tok", token_type: "bearer", scope: "repo" }),
+        { status: 200 }
+      )
+    );
+
+    const env = makeEnv();
+    // First 10 requests should succeed
+    for (let i = 0; i < 10; i++) {
+      const resp = await worker.fetch(makeRateLimitRequest(), env);
+      expect(resp.status).not.toBe(429);
+    }
+    // 11th request should be rate-limited
+    const resp = await worker.fetch(makeRateLimitRequest(), env);
+    expect(resp.status).toBe(429);
+    const body = await resp.json() as { error: string };
+    expect(body.error).toBe("rate_limited");
+    // Should include security headers
+    expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("allows requests again after the rate-limit window expires", async () => {
+    const fixedIp = "10.0.0.100";
+    function makeRateLimitRequest() {
+      return new Request("https://gh.gordoncode.dev/api/oauth/token", {
+        method: "POST",
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": fixedIp,
+        },
+        body: JSON.stringify({ code: VALID_CODE }),
+      });
+    }
+
+    vi.useFakeTimers();
+    try {
+      // Mock successful GitHub response
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ access_token: "tok", token_type: "bearer", scope: "repo" }),
+          { status: 200 }
+        )
+      );
+
+      const env = makeEnv();
+      // Exhaust the 10-request limit — 11th triggers rate limit
+      for (let i = 0; i < 10; i++) {
+        await worker.fetch(makeRateLimitRequest(), env);
+      }
+      const limited = await worker.fetch(makeRateLimitRequest(), env);
+      expect(limited.status).toBe(429);
+
+      // Advance time past the 60-second window
+      vi.advanceTimersByTime(61_000);
+
+      // Next request should get a fresh window — not rate-limited
+      const afterReset = await worker.fetch(makeRateLimitRequest(), env);
+      expect(afterReset.status).not.toBe(429);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ── Token exchange ─────────────────────────────────────────────────────────
@@ -868,9 +955,15 @@ describe("Worker OAuth endpoint", () => {
       expect(log!.level).toBe("warn");
     });
 
-    it("returns 404 when SENTRY_DSN is not configured", async () => {
+    it("returns 404 when SENTRY_DSN is empty string", async () => {
       const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
       const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: "" }));
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 when SENTRY_DSN is undefined", async () => {
+      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
+      const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: undefined as unknown as string }));
       expect(res.status).toBe(404);
     });
 

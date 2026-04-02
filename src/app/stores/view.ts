@@ -4,6 +4,7 @@ import { createEffect, onCleanup, untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
+const IGNORED_ITEMS_CAP = 500;
 
 const IssueFiltersSchema = z.object({
   role: z.enum(["all", "author", "assignee"]).default("all"),
@@ -55,6 +56,7 @@ export const ViewStateSchema = z.object({
         ignoredAt: z.number(),
       })
     )
+    .max(IGNORED_ITEMS_CAP)
     .default([]),
   globalFilter: z
     .object({
@@ -146,6 +148,10 @@ export function ignoreItem(item: IgnoredItem): void {
     produce((draft) => {
       const already = draft.ignoredItems.some((i) => i.id === item.id);
       if (!already) {
+        // FIFO eviction: remove oldest if at cap
+        if (draft.ignoredItems.length >= IGNORED_ITEMS_CAP) {
+          draft.ignoredItems.shift();
+        }
         draft.ignoredItems.push(item);
       }
     })
@@ -156,6 +162,17 @@ export function unignoreItem(id: string): void {
   setViewState(
     produce((draft) => {
       draft.ignoredItems = draft.ignoredItems.filter((i) => i.id !== id);
+    })
+  );
+}
+
+export function pruneStaleIgnoredItems(): void {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  setViewState(
+    produce((draft) => {
+      draft.ignoredItems = draft.ignoredItems.filter(
+        (i) => i.ignoredAt > thirtyDaysAgo
+      );
     })
   );
 }

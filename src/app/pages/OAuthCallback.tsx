@@ -24,10 +24,6 @@ export default function OAuthCallback() {
     const storedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     sessionStorage.removeItem(OAUTH_STATE_KEY);
 
-    // Read and clear returnTo before CSRF check — always consumed, even on failure
-    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
-    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
-
     // Validate state before anything else (CSRF protection)
     if (!stateFromUrl || !storedState || stateFromUrl !== storedState) {
       setError("Invalid OAuth state. Please try signing in again.");
@@ -64,6 +60,9 @@ export default function OAuthCallback() {
         return;
       }
 
+      // Read and clear returnTo only after successful auth (preserves it for retry on failure)
+      const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+      sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
       navigate(sanitizeReturnTo(returnTo), { replace: true });
     } catch {
       setError("A network error occurred. Please try again.");

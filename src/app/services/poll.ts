@@ -267,11 +267,13 @@ export async function fetchAllData(
   ];
   for (const [result, label] of settled) {
     if (result.status === "rejected") {
-      const reason = result.reason;
-      const statusCode = typeof reason === "object" && reason !== null && typeof (reason as Record<string, unknown>).status === "number"
-        ? (reason as Record<string, unknown>).status as number
+      const err = result.reason;
+      // Propagate 401 to outer handler for re-auth (don't absorb as generic error)
+      if (err?.status === 401 || err?.response?.status === 401) throw err;
+      const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+        ? (err as Record<string, unknown>).status as number
         : null;
-      const message = reason instanceof Error ? reason.message : String(reason);
+      const message = err instanceof Error ? err.message : String(err);
       topLevelErrors.push({ repo: label, statusCode, message, retryable: statusCode === null || (statusCode !== null && statusCode >= 500) });
     }
   }

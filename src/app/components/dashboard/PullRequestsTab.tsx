@@ -3,6 +3,7 @@ import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -542,8 +543,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                   </Show>
                                   <ReviewBadge decision={pr.reviewDecision} />
                                   <Show when={pr.enriched !== false}>
-                                    <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={`${pr.htmlUrl}/files`} />
-                                    <StatusDot status={pr.checkStatus} href={`${pr.htmlUrl}/checks`} />
+                                    <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
+                                    <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
                                     <Show when={pr.checkStatus === "conflict"}>
                                       <span class="badge badge-warning badge-sm gap-1">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

@@ -833,6 +833,62 @@ describe("DashboardPage pollFetch — fine-grained merge preserves surfacedBy", 
   });
 });
 
+// ── 401 propagation from Promise.allSettled ───────────────────────────────────
+
+describe("fetchAllData — 401 propagation from allSettled", () => {
+  it("re-throws 401 from fetchIssuesAndPullRequests instead of absorbing it", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+
+    vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue({ status: 401, message: "Unauthorized" });
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    await expect(fetchAllData()).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("re-throws 401 with response.status shape from fetchWorkflowRuns", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockRejectedValue({ response: { status: 401 }, message: "Bad credentials" });
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    await expect(fetchAllData()).rejects.toMatchObject({ response: { status: 401 } });
+  });
+
+  it("does NOT re-throw non-401 errors (500 is absorbed)", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+
+    vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue(Object.assign(new Error("Internal Server Error"), { status: 500 }));
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    // Should resolve (not throw) — 500 is absorbed as a top-level error entry
+    const result = await fetchAllData();
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].repo).toBe("issues-and-prs");
+    expect(result.errors[0].statusCode).toBe(500);
+  });
+});
+
 // ── qa-4: Concurrency verification ────────────────────────────────────────────
 
 describe("fetchAllData — parallel execution", () => {

@@ -18,8 +18,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm test
-      - name: Verify CSP hash
-        run: node scripts/verify-csp-hash.mjs
+      - name: Verify CSP inline script hash
+        run: bash scripts/verify-csp-hash.sh
       - name: WAF smoke tests
         run: pnpm test:waf
       - run: pnpm run build

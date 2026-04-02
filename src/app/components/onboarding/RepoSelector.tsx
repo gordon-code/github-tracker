@@ -16,7 +16,7 @@ import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 
 // Validates owner/repo format (both segments must be non-empty, no spaces)
-const VALID_REPO_NAME = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const VALID_REPO_NAME = /^[a-zA-Z0-9._-]{1,100}\/[a-zA-Z0-9._-]{1,100}$/;
 
 interface RepoSelectorProps {
   selectedOrgs: string[];
@@ -704,6 +704,13 @@ export default function RepoSelector(props: RepoSelectorProps) {
           {props.selected.length}{" "}
           {props.selected.length === 1 ? "repo" : "repos"} selected
         </p>
+      </Show>
+
+      {/* Rate limit warning for large selections */}
+      <Show when={props.selected.length + (props.upstreamRepos ?? []).length > 100}>
+        <div role="alert" class="alert alert-warning text-sm">
+          Tracking 100+ repos may cause GitHub API rate limit issues. Consider reducing your selection.
+        </div>
       </Show>
     </div>
   );

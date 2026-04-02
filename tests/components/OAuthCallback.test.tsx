@@ -314,7 +314,7 @@ describe("OAuthCallback", () => {
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
 
-  it("OAUTH_RETURN_TO_KEY is removed from sessionStorage after reading", async () => {
+  it("OAUTH_RETURN_TO_KEY is preserved while token exchange is in flight", async () => {
     sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
@@ -322,12 +322,12 @@ describe("OAuthCallback", () => {
 
     renderCallback();
 
-    await waitFor(() => {
-      expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
-    });
+    // returnTo is not consumed until auth completes — preserved for retry on failure
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
-  it("OAUTH_RETURN_TO_KEY is cleared even when CSRF check fails (stale key protection)", async () => {
+  it("OAUTH_RETURN_TO_KEY is preserved when CSRF check fails (only consumed on success)", async () => {
     sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
     sessionStorage.setItem(OAUTH_STATE_KEY, "expected-state");
     setWindowSearch({ code: "fakecode", state: "wrong-state" });
@@ -337,7 +337,49 @@ describe("OAuthCallback", () => {
     await waitFor(() => {
       screen.getByText(/Invalid OAuth state/i);
     });
-    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+    // returnTo is preserved for the user's next legitimate auth attempt
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
+  });
+
+  it("OAUTH_RETURN_TO_KEY is preserved when validateToken returns false", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "tok123" }),
+      })
+    );
+    vi.mocked(authStore.validateToken).mockResolvedValue(false);
+
+    renderCallback();
+
+    await waitFor(() => {
+      screen.getByText(/Could not verify token/i);
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
+  });
+
+  it("OAUTH_RETURN_TO_KEY is preserved when token exchange fails", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({ error: "bad_verification_code" }),
+      })
+    );
+
+    renderCallback();
+
+    await waitFor(() => {
+      screen.getByText(/Failed to complete sign in/i);
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
   it("navigates to / when OAUTH_RETURN_TO_KEY is not set", async () => {

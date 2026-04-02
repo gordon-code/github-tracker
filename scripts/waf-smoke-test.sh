@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # WAF Smoke Tests — validates Cloudflare WAF rules for gh.gordoncode.dev
+# Requires: GNU parallel (brew install parallel / apt install parallel)
 #
 # Usage: pnpm test:waf
 #
@@ -10,94 +11,112 @@
 
 set -euo pipefail
 
-BASE="https://gh.gordoncode.dev"
-PASS=0
-FAIL=0
+if ! command -v parallel &>/dev/null; then
+  printf 'Error: GNU parallel is required (brew install parallel / apt install parallel)\n' >&2
+  exit 1
+fi
 
-assert_status() {
-  local expected="$1" actual="$2" label="$3"
+BASE="https://gh.gordoncode.dev"
+
+# --- Test runner (exported for GNU parallel) ---
+run_test() {
+  local expected="$1" label="$2"
+  shift 2
+  local actual
+  actual=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$@")
   if [[ "$actual" == "$expected" ]]; then
-    echo "  PASS  [${actual}] ${label}"
-    PASS=$((PASS + 1))
+    printf '  PASS  [%s] %s\n' "$actual" "$label"
   else
-    echo "  FAIL  [${actual}] ${label} (expected ${expected})"
-    FAIL=$((FAIL + 1))
+    printf '  FAIL  [%s] %s (expected %s)\n' "$actual" "$label" "$expected"
+    return 1
   fi
 }
+export -f run_test
 
-fetch() {
-  curl -s -o /dev/null -w "%{http_code}" "$@"
+# --- Test spec parser (exported for GNU parallel) ---
+# Splits pipe-delimited spec into: expected_status | label | curl_args...
+run_spec() {
+  local expected label
+  IFS='|' read -ra parts <<< "$1"
+  expected="${parts[0]}"
+  label="${parts[1]}"
+  run_test "$expected" "$label" "${parts[@]:2}"
 }
+export -f run_spec
 
-# ============================================================
-# Rule 1: Path Allowlist
-# ============================================================
-echo "=== Rule 1: Path Allowlist ==="
-echo "--- Allowed paths (should pass) ---"
+# --- Test specs: expected_status | label | curl args ... ---
+# Pipe-delimited. Fields after label are passed directly to curl.
+TESTS=(
+  # Rule 1: Path Allowlist — allowed paths
+  "200|GET /|${BASE}/"
+  "200|GET /login|${BASE}/login"
+  "200|GET /oauth/callback|${BASE}/oauth/callback"
+  "200|GET /onboarding|${BASE}/onboarding"
+  "200|GET /dashboard|${BASE}/dashboard"
+  "200|GET /settings|${BASE}/settings"
+  "200|GET /privacy|${BASE}/privacy"
+  "307|GET /index.html (html_handling redirect)|${BASE}/index.html"
+  "200|GET /assets/nonexistent.js|${BASE}/assets/nonexistent.js"
+  "200|GET /api/health|${BASE}/api/health"
+  "400|POST /api/oauth/token (no body)|-X|POST|${BASE}/api/oauth/token"
+  "404|GET /api/nonexistent|${BASE}/api/nonexistent"
+  # Rule 1: Path Allowlist — blocked paths
+  "403|GET /wp-admin|${BASE}/wp-admin"
+  "403|GET /wp-login.php|${BASE}/wp-login.php"
+  "403|GET /.env|${BASE}/.env"
+  "403|GET /.env.production|${BASE}/.env.production"
+  "403|GET /.git/config|${BASE}/.git/config"
+  "403|GET /.git/HEAD|${BASE}/.git/HEAD"
+  "403|GET /xmlrpc.php|${BASE}/xmlrpc.php"
+  "403|GET /phpmyadmin/|${BASE}/phpmyadmin/"
+  "403|GET /phpMyAdmin/|${BASE}/phpMyAdmin/"
+  "403|GET /.htaccess|${BASE}/.htaccess"
+  "403|GET /.htpasswd|${BASE}/.htpasswd"
+  "403|GET /cgi-bin/|${BASE}/cgi-bin/"
+  "403|GET /admin/|${BASE}/admin/"
+  "403|GET /wp-content/debug.log|${BASE}/wp-content/debug.log"
+  "403|GET /config.php|${BASE}/config.php"
+  "403|GET /backup.zip|${BASE}/backup.zip"
+  "403|GET /actuator/health|${BASE}/actuator/health"
+  "403|GET /manager/html|${BASE}/manager/html"
+  "403|GET /wp-config.php|${BASE}/wp-config.php"
+  "403|GET /eval-stdin.php|${BASE}/eval-stdin.php"
+  "403|GET /.aws/credentials|${BASE}/.aws/credentials"
+  "403|GET /.ssh/id_rsa|${BASE}/.ssh/id_rsa"
+  "403|GET /robots.txt|${BASE}/robots.txt"
+  "403|GET /sitemap.xml|${BASE}/sitemap.xml"
+  "403|GET /favicon.ico|${BASE}/favicon.ico"
+  "403|GET /random/garbage/path|${BASE}/random/garbage/path"
+  # Rule 2: Scanner User-Agents — normal UAs
+  "200|Normal browser UA|-H|User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36|${BASE}/"
+  "200|Default curl UA|${BASE}/"
+  # Rule 2: Scanner User-Agents — malicious UAs
+  "403|Empty User-Agent|-H|User-Agent:|${BASE}/"
+  "403|UA: sqlmap/1.7|-H|User-Agent: sqlmap/1.7|${BASE}/"
+  "403|UA: Nikto/2.1.6|-H|User-Agent: Nikto/2.1.6|${BASE}/"
+  "403|UA: Nmap Scripting Engine|-H|User-Agent: Nmap Scripting Engine|${BASE}/"
+  "403|UA: masscan/1.3|-H|User-Agent: masscan/1.3|${BASE}/"
+  "403|UA: Mozilla/5.0 zgrab/0.x|-H|User-Agent: Mozilla/5.0 zgrab/0.x|${BASE}/"
+)
 
-for path in "/" "/login" "/oauth/callback" "/onboarding" "/dashboard" "/settings" "/privacy"; do
-  status=$(fetch "${BASE}${path}")
-  assert_status "200" "$status" "GET ${path}"
-done
+# --- Run in parallel (:::  passes array elements directly, avoiding stdin quoting issues) ---
+TOTAL=${#TESTS[@]}
 
-status=$(fetch "${BASE}/index.html")
-assert_status "307" "$status" "GET /index.html (html_handling redirect)"
+OUTPUT=$(parallel --will-cite -k -j10 --timeout 15 run_spec ::: "${TESTS[@]}") || true
 
-status=$(fetch "${BASE}/assets/nonexistent.js")
-assert_status "200" "$status" "GET /assets/nonexistent.js"
+# Detect infrastructure failure (parallel crashed, no tests ran)
+if [[ -z "$OUTPUT" ]]; then
+  printf 'Error: test harness produced no output — parallel may have failed\n' >&2
+  exit 2
+fi
 
-status=$(fetch "${BASE}/api/health")
-assert_status "200" "$status" "GET /api/health"
+# Count results from output
+PASS=$(grep -c "^  PASS" <<< "$OUTPUT" || true)
+FAIL=$((TOTAL - PASS))
 
-status=$(fetch -X POST "${BASE}/api/oauth/token")
-assert_status "400" "$status" "POST /api/oauth/token (no body)"
-
-status=$(fetch "${BASE}/api/nonexistent")
-assert_status "404" "$status" "GET /api/nonexistent"
-
-echo "--- Blocked paths (should be 403) ---"
-
-for path in "/wp-admin" "/wp-login.php" "/.env" "/.env.production" \
-            "/.git/config" "/.git/HEAD" "/xmlrpc.php" \
-            "/phpmyadmin/" "/phpMyAdmin/" "/.htaccess" "/.htpasswd" \
-            "/cgi-bin/" "/admin/" "/wp-content/debug.log" \
-            "/config.php" "/backup.zip" "/actuator/health" \
-            "/manager/html" "/wp-config.php" "/eval-stdin.php" \
-            "/.aws/credentials" "/.ssh/id_rsa" "/robots.txt" \
-            "/sitemap.xml" "/favicon.ico" "/random/garbage/path"; do
-  status=$(fetch "${BASE}${path}")
-  assert_status "403" "$status" "GET ${path}"
-done
-
-# ============================================================
-# Rule 2: Scanner User-Agents
-# ============================================================
-echo ""
-echo "=== Rule 2: Scanner User-Agents ==="
-echo "--- Normal UAs (should pass) ---"
-
-status=$(fetch -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" "${BASE}/")
-assert_status "200" "$status" "Normal browser UA"
-
-status=$(fetch "${BASE}/")
-assert_status "200" "$status" "Default curl UA"
-
-echo "--- Malicious UAs (should be 403 — managed challenge, no JS) ---"
-
-status=$(fetch -H "User-Agent:" "${BASE}/")
-assert_status "403" "$status" "Empty User-Agent"
-
-for ua in "sqlmap/1.7" "Nikto/2.1.6" "Nmap Scripting Engine" "masscan/1.3" "Mozilla/5.0 zgrab/0.x"; do
-  status=$(fetch -H "User-Agent: ${ua}" "${BASE}/")
-  assert_status "403" "$status" "UA: ${ua}"
-done
-
-# ============================================================
-# Summary
-# ============================================================
-echo ""
-TOTAL=$((PASS + FAIL))
-echo "=== Results: ${PASS}/${TOTAL} passed, ${FAIL} failed ==="
+# Print results (preserving order from parallel -k)
+printf '%s\n' "$OUTPUT"
+printf '\n=== Results: %d/%d passed, %d failed ===\n' "$PASS" "$TOTAL" "$FAIL"
 if [[ $FAIL -gt 0 ]]; then
   exit 1
 fi

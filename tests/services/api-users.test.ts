@@ -328,6 +328,39 @@ describe("discoverUpstreamRepos", () => {
     expect(result.length).toBeLessThanOrEqual(100);
   });
 
+  it("stops processing users when cap is reached across multiple tracked users", async () => {
+    // User A discovers 70 repos; user B would discover 70 more (overlapping names
+    // avoided by using distinct prefixes). The shared repoNames Set is capped at 100,
+    // so user B can only contribute at most 30 before the cap is hit.
+    const userARepos = Array.from({ length: 70 }, (_, i) => `user-a/repo-${i.toString().padStart(3, "0")}`);
+    const userBRepos = Array.from({ length: 70 }, (_, i) => `user-b/repo-${i.toString().padStart(3, "0")}`);
+
+    const octokit = makeOctokit(
+      async () => ({}),
+      async (_query: string, vars: unknown) => {
+        const v = vars as { q: string };
+        if (v.q.includes("involves:primary") && v.q.includes("is:issue")) {
+          return makeSearchPage(userARepos);
+        }
+        if (v.q.includes("involves:trackeduser") && v.q.includes("is:issue")) {
+          return makeSearchPage(userBRepos);
+        }
+        return makeSearchPage([]);
+      }
+    );
+
+    const trackedUsers = [makeTrackedUser("trackeduser")];
+    const result = await discoverUpstreamRepos(octokit as never, "primary", new Set(), trackedUsers);
+
+    // Total must not exceed the CAP of 100
+    expect(result.length).toBeLessThanOrEqual(100);
+    // User A's repos should all be present (70 < 100)
+    const names = result.map((r) => r.fullName);
+    expect(names.filter((n) => n.startsWith("user-a/")).length).toBe(70);
+    // User B's repos are partially included (capped at 30)
+    expect(names.filter((n) => n.startsWith("user-b/")).length).toBeLessThanOrEqual(30);
+  });
+
   it("returns results sorted alphabetically by fullName", async () => {
     const octokit = makeOctokit(
       async () => ({}),
