@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
-import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import {
   pushNotification,
@@ -108,15 +107,13 @@ describe("NotificationDrawer", () => {
     expect(isMuted("search")).toBe(true);
   });
 
-  it("calls onClose when overlay backdrop is clicked", async () => {
-    const user = userEvent.setup({ delay: null });
+  it("calls onClose when overlay backdrop is clicked", () => {
     const onClose = vi.fn();
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
-    // corvu drawer overlay
-    const overlay = document.body.querySelector("[data-corvu-drawer-overlay]") as HTMLElement;
+    const overlay = document.body.querySelector("[data-testid='notification-overlay']") as HTMLElement;
     expect(overlay).not.toBeNull();
-    await user.click(overlay);
+    fireEvent.pointerDown(overlay);
     expect(onClose).toHaveBeenCalled();
   });
 

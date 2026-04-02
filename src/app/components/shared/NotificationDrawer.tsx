@@ -1,5 +1,5 @@
 import { createMemo, For, Show } from "solid-js";
-import Drawer from "corvu/drawer";
+import { Dialog } from "@kobalte/core/dialog";
 import {
   getNotifications,
   markAllAsRead,
@@ -25,15 +25,15 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
   }
 
   return (
-    <Drawer open={props.open} onOpenChange={(open) => !open && props.onClose()} side="right">
-      <Drawer.Portal>
-        <Drawer.Overlay class="fixed inset-0 bg-black/50 z-[70]" />
-        <Drawer.Content class="fixed top-0 right-0 h-full w-80 sm:w-96 bg-base-100 shadow-xl z-[71] flex flex-col">
+    <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()} modal>
+      <Dialog.Portal>
+        <Dialog.Overlay class="drawer-overlay fixed inset-0 bg-black/50 z-[70]" data-testid="notification-overlay" />
+        <Dialog.Content class="drawer-content fixed top-0 right-0 h-full w-80 sm:w-96 bg-base-100 shadow-xl z-[71] flex flex-col">
           {/* Header */}
           <div class="flex items-center gap-2 px-4 py-3 border-b border-base-300 shrink-0">
-            <Drawer.Label class="text-lg font-semibold text-base-content flex-1">
+            <Dialog.Title class="text-lg font-semibold text-base-content flex-1">
               Notifications
-            </Drawer.Label>
+            </Dialog.Title>
             <button
               type="button"
               onClick={markAllAsRead}
@@ -48,7 +48,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
             >
               Dismiss all
             </button>
-            <Drawer.Close
+            <Dialog.CloseButton
               class="btn btn-ghost btn-sm btn-circle ml-1"
               aria-label="Close notifications"
             >
@@ -59,7 +59,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
                   clip-rule="evenodd"
                 />
               </svg>
-            </Drawer.Close>
+            </Dialog.CloseButton>
           </div>
 
           {/* Notification list */}
@@ -129,8 +129,8 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
               </ul>
             </Show>
           </div>
-        </Drawer.Content>
-      </Drawer.Portal>
-    </Drawer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog>
   );
 }
