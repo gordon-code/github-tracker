@@ -23,7 +23,6 @@
     "@octokit/plugin-throttling": "11.0.3",
     "@sentry/solid": "10.46.0",
     "@solidjs/router": "0.16.1",
-    "corvu": "0.7.2",
     "idb": "8.0.3",
     "solid-js": "1.9.11",
     "zod": "4.3.6"

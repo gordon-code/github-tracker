@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
-import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import {
   pushNotification,
@@ -54,6 +53,7 @@ describe("NotificationDrawer", () => {
     vi.advanceTimersByTime(0);
     expect(screen.getByText(/Something failed/)).toBeDefined();
     expect(screen.getByText(/api/)).toBeDefined();
+    expect(screen.queryByText("(will retry)")).toBeNull();
   });
 
   it("shows newest notification first in the list", () => {
@@ -108,16 +108,16 @@ describe("NotificationDrawer", () => {
     expect(isMuted("search")).toBe(true);
   });
 
-  it("calls onClose when overlay backdrop is clicked", async () => {
-    const user = userEvent.setup({ delay: null });
+  it("calls onClose when overlay backdrop is clicked", () => {
+    // Kobalte dismisses via document-level capture-phase pointerdown (createInteractOutside),
+    // not an overlay click handler. data-testid targets the overlay because Dialog.Overlay
+    // has no ARIA role to query by.
     const onClose = vi.fn();
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
-    // corvu drawer overlay
-    const overlay = document.body.querySelector("[data-corvu-drawer-overlay]") as HTMLElement;
-    expect(overlay).not.toBeNull();
-    await user.click(overlay);
-    expect(onClose).toHaveBeenCalled();
+    const overlay = screen.getByTestId("notification-overlay");
+    fireEvent.pointerDown(overlay);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("calls onClose when X button is clicked", () => {
@@ -125,7 +125,7 @@ describe("NotificationDrawer", () => {
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
     fireEvent.click(screen.getByLabelText("Close notifications"));
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("shows empty state text when no notifications", () => {
@@ -163,6 +163,35 @@ describe("NotificationDrawer", () => {
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows retryable indicator when notification is retryable", () => {
+    pushNotification("api", "Transient failure", "error", true);
+    renderDrawer(true);
+    vi.advanceTimersByTime(0);
+    expect(screen.queryByText("(will retry)")).not.toBeNull();
+  });
+
+  it("marks dialog as closed when open transitions from true to false", () => {
+    // solid-presence waits for animationend to unmount; happy-dom has no CSS engine
+    // so the element stays in DOM with data-closed instead of being removed
+    const { setIsOpen } = renderDrawer(true);
+    vi.advanceTimersByTime(0);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.hasAttribute("data-closed")).toBe(false);
+    setIsOpen(false);
+    vi.advanceTimersByTime(0);
+    expect(dialog.hasAttribute("data-closed")).toBe(true);
+  });
+
+  it("has accessible description for screen readers", () => {
+    renderDrawer(true);
+    vi.advanceTimersByTime(0);
+    const dialog = screen.getByRole("dialog");
+    const descId = dialog.getAttribute("aria-describedby");
+    expect(descId).toBeTruthy();
+    const descEl = document.getElementById(descId!);
+    expect(descEl?.textContent).toContain("Recent system notifications and errors");
   });
 });

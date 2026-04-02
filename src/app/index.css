@@ -92,20 +92,19 @@
   animation: toast-slide-out 0.3s ease-in forwards;
 }
 
-@utility animate-drawer-in {
-  animation: drawer-slide-in 0.3s ease-out forwards;
-}
-
-@utility animate-drawer-out {
+/* Kobalte Dialog drawer animations — uses data-attribute selectors instead of @utility
+   because Kobalte sets [data-expanded]/[data-closed] based on open/closed state */
+.drawer-content[data-closed] {
   animation: drawer-slide-out 0.3s ease-in forwards;
 }
-
-@utility animate-overlay-in {
-  animation: overlay-fade-in 0.3s ease-out forwards;
+.drawer-content[data-expanded] {
+  animation: drawer-slide-in 0.3s ease-out forwards;
 }
-
-@utility animate-overlay-out {
+.drawer-overlay[data-closed] {
   animation: overlay-fade-out 0.3s ease-in forwards;
+}
+.drawer-overlay[data-expanded] {
+  animation: overlay-fade-in 0.3s ease-out forwards;
 }
 
 /* ── Kobalte → daisyUI bridges ───────────────────────────────────────────── */
@@ -129,8 +128,8 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-slow-pulse,
   .animate-toast-in, .animate-toast-out,
-  .animate-drawer-in, .animate-drawer-out,
-  .animate-overlay-in, .animate-overlay-out,
+  .drawer-content[data-expanded], .drawer-content[data-closed],
+  .drawer-overlay[data-expanded], .drawer-overlay[data-closed],
   .animate-shimmer, .animate-flash, .animate-reorder-highlight,
   .loading {
     animation: none;

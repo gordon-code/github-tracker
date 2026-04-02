@@ -145,7 +145,7 @@ describe("Header", () => {
     const bellBtn = screen.getByLabelText("Notifications");
     await user.click(bellBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("true");
-    // Close via drawer close button (corvu sets pointer-events:none on body while open)
+    // Close via drawer close button (Kobalte Dialog modal sets pointer-events:none on body while open)
     const closeBtn = screen.getByLabelText("Close notifications");
     fireEvent.click(closeBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
