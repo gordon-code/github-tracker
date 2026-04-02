@@ -323,8 +323,9 @@ function withJitter(intervalMs: number): number {
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling (SDR-017)
- * - Pauses when document is hidden; resumes on visibility restore
- * - Refreshes immediately on re-visible if hidden for >2 min
+ * - Continues polling in background tabs (no visibility pause)
+ * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
+ *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
  *
  * Must be called inside a reactive root (e.g., createRoot or component body).
@@ -396,6 +397,12 @@ export function createPollCoordinator(
     }, intervalMs);
   }
 
+  // Safety net for browser-level tab throttling/freezing. Background polling
+  // continues via setInterval, but browsers may throttle or freeze timers in
+  // hidden tabs (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
+  // When the tab becomes visible again after >2 min, this handler fires a
+  // catch-up fetch in case the browser suppressed scheduled polls. The
+  // notifications gate (304) makes redundant fetches near-zero cost.
   function handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
       hiddenAt = Date.now();
@@ -616,6 +623,14 @@ export function createHotPollCoordinator(
 
     // No-op cycle when nothing to poll
     if (_hotPRs.size === 0 && _hotRuns.size === 0) {
+      schedule(myGeneration);
+      return;
+    }
+
+    // Skip fetch when page is hidden — hot poll provides visual feedback
+    // (shimmer, status changes) that has no value in a background tab.
+    // The full poll continues in background for data freshness.
+    if (document.visibilityState === "hidden") {
       schedule(myGeneration);
       return;
     }

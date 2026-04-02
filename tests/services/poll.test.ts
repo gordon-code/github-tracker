@@ -160,13 +160,16 @@ describe("createPollCoordinator", () => {
       setDocumentVisible(true);
       await Promise.resolve();
 
-      // Should have triggered an immediate fetch on re-visible
-      expect(fetchAll.mock.calls.length).toBe(callsAfterInit + 1);
+      // Should have triggered at least a catch-up fetch on re-visible
+      // (background polls may also have fired if interval < hidden duration)
+      expect(fetchAll.mock.calls.length).toBeGreaterThanOrEqual(callsAfterInit + 1);
       dispose();
     });
   });
 
   it("does NOT trigger immediate refresh on re-visible within 2 minutes", async () => {
+    // Pin jitter to 0 so 300s interval is exactly 300s (no background poll in 90s)
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -187,6 +190,50 @@ describe("createPollCoordinator", () => {
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
       dispose();
     });
+
+    randomSpy.mockRestore();
+  });
+
+  it("resets timer on re-visible after >2 min, preventing double-fire with background polls", async () => {
+    // Pin jitter to 0 so 60s interval is exactly 60s
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      // Hide for >2 min — background polls fire at 60s and 120s
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      await Promise.resolve();
+
+      const callsWhileHidden = fetchAll.mock.calls.length;
+      expect(callsWhileHidden).toBeGreaterThan(callsAfterInit);
+
+      // Restore visibility — catch-up fetch fires + timer resets
+      setDocumentVisible(true);
+      await Promise.resolve();
+
+      const callsAfterRevisible = fetchAll.mock.calls.length;
+      expect(callsAfterRevisible).toBeGreaterThan(callsWhileHidden);
+
+      // Advance 30s — should NOT fire (timer was reset to full 60s interval)
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterRevisible);
+
+      // Advance another 31s (61s from reset) — timer fires
+      vi.advanceTimersByTime(31_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterRevisible);
+
+      dispose();
+    });
+
+    randomSpy.mockRestore();
   });
 
   it("manual refresh triggers fetch and resets the timer", async () => {
