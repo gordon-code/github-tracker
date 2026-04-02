@@ -322,9 +322,15 @@ describe("DashboardPage — tab badge counts", () => {
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
+
+    // Un-ignore — badge should increment back to 3
+    viewStore.unignoreItem("10");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
   });
 
-  it("decrements Actions badge on ignore", async () => {
+  it("decrements Actions badge on ignore and increments on un-ignore", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
       pullRequests: [],
@@ -343,6 +349,12 @@ describe("DashboardPage — tab badge counts", () => {
     viewStore.ignoreItem({ id: "20", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Un-ignore — badge should increment back to 2
+    viewStore.unignoreItem("20");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
   });
 
@@ -386,6 +398,31 @@ describe("DashboardPage — tab badge counts", () => {
     viewStore.updateViewState({ showPrRuns: true });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+  });
+
+  it("combines showPrRuns and ignore exclusions for Actions badge", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+    viewStore.updateViewState({ showPrRuns: true });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+
+    // Ignore one PR-triggered run — badge should drop to 2
+    viewStore.ignoreItem({ id: "21", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
   });
 

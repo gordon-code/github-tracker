@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createRoot, createSignal, batch, type Accessor } from "solid-js";
 import { createReorderHighlight } from "../../src/app/lib/reorderHighlight";
 
@@ -182,5 +182,32 @@ describe("createReorderHighlight", () => {
     expect(highlighted().size).toBeGreaterThan(0);
 
     disposeRoot();
+  });
+
+  it("clears highlight after 1500ms timeout", () => {
+    vi.useFakeTimers();
+
+    let highlighted!: Accessor<ReadonlySet<string>>;
+    let setOrder!: (v: string[]) => void;
+    let disposeRoot!: () => void;
+
+    createRoot((dispose) => {
+      const [order, _setOrder] = createSignal<string[]>(["a", "b", "c"]);
+      const [locked] = createSignal<string[]>([]);
+      const [ignored] = createSignal(0);
+      setOrder = _setOrder;
+      highlighted = createReorderHighlight(order, locked, ignored);
+      disposeRoot = dispose;
+    });
+
+    setOrder(["c", "a", "b"]);
+    expect(highlighted().size).toBeGreaterThan(0);
+
+    // Advance past the 1500ms clear timeout
+    vi.advanceTimersByTime(1500);
+    expect(highlighted().size).toBe(0);
+
+    disposeRoot();
+    vi.useRealTimers();
   });
 });
