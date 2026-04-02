@@ -364,6 +364,38 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
   });
+
+  it("filters badge counts by globalFilter repo", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A", repoFullName: "org/alpha" }),
+        makeIssue({ id: 2, title: "Issue B", repoFullName: "org/beta" }),
+        makeIssue({ id: 3, title: "Issue C", repoFullName: "org/alpha" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, repoFullName: "org/alpha" }),
+        makePullRequest({ id: 11, repoFullName: "org/beta" }),
+      ],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, repoFullName: "org/alpha" }),
+        makeWorkflowRun({ id: 21, repoFullName: "org/beta" }),
+        makeWorkflowRun({ id: 22, repoFullName: "org/beta" }),
+      ],
+      errors: [],
+    });
+    // Set filter BEFORE render to avoid Kobalte Select onChange cascade in happy-dom
+    viewStore.updateViewState({
+      hideDepDashboard: false,
+      globalFilter: { org: null, repo: "org/alpha" },
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
 });
 
 describe("DashboardPage — data flow", () => {
