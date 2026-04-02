@@ -180,6 +180,8 @@ export async function validateToken(): Promise<boolean> {
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e: StorageEvent) => {
     if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
+      // Re-check: a rapid sign-out/sign-in may have already replaced the token
+      if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
       clearAuth();
       window.location.replace("/login");
     }

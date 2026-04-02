@@ -31,14 +31,14 @@ export default function OAuthCallback() {
       return;
     }
 
-    // Read and clear returnTo only after CSRF check passes
-    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
-    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
-
     if (!code) {
       setError("No authorization code received from GitHub.");
       return;
     }
+
+    // Read and clear returnTo only after all pre-exchange checks pass
+    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
 
     try {
       const resp = await fetch("/api/oauth/token", {

@@ -96,6 +96,45 @@ describe("Worker OAuth endpoint", () => {
     vi.restoreAllMocks();
   });
 
+  // ── Rate limiting ────────────────────────────────────────────────────────
+
+  it("returns 429 after exceeding 10 requests per minute from the same IP", async () => {
+    const fixedIp = "10.0.0.99";
+    function makeRateLimitRequest() {
+      return new Request("https://gh.gordoncode.dev/api/oauth/token", {
+        method: "POST",
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": fixedIp,
+        },
+        body: JSON.stringify({ code: VALID_CODE }),
+      });
+    }
+
+    // Mock successful GitHub response
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ access_token: "tok", token_type: "bearer", scope: "repo" }),
+        { status: 200 }
+      )
+    );
+
+    const env = makeEnv();
+    // First 10 requests should succeed
+    for (let i = 0; i < 10; i++) {
+      const resp = await worker.fetch(makeRateLimitRequest(), env);
+      expect(resp.status).not.toBe(429);
+    }
+    // 11th request should be rate-limited
+    const resp = await worker.fetch(makeRateLimitRequest(), env);
+    expect(resp.status).toBe(429);
+    const body = await resp.json() as { error: string };
+    expect(body.error).toBe("rate_limited");
+    // Should include security headers
+    expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
   // ── Token exchange ─────────────────────────────────────────────────────────
 
   it("POST /api/oauth/token with valid code returns access_token, token_type, scope", async () => {

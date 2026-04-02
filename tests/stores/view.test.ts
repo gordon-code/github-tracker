@@ -6,6 +6,7 @@ import {
   resetViewState,
   ignoreItem,
   unignoreItem,
+  pruneClosedIgnoredItems,
   setSortPreference,
   setGlobalFilter,
   resetAllTabFilters,
@@ -154,6 +155,50 @@ describe("ignoreItem / unignoreItem", () => {
   it("unignoreItem is a no-op for an unknown id", () => {
     ignoreItem(item1);
     unignoreItem("does-not-exist");
+    expect(viewState.ignoredItems).toHaveLength(1);
+  });
+
+  it("evicts oldest item when at 500 cap (FIFO)", () => {
+    // Fill to 500
+    for (let i = 0; i < 500; i++) {
+      ignoreItem({ id: `item-${i}`, type: "issue", repo: "o/r", title: `T${i}`, ignoredAt: 1000 + i });
+    }
+    expect(viewState.ignoredItems).toHaveLength(500);
+
+    // Adding 501st should evict item-0 (oldest)
+    ignoreItem({ id: "item-new", type: "issue", repo: "o/r", title: "New", ignoredAt: 2000 });
+    expect(viewState.ignoredItems).toHaveLength(500);
+    expect(viewState.ignoredItems[0].id).toBe("item-1"); // item-0 evicted
+    expect(viewState.ignoredItems[499].id).toBe("item-new");
+  });
+});
+
+describe("pruneClosedIgnoredItems", () => {
+  it("removes items older than 30 days", () => {
+    const now = Date.now();
+    const old = now - 31 * 24 * 60 * 60 * 1000;
+    const recent = now - 1 * 24 * 60 * 60 * 1000;
+
+    ignoreItem({ id: "old-1", type: "issue", repo: "o/r", title: "Old", ignoredAt: old });
+    ignoreItem({ id: "recent-1", type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
+    expect(viewState.ignoredItems).toHaveLength(2);
+
+    pruneClosedIgnoredItems();
+    expect(viewState.ignoredItems).toHaveLength(1);
+    expect(viewState.ignoredItems[0].id).toBe("recent-1");
+  });
+
+  it("is a no-op when ignoredItems is empty", () => {
+    pruneClosedIgnoredItems();
+    expect(viewState.ignoredItems).toHaveLength(0);
+  });
+
+  it("keeps items exactly at the 30-day boundary", () => {
+    const now = Date.now();
+    const exactly30 = now - 30 * 24 * 60 * 60 * 1000 + 1000;
+
+    ignoreItem({ id: "boundary", type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
+    pruneClosedIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
   });
 });

@@ -62,6 +62,9 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 // Simple in-memory rate limiter for token exchange endpoint.
 // Not durable across isolate restarts, but catches burst abuse.
+// Note: CF-Connecting-IP is set by Cloudflare's proxy layer; if the workers.dev
+// route is enabled, an attacker could spoof this header. Disable the workers.dev
+// route in the Cloudflare dashboard for production use.
 const TOKEN_RATE_LIMIT = 10; // max requests per window
 const TOKEN_RATE_WINDOW_MS = 60_000; // 1 minute
 const _tokenRateMap = new Map<string, { count: number; resetAt: number }>();

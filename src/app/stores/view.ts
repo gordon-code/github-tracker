@@ -170,7 +170,7 @@ export function pruneClosedIgnoredItems(): void {
   setViewState(
     produce((draft) => {
       draft.ignoredItems = draft.ignoredItems.filter(
-        (i) => new Date(i.ignoredAt).getTime() > thirtyDaysAgo
+        (i) => i.ignoredAt > thirtyDaysAgo
       );
     })
   );
