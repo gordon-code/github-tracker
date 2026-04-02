@@ -92,7 +92,8 @@
   animation: toast-slide-out 0.3s ease-in forwards;
 }
 
-/* Kobalte Dialog drawer animations */
+/* Kobalte Dialog drawer animations — uses data-attribute selectors instead of @utility
+   because Kobalte sets [data-expanded]/[data-closed] based on open/closed state */
 .drawer-content[data-closed] {
   animation: drawer-slide-out 0.3s ease-in forwards;
 }
