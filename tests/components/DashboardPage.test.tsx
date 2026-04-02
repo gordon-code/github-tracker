@@ -396,6 +396,36 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
   });
+
+  it("filters badge counts by globalFilter org only", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, repoFullName: "alpha/one" }),
+        makeIssue({ id: 2, repoFullName: "beta/two" }),
+        makeIssue({ id: 3, repoFullName: "alpha/three" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, repoFullName: "alpha/one" }),
+        makePullRequest({ id: 11, repoFullName: "beta/two" }),
+      ],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, repoFullName: "beta/two" }),
+        makeWorkflowRun({ id: 21, repoFullName: "alpha/one" }),
+      ],
+      errors: [],
+    });
+    viewStore.updateViewState({
+      hideDepDashboard: false,
+      globalFilter: { org: "alpha", repo: null },
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
 });
 
 describe("DashboardPage — data flow", () => {

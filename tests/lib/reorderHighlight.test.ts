@@ -153,4 +153,34 @@ describe("createReorderHighlight", () => {
 
     disposeRoot();
   });
+
+  it("suppresses highlight when locked repos change simultaneously with reorder", () => {
+    let highlighted!: Accessor<ReadonlySet<string>>;
+    let setOrder!: (v: string[]) => void;
+    let setLocked!: (v: string[]) => void;
+    let disposeRoot!: () => void;
+
+    createRoot((dispose) => {
+      const [order, _setOrder] = createSignal<string[]>(["a", "b", "c"]);
+      const [locked, _setLocked] = createSignal<string[]>([]);
+      const [ignored] = createSignal(0);
+      setOrder = _setOrder;
+      setLocked = _setLocked;
+      highlighted = createReorderHighlight(order, locked, ignored);
+      disposeRoot = dispose;
+    });
+
+    // Reorder AND add a lock in single batch — should suppress
+    batch(() => {
+      setLocked(["c"]);
+      setOrder(["c", "a", "b"]);
+    });
+    expect(highlighted().size).toBe(0);
+
+    // Next reorder without lock change — should highlight
+    setOrder(["b", "c", "a"]);
+    expect(highlighted().size).toBeGreaterThan(0);
+
+    disposeRoot();
+  });
 });
