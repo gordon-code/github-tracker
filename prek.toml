@@ -44,7 +44,7 @@ priority = 0
 id = "csp-hash"
 name = "CSP hash verification"
 language = "system"
-entry = "bash -c 'SCRIPT=$(sed -n \"s/.*<script>\\(.*\\)<\\/script>.*/\\1/p\" index.html) && HASH=$(printf \"%s\" \"$SCRIPT\" | openssl dgst -sha256 -binary | base64) && grep -q \"sha256-$HASH\" public/_headers && echo \"CSP hash OK: sha256-$HASH\" || { echo \"CSP hash mismatch! sha256-$HASH not in public/_headers\"; exit 1; }'"
+entry = "bash scripts/verify-csp-hash.sh"
 pass_filenames = false
 always_run = true
 priority = 0

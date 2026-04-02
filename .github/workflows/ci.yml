@@ -15,15 +15,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Verify CSP inline script hash
-        run: |
-          SCRIPT=$(sed -n 's/.*<script>\(.*\)<\/script>.*/\1/p' index.html)
-          HASH=$(printf '%s' "$SCRIPT" | openssl dgst -sha256 -binary | base64)
-          if ! grep -q "sha256-$HASH" public/_headers; then
-            echo "::error::CSP hash mismatch! Inline script hash 'sha256-$HASH' not found in public/_headers"
-            echo "Update the sha256 hash in public/_headers to match the inline script in index.html"
-            exit 1
-          fi
-          echo "CSP hash verified: sha256-$HASH"
+        run: bash scripts/verify-csp-hash.sh
       - run: pnpm run typecheck
       - run: pnpm test
       - name: Install Playwright browsers
