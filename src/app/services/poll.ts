@@ -580,6 +580,9 @@ export async function fetchHotData(): Promise<{
  * in-flight items without a full poll cycle. Uses setTimeout chains to avoid
  * overlapping concurrent fetches.
  *
+ * - Pauses when document is hidden (visual-only feedback has no value in background tabs)
+ * - Resumes on next scheduled cycle when tab becomes visible
+ *
  * Must be called inside a SolidJS reactive root (uses createEffect + onCleanup).
  *
  * @param getInterval - Reactive accessor returning interval in seconds

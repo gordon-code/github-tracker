@@ -18,7 +18,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 - **Ignore System** — Hide specific items with an "N ignored" badge and unignore popover.
 - **Dark Mode** — System-aware with flash prevention via inline script + CSP SHA-256 hash.
 - **ETag Caching** — Conditional requests (304s are free against GitHub's rate limit).
-- **Auto-refresh** — Visibility-aware polling that pauses when tab is hidden.
+- **Auto-refresh** — Background polling keeps data fresh even in hidden tabs; hot poll pauses to save API budget.
 
 ## Tech Stack
 
@@ -55,7 +55,7 @@ src/
     services/
       api.ts        # GitHub API methods (fetchOrgs, fetchRepos, fetchIssues, fetchPRs, fetchWorkflowRuns)
       github.ts     # Octokit client factory with ETag caching and rate limit tracking
-      poll.ts       # Poll coordinator with visibility-aware auto-refresh
+      poll.ts       # Poll coordinator with background refresh + hot poll for in-flight items
     stores/
       auth.ts       # OAuth token management (localStorage persistence, validateToken)
       cache.ts      # IndexedDB cache with TTL eviction and ETag support
