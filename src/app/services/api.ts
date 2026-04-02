@@ -205,7 +205,7 @@ function extractSearchPartialData<T>(err: unknown): T | null {
   return null;
 }
 
-const VALID_REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const VALID_REPO_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
 // Allows alphanumeric/hyphen base (1-39 chars) with optional literal [bot] suffix for GitHub
 // App bot accounts. Case-sensitive [bot] is intentional — GitHub always uses lowercase.
 const VALID_TRACKED_LOGIN = /^[A-Za-z0-9-]{1,39}(\[bot\])?$/;
@@ -1882,6 +1882,7 @@ export async function fetchRepos(
   if (!octokit) throw new Error("No GitHub client available");
 
   const repos: RepoEntry[] = [];
+  const REPO_CAP = 1000;
 
   if (type === "org") {
     for await (const response of octokit.paginate.iterator(`GET /orgs/{org}/repos`, {
@@ -1893,6 +1894,7 @@ export async function fetchRepos(
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
+      if (repos.length >= REPO_CAP) break;
     }
   } else {
     for await (const response of octokit.paginate.iterator(`GET /user/repos`, {
@@ -1904,7 +1906,16 @@ export async function fetchRepos(
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
+      if (repos.length >= REPO_CAP) break;
     }
+  }
+
+  if (repos.length >= REPO_CAP) {
+    pushNotification(
+      "api",
+      `${orgOrUser} has 1000+ repos — showing the most recently active`,
+      "warning",
+    );
   }
 
   return repos;
@@ -2264,7 +2275,14 @@ export async function discoverUpstreamRepos(
   }
   if (logins.length === 0) return [];
 
-  await Promise.allSettled(logins.map((login) => discoverForUser(login)));
+  // Process users sequentially so the repoNames.size cap check is atomic
+  // across iterations (prevents TOCTOU race from parallel writes to the shared Set).
+  // Issues + PRs searches for each user still run in parallel — they write to
+  // the same Set within a single iteration, which is safe.
+  for (const login of logins) {
+    if (repoNames.size >= CAP) break;
+    await discoverForUser(login);
+  }
 
   if (errors.length > 0) {
     pushNotification(

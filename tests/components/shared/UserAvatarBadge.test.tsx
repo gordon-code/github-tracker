@@ -95,7 +95,7 @@ describe("UserAvatarBadge", () => {
     // Second avatar wrapper should have a negative margin-left style
     const avatarWrappers = container.querySelectorAll(".avatar");
     expect(avatarWrappers.length).toBe(2);
-    // First has no negative margin; second does
-    expect((avatarWrappers[1] as HTMLElement).style.marginLeft).toBe("-6px");
+    // First has no negative margin class; second does
+    expect(avatarWrappers[1].classList.contains("-ml-1.5")).toBe(true);
   });
 });

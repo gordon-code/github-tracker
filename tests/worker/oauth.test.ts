@@ -14,13 +14,18 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   };
 }
 
+let _requestCounter = 0;
+
 function makeRequest(
   method: string,
   path: string,
   options: { body?: unknown; origin?: string; contentType?: string } = {}
 ): Request {
   const url = `https://gh.gordoncode.dev${path}`;
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    // Unique IP per request to avoid hitting the in-memory rate limiter across tests
+    "CF-Connecting-IP": `127.0.0.${++_requestCounter}`,
+  };
   if (options.origin !== undefined) {
     headers["Origin"] = options.origin;
   } else {

@@ -55,6 +55,7 @@ export const ViewStateSchema = z.object({
         ignoredAt: z.number(),
       })
     )
+    .max(500)
     .default([]),
   globalFilter: z
     .object({
@@ -146,6 +147,10 @@ export function ignoreItem(item: IgnoredItem): void {
     produce((draft) => {
       const already = draft.ignoredItems.some((i) => i.id === item.id);
       if (!already) {
+        // FIFO eviction: remove oldest if at cap
+        if (draft.ignoredItems.length >= 500) {
+          draft.ignoredItems.shift();
+        }
         draft.ignoredItems.push(item);
       }
     })
@@ -156,6 +161,17 @@ export function unignoreItem(id: string): void {
   setViewState(
     produce((draft) => {
       draft.ignoredItems = draft.ignoredItems.filter((i) => i.id !== id);
+    })
+  );
+}
+
+export function pruneClosedIgnoredItems(): void {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  setViewState(
+    produce((draft) => {
+      draft.ignoredItems = draft.ignoredItems.filter(
+        (i) => new Date(i.ignoredAt).getTime() > thirtyDaysAgo
+      );
     })
   );
 }

@@ -312,10 +312,12 @@ export default function DashboardPage() {
     const clockInterval = setInterval(() => setClockTick((t) => t + 1), 60_000);
 
     onCleanup(() => {
-      _coordinator()?.destroy();
-      _setCoordinator(null);
-      _hotCoordinator()?.destroy();
-      _setHotCoordinator(null);
+      const coord = _coordinator();
+      const hotCoord = _hotCoordinator();
+      coord?.destroy();
+      if (_coordinator() === coord) _setCoordinator(null);
+      hotCoord?.destroy();
+      if (_hotCoordinator() === hotCoord) _setHotCoordinator(null);
       clearHotSets();
       clearInterval(clockInterval);
     });

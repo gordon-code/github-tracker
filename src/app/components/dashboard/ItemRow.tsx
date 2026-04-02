@@ -1,7 +1,8 @@
 import { createMemo, For, JSX, Show } from "solid-js";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { relativeTime, shortRelativeTime, labelTextColor, formatCount } from "../../lib/format";
+import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
+import { labelColorClass } from "../../lib/label-colors";
 
 export interface ItemRowProps {
   repo: string;
@@ -102,19 +103,13 @@ export default function ItemRow(props: ItemRowProps) {
         <Show when={props.labels.length > 0}>
           <div class={`flex flex-wrap gap-1 ${isCompact() ? "mt-0.5" : "mt-1"}`}>
             <For each={props.labels}>
-              {(label) => {
-                const isValidHex = /^[0-9a-fA-F]{6}$/.test(label.color);
-                const bg = isValidHex ? `#${label.color}` : "#e5e7eb";
-                const fg = isValidHex ? labelTextColor(label.color) : "#374151";
-                return (
-                  <span
-                    class="inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium bg-[var(--lb)] text-[var(--lf)]"
-                    style={{ "--lb": bg, "--lf": fg }}
-                  >
-                    {expandEmoji(label.name)}
-                  </span>
-                );
-              }}
+              {(label) => (
+                <span
+                  class={`inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium ${labelColorClass(label.color)}`}
+                >
+                  {expandEmoji(label.name)}
+                </span>
+              )}
             </For>
           </div>
         </Show>

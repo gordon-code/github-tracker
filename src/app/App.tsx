@@ -2,7 +2,7 @@ import { createSignal, createEffect, onMount, Show, ErrorBoundary, Suspense, laz
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
-import { initViewPersistence } from "./stores/view";
+import { initViewPersistence, pruneClosedIgnoredItems } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
 import LoginPage from "./pages/LoginPage";
@@ -161,6 +161,7 @@ export default function App() {
     initConfigPersistence();
     initViewPersistence();
     initClientWatcher();
+    pruneClosedIgnoredItems();
     evictStaleEntries(24 * 60 * 60 * 1000).catch(() => {
       // Non-fatal — stale eviction failure is acceptable
     });

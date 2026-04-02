@@ -24,16 +24,16 @@ export default function OAuthCallback() {
     const storedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     sessionStorage.removeItem(OAUTH_STATE_KEY);
 
-    // Read and clear returnTo before CSRF check — always consumed, even on failure
-    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
-    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
-
     // Validate state before anything else (CSRF protection)
     if (!stateFromUrl || !storedState || stateFromUrl !== storedState) {
       setError("Invalid OAuth state. Please try signing in again.");
       console.info("[auth] OAuth state mismatch — possible CSRF attempt");
       return;
     }
+
+    // Read and clear returnTo only after CSRF check passes
+    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
 
     if (!code) {
       setError("No authorization code received from GitHub.");

@@ -327,7 +327,7 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("OAUTH_RETURN_TO_KEY is cleared even when CSRF check fails (stale key protection)", async () => {
+  it("OAUTH_RETURN_TO_KEY is preserved when CSRF check fails (only consumed on success)", async () => {
     sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
     sessionStorage.setItem(OAUTH_STATE_KEY, "expected-state");
     setWindowSearch({ code: "fakecode", state: "wrong-state" });
@@ -337,7 +337,8 @@ describe("OAuthCallback", () => {
     await waitFor(() => {
       screen.getByText(/Invalid OAuth state/i);
     });
-    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
+    // returnTo is preserved for the user's next legitimate auth attempt
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
   it("navigates to / when OAUTH_RETURN_TO_KEY is not set", async () => {

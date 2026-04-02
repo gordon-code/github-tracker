@@ -186,16 +186,16 @@ describe("expireToken", () => {
     expect(mod.user()).toBeNull();
   });
 
-  it("removes only auth token from localStorage — config, view, dashboard preserved", () => {
+  it("removes auth token and dashboard cache from localStorage — config, view preserved", () => {
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
     localStorageMock.setItem("github-tracker:dashboard", '{"cached":true}');
     mod.setAuth({ access_token: "ghs_abc" });
     mod.expireToken();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dashboard")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
-    expect(localStorageMock.getItem("github-tracker:dashboard")).toBe('{"cached":true}');
   });
 
   it("does NOT invoke onAuthCleared callbacks", () => {
