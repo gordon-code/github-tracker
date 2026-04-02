@@ -955,9 +955,15 @@ describe("Worker OAuth endpoint", () => {
       expect(log!.level).toBe("warn");
     });
 
-    it("returns 404 when SENTRY_DSN is not configured", async () => {
+    it("returns 404 when SENTRY_DSN is empty string", async () => {
       const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
       const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: "" }));
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 when SENTRY_DSN is undefined", async () => {
+      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
+      const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: undefined as unknown as string }));
       expect(res.status).toBe(404);
     });
 

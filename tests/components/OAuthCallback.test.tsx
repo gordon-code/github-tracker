@@ -341,6 +341,47 @@ describe("OAuthCallback", () => {
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
+  it("OAUTH_RETURN_TO_KEY is preserved when validateToken returns false", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "tok123" }),
+      })
+    );
+    vi.mocked(authStore.validateToken).mockResolvedValue(false);
+
+    renderCallback();
+
+    await waitFor(() => {
+      screen.getByText(/Could not verify token/i);
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
+  });
+
+  it("OAUTH_RETURN_TO_KEY is preserved when token exchange fails", async () => {
+    sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
+    setupValidState();
+    setWindowSearch({ code: "fakecode", state: "teststate" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({ error: "bad_verification_code" }),
+      })
+    );
+
+    renderCallback();
+
+    await waitFor(() => {
+      screen.getByText(/Failed to complete sign in/i);
+    });
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
+  });
+
   it("navigates to / when OAUTH_RETURN_TO_KEY is not set", async () => {
     setupSuccessfulCallback();
     renderCallback();
