@@ -29,6 +29,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
       <Dialog.Portal>
         <Dialog.Overlay class="drawer-overlay fixed inset-0 bg-black/50 z-[70]" data-testid="notification-overlay" />
         <Dialog.Content class="drawer-content fixed top-0 right-0 h-full w-80 sm:w-96 bg-base-100 shadow-xl z-[71] flex flex-col">
+          <Dialog.Description class="sr-only">Recent system notifications and errors</Dialog.Description>
           {/* Header */}
           <div class="flex items-center gap-2 px-4 py-3 border-b border-base-300 shrink-0">
             <Dialog.Title class="text-lg font-semibold text-base-content flex-1">

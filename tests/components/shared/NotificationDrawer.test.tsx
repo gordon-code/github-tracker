@@ -111,8 +111,7 @@ describe("NotificationDrawer", () => {
     const onClose = vi.fn();
     render(() => <NotificationDrawer open={true} onClose={onClose} />);
     vi.advanceTimersByTime(0);
-    const overlay = document.body.querySelector("[data-testid='notification-overlay']") as HTMLElement;
-    expect(overlay).not.toBeNull();
+    const overlay = screen.getByTestId("notification-overlay");
     fireEvent.pointerDown(overlay);
     expect(onClose).toHaveBeenCalled();
   });
