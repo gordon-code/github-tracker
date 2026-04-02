@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
-import * as viewStore from "../../src/app/stores/view";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { HotPRStatusUpdate, HotWorkflowRunUpdate } from "../../src/app/services/api";
 
@@ -73,6 +72,7 @@ let capturedOnHotData: ((
 let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
 let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
+let viewStore: typeof import("../../src/app/stores/view");
 
 beforeEach(async () => {
   // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
@@ -123,6 +123,7 @@ beforeEach(async () => {
   DashboardPage = dashboardModule.default;
   pollService = await import("../../src/app/services/poll");
   authStore = await import("../../src/app/stores/auth");
+  viewStore = await import("../../src/app/stores/view");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -199,6 +200,292 @@ describe("DashboardPage — clock tick", () => {
     expect(clearSpy).toHaveBeenCalledWith(clockIntervalId);
     setSpy.mockRestore();
     clearSpy.mockRestore();
+  });
+});
+
+describe("DashboardPage — tab badge counts", () => {
+  it("excludes Dependency Dashboard issues from badge count by default", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Real issue" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+        makeIssue({ id: 3, title: "Dependency Dashboard" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const issuesTab = screen.getByRole("tab", { name: /Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("updates badge dynamically when hideDepDashboard is toggled off", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Real issue" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    // hideDepDashboard defaults to true — badge shows 1
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Toggle off — badge should update to 2
+    viewStore.updateViewState({ hideDepDashboard: false });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("decrements issue badge on ignore and increments on un-ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Issue B" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    // Ignore one item — badge should decrement to 1
+    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Un-ignore — badge should increment back to 2
+    viewStore.unignoreItem("1");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("combines hideDepDashboard and ignore exclusions correctly", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+        makeIssue({ id: 3, title: "Issue C" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    // hideDepDashboard defaults true — badge starts at 2 (excludes Dep Dashboard)
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    // Ignore one real issue — badge should drop to 1
+    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("decrements PR badge on ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 10, title: "PR A" }),
+        makePullRequest({ id: 11, title: "PR B" }),
+        makePullRequest({ id: 12, title: "PR C" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+
+    viewStore.ignoreItem({ id: "10", type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    // Un-ignore — badge should increment back to 3
+    viewStore.unignoreItem("10");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+  });
+
+  it("decrements Actions badge on ignore and increments on un-ignore", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    viewStore.ignoreItem({ id: "20", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Un-ignore — badge should increment back to 2
+    viewStore.unignoreItem("20");
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("excludes PR-triggered runs from badge count by default", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("includes PR-triggered runs in badge count when showPrRuns is enabled", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    // Default: showPrRuns=false — badge shows 1
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    // Toggle on — badge should update to 3
+    viewStore.updateViewState({ showPrRuns: true });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+  });
+
+  it("combines showPrRuns and ignore exclusions for Actions badge", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: true }),
+        makeWorkflowRun({ id: 22, isPrRun: true }),
+      ],
+      errors: [],
+    });
+    viewStore.updateViewState({ showPrRuns: true });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+
+    // Ignore one PR-triggered run — badge should drop to 2
+    viewStore.ignoreItem({ id: "21", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("filters badge counts by globalFilter repo", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A", repoFullName: "org/alpha" }),
+        makeIssue({ id: 2, title: "Issue B", repoFullName: "org/beta" }),
+        makeIssue({ id: 3, title: "Issue C", repoFullName: "org/alpha" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, repoFullName: "org/alpha" }),
+        makePullRequest({ id: 11, repoFullName: "org/beta" }),
+      ],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, repoFullName: "org/alpha" }),
+        makeWorkflowRun({ id: 21, repoFullName: "org/beta" }),
+        makeWorkflowRun({ id: 22, repoFullName: "org/beta" }),
+      ],
+      errors: [],
+    });
+    // Set filter BEFORE render to avoid Kobalte Select onChange cascade in happy-dom
+    viewStore.updateViewState({
+      hideDepDashboard: false,
+      globalFilter: { org: null, repo: "org/alpha" },
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("filters badge counts by globalFilter org only", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, repoFullName: "alpha/one" }),
+        makeIssue({ id: 2, repoFullName: "beta/two" }),
+        makeIssue({ id: 3, repoFullName: "alpha/three" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, repoFullName: "alpha/one" }),
+        makePullRequest({ id: 11, repoFullName: "beta/two" }),
+      ],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, repoFullName: "beta/two" }),
+        makeWorkflowRun({ id: 21, repoFullName: "alpha/one" }),
+      ],
+      errors: [],
+    });
+    viewStore.updateViewState({
+      hideDepDashboard: false,
+      globalFilter: { org: "alpha", repo: null },
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+      expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
   });
 });
 

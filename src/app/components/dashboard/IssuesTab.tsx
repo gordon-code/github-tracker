@@ -203,6 +203,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
+    () => viewState.ignoredItems.filter(i => i.type === "issue").length,
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -223,49 +224,52 @@ export default function IssuesTab(props: IssuesTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Sort dropdown + filter chips + ignore badge toolbar */}
-      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
-        <SortDropdown
-          options={sortOptions}
-          value={sortPref().field}
-          direction={sortPref().direction}
-          onChange={handleSort}
-        />
-        <FilterChips
-          groups={filterGroups()}
-          values={viewState.tabFilters.issues}
-          onChange={(field, value) => {
-            setTabFilter("issues", field as IssueFilterField, value);
-            setPage(0);
-          }}
-          onReset={(field) => {
-            resetTabFilter("issues", field as IssueFilterField);
-            setPage(0);
-          }}
-          onResetAll={() => {
-            resetAllTabFilters("issues");
-            setPage(0);
-          }}
-        />
-        <button
-          onClick={() => {
-            updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
-            setPage(0);
-          }}
-          class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
-          aria-pressed={!viewState.hideDepDashboard}
-          title="Toggle visibility of Dependency Dashboard issues"
-        >
-          Show Dep Dashboard
-        </button>
-        <div class="flex-1" />
-        <ExpandCollapseButtons
-          onExpandAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), true)}
-          onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
-        />
-        <IgnoreBadge
-          items={viewState.ignoredItems.filter((i) => i.type === "issue")}
-          onUnignore={unignoreItem}
-        />
+      <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+          <SortDropdown
+            options={sortOptions}
+            value={sortPref().field}
+            direction={sortPref().direction}
+            onChange={handleSort}
+          />
+          <FilterChips
+            groups={filterGroups()}
+            values={viewState.tabFilters.issues}
+            onChange={(field, value) => {
+              setTabFilter("issues", field as IssueFilterField, value);
+              setPage(0);
+            }}
+            onReset={(field) => {
+              resetTabFilter("issues", field as IssueFilterField);
+              setPage(0);
+            }}
+            onResetAll={() => {
+              resetAllTabFilters("issues");
+              setPage(0);
+            }}
+          />
+          <button
+            onClick={() => {
+              updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
+              setPage(0);
+            }}
+            class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
+            aria-pressed={!viewState.hideDepDashboard}
+            title="Toggle visibility of Dependency Dashboard issues"
+          >
+            Show Dep Dashboard
+          </button>
+        </div>
+        <div class="shrink-0 flex items-center gap-2 py-0.5">
+          <ExpandCollapseButtons
+            onExpandAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
+          />
+          <IgnoreBadge
+            items={viewState.ignoredItems.filter((i) => i.type === "issue")}
+            onUnignore={unignoreItem}
+          />
+        </div>
       </div>
 
       {/* Loading skeleton — only when no data exists yet */}

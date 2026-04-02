@@ -211,37 +211,41 @@ export default function ActionsTab(props: ActionsTabProps) {
   const highlightedReposActions = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.actions,
+    () => viewState.ignoredItems.filter(i => i.type === "workflowRun").length,
   );
 
   return (
     <div class="divide-y divide-base-300">
       {/* Toolbar */}
-      <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
-        <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={viewState.showPrRuns}
-            onChange={(e) => setViewState("showPrRuns", e.currentTarget.checked)}
-            class="checkbox checkbox-sm checkbox-primary"
+      <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+          <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={viewState.showPrRuns}
+              onChange={(e) => setViewState("showPrRuns", e.currentTarget.checked)}
+              class="checkbox checkbox-sm checkbox-primary"
+            />
+            Show PR runs
+          </label>
+          <FilterChips
+            groups={actionsFilterGroups}
+            values={viewState.tabFilters.actions}
+            onChange={(field, value) => setTabFilter("actions", field as ActionsFilterField, value)}
+            onReset={(field) => resetTabFilter("actions", field as ActionsFilterField)}
+            onResetAll={() => resetAllTabFilters("actions")}
           />
-          Show PR runs
-        </label>
-        <FilterChips
-          groups={actionsFilterGroups}
-          values={viewState.tabFilters.actions}
-          onChange={(field, value) => setTabFilter("actions", field as ActionsFilterField, value)}
-          onReset={(field) => resetTabFilter("actions", field as ActionsFilterField)}
-          onResetAll={() => resetAllTabFilters("actions")}
-        />
-        <div class="flex-1" />
-        <ExpandCollapseButtons
-          onExpandAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), true)}
-          onCollapseAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), false)}
-        />
-        <IgnoreBadge
-          items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
-          onUnignore={unignoreItem}
-        />
+        </div>
+        <div class="shrink-0 flex items-center gap-2 py-0.5">
+          <ExpandCollapseButtons
+            onExpandAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), false)}
+          />
+          <IgnoreBadge
+            items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
+            onUnignore={unignoreItem}
+          />
+        </div>
       </div>
 
       {/* Loading skeleton — only when no data exists yet */}
