@@ -517,7 +517,7 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
-  it("skips fetch when document is hidden", async () => {
+  it("continues fetching when document is hidden", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());
 
@@ -530,7 +530,7 @@ describe("createHotPollCoordinator", () => {
       createHotPollCoordinator(() => 10, onHotData);
       Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true });
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(onHotData).not.toHaveBeenCalled();
+      expect(onHotData).toHaveBeenCalled();
       Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
       dispose();
     });

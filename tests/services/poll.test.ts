@@ -119,7 +119,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("pauses polling when document is hidden", async () => {
+  it("continues polling when document is hidden", async () => {
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -135,8 +135,8 @@ describe("createPollCoordinator", () => {
       vi.advanceTimersByTime(90_000);
       await Promise.resolve();
 
-      // Should not have fetched while hidden
-      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+      // Should have fetched while hidden (background refresh)
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
       dispose();
     });
   });

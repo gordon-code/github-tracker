@@ -392,7 +392,6 @@ export function createPollCoordinator(
 
     const intervalMs = withJitter(intervalSec * 1000);
     intervalId = setInterval(() => {
-      if (document.visibilityState === "hidden") return;
       void doFetch();
     }, intervalMs);
   }
@@ -617,12 +616,6 @@ export function createHotPollCoordinator(
 
     // No-op cycle when nothing to poll
     if (_hotPRs.size === 0 && _hotRuns.size === 0) {
-      schedule(myGeneration);
-      return;
-    }
-
-    // Skip fetch when page is hidden
-    if (document.visibilityState === "hidden") {
       schedule(myGeneration);
       return;
     }
