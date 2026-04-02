@@ -165,7 +165,7 @@ export function unignoreItem(id: string): void {
   );
 }
 
-export function pruneClosedIgnoredItems(): void {
+export function pruneStaleIgnoredItems(): void {
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   setViewState(
     produce((draft) => {

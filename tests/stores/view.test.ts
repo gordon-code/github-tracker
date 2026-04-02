@@ -6,7 +6,7 @@ import {
   resetViewState,
   ignoreItem,
   unignoreItem,
-  pruneClosedIgnoredItems,
+  pruneStaleIgnoredItems,
   setSortPreference,
   setGlobalFilter,
   resetAllTabFilters,
@@ -173,7 +173,7 @@ describe("ignoreItem / unignoreItem", () => {
   });
 });
 
-describe("pruneClosedIgnoredItems", () => {
+describe("pruneStaleIgnoredItems", () => {
   it("removes items older than 30 days", () => {
     const now = Date.now();
     const old = now - 31 * 24 * 60 * 60 * 1000;
@@ -183,13 +183,13 @@ describe("pruneClosedIgnoredItems", () => {
     ignoreItem({ id: "recent-1", type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
     expect(viewState.ignoredItems).toHaveLength(2);
 
-    pruneClosedIgnoredItems();
+    pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
     expect(viewState.ignoredItems[0].id).toBe("recent-1");
   });
 
   it("is a no-op when ignoredItems is empty", () => {
-    pruneClosedIgnoredItems();
+    pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(0);
   });
 
@@ -198,7 +198,7 @@ describe("pruneClosedIgnoredItems", () => {
     const exactly30 = now - 30 * 24 * 60 * 60 * 1000 + 1000;
 
     ignoreItem({ id: "boundary", type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
-    pruneClosedIgnoredItems();
+    pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
   });
 });
