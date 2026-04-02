@@ -135,6 +135,49 @@ describe("Worker OAuth endpoint", () => {
     expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
+  it("allows requests again after the rate-limit window expires", async () => {
+    const fixedIp = "10.0.0.100";
+    function makeRateLimitRequest() {
+      return new Request("https://gh.gordoncode.dev/api/oauth/token", {
+        method: "POST",
+        headers: {
+          Origin: ALLOWED_ORIGIN,
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": fixedIp,
+        },
+        body: JSON.stringify({ code: VALID_CODE }),
+      });
+    }
+
+    vi.useFakeTimers();
+    try {
+      // Mock successful GitHub response
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ access_token: "tok", token_type: "bearer", scope: "repo" }),
+          { status: 200 }
+        )
+      );
+
+      const env = makeEnv();
+      // Exhaust the 10-request limit — 11th triggers rate limit
+      for (let i = 0; i < 10; i++) {
+        await worker.fetch(makeRateLimitRequest(), env);
+      }
+      const limited = await worker.fetch(makeRateLimitRequest(), env);
+      expect(limited.status).toBe(429);
+
+      // Advance time past the 60-second window
+      vi.advanceTimersByTime(61_000);
+
+      // Next request should get a fresh window — not rate-limited
+      const afterReset = await worker.fetch(makeRateLimitRequest(), env);
+      expect(afterReset.status).not.toBe(429);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // ── Token exchange ─────────────────────────────────────────────────────────
 
   it("POST /api/oauth/token with valid code returns access_token, token_type, scope", async () => {

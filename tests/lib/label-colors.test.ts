@@ -32,4 +32,20 @@ describe("labelColorClass", () => {
     expect(first).toBe(second);
     expect(first).toBe("lb-ff0000");
   });
+
+  it("inserts CSS rule with correct background and foreground colors", () => {
+    labelColorClass("000000");
+    const sheet = document.adoptedStyleSheets[document.adoptedStyleSheets.length - 1];
+    const rule = sheet.cssRules[0].cssText;
+    expect(rule).toContain(".lb-000000");
+    expect(rule).toContain("background-color");
+    expect(rule).toContain("color");
+  });
+
+  it("does not insert duplicate rules for same hex", () => {
+    labelColorClass("ff0000");
+    labelColorClass("ff0000");
+    const sheet = document.adoptedStyleSheets[document.adoptedStyleSheets.length - 1];
+    expect(sheet.cssRules.length).toBe(1);
+  });
 });

@@ -36,10 +36,6 @@ export default function OAuthCallback() {
       return;
     }
 
-    // Read and clear returnTo only after all pre-exchange checks pass
-    const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
-    sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
-
     try {
       const resp = await fetch("/api/oauth/token", {
         method: "POST",
@@ -64,6 +60,9 @@ export default function OAuthCallback() {
         return;
       }
 
+      // Read and clear returnTo only after successful auth (preserves it for retry on failure)
+      const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+      sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
       navigate(sanitizeReturnTo(returnTo), { replace: true });
     } catch {
       setError("A network error occurred. Please try again.");

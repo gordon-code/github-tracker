@@ -314,7 +314,7 @@ describe("OAuthCallback", () => {
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
 
-  it("OAUTH_RETURN_TO_KEY is removed from sessionStorage after reading", async () => {
+  it("OAUTH_RETURN_TO_KEY is preserved while token exchange is in flight", async () => {
     sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
@@ -322,9 +322,9 @@ describe("OAuthCallback", () => {
 
     renderCallback();
 
-    await waitFor(() => {
-      expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
-    });
+    // returnTo is not consumed until auth completes — preserved for retry on failure
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
   it("OAUTH_RETURN_TO_KEY is preserved when CSRF check fails (only consumed on success)", async () => {

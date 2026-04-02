@@ -35,7 +35,7 @@ This policy covers:
 
 This project implements the following security measures:
 
-- **CSP**: Strict Content-Security-Policy with `default-src 'none'` and no `unsafe-eval`
+- **CSP**: Strict Content-Security-Policy with `default-src 'none'`, no `unsafe-eval`, no `unsafe-inline` for scripts (`style-src-attr 'unsafe-inline'` required by Kobalte UI library)
 - **CORS**: Strict origin equality matching on the Worker
 - **OAuth CSRF**: Cryptographically random state parameter with single-use enforcement
 - **Read-only API access**: Octokit hook blocks all write operations

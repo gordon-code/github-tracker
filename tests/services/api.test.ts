@@ -168,6 +168,42 @@ describe("fetchRepos", () => {
       "No GitHub client available"
     );
   });
+
+  it("stops pagination at 1000 repos and emits warning notification", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    async function* mockPaginator() {
+      for (let page = 0; page < 20; page++) {
+        yield {
+          data: Array.from({ length: 100 }, (_, i) => ({
+            owner: { login: "org" },
+            name: `repo-${page * 100 + i}`,
+            full_name: `org/repo-${page * 100 + i}`,
+            pushed_at: "2026-01-01T00:00:00Z",
+          })),
+        };
+      }
+    }
+
+    const octokit = makeBasicOctokit();
+    octokit.paginate.iterator.mockImplementation((() => mockPaginator()) as never);
+
+    const result = await fetchRepos(octokit as never, "org", "org");
+
+    expect(result).toHaveLength(1000);
+    expect(pushNotification).toHaveBeenCalledWith(
+      "api",
+      expect.stringContaining("1000+"),
+      "warning"
+    );
+  });
+
+  // VALID_REPO_NAME is not exported. It is exercised indirectly via buildRepoQualifiers
+  // (called inside fetchIssues/fetchPullRequests). Invalid repo names are silently
+  // filtered from the GraphQL query qualifiers. Direct boundary tests for the regex
+  // itself would require exporting the constant; the existing fetchIssues tests
+  // already cover the valid-name path and the VALID_TRACKED_LOGIN boundary tests
+  // cover the analogous login regex. No additional test added here.
 });
 
 // ── fetchIssues (GraphQL search) ─────────────────────────────────────────────

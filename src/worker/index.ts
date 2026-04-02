@@ -3,7 +3,7 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   ALLOWED_ORIGIN: string;
-  SENTRY_DSN: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
+  SENTRY_DSN?: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
   SENTRY_SECURITY_TOKEN?: string; // Optional: Sentry security token for Allowed Domains validation
 }
 
@@ -81,8 +81,11 @@ function checkTokenRateLimit(ip: string): boolean {
   return true;
 }
 
-// Periodic cleanup to prevent unbounded map growth
+// Periodic cleanup to prevent unbounded map growth.
+// Only runs when the map exceeds a threshold to avoid O(N) scan on every request.
+const PRUNE_THRESHOLD = 100;
 function pruneTokenRateMap(): void {
+  if (_tokenRateMap.size < PRUNE_THRESHOLD) return;
   const now = Date.now();
   for (const [ip, entry] of _tokenRateMap) {
     if (now >= entry.resetAt) _tokenRateMap.delete(ip);
@@ -134,8 +137,9 @@ function parseSentryDsn(dsn: string): ParsedDsn | null {
 
 /** Get cached parsed DSN, re-parsing only when the DSN string changes. */
 function getOrCacheDsn(env: Env): ParsedDsn | null {
-  if (!_dsnCache || _dsnCache.dsn !== env.SENTRY_DSN) {
-    _dsnCache = { dsn: env.SENTRY_DSN, parsed: parseSentryDsn(env.SENTRY_DSN) };
+  const dsn = env.SENTRY_DSN ?? "";
+  if (!_dsnCache || _dsnCache.dsn !== dsn) {
+    _dsnCache = { dsn, parsed: parseSentryDsn(dsn) };
   }
   return _dsnCache.parsed;
 }
@@ -355,7 +359,7 @@ async function handleTokenExchange(
   pruneTokenRateMap();
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   if (!checkTokenRateLimit(ip)) {
-    log("warn", "token_exchange_rate_limited", { ip }, request);
+    log("warn", "token_exchange_rate_limited", {}, request);
     return new Response(JSON.stringify({ error: "rate_limited" }), {
       status: 429,
       headers: {

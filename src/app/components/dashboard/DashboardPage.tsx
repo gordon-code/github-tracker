@@ -84,13 +84,14 @@ onAuthCleared(() => {
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
-    _setCoordinator(null);
+    if (_coordinator() === coord) _setCoordinator(null);
   }
   const hotCoord = _hotCoordinator();
   if (hotCoord) {
     hotCoord.destroy();
-    _setHotCoordinator(null);
+    if (_hotCoordinator() === hotCoord) _setHotCoordinator(null);
   }
+  clearHotSets();
 });
 
 async function pollFetch(): Promise<DashboardData> {
