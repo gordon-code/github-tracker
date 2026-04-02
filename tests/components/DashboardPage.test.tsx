@@ -277,6 +277,30 @@ describe("DashboardPage — tab badge counts", () => {
     });
   });
 
+  it("combines hideDepDashboard and ignore exclusions correctly", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Dependency Dashboard" }),
+        makeIssue({ id: 3, title: "Issue C" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    // hideDepDashboard defaults true — badge starts at 2 (excludes Dep Dashboard)
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    // Ignore one real issue — badge should drop to 1
+    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
   it("decrements PR badge on ignore", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
