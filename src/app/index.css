@@ -114,7 +114,7 @@
 .navbar {
   padding-right: calc(0.5rem + var(--scrollbar-width, 0px));
 }
-footer {
+.app-footer {
   padding-right: var(--scrollbar-width, 0px);
 }
 

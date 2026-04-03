@@ -165,6 +165,36 @@ test("switching tabs changes active tab indicator", async ({ page }) => {
   await expect(actionsTab).toHaveAttribute("aria-selected", "true");
 });
 
+test("fixed elements compensate for scrollbar width when scroll is locked", async ({ page }) => {
+  await setupAuth(page);
+  await page.goto("/dashboard");
+
+  const navbar = page.locator(".navbar");
+  const footer = page.locator(".app-footer");
+  await expect(navbar).toBeVisible();
+  await expect(footer).toBeVisible();
+
+  // Baseline: navbar 0.5rem (8px) from daisyUI, footer 0px (no base padding)
+  expect(parseFloat(await navbar.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(8, 0);
+  expect(parseFloat(await footer.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(0, 0);
+
+  // Simulate solid-prevent-scroll setting --scrollbar-width on body
+  await page.evaluate(() => {
+    document.body.style.setProperty("--scrollbar-width", "15px");
+  });
+
+  // Navbar: 8px + 15px = 23px, footer: 0px + 15px = 15px
+  expect(parseFloat(await navbar.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(23, 0);
+  expect(parseFloat(await footer.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(15, 0);
+
+  // Clear — both return to baseline
+  await page.evaluate(() => {
+    document.body.style.removeProperty("--scrollbar-width");
+  });
+  expect(parseFloat(await navbar.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(8, 0);
+  expect(parseFloat(await footer.evaluate((el) => getComputedStyle(el).paddingRight))).toBeCloseTo(0, 0);
+});
+
 test("dashboard shows empty state with no data", async ({ page }) => {
   await setupAuth(page);
   await page.goto("/dashboard");

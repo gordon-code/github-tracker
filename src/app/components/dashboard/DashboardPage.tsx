@@ -428,7 +428,7 @@ export default function DashboardPage() {
           </main>
         </div>
 
-        <footer class="fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">
+        <footer class="app-footer fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">
           <div class="max-w-6xl mx-auto w-full px-4 grid grid-cols-3 items-center">
             <div />
             <div class="flex items-center justify-center gap-3">
