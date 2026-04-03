@@ -111,6 +111,9 @@
 /* solid-prevent-scroll sets --scrollbar-width on body when scroll is locked;
    fixed elements don't inherit body padding-right, so compensate explicitly */
 .navbar {
+  padding-right: calc(0.5rem + var(--scrollbar-width, 0px));
+}
+footer {
   padding-right: var(--scrollbar-width, 0px);
 }
 
