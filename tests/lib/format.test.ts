@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount } from "../../src/app/lib/format";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -346,5 +346,43 @@ describe("formatCount", () => {
 
   it("returns '10k' for 10000", () => {
     expect(formatCount(10000)).toBe("10k");
+  });
+});
+
+describe("formatStarCount", () => {
+  it("returns '0' for 0", () => {
+    expect(formatStarCount(0)).toBe("0");
+  });
+
+  it("returns '42' for 42", () => {
+    expect(formatStarCount(42)).toBe("42");
+  });
+
+  it("returns '999' for 999", () => {
+    expect(formatStarCount(999)).toBe("999");
+  });
+
+  it("returns '1k' for 1000", () => {
+    expect(formatStarCount(1000)).toBe("1k");
+  });
+
+  it("returns '1.2k' for 1234", () => {
+    expect(formatStarCount(1234)).toBe("1.2k");
+  });
+
+  it("returns '10k' for 9999 (rounds up)", () => {
+    expect(formatStarCount(9999)).toBe("10k");
+  });
+
+  it("returns '15k' for 15000", () => {
+    expect(formatStarCount(15000)).toBe("15k");
+  });
+
+  it("returns '1M' for 1000000", () => {
+    expect(formatStarCount(1000000)).toBe("1M");
+  });
+
+  it("returns '1.2M' for 1234567", () => {
+    expect(formatStarCount(1234567)).toBe("1.2M");
   });
 });

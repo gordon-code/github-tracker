@@ -4,10 +4,13 @@ import { groupByRepo, computePageLayout, slicePageGroups, type RepoGroup } from 
 interface Item {
   repoFullName: string;
   id: number;
+  starCount?: number;
 }
 
-function makeItem(repo: string, id: number): Item {
-  return { repoFullName: repo, id };
+function makeItem(repo: string, id: number, starCount?: number): Item {
+  const item: Item = { repoFullName: repo, id };
+  if (starCount !== undefined) item.starCount = starCount;
+  return item;
 }
 
 function makeGroup(repo: string, count: number): RepoGroup<Item> {
@@ -41,6 +44,18 @@ describe("groupByRepo", () => {
     const groups = groupByRepo(items);
     expect(groups).toHaveLength(1);
     expect(groups[0].items).toHaveLength(2);
+  });
+
+  it("propagates starCount from first item in group", () => {
+    const items = [makeItem("org/repo", 1, 42), makeItem("org/repo", 2, 42)];
+    const groups = groupByRepo(items);
+    expect(groups[0].starCount).toBe(42);
+  });
+
+  it("leaves starCount undefined when items have no starCount", () => {
+    const items = [makeItem("org/repo", 1), makeItem("org/repo", 2)];
+    const groups = groupByRepo(items);
+    expect(groups[0].starCount).toBeUndefined();
   });
 });
 
