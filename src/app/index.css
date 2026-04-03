@@ -109,7 +109,8 @@
 
 /* ── Fixed-element scrollbar compensation ────────────────────────────────── */
 /* solid-prevent-scroll sets --scrollbar-width on body when scroll is locked;
-   fixed elements don't inherit body padding-right, so compensate explicitly */
+   fixed elements don't inherit body padding-right, so compensate explicitly.
+   0.5rem matches daisyUI .navbar padding (padding: .5rem) */
 .navbar {
   padding-right: calc(0.5rem + var(--scrollbar-width, 0px));
 }
