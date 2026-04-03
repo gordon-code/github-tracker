@@ -121,6 +121,7 @@ describe("createPollCoordinator", () => {
   });
 
   it("continues polling when document is hidden (notifications gate enabled)", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -132,14 +133,16 @@ describe("createPollCoordinator", () => {
       // Hide document
       setDocumentVisible(false);
 
-      // Advance past the interval
-      vi.advanceTimersByTime(90_000);
+      // Advance past the interval (60s with 0 jitter)
+      vi.advanceTimersByTime(61_000);
       await Promise.resolve();
 
       // Should have fetched while hidden (background refresh)
       expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
       dispose();
     });
+
+    randomSpy.mockRestore();
   });
 
   it("triggers immediate refresh on re-visible after >2 minutes hidden", async () => {
@@ -474,7 +477,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  // ── qa-3: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
+  // ── qa-3a: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
 
   it("skipped fetch does NOT call pushError for previous errors (no restore logic)", async () => {
     mockPushError.mockClear();
