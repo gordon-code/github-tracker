@@ -17,46 +17,50 @@ interface PersonalSummaryStripProps {
 }
 
 export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
-  const assignedIssues = createMemo(() => {
+  // Single-pass over issues to count assigned
+  const issueCounts = createMemo(() => {
     const login = props.userLogin.toLowerCase();
-    if (!login) return 0;
-    return props.issues.filter((i) =>
-      i.assigneeLogins.some((a) => a.toLowerCase() === login)
-    ).length;
+    if (!login) return { assignedIssues: 0 };
+    let assignedIssues = 0;
+    for (const i of props.issues) {
+      if (i.assigneeLogins.some((a) => a.toLowerCase() === login)) assignedIssues++;
+    }
+    return { assignedIssues };
   });
 
-  const prsAwaitingReview = createMemo(() => {
+  // Single-pass over PRs to count awaiting review, ready to merge, and blocked
+  const prCounts = createMemo(() => {
     const login = props.userLogin.toLowerCase();
-    if (!login) return 0;
-    return props.pullRequests.filter(
-      (pr) =>
+    if (!login) return { prsAwaitingReview: 0, prsReadyToMerge: 0, prsBlocked: 0 };
+    let prsAwaitingReview = 0;
+    let prsReadyToMerge = 0;
+    let prsBlocked = 0;
+    for (const pr of props.pullRequests) {
+      const isAuthor = pr.userLogin.toLowerCase() === login;
+      if (
         pr.enriched !== false &&
         pr.reviewDecision === "REVIEW_REQUIRED" &&
         pr.reviewerLogins.some((r) => r.toLowerCase() === login)
-    ).length;
-  });
-
-  const prsReadyToMerge = createMemo(() => {
-    const login = props.userLogin.toLowerCase();
-    if (!login) return 0;
-    return props.pullRequests.filter(
-      (pr) =>
-        pr.userLogin.toLowerCase() === login &&
+      ) {
+        prsAwaitingReview++;
+      }
+      if (
+        isAuthor &&
         !pr.draft &&
         pr.checkStatus === "success" &&
         (pr.reviewDecision === "APPROVED" || pr.reviewDecision === null)
-    ).length;
-  });
-
-  const prsBlocked = createMemo(() => {
-    const login = props.userLogin.toLowerCase();
-    if (!login) return 0;
-    return props.pullRequests.filter(
-      (pr) =>
-        pr.userLogin.toLowerCase() === login &&
+      ) {
+        prsReadyToMerge++;
+      }
+      if (
+        isAuthor &&
         !pr.draft &&
         (pr.checkStatus === "failure" || pr.checkStatus === "conflict")
-    ).length;
+      ) {
+        prsBlocked++;
+      }
+    }
+    return { prsAwaitingReview, prsReadyToMerge, prsBlocked };
   });
 
   const runningActions = createMemo(() =>
@@ -64,12 +68,15 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
   );
 
   const summaryItems = createMemo(() => {
+    const { assignedIssues } = issueCounts();
+    const { prsAwaitingReview, prsReadyToMerge, prsBlocked } = prCounts();
+    const running = runningActions();
     const items: SummaryCount[] = [];
-    if (assignedIssues() > 0) items.push({ label: "assigned", count: assignedIssues(), tab: "issues" });
-    if (prsAwaitingReview() > 0) items.push({ label: "awaiting review", count: prsAwaitingReview(), tab: "pullRequests" });
-    if (prsReadyToMerge() > 0) items.push({ label: "ready to merge", count: prsReadyToMerge(), tab: "pullRequests" });
-    if (prsBlocked() > 0) items.push({ label: "blocked", count: prsBlocked(), tab: "pullRequests" });
-    if (runningActions() > 0) items.push({ label: "running", count: runningActions(), tab: "actions" });
+    if (assignedIssues > 0) items.push({ label: "assigned", count: assignedIssues, tab: "issues" });
+    if (prsAwaitingReview > 0) items.push({ label: "awaiting review", count: prsAwaitingReview, tab: "pullRequests" });
+    if (prsReadyToMerge > 0) items.push({ label: "ready to merge", count: prsReadyToMerge, tab: "pullRequests" });
+    if (prsBlocked > 0) items.push({ label: "blocked", count: prsBlocked, tab: "pullRequests" });
+    if (running > 0) items.push({ label: "running", count: running, tab: "actions" });
     return items;
   });
 
@@ -83,6 +90,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
                 <span class="text-base-content/30">·</span>
               </Show>
               <button
+                type="button"
                 class="hover:text-primary transition-colors cursor-pointer"
                 onClick={() => props.onTabChange(item.tab)}
               >

@@ -376,7 +376,7 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
       <PullRequestsTab
         pullRequests={prs}
         userLogin="me"
-        monitoredRepos={[]}
+        monitoredRepos={[{ owner: "org", name: "repo", fullName: "org/repo" }]}
       />
     ));
 

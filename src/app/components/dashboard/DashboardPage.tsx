@@ -163,6 +163,7 @@ async function pollFetch(): Promise<DashboardData> {
               pr.enriched = e.enriched;
               pr.nodeId = e.nodeId;
               pr.surfacedBy = e.surfacedBy;
+              pr.starCount = e.starCount;
             }
           } else {
             state.pullRequests = data.pullRequests;

@@ -171,6 +171,16 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
+  // Auto-reset scope to default when neither monitored repos nor tracked users are present
+  // (the scope chip group is hidden in that case, so any non-default scope would be sticky/invisible)
+  createEffect(() => {
+    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
+    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
+    if (!hasMonitoredRepos && !hasTrackedUsers && viewState.tabFilters.pullRequests.scope !== "involves_me") {
+      setTabFilter("pullRequests", "scope", "involves_me");
+    }
+  });
+
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
     return pref ?? { field: "updatedAt", direction: "desc" as const };
@@ -185,6 +195,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         .map((i) => i.id)
     );
 
+    const userLoginLower = props.userLogin.toLowerCase();
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
@@ -196,18 +207,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
       // Scope filter
-      if (tabFilters.scope === "involves_me") {
-        const login = props.userLogin.toLowerCase();
-        const surfacedBy = pr.surfacedBy ?? [];
-        if (surfacedBy.length > 0) {
-          if (!surfacedBy.includes(login)) return false;
-        } else if (monitoredRepoNameSet().has(pr.repoFullName)) {
-          const isInvolved = pr.userLogin.toLowerCase() === login ||
-            pr.assigneeLogins.some(a => a.toLowerCase() === login) ||
-            (pr.enriched !== false && pr.reviewerLogins.some(r => r.toLowerCase() === login));
-          if (!isInvolved) return false;
-        }
-      }
+      if (tabFilters.scope === "involves_me" && !isInvolvedItem(pr)) return false;
 
       // Tab filters — light-field filters always apply; heavy-field filters
       // only apply to enriched PRs so unenriched phase-1 PRs aren't incorrectly hidden
@@ -240,7 +240,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (!monitoredRepoNameSet().has(pr.repoFullName)) {
           const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
           if (validUser) {
-            const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
+            const surfacedBy = pr.surfacedBy ?? [userLoginLower];
             if (!surfacedBy.includes(tabFilters.user)) return false;
           }
         }

@@ -103,6 +103,16 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
+  // Auto-reset scope to default when neither monitored repos nor tracked users are present
+  // (the scope chip group is hidden in that case, so any non-default scope would be sticky/invisible)
+  createEffect(() => {
+    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
+    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
+    if (!hasMonitoredRepos && !hasTrackedUsers && viewState.tabFilters.issues.scope !== "involves_me") {
+      setTabFilter("issues", "scope", "involves_me");
+    }
+  });
+
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
     return pref ?? { field: "updatedAt", direction: "desc" as const };
@@ -117,6 +127,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         .map((i) => i.id)
     );
 
+    const userLoginLower = props.userLogin.toLowerCase();
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
@@ -127,17 +138,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
       // Scope filter
-      if (tabFilter.scope === "involves_me") {
-        const login = props.userLogin.toLowerCase();
-        const surfacedBy = issue.surfacedBy ?? [];
-        if (surfacedBy.length > 0) {
-          if (!surfacedBy.includes(login)) return false;
-        } else if (monitoredRepoNameSet().has(issue.repoFullName)) {
-          const isInvolved = issue.userLogin.toLowerCase() === login ||
-            issue.assigneeLogins.some(a => a.toLowerCase() === login);
-          if (!isInvolved) return false;
-        }
-      }
+      if (tabFilter.scope === "involves_me" && !isInvolvedItem(issue)) return false;
 
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
@@ -155,7 +156,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (!monitoredRepoNameSet().has(issue.repoFullName)) {
           const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
           if (validUser) {
-            const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
+            const surfacedBy = issue.surfacedBy ?? [userLoginLower];
             if (!surfacedBy.includes(tabFilter.user)) return false;
           }
         }
@@ -245,7 +246,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (surfacedBy.length > 0) return surfacedBy.includes(login);
     if (monitoredRepoNameSet().has(item.repoFullName)) {
       return item.userLogin.toLowerCase() === login ||
-        item.assigneeLogins.some(a => a.toLowerCase() === login);
+        item.assigneeLogins.some((a) => a.toLowerCase() === login);
     }
     return true;
   }

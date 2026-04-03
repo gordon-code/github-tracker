@@ -370,7 +370,7 @@ describe("formatStarCount", () => {
     expect(formatStarCount(1234)).toBe("1.2k");
   });
 
-  it("returns '10k' for 9999 (rounds up)", () => {
+  it("returns '10k' for 9999", () => {
     expect(formatStarCount(9999)).toBe("10k");
   });
 

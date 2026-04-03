@@ -426,7 +426,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
       <IssuesTab
         issues={issues}
         userLogin="me"
-        monitoredRepos={[]}
+        monitoredRepos={[{ owner: "org", name: "repo", fullName: "org/repo" }]}
       />
     ));
 
