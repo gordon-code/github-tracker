@@ -71,6 +71,12 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
+/** Simulate 403 on /notifications — disables the notifications gate.
+ * Used by tests to exercise the conditional background-poll guard. */
+export function disableNotifGate(): void {
+  _notifGateDisabled = true;
+}
+
 export function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
@@ -178,8 +184,8 @@ async function hasNotificationChanges(): Promise<boolean> {
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
       pushNotification("notifications", config.authMethod === "pat"
-        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope"
-        : "Notifications API returned 403 — check that the notifications scope is granted", "warning");
+        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope. Background refresh in hidden tabs is disabled."
+        : "Notifications API returned 403 — check that the notifications scope is granted. Background refresh in hidden tabs is disabled.", "warning");
       _notifGateDisabled = true;
     }
     return true;
@@ -323,7 +329,10 @@ function withJitter(intervalMs: number): number {
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling (SDR-017)
- * - Continues polling in background tabs (no visibility pause)
+ * - Continues polling in background tabs when notifications gate is available
+ *   (304 responses make background polls near-zero cost). When the gate is
+ *   disabled (fine-grained PAT or missing notifications scope), background
+ *   polling pauses to conserve API budget.
  * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
  *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
@@ -393,6 +402,10 @@ export function createPollCoordinator(
 
     const intervalMs = withJitter(intervalSec * 1000);
     intervalId = setInterval(() => {
+      // Without the notifications gate (403 — scope not granted), every background
+      // poll is a full fetch with no 304 shortcut. Skip background polls to avoid
+      // burning API budget; the catch-up handler still fires on tab return.
+      if (document.visibilityState === "hidden" && _notifGateDisabled) return;
       void doFetch();
     }, intervalMs);
   }

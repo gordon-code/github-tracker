@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
+import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
@@ -29,6 +29,7 @@ vi.mock("../../src/app/lib/errors", () => ({
 vi.mock("../../src/app/lib/notifications", () => ({
   detectNewItems: vi.fn(() => []),
   dispatchNotifications: vi.fn(),
+  _resetNotificationState: vi.fn(),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
@@ -119,7 +120,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("continues polling when document is hidden", async () => {
+  it("continues polling when document is hidden (notifications gate enabled)", async () => {
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -165,6 +166,31 @@ describe("createPollCoordinator", () => {
       expect(fetchAll.mock.calls.length).toBeGreaterThanOrEqual(callsAfterInit + 1);
       dispose();
     });
+  });
+
+  it("pauses background polling when hidden and notifications gate is disabled", async () => {
+    disableNotifGate();
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      // Hide document
+      setDocumentVisible(false);
+
+      // Advance past the interval
+      vi.advanceTimersByTime(90_000);
+      await Promise.resolve();
+
+      // Should NOT have fetched — gate disabled means no cheap 304, skip background polls
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+      dispose();
+    });
+
+    resetPollState(); // restore gate for other tests
   });
 
   it("does NOT trigger immediate refresh on re-visible within 2 minutes", async () => {

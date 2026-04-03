@@ -18,7 +18,7 @@ Dashboard SPA tracking GitHub issues, PRs, and GHA workflow runs across multiple
 - **Ignore System** — Hide specific items with an "N ignored" badge and unignore popover.
 - **Dark Mode** — System-aware with flash prevention via inline script + CSP SHA-256 hash.
 - **ETag Caching** — Conditional requests (304s are free against GitHub's rate limit).
-- **Auto-refresh** — Background polling keeps data fresh even in hidden tabs; hot poll pauses to save API budget.
+- **Auto-refresh** — Background polling keeps data fresh even in hidden tabs (requires notifications scope for efficient 304 change detection); hot poll pauses to save API budget.
 
 ## Tech Stack
 
