@@ -17,12 +17,12 @@ const STATUS_CONFIG = {
     pulse: true,
   },
   failure: {
-    bg: "bg-error",
+    bg: "bg-error ring-2 ring-error/30",
     label: "Checks failing",
     pulse: false,
   },
   error: {
-    bg: "bg-error",
+    bg: "bg-error ring-2 ring-error/30",
     label: "Checks failing",
     pulse: false,
   },
