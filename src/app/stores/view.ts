@@ -7,12 +7,14 @@ export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 
 const IssueFiltersSchema = z.object({
+  scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "assignee"]).default("all"),
   comments: z.enum(["all", "has", "none"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
 const PullRequestFiltersSchema = z.object({
+  scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]).default("all"),
   draft: z.enum(["all", "draft", "ready"]).default("all"),
@@ -65,12 +67,12 @@ export const ViewStateSchema = z.object({
     })
     .default({ org: null, repo: null }),
   tabFilters: z.object({
-    issues: IssueFiltersSchema.default({ role: "all", comments: "all", user: "all" }),
-    pullRequests: PullRequestFiltersSchema.default({ role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
+    issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
+    pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
   }).default({
-    issues: { role: "all", comments: "all", user: "all" },
-    pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
+    issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
+    pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
   }),
   showPrRuns: z.boolean().default(false),
@@ -124,8 +126,8 @@ export function resetViewState(): void {
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
     tabFilters: {
-      issues: { role: "all", comments: "all", user: "all" },
-      pullRequests: { role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
+      issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
+      pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
       actions: { conclusion: "all", event: "all" },
     },
     showPrRuns: false,

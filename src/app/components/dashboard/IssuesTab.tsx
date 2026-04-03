@@ -32,6 +32,16 @@ export interface IssuesTabProps {
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
 
+const scopeFilterGroup: FilterChipGroupDef = {
+  label: "Scope",
+  field: "scope",
+  defaultValue: "involves_me",
+  options: [
+    { value: "involves_me", label: "Involves me" },
+    { value: "all", label: "All activity" },
+  ],
+};
+
 const issueFilterGroups: FilterChipGroupDef[] = [
   {
     label: "Role",
@@ -77,9 +87,14 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    if (!users || users.length <= 1) return issueFilterGroups;
+    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
+    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
+    const base = (hasMonitoredRepos || hasTrackedUsers)
+      ? [scopeFilterGroup, ...issueFilterGroups]
+      : [...issueFilterGroups];
+    if (!users || users.length <= 1) return base;
     return [
-      ...issueFilterGroups,
+      ...base,
       {
         label: "User",
         field: "user",

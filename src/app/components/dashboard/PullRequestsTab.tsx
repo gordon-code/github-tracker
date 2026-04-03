@@ -66,6 +66,16 @@ function reviewDecisionOrder(decision: PullRequest["reviewDecision"]): number {
   }
 }
 
+const scopeFilterGroup: FilterChipGroupDef = {
+  label: "Scope",
+  field: "scope",
+  defaultValue: "involves_me",
+  options: [
+    { value: "involves_me", label: "Involves me" },
+    { value: "all", label: "All activity" },
+  ],
+};
+
 const prFilterGroups: FilterChipGroupDef[] = [
   {
     label: "Role",
@@ -145,9 +155,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    if (!users || users.length <= 1) return prFilterGroups;
+    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
+    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
+    const base = (hasMonitoredRepos || hasTrackedUsers)
+      ? [scopeFilterGroup, ...prFilterGroups]
+      : [...prFilterGroups];
+    if (!users || users.length <= 1) return base;
     return [
-      ...prFilterGroups,
+      ...base,
       {
         label: "User",
         field: "user",

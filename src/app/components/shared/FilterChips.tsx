@@ -4,6 +4,7 @@ export interface FilterChipGroupDef {
   label: string;
   field: string;
   options: { value: string; label: string }[];
+  defaultValue?: string; // When set, replaces "all" as the "no filter active" value
 }
 
 interface FilterChipsProps {
@@ -16,31 +17,33 @@ interface FilterChipsProps {
 
 export default function FilterChips(props: FilterChipsProps) {
   const hasActiveFilter = () =>
-    props.groups.some((g) => props.values[g.field] !== "all" && props.values[g.field] !== undefined);
+    props.groups.some((g) => props.values[g.field] !== undefined && props.values[g.field] !== (g.defaultValue ?? "all"));
 
   return (
     <div class="flex flex-wrap items-center gap-3">
       <For each={props.groups}>
         {(group) => {
-          const current = () => props.values[group.field] ?? "all";
-          const isActive = () => current() !== "all";
+          const current = () => props.values[group.field] ?? (group.defaultValue ?? "all");
+          const isActive = () => current() !== (group.defaultValue ?? "all");
 
           return (
             <div class="flex items-center gap-1">
               <span class="text-xs text-base-content/50 mr-1">{group.label}:</span>
               <div role="group" aria-label={group.label}>
-                <button
-                  type="button"
-                  onClick={() => props.onChange(group.field, "all")}
-                  aria-pressed={current() === "all"}
-                  class={`badge cursor-pointer transition-colors ${
-                    current() === "all"
-                      ? "badge-primary"
-                      : "badge-ghost"
-                  }`}
-                >
-                  All
-                </button>
+                <Show when={!group.defaultValue}>
+                  <button
+                    type="button"
+                    onClick={() => props.onChange(group.field, "all")}
+                    aria-pressed={current() === "all"}
+                    class={`badge cursor-pointer transition-colors ${
+                      current() === "all"
+                        ? "badge-primary"
+                        : "badge-ghost"
+                    }`}
+                  >
+                    All
+                  </button>
+                </Show>
                 <For each={group.options}>
                   {(opt) => (
                     <button
