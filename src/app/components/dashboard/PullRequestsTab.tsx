@@ -195,6 +195,20 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
+      // Scope filter
+      if (tabFilters.scope === "involves_me") {
+        const login = props.userLogin.toLowerCase();
+        const surfacedBy = pr.surfacedBy ?? [];
+        if (surfacedBy.length > 0) {
+          if (!surfacedBy.includes(login)) return false;
+        } else if (monitoredRepoNameSet().has(pr.repoFullName)) {
+          const isInvolved = pr.userLogin.toLowerCase() === login ||
+            pr.assigneeLogins.some(a => a.toLowerCase() === login) ||
+            (pr.enriched !== false && pr.reviewerLogins.some(r => r.toLowerCase() === login));
+          if (!isInvolved) return false;
+        }
+      }
+
       // Tab filters — light-field filters always apply; heavy-field filters
       // only apply to enriched PRs so unenriched phase-1 PRs aren't incorrectly hidden
       const isEnriched = pr.enriched !== false;
@@ -400,9 +414,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                   d="M8 7h8m-8 5h5m-5 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
                 />
               </svg>
-              <p class="text-sm font-medium">No open pull requests involving you</p>
+              <p class="text-sm font-medium">
+                {viewState.tabFilters.pullRequests.scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
+              </p>
               <p class="text-xs">
-                PRs where you are the author, assignee, or reviewer will appear here.
+                {viewState.tabFilters.pullRequests.scope === "all"
+                  ? "No pull requests match your current filters."
+                  : "PRs where you are the author, assignee, or reviewer will appear here."}
               </p>
             </div>
           }

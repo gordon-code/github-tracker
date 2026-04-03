@@ -126,6 +126,19 @@ export default function IssuesTab(props: IssuesTabProps) {
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
+      // Scope filter
+      if (tabFilter.scope === "involves_me") {
+        const login = props.userLogin.toLowerCase();
+        const surfacedBy = issue.surfacedBy ?? [];
+        if (surfacedBy.length > 0) {
+          if (!surfacedBy.includes(login)) return false;
+        } else if (monitoredRepoNameSet().has(issue.repoFullName)) {
+          const isInvolved = issue.userLogin.toLowerCase() === login ||
+            issue.assigneeLogins.some(a => a.toLowerCase() === login);
+          if (!isInvolved) return false;
+        }
+      }
+
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
       }
@@ -312,9 +325,13 @@ export default function IssuesTab(props: IssuesTabProps) {
                   d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
                 />
               </svg>
-              <p class="text-sm font-medium">No open issues involving you</p>
+              <p class="text-sm font-medium">
+                {viewState.tabFilters.issues.scope === "all" ? "No open issues found" : "No open issues involving you"}
+              </p>
               <p class="text-xs">
-                Issues where you are the author, assignee, or mentioned will appear here.
+                {viewState.tabFilters.issues.scope === "all"
+                  ? "No issues match your current filters."
+                  : "Issues where you are the author, assignee, or mentioned will appear here."}
               </p>
             </div>
           }

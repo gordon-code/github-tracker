@@ -84,6 +84,7 @@ describe("IssuesTab — user filter logic", () => {
       makeIssue({ id: 1, title: "Main issue", repoFullName: "owner/repo-a", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Tracked issue", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
+    setTabFilter("issues", "scope", "all");
     setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
 
     render(() => (
@@ -107,6 +108,7 @@ describe("IssuesTab — user filter logic", () => {
       makeIssue({ id: 2, title: "Tracked issue", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "tracked1");
     setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
 
@@ -201,6 +203,7 @@ describe("IssuesTab — avatar badge", () => {
       makeIssue({ id: 1, title: "Tracked issue", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("issues", "scope", "all");
     setAllExpanded("issues", ["owner/repo"], true);
 
     render(() => (
@@ -246,6 +249,7 @@ describe("IssuesTab — monitored repos filter bypass", () => {
     const issues = [
       makeIssue({ id: 1, title: "Monitored issue", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
     ];
+    setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "me");
     setAllExpanded("issues", ["org/monitored"], true);
 

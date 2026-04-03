@@ -1,15 +1,16 @@
 export interface RepoGroup<T> {
   repoFullName: string;
+  starCount?: number;
   items: T[];
 }
 
-export function groupByRepo<T extends { repoFullName: string }>(items: T[]): RepoGroup<T>[] {
+export function groupByRepo<T extends { repoFullName: string; starCount?: number }>(items: T[]): RepoGroup<T>[] {
   const groups: RepoGroup<T>[] = [];
   const map = new Map<string, RepoGroup<T>>();
   for (const item of items) {
     let group = map.get(item.repoFullName);
     if (!group) {
-      group = { repoFullName: item.repoFullName, items: [] };
+      group = { repoFullName: item.repoFullName, starCount: item.starCount, items: [] };
       map.set(item.repoFullName, group);
       groups.push(group);
     }

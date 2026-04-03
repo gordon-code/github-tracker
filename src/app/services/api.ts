@@ -40,6 +40,7 @@ export interface Issue {
   assigneeLogins: string[];
   repoFullName: string;
   comments: number;
+  starCount?: number;
   surfacedBy?: string[];
 }
 
@@ -73,6 +74,7 @@ export interface PullRequest {
   labels: { name: string; color: string }[];
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   totalReviewCount: number;
+  starCount?: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
@@ -266,7 +268,7 @@ interface GraphQLIssueNode {
   author: { login: string; avatarUrl: string } | null;
   labels: { nodes: { name: string; color: string }[] };
   assignees: { nodes: { login: string }[] };
-  repository: { nameWithOwner: string } | null;
+  repository: { nameWithOwner: string; stargazerCount: number } | null;
   comments: { totalCount: number };
 }
 
@@ -293,7 +295,7 @@ interface GraphQLPRNode {
   headRefName: string;
   baseRefName: string;
   headRepository: { owner: { login: string }; nameWithOwner: string } | null;
-  repository: { nameWithOwner: string } | null;
+  repository: { nameWithOwner: string; stargazerCount: number } | null;
   mergeStateStatus: string;
   assignees: { nodes: { login: string }[] };
   reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
@@ -356,7 +358,7 @@ const LIGHT_ISSUE_FRAGMENT = `
     author { login avatarUrl }
     labels(first: 10) { nodes { name color } }
     assignees(first: 10) { nodes { login } }
-    repository { nameWithOwner }
+    repository { nameWithOwner stargazerCount }
     comments { totalCount }
   }
 `;
@@ -398,7 +400,7 @@ const PR_SEARCH_QUERY = `
           headRefName
           baseRefName
           headRepository { owner { login } nameWithOwner }
-          repository { nameWithOwner }
+          repository { nameWithOwner stargazerCount }
           mergeStateStatus
           assignees(first: 10) { nodes { login } }
           reviewRequests(first: 10) {
@@ -444,7 +446,7 @@ const LIGHT_PR_FRAGMENT = `
     createdAt
     updatedAt
     author { login avatarUrl }
-    repository { nameWithOwner }
+    repository { nameWithOwner stargazerCount }
     headRefName
     baseRefName
     reviewDecision
@@ -644,7 +646,7 @@ interface GraphQLLightPRNode {
   createdAt: string;
   updatedAt: string;
   author: { login: string; avatarUrl: string } | null;
-  repository: { nameWithOwner: string } | null;
+  repository: { nameWithOwner: string; stargazerCount: number } | null;
   headRefName: string;
   baseRefName: string;
   reviewDecision: string | null;
@@ -821,6 +823,7 @@ function processIssueNode(
     assigneeLogins: node.assignees.nodes.map((a) => a.login),
     repoFullName: node.repository.nameWithOwner,
     comments: node.comments.totalCount,
+    starCount: node.repository.stargazerCount,
   });
   return true;
 }
@@ -957,6 +960,7 @@ function processLightPRNode(
     labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
     reviewDecision: mapReviewDecision(node.reviewDecision),
     totalReviewCount: 0,
+    starCount: node.repository.stargazerCount,
     enriched: false,
     nodeId: node.id,
   });
@@ -1583,27 +1587,7 @@ async function graphqlSearchIssues(
       octokit, ISSUES_SEARCH_QUERY, queryString,
       `search-batch-${chunkIdx + 1}/${chunks.length}`,
       errors,
-      (node) => {
-        if (node.databaseId == null || !node.repository) return false;
-        if (seen.has(node.databaseId)) return false;
-        seen.add(node.databaseId);
-        issues.push({
-          id: node.databaseId,
-          number: node.number,
-          title: node.title,
-          state: node.state,
-          htmlUrl: node.url,
-          createdAt: node.createdAt,
-          updatedAt: node.updatedAt,
-          userLogin: node.author?.login ?? "",
-          userAvatarUrl: node.author?.avatarUrl ?? "",
-          labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-          assigneeLogins: node.assignees.nodes.map((a) => a.login),
-          repoFullName: node.repository.nameWithOwner,
-          comments: node.comments.totalCount,
-        });
-        return true;
-      },
+      (node) => processIssueNode(node, seen, issues),
       () => issues.length,
       SEARCH_RESULT_CAP,
     );
@@ -1726,6 +1710,7 @@ async function graphqlSearchPRs(
       labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
       reviewDecision: mapReviewDecision(node.reviewDecision),
       totalReviewCount: node.latestReviews.totalCount,
+      starCount: node.repository.stargazerCount,
     });
     return true;
   }

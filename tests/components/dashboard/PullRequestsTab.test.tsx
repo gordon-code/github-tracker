@@ -75,6 +75,7 @@ describe("PullRequestsTab — user filter logic", () => {
       makePullRequest({ id: 1, title: "My PR", repoFullName: "owner/repo-a", surfacedBy: ["me"] }),
       makePullRequest({ id: 2, title: "Tracked PR", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
+    setTabFilter("pullRequests", "scope", "all");
     setAllExpanded("pullRequests", ["owner/repo-a", "owner/repo-b"], true);
 
     render(() => (
@@ -98,6 +99,7 @@ describe("PullRequestsTab — user filter logic", () => {
       makePullRequest({ id: 2, title: "Tracked PR", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("pullRequests", "scope", "all");
     setTabFilter("pullRequests", "user", "tracked1");
     setAllExpanded("pullRequests", ["owner/repo-a", "owner/repo-b"], true);
 
@@ -170,6 +172,7 @@ describe("PullRequestsTab — avatar badge", () => {
       makePullRequest({ id: 1, title: "Tracked PR", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("pullRequests", "scope", "all");
     setAllExpanded("pullRequests", ["owner/repo"], true);
 
     render(() => (
@@ -196,6 +199,7 @@ describe("PullRequestsTab — monitored repos filter bypass", () => {
     const prs = [
       makePullRequest({ id: 1, title: "Monitored PR", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
     ];
+    setTabFilter("pullRequests", "scope", "all");
     setTabFilter("pullRequests", "user", "me");
     setAllExpanded("pullRequests", ["org/monitored"], true);
 
