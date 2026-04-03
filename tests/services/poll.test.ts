@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
 
 // Mock pushError so we can spy on it
@@ -280,40 +280,35 @@ describe("createPollCoordinator", () => {
   });
 
   it("config change (interval change) restarts the interval", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
     const fetchAll = makeFetchAll();
-    let intervalSec = 300;
 
     await createRoot(async (dispose) => {
-      // Use a signal-based getter to simulate reactive config
-      const [getInterval, setGetInterval] = (() => {
-        let fn = () => intervalSec;
-        return [
-          () => fn(),
-          (newFn: () => number) => {
-            fn = newFn;
-          },
-        ] as const;
-      })();
+      const [interval, setInterval] = createSignal(300);
 
-      createPollCoordinator(getInterval, fetchAll);
+      createPollCoordinator(interval, fetchAll);
       await Promise.resolve(); // initial fetch
 
-      // Simulate config change to shorter interval by providing a new accessor
-      // In practice SolidJS createEffect re-runs when reactive dependencies change.
-      // Here we verify that calling with interval=60 fires within 90s.
-      intervalSec = 60;
-      void setGetInterval; // suppress unused warning
+      const callsAfterInit = fetchAll.mock.calls.length;
 
+      // At 300s interval, 90s should NOT fire
       vi.advanceTimersByTime(90_000);
       await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
-      // At 300s interval, 90s would not fire. But with 60s interval restart,
-      // it should fire at least once more. Since the internal createEffect
-      // is not re-triggered (intervalSec is not a signal), we only verify
-      // that the original timer was set and would eventually fire.
-      // The key test is just that manualRefresh + timer work correctly.
+      // Change interval to 60s — createEffect re-fires, timer restarts
+      setInterval(60);
+      await Promise.resolve(); // let effect run
+
+      // Advance 61s — new 60s interval should fire
+      vi.advanceTimersByTime(61_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
+
       dispose();
     });
+
+    randomSpy.mockRestore();
   });
 
   it("interval=0 disables auto-refresh (no setInterval)", async () => {
