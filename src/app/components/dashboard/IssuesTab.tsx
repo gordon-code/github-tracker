@@ -14,7 +14,7 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles, formatStarCount } from "../../lib/format";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
@@ -103,16 +103,8 @@ export default function IssuesTab(props: IssuesTabProps) {
     }
   });
 
-  function isInvolvedItem(item: Issue): boolean {
-    const login = userLoginLower();
-    const surfacedBy = item.surfacedBy ?? [];
-    if (surfacedBy.length > 0) return surfacedBy.includes(login);
-    if (monitoredRepoNameSet().has(item.repoFullName)) {
-      return item.userLogin.toLowerCase() === login ||
-        item.assigneeLogins.some((a) => a.toLowerCase() === login);
-    }
-    return true;
-  }
+  const isInvolvedItem = (item: Issue) =>
+    isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];

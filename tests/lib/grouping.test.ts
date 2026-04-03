@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByRepo, computePageLayout, slicePageGroups, type RepoGroup } from "../../src/app/lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, type RepoGroup } from "../../src/app/lib/grouping";
 
 interface Item {
   repoFullName: string;
@@ -56,6 +56,43 @@ describe("groupByRepo", () => {
     const items = [makeItem("org/repo", 1), makeItem("org/repo", 2)];
     const groups = groupByRepo(items);
     expect(groups[0].starCount).toBeUndefined();
+  });
+});
+
+describe("isUserInvolved", () => {
+  const base = { repoFullName: "org/repo", userLogin: "author", assigneeLogins: [] as string[] };
+  const monitored = new Set(["org/monitored"]);
+
+  it("returns true when surfacedBy includes user", () => {
+    expect(isUserInvolved({ ...base, surfacedBy: ["me"] }, "me", monitored)).toBe(true);
+  });
+
+  it("returns false when surfacedBy excludes user", () => {
+    expect(isUserInvolved({ ...base, surfacedBy: ["other"] }, "me", monitored)).toBe(false);
+  });
+
+  it("returns true for non-monitored item with no surfacedBy (fetched via involves:{user})", () => {
+    expect(isUserInvolved(base, "me", monitored)).toBe(true);
+  });
+
+  it("returns true for monitored repo item when user is author", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored", userLogin: "me" }, "me", monitored)).toBe(true);
+  });
+
+  it("returns true for monitored repo item when user is assignee", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored", assigneeLogins: ["me"] }, "me", monitored)).toBe(true);
+  });
+
+  it("returns false for monitored repo item when user is not author/assignee", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored" }, "me", monitored)).toBe(false);
+  });
+
+  it("returns true for monitored repo item when user is in reviewerLogins", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored" }, "me", monitored, ["me"])).toBe(true);
+  });
+
+  it("does not check reviewerLogins when not provided", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored" }, "me", monitored)).toBe(false);
   });
 });
 

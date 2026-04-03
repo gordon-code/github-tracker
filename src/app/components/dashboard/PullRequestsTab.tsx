@@ -18,7 +18,7 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -172,17 +172,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     }
   });
 
-  function isInvolvedItem(item: PullRequest): boolean {
-    const login = userLoginLower();
-    const surfacedBy = item.surfacedBy ?? [];
-    if (surfacedBy.length > 0) return surfacedBy.includes(login);
-    if (monitoredRepoNameSet().has(item.repoFullName)) {
-      return item.userLogin.toLowerCase() === login ||
-        item.assigneeLogins.some(a => a.toLowerCase() === login) ||
-        (item.enriched !== false && item.reviewerLogins.some(r => r.toLowerCase() === login));
-    }
-    return true;
-  }
+  const isInvolvedItem = (item: PullRequest) =>
+    isUserInvolved(item, userLoginLower(), monitoredRepoNameSet(),
+      item.enriched !== false ? item.reviewerLogins : undefined);
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];

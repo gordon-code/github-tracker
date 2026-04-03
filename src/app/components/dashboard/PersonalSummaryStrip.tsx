@@ -87,8 +87,18 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     const { prsAwaitingReview, prsReadyToMerge, prsBlocked } = prCounts();
     const running = runningActions();
     const items: SummaryCount[] = [];
-    // Summary counts from unfiltered data — set scope=all so the filtered view
-    // matches. The specific filters (role, checkStatus) already ensure relevance.
+    // ── Count-to-filter contract ──
+    // Counts are computed from unfiltered data (ignoring scope, globalFilter, showPrRuns).
+    // Click filters set scope=all so tabs don't hide items the count included.
+    // Known approximations (single-value filter system cannot express these):
+    //   - "ready to merge": count requires reviewDecision=APPROVED||null, but filter
+    //     can't express OR — PRs with CHANGES_REQUESTED + passing CI may appear
+    //   - "awaiting review": count excludes self-authored PRs (!isAuthor), but
+    //     role=reviewer filter includes them if user is both author+reviewer (rare)
+    //   - globalFilter (org/repo) is NOT applied here — counts are persistent
+    //     awareness across all repos, matching the tab badge behavior
+    //   - "running": count includes all in_progress runs; click enables showPrRuns
+    //     so PR-triggered runs are visible in the tab
     if (assignedIssues > 0) items.push({
       label: assignedIssues === 1 ? "issue assigned" : "issues assigned",
       count: assignedIssues,
