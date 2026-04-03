@@ -455,7 +455,7 @@ describe("PersonalSummaryStrip — click applies filters", () => {
     expect(viewState.tabFilters.pullRequests.reviewDecision).toBe("REVIEW_REQUIRED");
   });
 
-  it("clicking ready to merge sets scope=all, role=author, checkStatus=success", () => {
+  it("clicking ready to merge sets scope=all, role=author, draft=ready, checkStatus=success", () => {
     const onTabChange = vi.fn();
     const prs = [makePullRequest({ userLogin: "me", draft: false, checkStatus: "success", reviewDecision: "APPROVED" })];
 
@@ -467,6 +467,7 @@ describe("PersonalSummaryStrip — click applies filters", () => {
     expect(onTabChange).toHaveBeenCalledWith("pullRequests");
     expect(viewState.tabFilters.pullRequests.scope).toBe("all");
     expect(viewState.tabFilters.pullRequests.role).toBe("author");
+    expect(viewState.tabFilters.pullRequests.draft).toBe("ready");
     expect(viewState.tabFilters.pullRequests.checkStatus).toBe("success");
   });
 

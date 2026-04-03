@@ -117,6 +117,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
         resetAllTabFilters("pullRequests");
         setTabFilter("pullRequests", "scope", "all");
         setTabFilter("pullRequests", "role", "author");
+        setTabFilter("pullRequests", "draft", "ready");
         setTabFilter("pullRequests", "checkStatus", "success");
       },
     });
