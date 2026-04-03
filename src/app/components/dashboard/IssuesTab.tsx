@@ -85,6 +85,8 @@ export default function IssuesTab(props: IssuesTabProps) {
     new Set((props.monitoredRepos ?? []).map(r => r.fullName))
   );
 
+  const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
@@ -127,7 +129,6 @@ export default function IssuesTab(props: IssuesTabProps) {
         .map((i) => i.id)
     );
 
-    const userLoginLower = props.userLogin.toLowerCase();
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
@@ -156,7 +157,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (!monitoredRepoNameSet().has(issue.repoFullName)) {
           const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
           if (validUser) {
-            const surfacedBy = issue.surfacedBy ?? [userLoginLower];
+            const surfacedBy = issue.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilter.user)) return false;
           }
         }
@@ -241,7 +242,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   }
 
   function isInvolvedItem(item: Issue): boolean {
-    const login = props.userLogin.toLowerCase();
+    const login = userLoginLower();
     const surfacedBy = item.surfacedBy ?? [];
     if (surfacedBy.length > 0) return surfacedBy.includes(login);
     if (monitoredRepoNameSet().has(item.repoFullName)) {
