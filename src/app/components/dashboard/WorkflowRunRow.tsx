@@ -144,7 +144,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   return (
     <div
-      class={`flex items-center gap-3 ${paddingClass()} hover:bg-base-200 group ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
+      class={`flex items-center gap-3 ${paddingClass()} group ${props.run.conclusion === "failure" ? "bg-error/5 hover:bg-error/10" : "hover:bg-base-200"} ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 
