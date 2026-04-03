@@ -71,6 +71,12 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
+/** Simulate 403 on /notifications — disables the notifications gate.
+ * Used by tests to exercise the conditional background-poll guard. */
+export function disableNotifGate(): void {
+  _notifGateDisabled = true;
+}
+
 export function resetPollState(): void {
   _notifLastModified = null;
   _lastSuccessfulFetch = null;
@@ -178,8 +184,8 @@ async function hasNotificationChanges(): Promise<boolean> {
     ) {
       console.warn("[poll] Notifications API returned 403 — disabling gate");
       pushNotification("notifications", config.authMethod === "pat"
-        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope"
-        : "Notifications API returned 403 — check that the notifications scope is granted", "warning");
+        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope. Background refresh in hidden tabs is disabled."
+        : "Notifications API returned 403 — check that the notifications scope is granted. Background refresh in hidden tabs is disabled.", "warning");
       _notifGateDisabled = true;
     }
     return true;
@@ -323,8 +329,12 @@ function withJitter(intervalMs: number): number {
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling (SDR-017)
- * - Pauses when document is hidden; resumes on visibility restore
- * - Refreshes immediately on re-visible if hidden for >2 min
+ * - Continues polling in background tabs when notifications gate is available
+ *   (304 responses make background polls near-zero cost). When the gate is
+ *   disabled (fine-grained PAT or missing notifications scope), background
+ *   polling pauses to conserve API budget.
+ * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
+ *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
  *
  * Must be called inside a reactive root (e.g., createRoot or component body).
@@ -392,11 +402,20 @@ export function createPollCoordinator(
 
     const intervalMs = withJitter(intervalSec * 1000);
     intervalId = setInterval(() => {
-      if (document.visibilityState === "hidden") return;
+      // Without the notifications gate (403 — scope not granted), every background
+      // poll is a full fetch with no 304 shortcut. Skip background polls to avoid
+      // burning API budget; the catch-up handler still fires on tab return.
+      if (document.visibilityState === "hidden" && _notifGateDisabled) return;
       void doFetch();
     }, intervalMs);
   }
 
+  // Safety net for browser-level tab throttling/freezing. Background polling
+  // continues via setInterval, but browsers may throttle or freeze timers in
+  // hidden tabs (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
+  // When the tab becomes visible again after >2 min, this handler fires a
+  // catch-up fetch in case the browser suppressed scheduled polls. The
+  // notifications gate (304) makes redundant fetches near-zero cost.
   function handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
       hiddenAt = Date.now();
@@ -574,6 +593,9 @@ export async function fetchHotData(): Promise<{
  * in-flight items without a full poll cycle. Uses setTimeout chains to avoid
  * overlapping concurrent fetches.
  *
+ * - Pauses when document is hidden (visual-only feedback has no value in background tabs)
+ * - Resumes on next scheduled cycle when tab becomes visible
+ *
  * Must be called inside a SolidJS reactive root (uses createEffect + onCleanup).
  *
  * @param getInterval - Reactive accessor returning interval in seconds
@@ -621,7 +643,9 @@ export function createHotPollCoordinator(
       return;
     }
 
-    // Skip fetch when page is hidden
+    // Skip fetch when page is hidden — hot poll provides visual feedback
+    // (shimmer, status changes) that has no value in a background tab.
+    // The full poll continues in background for data freshness.
     if (document.visibilityState === "hidden") {
       schedule(myGeneration);
       return;

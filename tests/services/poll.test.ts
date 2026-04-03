@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot } from "solid-js";
-import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
+import { createRoot, createSignal } from "solid-js";
+import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
@@ -29,6 +29,7 @@ vi.mock("../../src/app/lib/errors", () => ({
 vi.mock("../../src/app/lib/notifications", () => ({
   detectNewItems: vi.fn(() => []),
   dispatchNotifications: vi.fn(),
+  _resetNotificationState: vi.fn(),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
@@ -119,7 +120,8 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("pauses polling when document is hidden", async () => {
+  it("continues polling when document is hidden (notifications gate enabled)", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -131,14 +133,16 @@ describe("createPollCoordinator", () => {
       // Hide document
       setDocumentVisible(false);
 
-      // Advance past the interval
-      vi.advanceTimersByTime(90_000);
+      // Advance past the interval (60s with 0 jitter)
+      vi.advanceTimersByTime(61_000);
       await Promise.resolve();
 
-      // Should not have fetched while hidden
-      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+      // Should have fetched while hidden (background refresh)
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
       dispose();
     });
+
+    randomSpy.mockRestore();
   });
 
   it("triggers immediate refresh on re-visible after >2 minutes hidden", async () => {
@@ -160,13 +164,41 @@ describe("createPollCoordinator", () => {
       setDocumentVisible(true);
       await Promise.resolve();
 
-      // Should have triggered an immediate fetch on re-visible
-      expect(fetchAll.mock.calls.length).toBe(callsAfterInit + 1);
+      // Should have triggered at least a catch-up fetch on re-visible
+      // (background polls may also have fired if interval < hidden duration)
+      expect(fetchAll.mock.calls.length).toBeGreaterThanOrEqual(callsAfterInit + 1);
       dispose();
     });
   });
 
+  it("pauses background polling when hidden and notifications gate is disabled", async () => {
+    disableNotifGate();
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      // Hide document
+      setDocumentVisible(false);
+
+      // Advance past the interval
+      vi.advanceTimersByTime(90_000);
+      await Promise.resolve();
+
+      // Should NOT have fetched — gate disabled means no cheap 304, skip background polls
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+      dispose();
+    });
+
+    resetPollState(); // restore gate for other tests
+  });
+
   it("does NOT trigger immediate refresh on re-visible within 2 minutes", async () => {
+    // Pin jitter to 0 so 300s interval is exactly 300s (no background poll in 90s)
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
     const fetchAll = makeFetchAll();
 
     await createRoot(async (dispose) => {
@@ -187,6 +219,50 @@ describe("createPollCoordinator", () => {
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
       dispose();
     });
+
+    randomSpy.mockRestore();
+  });
+
+  it("resets timer on re-visible after >2 min, preventing double-fire with background polls", async () => {
+    // Pin jitter to 0 so 60s interval is exactly 60s
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(60), fetchAll);
+      await Promise.resolve(); // initial fetch
+
+      const callsAfterInit = fetchAll.mock.calls.length;
+
+      // Hide for >2 min — background polls fire at 60s and 120s
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      await Promise.resolve();
+
+      const callsWhileHidden = fetchAll.mock.calls.length;
+      expect(callsWhileHidden).toBeGreaterThan(callsAfterInit);
+
+      // Restore visibility — catch-up fetch fires + timer resets
+      setDocumentVisible(true);
+      await Promise.resolve();
+
+      const callsAfterRevisible = fetchAll.mock.calls.length;
+      expect(callsAfterRevisible).toBeGreaterThan(callsWhileHidden);
+
+      // Advance 30s — should NOT fire (timer was reset to full 60s interval)
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterRevisible);
+
+      // Advance another 31s (61s from reset) — timer fires
+      vi.advanceTimersByTime(31_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterRevisible);
+
+      dispose();
+    });
+
+    randomSpy.mockRestore();
   });
 
   it("manual refresh triggers fetch and resets the timer", async () => {
@@ -207,40 +283,35 @@ describe("createPollCoordinator", () => {
   });
 
   it("config change (interval change) restarts the interval", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
     const fetchAll = makeFetchAll();
-    let intervalSec = 300;
 
     await createRoot(async (dispose) => {
-      // Use a signal-based getter to simulate reactive config
-      const [getInterval, setGetInterval] = (() => {
-        let fn = () => intervalSec;
-        return [
-          () => fn(),
-          (newFn: () => number) => {
-            fn = newFn;
-          },
-        ] as const;
-      })();
+      const [interval, setInterval] = createSignal(300);
 
-      createPollCoordinator(getInterval, fetchAll);
+      createPollCoordinator(interval, fetchAll);
       await Promise.resolve(); // initial fetch
 
-      // Simulate config change to shorter interval by providing a new accessor
-      // In practice SolidJS createEffect re-runs when reactive dependencies change.
-      // Here we verify that calling with interval=60 fires within 90s.
-      intervalSec = 60;
-      void setGetInterval; // suppress unused warning
+      const callsAfterInit = fetchAll.mock.calls.length;
 
+      // At 300s interval, 90s should NOT fire
       vi.advanceTimersByTime(90_000);
       await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
-      // At 300s interval, 90s would not fire. But with 60s interval restart,
-      // it should fire at least once more. Since the internal createEffect
-      // is not re-triggered (intervalSec is not a signal), we only verify
-      // that the original timer was set and would eventually fire.
-      // The key test is just that manualRefresh + timer work correctly.
+      // Change interval to 60s — createEffect re-fires, timer restarts
+      setInterval(60);
+      await Promise.resolve(); // let effect run
+
+      // Advance 61s — new 60s interval should fire
+      vi.advanceTimersByTime(61_000);
+      await Promise.resolve();
+      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
+
       dispose();
     });
+
+    randomSpy.mockRestore();
   });
 
   it("interval=0 disables auto-refresh (no setInterval)", async () => {
@@ -406,7 +477,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  // ── qa-3: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
+  // ── qa-3a: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
 
   it("skipped fetch does NOT call pushError for previous errors (no restore logic)", async () => {
     mockPushError.mockClear();

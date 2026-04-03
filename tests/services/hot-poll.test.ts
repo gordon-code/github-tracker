@@ -531,7 +531,36 @@ describe("createHotPollCoordinator", () => {
       Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true });
       await vi.advanceTimersByTimeAsync(10_000);
       expect(onHotData).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("resumes fetching after hidden→visible transition", async () => {
+    const onHotData = vi.fn();
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },
+      headers: {},
+    }));
+    mockGetClient.mockReturnValue(makeOctokit(requestFn));
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 1, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+
+      // Hidden — cycle skips fetch
+      Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).not.toHaveBeenCalled();
+
+      // Visible — next cycle should fetch
       Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onHotData).toHaveBeenCalled();
+
       dispose();
     });
   });
