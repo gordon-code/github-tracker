@@ -25,7 +25,7 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
   }
 
   return (
-    <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()} modal>
+    <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()} modal preventScroll={false}>
       <Dialog.Portal>
         <Dialog.Overlay class="drawer-overlay fixed inset-0 bg-black/50 z-[70]" data-testid="notification-overlay" />
         <Dialog.Content class="drawer-content fixed top-0 right-0 h-full w-80 sm:w-96 bg-base-100 shadow-xl z-[71] flex flex-col">
