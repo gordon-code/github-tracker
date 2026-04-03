@@ -1,7 +1,7 @@
 import { createMemo, For, Show } from "solid-js";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import type { TabId } from "../layout/TabBar";
-import { viewState, resetAllTabFilters, setTabFilter } from "../../stores/view";
+import { viewState, updateViewState, resetAllTabFilters, setTabFilter } from "../../stores/view";
 
 interface SummaryCount {
   label: string;
@@ -141,6 +141,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       applyFilters: () => {
         resetAllTabFilters("actions");
         setTabFilter("actions", "conclusion", "running");
+        updateViewState({ showPrRuns: true });
       },
     });
     return items;
