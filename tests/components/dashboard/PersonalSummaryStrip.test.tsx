@@ -5,7 +5,7 @@ import PersonalSummaryStrip from "../../../src/app/components/dashboard/Personal
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
 import type { Issue, PullRequest, WorkflowRun } from "../../../src/app/services/api";
-import { viewState, setAllExpanded, ignoreItem } from "../../../src/app/stores/view";
+import { viewState, updateViewState, setAllExpanded, ignoreItem } from "../../../src/app/stores/view";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -697,5 +697,27 @@ describe("PersonalSummaryStrip — excludes ignored items", () => {
     renderStrip({ pullRequests: prs });
     const blockedButton = screen.getByText(/blocked/);
     expect(blockedButton.textContent).toContain("1");
+  });
+});
+
+describe("PersonalSummaryStrip — hideDepDashboard exclusion", () => {
+  it("excludes Dependency Dashboard issues from assigned count when hideDepDashboard is true", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", assigneeLogins: ["me"] }),
+    ];
+    // hideDepDashboard defaults to true via resetViewStore
+
+    const { container } = renderStrip({ issues });
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("includes Dependency Dashboard issues when hideDepDashboard is false", () => {
+    updateViewState({ hideDepDashboard: false });
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", assigneeLogins: ["me"] }),
+    ];
+
+    renderStrip({ issues });
+    screen.getByText(/assigned/);
   });
 });

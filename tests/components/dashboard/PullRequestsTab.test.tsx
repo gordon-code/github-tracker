@@ -29,7 +29,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
-import { setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -471,5 +471,64 @@ describe("PullRequestsTab — star count in repo headers", () => {
     ));
 
     expect(container.textContent).not.toContain("★");
+  });
+});
+
+// ── PullRequestsTab — scope chip visibility ────────────────────────────────
+
+describe("PullRequestsTab — scope chip visibility", () => {
+  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+    const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(container.textContent).not.toContain("Scope:");
+  });
+
+  it("shows Scope chip when monitored repos exist", () => {
+    const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]}
+      />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+    setTabFilter("pullRequests", "scope", "all");
+    expect(viewState.tabFilters.pullRequests.scope).toBe("all");
+
+    render(() => (
+      <PullRequestsTab pullRequests={[]} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(viewState.tabFilters.pullRequests.scope).toBe("involves_me");
+  });
+});
+
+// ── PullRequestsTab — blocked composite filter ────────────────────────────
+
+describe("PullRequestsTab — checkStatus=blocked filter", () => {
+  it("shows both failure and conflict PRs when checkStatus=blocked", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Failing PR", repoFullName: "org/repo", checkStatus: "failure", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "Conflict PR", repoFullName: "org/repo", checkStatus: "conflict", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Passing PR", repoFullName: "org/repo", checkStatus: "success", surfacedBy: ["me"], enriched: true }),
+    ];
+    setTabFilter("pullRequests", "checkStatus", "blocked");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    screen.getByText("Failing PR");
+    screen.getByText("Conflict PR");
+    expect(screen.queryByText("Passing PR")).toBeNull();
   });
 });

@@ -210,4 +210,56 @@ describe("createReorderHighlight", () => {
     disposeRoot();
     vi.useRealTimers();
   });
+
+  it("suppresses highlight when filter key changes simultaneously with reorder", () => {
+    let highlighted!: Accessor<ReadonlySet<string>>;
+    let setOrder!: (v: string[]) => void;
+    let setFilterKey!: (v: string) => void;
+    let disposeRoot!: () => void;
+
+    createRoot((dispose) => {
+      const [order, _setOrder] = createSignal<string[]>(["a", "b", "c"]);
+      const [locked] = createSignal<string[]>([]);
+      const [ignored] = createSignal(0);
+      const [filterKey, _setFilterKey] = createSignal("initial");
+      setOrder = _setOrder;
+      setFilterKey = _setFilterKey;
+      highlighted = createReorderHighlight(order, locked, ignored, filterKey);
+      disposeRoot = dispose;
+    });
+
+    // Reorder AND filter change in single batch — should suppress
+    batch(() => {
+      setFilterKey("changed");
+      setOrder(["c", "a", "b"]);
+    });
+    expect(highlighted().size).toBe(0);
+
+    // Next reorder without filter change — should highlight
+    setOrder(["b", "c", "a"]);
+    expect(highlighted().size).toBeGreaterThan(0);
+
+    disposeRoot();
+  });
+
+  it("highlights normally when getFilterKey is not provided", () => {
+    let highlighted!: Accessor<ReadonlySet<string>>;
+    let setOrder!: (v: string[]) => void;
+    let disposeRoot!: () => void;
+
+    createRoot((dispose) => {
+      const [order, _setOrder] = createSignal<string[]>(["a", "b", "c"]);
+      const [locked] = createSignal<string[]>([]);
+      const [ignored] = createSignal(0);
+      setOrder = _setOrder;
+      // No getFilterKey argument — optional parameter
+      highlighted = createReorderHighlight(order, locked, ignored);
+      disposeRoot = dispose;
+    });
+
+    setOrder(["c", "a", "b"]);
+    expect(highlighted().size).toBeGreaterThan(0);
+
+    disposeRoot();
+  });
 });

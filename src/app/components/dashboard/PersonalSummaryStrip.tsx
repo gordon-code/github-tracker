@@ -25,7 +25,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     return ids;
   });
 
-  // Single-pass over issues to count assigned (excludes ignored)
+  // Single-pass over issues to count assigned (excludes ignored + Dep Dashboard)
   const issueCounts = createMemo(() => {
     const login = props.userLogin.toLowerCase();
     if (!login) return { assignedIssues: 0 };
@@ -33,6 +33,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     let assignedIssues = 0;
     for (const i of props.issues) {
       if (ignored.has(String(i.id))) continue;
+      if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") continue;
       if (i.assigneeLogins.some((a) => a.toLowerCase() === login)) assignedIssues++;
     }
     return { assignedIssues };

@@ -29,7 +29,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
-import { setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -543,5 +543,53 @@ describe("IssuesTab — scope filter with undefined surfacedBy (non-monitored re
     ));
 
     screen.getByText("Legacy issue");
+  });
+});
+
+// ── IssuesTab — scope chip visibility ──────────────────────────────────────
+
+describe("IssuesTab — scope chip visibility", () => {
+  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(container.textContent).not.toContain("Scope:");
+  });
+
+  it("shows Scope chip when monitored repos exist", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]} />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("shows Scope chip when tracked users exist (allUsers > 1)", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]}
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+      />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+    setTabFilter("issues", "scope", "all");
+    expect(viewState.tabFilters.issues.scope).toBe("all");
+
+    // Render with no monitored repos and no tracked users — scope chip hidden, effect should reset
+    render(() => (
+      <IssuesTab issues={[]} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(viewState.tabFilters.issues.scope).toBe("involves_me");
   });
 });
