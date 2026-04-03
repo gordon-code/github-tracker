@@ -29,7 +29,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
-import { setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -84,6 +84,7 @@ describe("IssuesTab — user filter logic", () => {
       makeIssue({ id: 1, title: "Main issue", repoFullName: "owner/repo-a", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Tracked issue", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
+    setTabFilter("issues", "scope", "all");
     setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
 
     render(() => (
@@ -107,6 +108,7 @@ describe("IssuesTab — user filter logic", () => {
       makeIssue({ id: 2, title: "Tracked issue", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "tracked1");
     setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
 
@@ -201,6 +203,7 @@ describe("IssuesTab — avatar badge", () => {
       makeIssue({ id: 1, title: "Tracked issue", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("issues", "scope", "all");
     setAllExpanded("issues", ["owner/repo"], true);
 
     render(() => (
@@ -246,6 +249,7 @@ describe("IssuesTab — monitored repos filter bypass", () => {
     const issues = [
       makeIssue({ id: 1, title: "Monitored issue", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
     ];
+    setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "me");
     setAllExpanded("issues", ["org/monitored"], true);
 
@@ -309,5 +313,283 @@ describe("IssuesTab — monitored repos filter bypass", () => {
     ));
 
     expect(screen.queryByText("Monitoring all")).toBeNull();
+  });
+});
+
+// ── IssuesTab — scope filter ───────────────────────────────────────────────────
+
+describe("IssuesTab — scope filter", () => {
+  it("default scope shows only items involving the user (surfacedBy includes userLogin)", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My issue");
+    expect(screen.queryByText("Community issue")).toBeNull();
+  });
+
+  it("scope 'all' shows all items including community items", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My issue");
+    screen.getByText("Community issue");
+  });
+
+  it("scope 'involves_me' with monitored repo shows items where user is author", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My monitored issue", repoFullName: "org/monitored", userLogin: "me" }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("My monitored issue");
+  });
+
+  it("scope 'involves_me' with monitored repo hides community items (user not author/assignee)", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Community monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: [] }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    expect(screen.queryByText("Community monitored issue")).toBeNull();
+  });
+
+  it("scope 'involves_me' with monitored repo shows items where user is assignee", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Assigned monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: ["me"] }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Assigned monitored issue");
+  });
+});
+
+// ── IssuesTab — left border accent ────────────────────────────────────────────
+
+describe("IssuesTab — left border accent in 'all' scope", () => {
+  it("adds border-l-2 class to items involving the user in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "repo", fullName: "org/repo" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-primary");
+  });
+
+  it("does not add border-l-2 to community items in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Community issue", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-primary");
+  });
+
+  it("does not add border-l-2 in default 'involves_me' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-primary");
+  });
+});
+
+// ── IssuesTab — star count in repo headers ────────────────────────────────────
+
+describe("IssuesTab — star count in repo headers", () => {
+  it("shows star count in repo header when starCount is present", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 1234 }),
+    ];
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("★ 1.2k");
+  });
+
+  it("does not show star display when starCount is undefined", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    // No star character should be present
+    expect(container.textContent).not.toContain("★");
+  });
+
+  it("does not show star display when starCount is 0", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 0 }),
+    ];
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(container.textContent).not.toContain("★");
+  });
+});
+
+// ── IssuesTab — scope filter fallback path ─────────────────────────────────
+
+describe("IssuesTab — scope filter with undefined surfacedBy (non-monitored repo)", () => {
+  it("scope 'involves_me' passes items with undefined surfacedBy from non-monitored repos", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Legacy issue", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("Legacy issue");
+  });
+});
+
+// ── IssuesTab — scope chip visibility ──────────────────────────────────────
+
+describe("IssuesTab — scope chip visibility", () => {
+  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(container.textContent).not.toContain("Scope:");
+  });
+
+  it("shows Scope chip when monitored repos exist", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]} />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("shows Scope chip when tracked users exist (allUsers > 1)", () => {
+    const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]}
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+      />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+    setTabFilter("issues", "scope", "all");
+    expect(viewState.tabFilters.issues.scope).toBe("all");
+
+    // Render with no monitored repos and no tracked users — scope chip hidden, effect should reset
+    render(() => (
+      <IssuesTab issues={[]} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(viewState.tabFilters.issues.scope).toBe("involves_me");
   });
 });

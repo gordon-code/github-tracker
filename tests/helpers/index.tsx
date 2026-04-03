@@ -21,7 +21,6 @@ export function makeIssue(overrides: Partial<Issue> = {}): Issue {
     assigneeLogins: [],
     repoFullName: "owner/repo",
     comments: 0,
-    surfacedBy: ["testuser"],
     ...overrides,
   };
 }
@@ -54,7 +53,6 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
     reviewDecision: null,
     totalReviewCount: 0,
     enriched: true,
-    surfacedBy: ["testuser"],
     ...overrides,
   };
 }

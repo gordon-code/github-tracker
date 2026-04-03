@@ -29,7 +29,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
-import { setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -75,6 +75,7 @@ describe("PullRequestsTab — user filter logic", () => {
       makePullRequest({ id: 1, title: "My PR", repoFullName: "owner/repo-a", surfacedBy: ["me"] }),
       makePullRequest({ id: 2, title: "Tracked PR", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
+    setTabFilter("pullRequests", "scope", "all");
     setAllExpanded("pullRequests", ["owner/repo-a", "owner/repo-b"], true);
 
     render(() => (
@@ -98,6 +99,7 @@ describe("PullRequestsTab — user filter logic", () => {
       makePullRequest({ id: 2, title: "Tracked PR", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("pullRequests", "scope", "all");
     setTabFilter("pullRequests", "user", "tracked1");
     setAllExpanded("pullRequests", ["owner/repo-a", "owner/repo-b"], true);
 
@@ -170,6 +172,7 @@ describe("PullRequestsTab — avatar badge", () => {
       makePullRequest({ id: 1, title: "Tracked PR", repoFullName: "owner/repo", surfacedBy: ["tracked1"] }),
     ];
 
+    setTabFilter("pullRequests", "scope", "all");
     setAllExpanded("pullRequests", ["owner/repo"], true);
 
     render(() => (
@@ -196,6 +199,7 @@ describe("PullRequestsTab — monitored repos filter bypass", () => {
     const prs = [
       makePullRequest({ id: 1, title: "Monitored PR", repoFullName: "org/monitored", surfacedBy: ["other-user"] }),
     ];
+    setTabFilter("pullRequests", "scope", "all");
     setTabFilter("pullRequests", "user", "me");
     setAllExpanded("pullRequests", ["org/monitored"], true);
 
@@ -259,5 +263,292 @@ describe("PullRequestsTab — monitored repos filter bypass", () => {
     ));
 
     expect(screen.queryByText("Monitoring all")).toBeNull();
+  });
+});
+
+// ── PullRequestsTab — scope filter ────────────────────────────────────────────
+
+describe("PullRequestsTab — scope filter", () => {
+  it("default scope shows only items involving the user (surfacedBy includes userLogin)", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makePullRequest({ id: 2, title: "Community PR", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My PR");
+    expect(screen.queryByText("Community PR")).toBeNull();
+  });
+
+  it("scope 'all' shows all PRs including community items", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makePullRequest({ id: 2, title: "Community PR", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setTabFilter("pullRequests", "scope", "all");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My PR");
+    screen.getByText("Community PR");
+  });
+
+  it("scope 'involves_me' with monitored repo shows PRs where user is author", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My monitored PR", repoFullName: "org/monitored", userLogin: "me" }),
+    ];
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("My monitored PR");
+  });
+
+  it("scope 'involves_me' with monitored repo hides community PRs (user not author/assignee/reviewer)", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Community monitored PR", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: [], reviewerLogins: [] }),
+    ];
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    expect(screen.queryByText("Community monitored PR")).toBeNull();
+  });
+
+  it("scope 'involves_me' with monitored repo shows PRs where user is reviewer (enriched)", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Review monitored PR", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: [], reviewerLogins: ["me"], enriched: true }),
+    ];
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Review monitored PR");
+  });
+});
+
+// ── PullRequestsTab — left border accent ──────────────────────────────────────
+
+describe("PullRequestsTab — left border accent in 'all' scope", () => {
+  it("adds border-l-2 class to PRs involving the user in 'all' scope", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setTabFilter("pullRequests", "scope", "all");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "repo", fullName: "org/repo" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-primary");
+  });
+
+  it("does not add border-l-primary to community PRs in 'all' scope", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Community PR", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [], reviewerLogins: [] }),
+    ];
+    setTabFilter("pullRequests", "scope", "all");
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-primary");
+  });
+
+  it("does not add border-l-primary in default 'involves_me' scope", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-primary");
+  });
+});
+
+// ── PullRequestsTab — star count in repo headers ──────────────────────────────
+
+describe("PullRequestsTab — star count in repo headers", () => {
+  it("shows star count in repo header when starCount is present", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 1234 }),
+    ];
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("★ 1.2k");
+  });
+
+  it("does not show star display when starCount is undefined", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(container.textContent).not.toContain("★");
+  });
+
+  it("does not show star display when starCount is 0", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 0 }),
+    ];
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(container.textContent).not.toContain("★");
+  });
+});
+
+// ── PullRequestsTab — scope chip visibility ────────────────────────────────
+
+describe("PullRequestsTab — scope chip visibility", () => {
+  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+    const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(container.textContent).not.toContain("Scope:");
+  });
+
+  it("shows Scope chip when monitored repos exist", () => {
+    const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    const { container } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]}
+      />
+    ));
+
+    expect(container.textContent).toContain("Scope:");
+  });
+
+  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+    setTabFilter("pullRequests", "scope", "all");
+    expect(viewState.tabFilters.pullRequests.scope).toBe("all");
+
+    render(() => (
+      <PullRequestsTab pullRequests={[]} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(viewState.tabFilters.pullRequests.scope).toBe("involves_me");
+  });
+});
+
+// ── PullRequestsTab — blocked composite filter ────────────────────────────
+
+describe("PullRequestsTab — checkStatus=blocked filter", () => {
+  it("shows both failure and conflict PRs when checkStatus=blocked", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Failing PR", repoFullName: "org/repo", checkStatus: "failure", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "Conflict PR", repoFullName: "org/repo", checkStatus: "conflict", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Passing PR", repoFullName: "org/repo", checkStatus: "success", surfacedBy: ["me"], enriched: true }),
+    ];
+    setTabFilter("pullRequests", "checkStatus", "blocked");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    screen.getByText("Failing PR");
+    screen.getByText("Conflict PR");
+    expect(screen.queryByText("Passing PR")).toBeNull();
+  });
+});
+
+describe("PullRequestsTab — reviewDecision=mergeable filter", () => {
+  it("shows APPROVED and null-review PRs, excludes CHANGES_REQUESTED", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Approved PR", repoFullName: "org/repo", reviewDecision: "APPROVED", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "No Review PR", repoFullName: "org/repo", reviewDecision: null, surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Changes PR", repoFullName: "org/repo", reviewDecision: "CHANGES_REQUESTED", surfacedBy: ["me"], enriched: true }),
+    ];
+    setTabFilter("pullRequests", "reviewDecision", "mergeable");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    screen.getByText("Approved PR");
+    screen.getByText("No Review PR");
+    expect(screen.queryByText("Changes PR")).toBeNull();
   });
 });

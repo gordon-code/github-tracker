@@ -120,3 +120,14 @@ export function formatCount(n: number): string {
   }
   return String(n);
 }
+
+/**
+ * Formats a star count in compact form with M suffix for millions.
+ * Unlike formatCount, drops decimals above 10k (e.g., 15000 → "15k" not "15.0k").
+ */
+export function formatStarCount(count: number): string {
+  if (count >= 1000000) return `${parseFloat((count / 1000000).toFixed(1))}M`;
+  if (count >= 10000) return `${Math.round(count / 1000)}k`;
+  if (count >= 1000) return `${parseFloat((count / 1000).toFixed(1))}k`;
+  return String(count);
+}

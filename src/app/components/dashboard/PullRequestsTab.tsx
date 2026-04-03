@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
-import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -12,14 +12,13 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips from "../shared/FilterChips";
-import type { FilterChipGroupDef } from "../shared/FilterChips";
+import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -83,6 +82,7 @@ const prFilterGroups: FilterChipGroupDef[] = [
       { value: "APPROVED", label: "Approved" },
       { value: "CHANGES_REQUESTED", label: "Changes" },
       { value: "REVIEW_REQUIRED", label: "Needs review" },
+      { value: "mergeable", label: "Mergeable" },
     ],
   },
   {
@@ -101,6 +101,7 @@ const prFilterGroups: FilterChipGroupDef[] = [
       { value: "failure", label: "Failing" },
       { value: "pending", label: "Pending" },
       { value: "conflict", label: "Conflict" },
+      { value: "blocked", label: "Blocked" },
       { value: "none", label: "No CI" },
     ],
   },
@@ -143,11 +144,20 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     new Set((props.monitoredRepos ?? []).map(r => r.fullName))
   );
 
+  const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
+
+  const showScopeFilter = createMemo(() =>
+    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    if (!users || users.length <= 1) return prFilterGroups;
+    const base = showScopeFilter()
+      ? [scopeFilterGroup, ...prFilterGroups]
+      : [...prFilterGroups];
+    if (!users || users.length <= 1) return base;
     return [
-      ...prFilterGroups,
+      ...base,
       {
         label: "User",
         field: "user",
@@ -155,6 +165,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       },
     ];
   });
+
+  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  createEffect(() => {
+    if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
+      setTabFilter("pullRequests", "scope", "involves_me");
+    }
+  });
+
+  const isInvolvedItem = (item: PullRequest) =>
+    isUserInvolved(item, userLoginLower(), monitoredRepoNameSet(),
+      item.enriched !== false ? item.reviewerLogins : undefined);
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
@@ -180,6 +201,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
+      // Scope filter — use effective scope to avoid one-render flash when auto-reset effect hasn't fired yet
+      const effectiveScope = showScopeFilter() ? tabFilters.scope : "involves_me";
+      if (effectiveScope === "involves_me" && !isInvolvedItem(pr)) return false;
+
       // Tab filters — light-field filters always apply; heavy-field filters
       // only apply to enriched PRs so unenriched phase-1 PRs aren't incorrectly hidden
       const isEnriched = pr.enriched !== false;
@@ -189,7 +214,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (!isEnriched && tabFilters.role === "author" && !roles.includes("author")) return false;
       }
       if (tabFilters.reviewDecision !== "all") {
-        if (pr.reviewDecision !== tabFilters.reviewDecision) return false;
+        if (tabFilters.reviewDecision === "mergeable") {
+          if (pr.reviewDecision !== "APPROVED" && pr.reviewDecision !== null) return false;
+        } else {
+          if (pr.reviewDecision !== tabFilters.reviewDecision) return false;
+        }
       }
       if (tabFilters.draft !== "all") {
         if (tabFilters.draft === "draft" && !pr.draft) return false;
@@ -198,6 +227,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       if (tabFilters.checkStatus !== "all" && isEnriched) {
         if (tabFilters.checkStatus === "none") {
           if (pr.checkStatus !== null) return false;
+        } else if (tabFilters.checkStatus === "blocked") {
+          if (pr.checkStatus !== "failure" && pr.checkStatus !== "conflict") return false;
         } else {
           if (pr.checkStatus !== tabFilters.checkStatus) return false;
         }
@@ -211,7 +242,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (!monitoredRepoNameSet().has(pr.repoFullName)) {
           const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
           if (validUser) {
-            const surfacedBy = pr.surfacedBy ?? [props.userLogin.toLowerCase()];
+            const surfacedBy = pr.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilters.user)) return false;
           }
         }
@@ -303,6 +334,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
     () => viewState.ignoredItems.filter(i => i.type === "pullRequest").length,
+    () => JSON.stringify(viewState.tabFilters.pullRequests),
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -385,9 +417,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                   d="M8 7h8m-8 5h5m-5 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
                 />
               </svg>
-              <p class="text-sm font-medium">No open pull requests involving you</p>
+              <p class="text-sm font-medium">
+                {viewState.tabFilters.pullRequests.scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
+              </p>
               <p class="text-xs">
-                PRs where you are the author, assignee, or reviewer will appear here.
+                {viewState.tabFilters.pullRequests.scope === "all"
+                  ? "No pull requests match your current filters."
+                  : "PRs where you are the author, assignee, or reviewer will appear here."}
               </p>
             </div>
           }
@@ -435,6 +471,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         {repoGroup.repoFullName}
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                        </Show>
+                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
+                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
+                            ★ {formatStarCount(repoGroup.starCount!)}
+                          </span>
                         </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
@@ -511,7 +552,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
                           {(pr) => (
-                            <div role="listitem">
+                            <div role="listitem" class={
+                              viewState.tabFilters.pullRequests.scope === "all" && isInvolvedItem(pr)
+                                ? "border-l-2 border-l-primary"
+                                : undefined
+                            }>
                               <ItemRow
                                 hideRepo={true}
                                 repo={pr.repoFullName}

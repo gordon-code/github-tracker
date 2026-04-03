@@ -8,14 +8,13 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips from "../shared/FilterChips";
-import type { FilterChipGroupDef } from "../shared/FilterChips";
+import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
-import { deriveInvolvementRoles } from "../../lib/format";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
+import { deriveInvolvementRoles, formatStarCount } from "../../lib/format";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
@@ -75,11 +74,20 @@ export default function IssuesTab(props: IssuesTabProps) {
     new Set((props.monitoredRepos ?? []).map(r => r.fullName))
   );
 
+  const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
+
+  const showScopeFilter = createMemo(() =>
+    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    if (!users || users.length <= 1) return issueFilterGroups;
+    const base = showScopeFilter()
+      ? [scopeFilterGroup, ...issueFilterGroups]
+      : [...issueFilterGroups];
+    if (!users || users.length <= 1) return base;
     return [
-      ...issueFilterGroups,
+      ...base,
       {
         label: "User",
         field: "user",
@@ -87,6 +95,16 @@ export default function IssuesTab(props: IssuesTabProps) {
       },
     ];
   });
+
+  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  createEffect(() => {
+    if (!showScopeFilter() && viewState.tabFilters.issues.scope !== "involves_me") {
+      setTabFilter("issues", "scope", "involves_me");
+    }
+  });
+
+  const isInvolvedItem = (item: Issue) =>
+    isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
@@ -111,6 +129,10 @@ export default function IssuesTab(props: IssuesTabProps) {
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
+      // Scope filter — use effective scope to avoid one-render flash when auto-reset effect hasn't fired yet
+      const effectiveScope = showScopeFilter() ? tabFilter.scope : "involves_me";
+      if (effectiveScope === "involves_me" && !isInvolvedItem(issue)) return false;
+
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
       }
@@ -127,7 +149,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (!monitoredRepoNameSet().has(issue.repoFullName)) {
           const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
           if (validUser) {
-            const surfacedBy = issue.surfacedBy ?? [props.userLogin.toLowerCase()];
+            const surfacedBy = issue.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilter.user)) return false;
           }
         }
@@ -204,6 +226,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
     () => viewState.ignoredItems.filter(i => i.type === "issue").length,
+    () => JSON.stringify(viewState.tabFilters.issues),
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
@@ -297,9 +320,13 @@ export default function IssuesTab(props: IssuesTabProps) {
                   d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
                 />
               </svg>
-              <p class="text-sm font-medium">No open issues involving you</p>
+              <p class="text-sm font-medium">
+                {viewState.tabFilters.issues.scope === "all" ? "No open issues found" : "No open issues involving you"}
+              </p>
               <p class="text-xs">
-                Issues where you are the author, assignee, or mentioned will appear here.
+                {viewState.tabFilters.issues.scope === "all"
+                  ? "No issues match your current filters."
+                  : "Issues where you are the author, assignee, or mentioned will appear here."}
               </p>
             </div>
           }
@@ -335,6 +362,11 @@ export default function IssuesTab(props: IssuesTabProps) {
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                         </Show>
+                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
+                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
+                            ★ {formatStarCount(repoGroup.starCount!)}
+                          </span>
+                        </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
@@ -359,7 +391,11 @@ export default function IssuesTab(props: IssuesTabProps) {
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
                           {(issue) => (
-                            <div role="listitem">
+                            <div role="listitem" class={
+                              viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
+                                ? "border-l-2 border-l-primary"
+                                : undefined
+                            }>
                               <ItemRow
                                 hideRepo={true}
                                 repo={issue.repoFullName}

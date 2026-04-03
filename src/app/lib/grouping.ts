@@ -1,15 +1,16 @@
 export interface RepoGroup<T> {
   repoFullName: string;
+  starCount?: number;
   items: T[];
 }
 
-export function groupByRepo<T extends { repoFullName: string }>(items: T[]): RepoGroup<T>[] {
+export function groupByRepo<T extends { repoFullName: string; starCount?: number }>(items: T[]): RepoGroup<T>[] {
   const groups: RepoGroup<T>[] = [];
   const map = new Map<string, RepoGroup<T>>();
   for (const item of items) {
     let group = map.get(item.repoFullName);
     if (!group) {
-      group = { repoFullName: item.repoFullName, items: [] };
+      group = { repoFullName: item.repoFullName, starCount: item.starCount, items: [] };
       map.set(item.repoFullName, group);
       groups.push(group);
     }
@@ -70,6 +71,31 @@ export function orderRepoGroups<G extends { repoFullName: string }>(
   );
 
   return [...locked, ...unlocked];
+}
+
+/**
+ * Three-tier involvement check for scope filtering.
+ * Shared by IssuesTab and PullRequestsTab — keep both call sites in sync.
+ *
+ * Tier 1: surfacedBy annotation present → check if user is included
+ * Tier 2: monitored repo (no surfacedBy) → field-based fallback (author/assignee)
+ *         Pass reviewerLogins for PRs (only when enriched — unenriched PRs have [])
+ * Tier 3: non-monitored, no surfacedBy → pass (fetched via involves:{user})
+ */
+export function isUserInvolved(
+  item: { repoFullName: string; userLogin: string; assigneeLogins: string[]; surfacedBy?: string[] },
+  login: string,
+  monitoredRepos: ReadonlySet<string>,
+  reviewerLogins?: string[],
+): boolean {
+  const surfacedBy = item.surfacedBy ?? [];
+  if (surfacedBy.length > 0) return surfacedBy.includes(login);
+  if (monitoredRepos.has(item.repoFullName)) {
+    return item.userLogin.toLowerCase() === login ||
+      item.assigneeLogins.some(a => a.toLowerCase() === login) ||
+      (reviewerLogins != null && reviewerLogins.some(r => r.toLowerCase() === login));
+  }
+  return true;
 }
 
 export function detectReorderedRepos(
