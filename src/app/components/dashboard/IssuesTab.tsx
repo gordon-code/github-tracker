@@ -14,7 +14,7 @@ import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
-import { deriveInvolvementRoles } from "../../lib/format";
+import { deriveInvolvementRoles, formatStarCount } from "../../lib/format";
 import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -239,6 +239,17 @@ export default function IssuesTab(props: IssuesTabProps) {
     setPage(0);
   }
 
+  function isInvolvedItem(item: Issue): boolean {
+    const login = props.userLogin.toLowerCase();
+    const surfacedBy = item.surfacedBy ?? [];
+    if (surfacedBy.length > 0) return surfacedBy.includes(login);
+    if (monitoredRepoNameSet().has(item.repoFullName)) {
+      return item.userLogin.toLowerCase() === login ||
+        item.assigneeLogins.some(a => a.toLowerCase() === login);
+    }
+    return true;
+  }
+
   function handleIgnore(issue: Issue) {
     ignoreItem({
       id: String(issue.id),
@@ -367,6 +378,11 @@ export default function IssuesTab(props: IssuesTabProps) {
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                         </Show>
+                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
+                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
+                            ★ {formatStarCount(repoGroup.starCount!)}
+                          </span>
+                        </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
@@ -391,7 +407,11 @@ export default function IssuesTab(props: IssuesTabProps) {
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
                           {(issue) => (
-                            <div role="listitem">
+                            <div role="listitem" class={
+                              viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
+                                ? "border-l-2 border-primary"
+                                : ""
+                            }>
                               <ItemRow
                                 hideRepo={true}
                                 repo={issue.repoFullName}

@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
-import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -339,6 +339,18 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     setPage(0);
   }
 
+  function isInvolvedItem(item: PullRequest): boolean {
+    const login = props.userLogin.toLowerCase();
+    const surfacedBy = item.surfacedBy ?? [];
+    if (surfacedBy.length > 0) return surfacedBy.includes(login);
+    if (monitoredRepoNameSet().has(item.repoFullName)) {
+      return item.userLogin.toLowerCase() === login ||
+        item.assigneeLogins.some(a => a.toLowerCase() === login) ||
+        (item.enriched !== false && item.reviewerLogins.some(r => r.toLowerCase() === login));
+    }
+    return true;
+  }
+
   function handleIgnore(pr: PullRequest) {
     ignoreItem({
       id: String(pr.id),
@@ -469,6 +481,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                         </Show>
+                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
+                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
+                            ★ {formatStarCount(repoGroup.starCount!)}
+                          </span>
+                        </Show>
                         <Show when={!isExpanded()}>
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                             <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
@@ -544,7 +561,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>
                           {(pr) => (
-                            <div role="listitem">
+                            <div role="listitem" class={
+                              viewState.tabFilters.pullRequests.scope === "all" && isInvolvedItem(pr)
+                                ? "border-l-2 border-primary"
+                                : ""
+                            }>
                               <ItemRow
                                 hideRepo={true}
                                 repo={pr.repoFullName}
