@@ -9,6 +9,7 @@ import {
   pruneStaleIgnoredItems,
   setSortPreference,
   setGlobalFilter,
+  setTabFilter,
   resetAllTabFilters,
   initViewPersistence,
   ViewStateSchema,
@@ -372,6 +373,22 @@ describe("hideDepDashboard", () => {
     updateViewState({ hideDepDashboard: false });
     resetAllTabFilters("issues");
     expect(viewState.hideDepDashboard).toBe(false);
+  });
+});
+
+describe("resetAllTabFilters — scope reset", () => {
+  it("resets issues scope from 'all' back to 'involves_me'", () => {
+    setTabFilter("issues", "scope", "all");
+    expect(viewState.tabFilters.issues.scope).toBe("all");
+    resetAllTabFilters("issues");
+    expect(viewState.tabFilters.issues.scope).toBe("involves_me");
+  });
+
+  it("resets pullRequests scope from 'all' back to 'involves_me'", () => {
+    setTabFilter("pullRequests", "scope", "all");
+    expect(viewState.tabFilters.pullRequests.scope).toBe("all");
+    resetAllTabFilters("pullRequests");
+    expect(viewState.tabFilters.pullRequests.scope).toBe("involves_me");
   });
 
   it("is reset by resetViewState", () => {

@@ -7,6 +7,16 @@ export interface FilterChipGroupDef {
   defaultValue?: string; // When set, replaces "all" as the "no filter active" value
 }
 
+export const scopeFilterGroup: FilterChipGroupDef = {
+  label: "Scope",
+  field: "scope",
+  defaultValue: "involves_me",
+  options: [
+    { value: "involves_me", label: "Involves me" },
+    { value: "all", label: "All activity" },
+  ],
+};
+
 interface FilterChipsProps {
   groups: FilterChipGroupDef[];
   values: Record<string, string>;

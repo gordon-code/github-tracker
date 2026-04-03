@@ -431,7 +431,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).toContain("border-l-2");
+    expect(listitem?.className).toContain("border-l-primary");
   });
 
   it("does not add border-l-2 to community items in 'all' scope", () => {
@@ -450,7 +450,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).not.toContain("border-l-2");
+    expect(listitem?.className).not.toContain("border-l-primary");
   });
 
   it("does not add border-l-2 in default 'involves_me' scope", () => {
@@ -468,7 +468,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).not.toContain("border-l-2");
+    expect(listitem?.className).not.toContain("border-l-primary");
   });
 });
 
@@ -522,5 +522,26 @@ describe("IssuesTab — star count in repo headers", () => {
     ));
 
     expect(container.textContent).not.toContain("★");
+  });
+});
+
+// ── IssuesTab — scope filter fallback path ─────────────────────────────────
+
+describe("IssuesTab — scope filter with undefined surfacedBy (non-monitored repo)", () => {
+  it("scope 'involves_me' passes items with undefined surfacedBy from non-monitored repos", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Legacy issue", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("Legacy issue");
   });
 });

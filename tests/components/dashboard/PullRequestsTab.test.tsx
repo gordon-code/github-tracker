@@ -381,10 +381,10 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).toContain("border-l-2");
+    expect(listitem?.className).toContain("border-l-primary");
   });
 
-  it("does not add border-l-2 to community PRs in 'all' scope", () => {
+  it("does not add border-l-primary to community PRs in 'all' scope", () => {
     const prs = [
       makePullRequest({ id: 1, title: "Community PR", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [], reviewerLogins: [] }),
     ];
@@ -400,10 +400,10 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).not.toContain("border-l-2");
+    expect(listitem?.className).not.toContain("border-l-primary");
   });
 
-  it("does not add border-l-2 in default 'involves_me' scope", () => {
+  it("does not add border-l-primary in default 'involves_me' scope", () => {
     const prs = [
       makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
     ];
@@ -418,7 +418,7 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
     ));
 
     const listitem = container.querySelector('[role="listitem"]');
-    expect(listitem?.className).not.toContain("border-l-2");
+    expect(listitem?.className).not.toContain("border-l-primary");
   });
 });
 

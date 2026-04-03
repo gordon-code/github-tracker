@@ -8,8 +8,7 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips from "../shared/FilterChips";
-import type { FilterChipGroupDef } from "../shared/FilterChips";
+import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
@@ -31,16 +30,6 @@ export interface IssuesTabProps {
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
-
-const scopeFilterGroup: FilterChipGroupDef = {
-  label: "Scope",
-  field: "scope",
-  defaultValue: "involves_me",
-  options: [
-    { value: "involves_me", label: "Involves me" },
-    { value: "all", label: "All activity" },
-  ],
-};
 
 const issueFilterGroups: FilterChipGroupDef[] = [
   {
@@ -87,11 +76,13 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
 
+  const showScopeFilter = createMemo(() =>
+    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
-    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
-    const base = (hasMonitoredRepos || hasTrackedUsers)
+    const base = showScopeFilter()
       ? [scopeFilterGroup, ...issueFilterGroups]
       : [...issueFilterGroups];
     if (!users || users.length <= 1) return base;
@@ -105,15 +96,23 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when neither monitored repos nor tracked users are present
-  // (the scope chip group is hidden in that case, so any non-default scope would be sticky/invisible)
+  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
   createEffect(() => {
-    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
-    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
-    if (!hasMonitoredRepos && !hasTrackedUsers && viewState.tabFilters.issues.scope !== "involves_me") {
+    if (!showScopeFilter() && viewState.tabFilters.issues.scope !== "involves_me") {
       setTabFilter("issues", "scope", "involves_me");
     }
   });
+
+  function isInvolvedItem(item: Issue): boolean {
+    const login = userLoginLower();
+    const surfacedBy = item.surfacedBy ?? [];
+    if (surfacedBy.length > 0) return surfacedBy.includes(login);
+    if (monitoredRepoNameSet().has(item.repoFullName)) {
+      return item.userLogin.toLowerCase() === login ||
+        item.assigneeLogins.some((a) => a.toLowerCase() === login);
+    }
+    return true;
+  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["issues"];
@@ -138,8 +137,9 @@ export default function IssuesTab(props: IssuesTabProps) {
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
-      // Scope filter
-      if (tabFilter.scope === "involves_me" && !isInvolvedItem(issue)) return false;
+      // Scope filter — use effective scope to avoid one-render flash when auto-reset effect hasn't fired yet
+      const effectiveScope = showScopeFilter() ? tabFilter.scope : "involves_me";
+      if (effectiveScope === "involves_me" && !isInvolvedItem(issue)) return false;
 
       if (tabFilter.role !== "all") {
         if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
@@ -234,22 +234,12 @@ export default function IssuesTab(props: IssuesTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
     () => viewState.ignoredItems.filter(i => i.type === "issue").length,
+    () => JSON.stringify(viewState.tabFilters.issues),
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("issues", field, direction);
     setPage(0);
-  }
-
-  function isInvolvedItem(item: Issue): boolean {
-    const login = userLoginLower();
-    const surfacedBy = item.surfacedBy ?? [];
-    if (surfacedBy.length > 0) return surfacedBy.includes(login);
-    if (monitoredRepoNameSet().has(item.repoFullName)) {
-      return item.userLogin.toLowerCase() === login ||
-        item.assigneeLogins.some((a) => a.toLowerCase() === login);
-    }
-    return true;
   }
 
   function handleIgnore(issue: Issue) {
@@ -411,8 +401,8 @@ export default function IssuesTab(props: IssuesTabProps) {
                           {(issue) => (
                             <div role="listitem" class={
                               viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
-                                ? "border-l-2 border-primary"
-                                : ""
+                                ? "border-l-2 border-l-primary"
+                                : undefined
                             }>
                               <ItemRow
                                 hideRepo={true}

@@ -12,8 +12,7 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips from "../shared/FilterChips";
-import type { FilterChipGroupDef } from "../shared/FilterChips";
+import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
@@ -66,16 +65,6 @@ function reviewDecisionOrder(decision: PullRequest["reviewDecision"]): number {
   }
 }
 
-const scopeFilterGroup: FilterChipGroupDef = {
-  label: "Scope",
-  field: "scope",
-  defaultValue: "involves_me",
-  options: [
-    { value: "involves_me", label: "Involves me" },
-    { value: "all", label: "All activity" },
-  ],
-};
-
 const prFilterGroups: FilterChipGroupDef[] = [
   {
     label: "Role",
@@ -111,6 +100,7 @@ const prFilterGroups: FilterChipGroupDef[] = [
       { value: "failure", label: "Failing" },
       { value: "pending", label: "Pending" },
       { value: "conflict", label: "Conflict" },
+      { value: "blocked", label: "Blocked" },
       { value: "none", label: "No CI" },
     ],
   },
@@ -155,11 +145,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
 
+  const showScopeFilter = createMemo(() =>
+    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
-    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
-    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
-    const base = (hasMonitoredRepos || hasTrackedUsers)
+    const base = showScopeFilter()
       ? [scopeFilterGroup, ...prFilterGroups]
       : [...prFilterGroups];
     if (!users || users.length <= 1) return base;
@@ -173,15 +165,24 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when neither monitored repos nor tracked users are present
-  // (the scope chip group is hidden in that case, so any non-default scope would be sticky/invisible)
+  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
   createEffect(() => {
-    const hasMonitoredRepos = (props.monitoredRepos ?? []).length > 0;
-    const hasTrackedUsers = (props.allUsers?.length ?? 0) > 1;
-    if (!hasMonitoredRepos && !hasTrackedUsers && viewState.tabFilters.pullRequests.scope !== "involves_me") {
+    if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
       setTabFilter("pullRequests", "scope", "involves_me");
     }
   });
+
+  function isInvolvedItem(item: PullRequest): boolean {
+    const login = userLoginLower();
+    const surfacedBy = item.surfacedBy ?? [];
+    if (surfacedBy.length > 0) return surfacedBy.includes(login);
+    if (monitoredRepoNameSet().has(item.repoFullName)) {
+      return item.userLogin.toLowerCase() === login ||
+        item.assigneeLogins.some(a => a.toLowerCase() === login) ||
+        (item.enriched !== false && item.reviewerLogins.some(r => r.toLowerCase() === login));
+    }
+    return true;
+  }
 
   const sortPref = createMemo(() => {
     const pref = viewState.sortPreferences["pullRequests"];
@@ -207,8 +208,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
 
-      // Scope filter
-      if (tabFilters.scope === "involves_me" && !isInvolvedItem(pr)) return false;
+      // Scope filter — use effective scope to avoid one-render flash when auto-reset effect hasn't fired yet
+      const effectiveScope = showScopeFilter() ? tabFilters.scope : "involves_me";
+      if (effectiveScope === "involves_me" && !isInvolvedItem(pr)) return false;
 
       // Tab filters — light-field filters always apply; heavy-field filters
       // only apply to enriched PRs so unenriched phase-1 PRs aren't incorrectly hidden
@@ -228,6 +230,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       if (tabFilters.checkStatus !== "all" && isEnriched) {
         if (tabFilters.checkStatus === "none") {
           if (pr.checkStatus !== null) return false;
+        } else if (tabFilters.checkStatus === "blocked") {
+          if (pr.checkStatus !== "failure" && pr.checkStatus !== "conflict") return false;
         } else {
           if (pr.checkStatus !== tabFilters.checkStatus) return false;
         }
@@ -333,23 +337,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
     () => viewState.ignoredItems.filter(i => i.type === "pullRequest").length,
+    () => JSON.stringify(viewState.tabFilters.pullRequests),
   );
 
   function handleSort(field: string, direction: "asc" | "desc") {
     setSortPreference("pullRequests", field, direction);
     setPage(0);
-  }
-
-  function isInvolvedItem(item: PullRequest): boolean {
-    const login = userLoginLower();
-    const surfacedBy = item.surfacedBy ?? [];
-    if (surfacedBy.length > 0) return surfacedBy.includes(login);
-    if (monitoredRepoNameSet().has(item.repoFullName)) {
-      return item.userLogin.toLowerCase() === login ||
-        item.assigneeLogins.some(a => a.toLowerCase() === login) ||
-        (item.enriched !== false && item.reviewerLogins.some(r => r.toLowerCase() === login));
-    }
-    return true;
   }
 
   function handleIgnore(pr: PullRequest) {
@@ -564,8 +557,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           {(pr) => (
                             <div role="listitem" class={
                               viewState.tabFilters.pullRequests.scope === "all" && isInvolvedItem(pr)
-                                ? "border-l-2 border-primary"
-                                : ""
+                                ? "border-l-2 border-l-primary"
+                                : undefined
                             }>
                               <ItemRow
                                 hideRepo={true}
