@@ -6,6 +6,7 @@ import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
+import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
@@ -377,6 +378,13 @@ export default function DashboardPage() {
       <div class="pt-14 min-h-[calc(100vh-3.5rem)] flex flex-col">
         <div class="max-w-6xl mx-auto w-full bg-base-100 shadow-lg border-x border-base-300 flex-1">
           <div class="sticky top-14 z-40 bg-base-100">
+            <PersonalSummaryStrip
+              issues={dashboardData.issues}
+              pullRequests={dashboardData.pullRequests}
+              workflowRuns={dashboardData.workflowRuns}
+              userLogin={userLogin()}
+              onTabChange={handleTabChange}
+            />
             <TabBar
               activeTab={activeTab()}
               onTabChange={handleTabChange}
