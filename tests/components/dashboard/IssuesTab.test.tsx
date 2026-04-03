@@ -315,3 +315,212 @@ describe("IssuesTab — monitored repos filter bypass", () => {
     expect(screen.queryByText("Monitoring all")).toBeNull();
   });
 });
+
+// ── IssuesTab — scope filter ───────────────────────────────────────────────────
+
+describe("IssuesTab — scope filter", () => {
+  it("default scope shows only items involving the user (surfacedBy includes userLogin)", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My issue");
+    expect(screen.queryByText("Community issue")).toBeNull();
+  });
+
+  it("scope 'all' shows all items including community items", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("My issue");
+    screen.getByText("Community issue");
+  });
+
+  it("scope 'involves_me' with monitored repo shows items where user is author", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My monitored issue", repoFullName: "org/monitored", userLogin: "me" }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("My monitored issue");
+  });
+
+  it("scope 'involves_me' with monitored repo hides community items (user not author/assignee)", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Community monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: [] }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    expect(screen.queryByText("Community monitored issue")).toBeNull();
+  });
+
+  it("scope 'involves_me' with monitored repo shows items where user is assignee", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Assigned monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: ["me"] }),
+    ];
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    screen.getByText("Assigned monitored issue");
+  });
+});
+
+// ── IssuesTab — left border accent ────────────────────────────────────────────
+
+describe("IssuesTab — left border accent in 'all' scope", () => {
+  it("adds border-l-2 class to items involving the user in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-2");
+  });
+
+  it("does not add border-l-2 to community items in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Community issue", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-2");
+  });
+
+  it("does not add border-l-2 in default 'involves_me' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).not.toContain("border-l-2");
+  });
+});
+
+// ── IssuesTab — star count in repo headers ────────────────────────────────────
+
+describe("IssuesTab — star count in repo headers", () => {
+  it("shows star count in repo header when starCount is present", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 1234 }),
+    ];
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    screen.getByText("★ 1.2k");
+  });
+
+  it("does not show star display when starCount is undefined", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+    ];
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    // No star character should be present
+    expect(container.textContent).not.toContain("★");
+  });
+
+  it("does not show star display when starCount is 0", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"], starCount: 0 }),
+    ];
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[]}
+      />
+    ));
+
+    expect(container.textContent).not.toContain("★");
+  });
+});
