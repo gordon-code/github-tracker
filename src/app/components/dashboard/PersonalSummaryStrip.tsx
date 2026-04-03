@@ -91,8 +91,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     // Counts are computed from unfiltered data (ignoring scope, globalFilter, showPrRuns).
     // Click filters set scope=all so tabs don't hide items the count included.
     // Known approximations (single-value filter system cannot express these):
-    //   - "ready to merge": count requires reviewDecision=APPROVED||null, but filter
-    //     can't express OR — PRs with CHANGES_REQUESTED + passing CI may appear
+    //   - "ready to merge": uses composite reviewDecision=mergeable (APPROVED||null)
     //   - "awaiting review": count excludes self-authored PRs (!isAuthor), but
     //     role=reviewer filter includes them if user is both author+reviewer (rare)
     //   - globalFilter (org/repo) is NOT applied here — counts are persistent
@@ -130,6 +129,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
         setTabFilter("pullRequests", "role", "author");
         setTabFilter("pullRequests", "draft", "ready");
         setTabFilter("pullRequests", "checkStatus", "success");
+        setTabFilter("pullRequests", "reviewDecision", "mergeable");
       },
     });
     if (prsBlocked > 0) items.push({

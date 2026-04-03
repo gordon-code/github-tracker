@@ -532,3 +532,23 @@ describe("PullRequestsTab — checkStatus=blocked filter", () => {
     expect(screen.queryByText("Passing PR")).toBeNull();
   });
 });
+
+describe("PullRequestsTab — reviewDecision=mergeable filter", () => {
+  it("shows APPROVED and null-review PRs, excludes CHANGES_REQUESTED", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Approved PR", repoFullName: "org/repo", reviewDecision: "APPROVED", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "No Review PR", repoFullName: "org/repo", reviewDecision: null, surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Changes PR", repoFullName: "org/repo", reviewDecision: "CHANGES_REQUESTED", surfacedBy: ["me"], enriched: true }),
+    ];
+    setTabFilter("pullRequests", "reviewDecision", "mergeable");
+    setAllExpanded("pullRequests", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    screen.getByText("Approved PR");
+    screen.getByText("No Review PR");
+    expect(screen.queryByText("Changes PR")).toBeNull();
+  });
+});

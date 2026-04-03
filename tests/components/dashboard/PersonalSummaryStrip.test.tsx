@@ -455,7 +455,7 @@ describe("PersonalSummaryStrip — click applies filters", () => {
     expect(viewState.tabFilters.pullRequests.reviewDecision).toBe("REVIEW_REQUIRED");
   });
 
-  it("clicking ready to merge sets scope=all, role=author, draft=ready, checkStatus=success", () => {
+  it("clicking ready to merge sets scope=all, role=author, draft=ready, checkStatus=success, reviewDecision=mergeable", () => {
     const onTabChange = vi.fn();
     const prs = [makePullRequest({ userLogin: "me", draft: false, checkStatus: "success", reviewDecision: "APPROVED" })];
 
@@ -469,6 +469,7 @@ describe("PersonalSummaryStrip — click applies filters", () => {
     expect(viewState.tabFilters.pullRequests.role).toBe("author");
     expect(viewState.tabFilters.pullRequests.draft).toBe("ready");
     expect(viewState.tabFilters.pullRequests.checkStatus).toBe("success");
+    expect(viewState.tabFilters.pullRequests.reviewDecision).toBe("mergeable");
   });
 
   it("clicking blocked sets scope=all, role=author, draft=ready, checkStatus=blocked", () => {
@@ -507,6 +508,8 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     makePullRequest({ id: 4, title: "Review PR", repoFullName: "org/repo-c", userLogin: "other-author", draft: false, checkStatus: "pending", reviewDecision: "REVIEW_REQUIRED", surfacedBy: ["other-author"], enriched: true, reviewerLogins: ["me"] }),
     // PR authored by me, draft with failing CI → NOT blocked (draft excluded)
     makePullRequest({ id: 5, title: "Draft PR", repoFullName: "org/repo-a", userLogin: "me", draft: true, checkStatus: "failure", reviewDecision: null, surfacedBy: ["me"], enriched: true, reviewerLogins: [] }),
+    // PR authored by me, passing CI, but CHANGES_REQUESTED → NOT ready to merge
+    makePullRequest({ id: 7, title: "Changes Requested PR", repoFullName: "org/repo-a", userLogin: "me", draft: false, checkStatus: "success", reviewDecision: "CHANGES_REQUESTED", surfacedBy: ["me"], enriched: true, reviewerLogins: [] }),
     // PR from tracked user, user not involved → only visible in scope=all
     makePullRequest({ id: 6, title: "Tracked PR", repoFullName: "org/repo-d", userLogin: "tracked-user", draft: false, checkStatus: "success", reviewDecision: "APPROVED", surfacedBy: ["tracked-user"], enriched: true, reviewerLogins: [] }),
   ];
@@ -598,6 +601,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     screen.getByText("Ready PR");
     expect(screen.queryByText("Conflict PR")).toBeNull();
     expect(screen.queryByText("Failing PR")).toBeNull();
+    expect(screen.queryByText("Changes Requested PR")).toBeNull();
   });
 
   it("'assigned' count matches IssuesTab filtered view", () => {

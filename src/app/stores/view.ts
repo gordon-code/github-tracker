@@ -16,7 +16,7 @@ const IssueFiltersSchema = z.object({
 const PullRequestFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
-  reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]).default("all"),
+  reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
   draft: z.enum(["all", "draft", "ready"]).default("all"),
   checkStatus: z.enum(["all", "success", "failure", "pending", "conflict", "blocked", "none"]).default("all"),
   sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL"]).default("all"),

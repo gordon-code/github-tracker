@@ -82,6 +82,7 @@ const prFilterGroups: FilterChipGroupDef[] = [
       { value: "APPROVED", label: "Approved" },
       { value: "CHANGES_REQUESTED", label: "Changes" },
       { value: "REVIEW_REQUIRED", label: "Needs review" },
+      { value: "mergeable", label: "Mergeable" },
     ],
   },
   {
@@ -213,7 +214,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         if (!isEnriched && tabFilters.role === "author" && !roles.includes("author")) return false;
       }
       if (tabFilters.reviewDecision !== "all") {
-        if (pr.reviewDecision !== tabFilters.reviewDecision) return false;
+        if (tabFilters.reviewDecision === "mergeable") {
+          if (pr.reviewDecision !== "APPROVED" && pr.reviewDecision !== null) return false;
+        } else {
+          if (pr.reviewDecision !== tabFilters.reviewDecision) return false;
+        }
       }
       if (tabFilters.draft !== "all") {
         if (tabFilters.draft === "draft" && !pr.draft) return false;
