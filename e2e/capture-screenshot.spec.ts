@@ -339,6 +339,8 @@ const workflowRunsResponse = {
 test("capture dashboard screenshot", async ({ page }) => {
   // 1a. Seed localStorage before any navigation
   await page.addInitScript(() => {
+    // Clear any stale view state (e.g. notification drawer open from a previous run)
+    localStorage.removeItem("github-tracker:view");
     localStorage.setItem("github-tracker:auth-token", "ghu_fake_screenshot_token");
     localStorage.setItem(
       "github-tracker:config",
@@ -368,12 +370,9 @@ test("capture dashboard screenshot", async ({ page }) => {
 
   // 1b. Mock all GitHub API routes before navigation.
   // Routes are matched in reverse registration order (last registered = highest priority).
-  // Register the catch-all first so specific routes take priority.
-  await page.route("https://api.github.com/**", (route) => {
-    // Allow requests to fall through to more-specific handlers registered after this one.
-    // If nothing else matched, fulfill with an empty 200 to prevent hangs.
-    return route.fulfill({ status: 200, json: {} });
-  });
+  // Register the catch-all FIRST so specific routes registered after it take priority.
+  // The catch-all aborts unmocked requests so they fail loudly instead of silently succeeding.
+  await page.route("https://api.github.com/**", (route) => route.abort());
 
   await page.route("https://api.github.com/notifications*", (route) =>
     route.fulfill({ status: 200, json: [] })
@@ -391,8 +390,8 @@ test("capture dashboard screenshot", async ({ page }) => {
     const query = body?.query ?? "";
     const variables = body?.variables ?? {};
 
-    // Heavy backfill: nodes(ids: [...])
-    if (query.includes("nodes(ids:") || "ids" in variables) {
+    // Heavy backfill: nodes(ids: [...]) — detected by query string content
+    if (query.includes("nodes(ids:")) {
       return route.fulfill({
         status: 200,
         json: {
@@ -442,7 +441,7 @@ test("capture dashboard screenshot", async ({ page }) => {
     });
   });
 
-  // /user is registered last so it has highest priority (matched before the catch-all)
+  // /user registered last so it has the highest priority (matched before the catch-all)
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
       status: 200,
@@ -458,19 +457,18 @@ test("capture dashboard screenshot", async ({ page }) => {
   // 1c. Navigate and capture
   await page.goto("/dashboard");
   await page.getByRole("tablist").waitFor();
-  await page.waitForTimeout(1500);
+  await page.waitForLoadState("networkidle");
 
   // Switch to Pull Requests tab for a richer screenshot
   await page.getByRole("tab", { name: /pull requests/i }).click();
-  await page.waitForTimeout(500);
+  await page.getByRole("tab", { name: /pull requests/i, selected: true }).waitFor();
 
   // Expand the first collapsed repo group by clicking its header button
   const firstCollapsedGroup = page.getByRole("button", { expanded: false }).first();
   if (await firstCollapsedGroup.isVisible()) {
     await firstCollapsedGroup.click();
-    await page.waitForTimeout(500);
+    await firstCollapsedGroup.waitFor({ state: "detached" }).catch(() => undefined);
   }
 
-  await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: "public/assets/dashboard-screenshot.png" });
 });

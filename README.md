@@ -117,8 +117,8 @@ src/
       view.ts       # View state (tabs, sorting, filters, ignored items, locked repos)
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
-tests/              # 1256 unit/component tests across 63 test files
-e2e/                # 10 Playwright specs
+tests/              # 1522 unit/component tests across 69 test files
+e2e/                # 12 E2E tests across 3 spec files
 ```
 
 ## Development
