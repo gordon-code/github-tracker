@@ -18,7 +18,7 @@ async function setupAuth(page: Page) {
     })
   );
   await page.route(
-    "https://api.github.com/repos/*/actions/runs*",
+    "https://api.github.com/repos/*/*/actions/runs*",
     (route) =>
       route.fulfill({
         status: 200,
@@ -33,8 +33,10 @@ async function setupAuth(page: Page) {
       status: 200,
       json: {
         data: {
-          search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          rateLimit: { limit: 5000, remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
         },
       },
     })
@@ -111,8 +113,10 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
       status: 200,
       json: {
         data: {
-          search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          rateLimit: { limit: 5000, remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
         },
       },
     })
@@ -206,4 +210,10 @@ test("dashboard shows empty state with no data", async ({ page }) => {
 
   // The issues tab content area should render (even if empty)
   await expect(page.getByRole("main")).toBeVisible();
+});
+
+test("unknown path redirects to login when unauthenticated", async ({ page }) => {
+  await page.goto("/this-path-does-not-exist");
+  // catch-all → Navigate "/" → RootRedirect → validateToken() fails → Navigate "/login"
+  await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
 });

@@ -16,6 +16,14 @@ async function setupAuth(page: Page) {
       },
     })
   );
+  await page.route(
+    "https://api.github.com/repos/*/*/actions/runs*",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        json: { total_count: 0, workflow_runs: [] },
+      })
+  );
   await page.route("https://api.github.com/notifications*", (route) =>
     route.fulfill({ status: 200, json: [] })
   );
@@ -24,8 +32,10 @@ async function setupAuth(page: Page) {
       status: 200,
       json: {
         data: {
-          search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
-          rateLimit: { limit: 5000, remaining: 5000, resetAt: new Date(Date.now() + 3600000).toISOString() },
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
         },
       },
     })

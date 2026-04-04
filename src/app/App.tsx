@@ -190,6 +190,7 @@ export default function App() {
           <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
           <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
           <Route path="/privacy" component={PrivacyPage} />
+          <Route path="/*" component={() => <Navigate href="/" />} />
         </Router>
       </Suspense>
     </ErrorBoundary>
