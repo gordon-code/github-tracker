@@ -470,5 +470,5 @@ test("capture dashboard screenshot", async ({ page }) => {
     await firstCollapsedGroup.waitFor({ state: "detached" }).catch(() => undefined);
   }
 
-  await page.screenshot({ path: "public/assets/dashboard-screenshot.png" });
+  await page.screenshot({ path: "docs/dashboard-screenshot.png" });
 });
