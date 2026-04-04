@@ -118,7 +118,7 @@ src/
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
 tests/              # 1522 unit/component tests across 69 test files
-e2e/                # 12 E2E tests across 2 spec files
+e2e/                # 13 E2E tests across 2 spec files
 ```
 
 ## Development

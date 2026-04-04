@@ -1,60 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-
-/**
- * Register API route interceptors and inject auth + config into localStorage BEFORE navigation.
- * OAuth App uses permanent tokens stored in localStorage — no refresh endpoint needed.
- * The app calls validateToken() on load, which GETs /user to verify the token.
- */
-async function setupAuth(page: Page) {
-  // Intercept /user validation (called by validateToken on page load)
-  await page.route("https://api.github.com/user", (route) =>
-    route.fulfill({
-      status: 200,
-      json: {
-        login: "testuser",
-        name: "Test User",
-        avatar_url: "https://github.com/testuser.png",
-      },
-    })
-  );
-  await page.route(
-    "https://api.github.com/repos/*/*/actions/runs*",
-    (route) =>
-      route.fulfill({
-        status: 200,
-        json: { total_count: 0, workflow_runs: [] },
-      })
-  );
-  await page.route("https://api.github.com/notifications*", (route) =>
-    route.fulfill({ status: 200, json: [] })
-  );
-  await page.route("https://api.github.com/graphql", (route) =>
-    route.fulfill({
-      status: 200,
-      json: {
-        data: {
-          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
-        },
-      },
-    })
-  );
-
-  // Seed localStorage with auth token and config before the page loads
-  await page.addInitScript(() => {
-    localStorage.setItem("github-tracker:auth-token", "ghu_fake");
-    localStorage.setItem(
-      "github-tracker:config",
-      JSON.stringify({
-        selectedOrgs: ["testorg"],
-        selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
-        onboardingComplete: true,
-      })
-    );
-  });
-}
+import { test, expect } from "@playwright/test";
+import { setupAuth } from "./helpers";
 
 // ── Login page ───────────────────────────────────────────────────────────────
 
@@ -79,7 +24,7 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
     route.fulfill({
       status: 200,
       json: {
-        access_token: "ghu_fake",
+        access_token: "fake-token",
         token_type: "bearer",
         scope: "repo read:org notifications",
       },
@@ -216,4 +161,11 @@ test("unknown path redirects to login when unauthenticated", async ({ page }) =>
   await page.goto("/this-path-does-not-exist");
   // catch-all → Navigate "/" → RootRedirect → validateToken() fails → Navigate "/login"
   await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
+});
+
+test("unknown path redirects to dashboard when authenticated", async ({ page }) => {
+  await setupAuth(page);
+  await page.goto("/this-path-does-not-exist");
+  // catch-all → Navigate "/" → RootRedirect → validateToken() succeeds → Navigate "/dashboard"
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
 });

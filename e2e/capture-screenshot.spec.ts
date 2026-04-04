@@ -341,7 +341,7 @@ test("capture dashboard screenshot", async ({ page }) => {
   await page.addInitScript(() => {
     // Clear any stale view state (e.g. notification drawer open from a previous run)
     localStorage.removeItem("github-tracker:view");
-    localStorage.setItem("github-tracker:auth-token", "ghu_fake_screenshot_token");
+    localStorage.setItem("github-tracker:auth-token", "fake-screenshot-token");
     localStorage.setItem(
       "github-tracker:config",
       JSON.stringify({
@@ -463,11 +463,14 @@ test("capture dashboard screenshot", async ({ page }) => {
   await page.getByRole("tab", { name: /pull requests/i }).click();
   await page.getByRole("tab", { name: /pull requests/i, selected: true }).waitFor();
 
-  // Expand the first collapsed repo group by clicking its header button
-  const firstCollapsedGroup = page.getByRole("button", { expanded: false }).first();
-  if (await firstCollapsedGroup.isVisible()) {
-    await firstCollapsedGroup.click();
-    await firstCollapsedGroup.waitFor({ state: "detached" }).catch(() => undefined);
+  // Wait for repo group headers to render (visible even when collapsed)
+  await page.getByText("acme-corp/web-platform").first().waitFor();
+
+  // Expand a repo group by clicking its header button (scoped to avoid notification bell)
+  const repoGroupBtn = page.getByRole("button", { expanded: false }).filter({ hasText: "acme-corp/web-platform" });
+  if (await repoGroupBtn.isVisible()) {
+    await repoGroupBtn.click();
+    await page.getByRole("button", { expanded: true }).filter({ hasText: "acme-corp/web-platform" }).waitFor();
   }
 
   await page.screenshot({ path: "docs/dashboard-screenshot.png" });
