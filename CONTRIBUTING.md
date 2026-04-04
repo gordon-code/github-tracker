@@ -11,7 +11,7 @@ pnpm install
 pnpm run dev
 ```
 
-The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app client ID in `.dev.vars` (see README for setup).
+The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app client ID in `.dev.vars` (see DEPLOY.md for setup).
 
 ## Running checks
 

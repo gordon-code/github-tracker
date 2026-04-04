@@ -104,7 +104,7 @@ src/
     lib/            # 14 modules: format, errors, notifications, oauth, pat, url,
                     # flashDetection, grouping, reorderHighlight, collections,
                     # emoji, label-colors, sentry, github-emoji-map.json
-    pages/          # LoginPage, OAuthCallback
+    pages/          # LoginPage, OAuthCallback, PrivacyPage
     services/
       api.ts        # GitHub API methods — issues, PRs, workflow runs, user validation,
                     # upstream repo discovery, tracked user search
