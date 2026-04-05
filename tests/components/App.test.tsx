@@ -171,7 +171,7 @@ describe("App", () => {
     });
   });
 
-  it("all routes are registered: /, /login, /oauth/callback, /onboarding, /dashboard, /settings", () => {
+  it("all routes are registered: /, /login, /oauth/callback, /onboarding, /dashboard, /settings, /*", () => {
     expect(() => render(() => <App />)).not.toThrow();
   });
 

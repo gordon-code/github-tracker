@@ -118,7 +118,7 @@ src/
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
 tests/              # 1522 unit/component tests across 69 test files
-e2e/                # 13 E2E tests across 2 spec files
+e2e/                # 14 E2E tests across 2 spec files
 ```
 
 ## Development
@@ -130,6 +130,7 @@ pnpm test           # Run unit/component tests
 pnpm test:e2e       # Run Playwright E2E tests
 pnpm run typecheck  # TypeScript check
 pnpm run build      # Production build
+pnpm run screenshot # Capture dashboard screenshot
 ```
 
 ## Security

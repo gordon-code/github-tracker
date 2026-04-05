@@ -19,9 +19,10 @@ The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app
 pnpm test           # unit tests (Vitest)
 pnpm test:e2e       # Playwright E2E tests (chromium)
 pnpm run typecheck  # TypeScript validation
+pnpm run screenshot # Capture dashboard screenshot (saves to docs/)
 ```
 
-CI runs all three on every PR. Make sure they pass locally before pushing.
+CI runs typecheck, unit tests, and E2E tests on every PR. Make sure they pass locally before pushing.
 
 To run a specific test file:
 
@@ -73,7 +74,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 type(scope): description
 ```
 
-Scope is optional. Use present indicative tense: "adds feature", not "add feature" or "added feature".
+Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
 
 ## Pull requests
 

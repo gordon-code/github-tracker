@@ -19,6 +19,9 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
     sessionStorage.setItem("github-tracker:oauth-state", state);
   }, fakeState);
 
+  // Catch-all: abort any unmocked GitHub API request so failures are loud
+  await page.route("https://api.github.com/**", (route) => route.abort());
+
   // Mock the token exchange endpoint and the /user validation
   await page.route("**/api/oauth/token", (route) =>
     route.fulfill({
@@ -52,15 +55,23 @@ test("OAuth callback flow completes and redirects", async ({ page }) => {
       })
     );
   });
-  // Also intercept downstream dashboard API calls
+  // Intercept downstream dashboard API calls
+  await page.route(
+    "https://api.github.com/repos/*/*/actions/runs*",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        json: { total_count: 0, workflow_runs: [] },
+      })
+  );
   await page.route("https://api.github.com/graphql", (route) =>
     route.fulfill({
       status: 200,
       json: {
         data: {
-          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
           rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
         },
       },
@@ -155,6 +166,14 @@ test("dashboard shows empty state with no data", async ({ page }) => {
 
   // The issues tab content area should render (even if empty)
   await expect(page.getByRole("main")).toBeVisible();
+});
+
+test("OG and Twitter meta tags are present", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "GitHub Tracker");
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /social-preview\.png$/);
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute("content", "summary_large_image");
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", /Dashboard for tracking/);
 });
 
 test("unknown path redirects to login when unauthenticated", async ({ page }) => {

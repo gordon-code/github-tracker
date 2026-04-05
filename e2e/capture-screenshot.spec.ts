@@ -386,12 +386,11 @@ test("capture dashboard screenshot", async ({ page }) => {
   );
 
   await page.route("https://api.github.com/graphql", async (route) => {
-    const body = route.request().postDataJSON() as { query?: string; variables?: Record<string, unknown> } | null;
-    const query = body?.query ?? "";
+    const body = route.request().postDataJSON() as { variables?: Record<string, unknown> } | null;
     const variables = body?.variables ?? {};
 
-    // Heavy backfill: nodes(ids: [...]) — detected by query string content
-    if (query.includes("nodes(ids:")) {
+    // Heavy backfill: HEAVY_PR_BACKFILL_QUERY uses $ids variable
+    if ("ids" in variables) {
       return route.fulfill({
         status: 200,
         json: {
@@ -457,7 +456,6 @@ test("capture dashboard screenshot", async ({ page }) => {
   // 1c. Navigate and capture
   await page.goto("/dashboard");
   await page.getByRole("tablist").waitFor();
-  await page.waitForLoadState("networkidle");
 
   // Switch to Pull Requests tab for a richer screenshot
   await page.getByRole("tab", { name: /pull requests/i }).click();

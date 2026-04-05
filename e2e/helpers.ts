@@ -6,6 +6,9 @@ import type { Page } from "@playwright/test";
  * The app calls validateToken() on load, which GETs /user to verify the token.
  */
 export async function setupAuth(page: Page) {
+  // Catch-all: abort any unmocked GitHub API request so failures are loud
+  await page.route("https://api.github.com/**", (route) => route.abort());
+
   // Intercept /user validation (called by validateToken on page load)
   await page.route("https://api.github.com/user", (route) =>
     route.fulfill({
@@ -33,9 +36,9 @@ export async function setupAuth(page: Page) {
       status: 200,
       json: {
         data: {
-          issues: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
-          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] },
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
           rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
         },
       },
