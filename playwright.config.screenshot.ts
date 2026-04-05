@@ -4,11 +4,11 @@ const port = Number(process.env.E2E_PORT) || 5173;
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: ["**/capture-screenshot.spec.ts"],
-  reporter: [["html", { open: "never" }]],
+  testMatch: ["**/capture-screenshot.spec.ts"],
+  timeout: 60_000,
   use: {
     baseURL: `http://localhost:${port}`,
-    trace: "on-first-retry",
+    viewport: { width: 1280, height: 800 },
   },
   projects: [
     {
