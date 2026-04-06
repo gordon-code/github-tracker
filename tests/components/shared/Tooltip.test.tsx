@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { Tooltip, InfoTooltip } from "../../../src/app/components/shared/Tooltip";
 
 describe("Tooltip", () => {
@@ -49,6 +49,43 @@ describe("Tooltip", () => {
     const trigger = container.querySelector("span.inline-flex");
     expect(trigger?.hasAttribute("tabindex")).toBe(false);
   });
+
+  it("tooltip content is not visible before hover", () => {
+    render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    expect(document.body.textContent).not.toContain("tooltip text");
+  });
+
+  it("shows tooltip content after 300ms hover delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    // Content should not be visible before delay fires
+    expect(document.body.textContent).not.toContain("tooltip text");
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("tooltip text");
+  });
+
+  it("cancels tooltip if pointer leaves before 300ms delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(150);
+    fireEvent.pointerLeave(trigger);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).not.toContain("tooltip text");
+  });
 });
 
 describe("InfoTooltip", () => {
@@ -71,5 +108,14 @@ describe("InfoTooltip", () => {
     render(() => <InfoTooltip content="Helpful info" />);
     const btn = screen.getByRole("button", { name: "More information" });
     expect(btn.classList.contains("cursor-help")).toBe(true);
+  });
+
+  it("shows tooltip content after hover (openDelay=300ms)", () => {
+    render(() => <InfoTooltip content="helpful info text" />);
+    const btn = screen.getByRole("button", { name: "More information" });
+    fireEvent.pointerEnter(btn);
+    expect(document.body.textContent).not.toContain("helpful info text");
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("helpful info text");
   });
 });

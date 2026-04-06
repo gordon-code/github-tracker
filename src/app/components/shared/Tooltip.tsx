@@ -1,8 +1,10 @@
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal, onCleanup } from "solid-js";
 import { Tooltip as KobalteTooltip } from "@kobalte/core/tooltip";
 import type { JSX } from "solid-js";
 
 // SECURITY: tooltip content must be JSX children, never raw HTML
+
+const TOOLTIP_CONTENT_CLASS = "z-50 max-w-xs rounded bg-neutral px-2 py-1 text-xs text-neutral-content shadow-lg";
 
 interface TooltipProps {
   content: string;
@@ -16,6 +18,10 @@ export function Tooltip(props: TooltipProps) {
   const [isFocused, setIsFocused] = createSignal(false);
   const open = createMemo(() => isHovered() || isFocused());
 
+  // openDelay is ignored in controlled mode; implement the delay manually
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(hoverTimer));
+
   return (
     <KobalteTooltip
       open={open()}
@@ -27,21 +33,25 @@ export function Tooltip(props: TooltipProps) {
       }}
       placement={props.placement ?? "top"}
       gutter={4}
-      openDelay={300}
     >
       <KobalteTooltip.Trigger
         as="span"
         class="inline-flex"
         tabindex={props.focusable ? "0" : undefined}
-        onPointerEnter={() => setIsHovered(true)}
-        onPointerLeave={() => setIsHovered(false)}
+        onPointerEnter={() => {
+          hoverTimer = setTimeout(() => setIsHovered(true), 300);
+        }}
+        onPointerLeave={() => {
+          clearTimeout(hoverTimer);
+          setIsHovered(false);
+        }}
         onFocusIn={() => setIsFocused(true)}
         onFocusOut={() => setIsFocused(false)}
       >
         {props.children}
       </KobalteTooltip.Trigger>
       <KobalteTooltip.Portal>
-        <KobalteTooltip.Content class="z-50 max-w-xs rounded bg-neutral px-2 py-1 text-xs text-neutral-content shadow-lg">
+        <KobalteTooltip.Content class={TOOLTIP_CONTENT_CLASS}>
           <KobalteTooltip.Arrow />
           {props.content}
         </KobalteTooltip.Content>
@@ -71,7 +81,7 @@ export function InfoTooltip(props: InfoTooltipProps) {
         i
       </KobalteTooltip.Trigger>
       <KobalteTooltip.Portal>
-        <KobalteTooltip.Content class="z-50 max-w-xs rounded bg-neutral px-2 py-1 text-xs text-neutral-content shadow-lg">
+        <KobalteTooltip.Content class={TOOLTIP_CONTENT_CLASS}>
           <KobalteTooltip.Arrow />
           {props.content}
         </KobalteTooltip.Content>

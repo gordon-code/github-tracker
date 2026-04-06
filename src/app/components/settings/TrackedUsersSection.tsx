@@ -126,7 +126,9 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
                   </span>
                 </Show>
                 <Show when={trackedUser.type === "bot"}>
-                  <span class="badge badge-xs badge-outline" aria-label={`${trackedUser.login} is a bot account`}>bot</span>
+                  <Tooltip content="GitHub identifies this as a bot account" focusable>
+                    <span class="badge badge-xs badge-outline" aria-label={`${trackedUser.login} is a bot account`}>bot</span>
+                  </Tooltip>
                 </Show>
               </div>
             </div>

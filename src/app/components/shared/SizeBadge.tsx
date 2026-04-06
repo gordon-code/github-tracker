@@ -18,11 +18,11 @@ const SIZE_CONFIG = {
   XL: "badge badge-error badge-sm",
 } as const;
 
-const SIZE_TOOLTIP: Record<string, string> = {
-  XS: "XS: under 10 lines changed",
-  S: "S: under 100 lines changed",
-  M: "M: under 500 lines changed",
-  L: "L: under 1000 lines changed",
+const SIZE_TOOLTIP: Record<"XS" | "S" | "M" | "L" | "XL", string> = {
+  XS: "XS: <10 lines changed",
+  S: "S: 10–99 lines changed",
+  M: "M: 100–499 lines changed",
+  L: "L: 500–999 lines changed",
   XL: "XL: 1000+ lines changed",
 };
 
