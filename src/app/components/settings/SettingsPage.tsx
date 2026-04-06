@@ -1,6 +1,8 @@
 import { createSignal, createMemo, Show, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
+import type { Config } from "../../stores/config";
+import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
@@ -159,6 +161,7 @@ export default function SettingsPage() {
         itemsPerPage: config.itemsPerPage,
         defaultTab: config.defaultTab,
         rememberLastTab: config.rememberLastTab,
+        enableTracking: config.enableTracking,
       },
       null,
       2
@@ -200,11 +203,12 @@ export default function SettingsPage() {
     { value: 0, label: "Off" },
   ];
 
-  const tabOptions = [
+  const tabOptions = createMemo(() => [
     { value: "issues" as const, label: "Issues" },
     { value: "pullRequests" as const, label: "Pull Requests" },
     { value: "actions" as const, label: "GitHub Actions" },
-  ];
+    ...(config.enableTracking ? [{ value: "tracked" as const, label: "Tracked Items" }] : []),
+  ]);
 
   const densityOptions = [
     { value: "comfortable" as const, label: "Comfortable" },
@@ -580,11 +584,11 @@ export default function SettingsPage() {
             <select
               value={config.defaultTab}
               onChange={(e) => {
-                saveWithFeedback({ defaultTab: e.currentTarget.value as "issues" | "pullRequests" | "actions" });
+                saveWithFeedback({ defaultTab: e.currentTarget.value as Config["defaultTab"] });
               }}
               class="select select-sm"
             >
-              {tabOptions.map((opt) => (
+              {tabOptions().map((opt) => (
                 <option value={opt.value}>{opt.label}</option>
               ))}
             </select>
@@ -600,6 +604,34 @@ export default function SettingsPage() {
               aria-label="Remember last tab"
               checked={config.rememberLastTab}
               onChange={(e) => saveWithFeedback({ rememberLastTab: e.currentTarget.checked })}
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+          <SettingRow
+            label="Enable tracked items"
+            description="Show a Tracked tab to pin issues and PRs for quick access"
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.enableTracking}
+              aria-label="Enable tracked items"
+              checked={config.enableTracking}
+              onChange={(e) => {
+                const val = e.currentTarget.checked;
+                if (!val) {
+                  if (config.defaultTab === "tracked") {
+                    saveWithFeedback({ enableTracking: val, defaultTab: "issues" });
+                  } else {
+                    saveWithFeedback({ enableTracking: val });
+                  }
+                  if (viewState.lastActiveTab === "tracked") {
+                    updateViewState({ lastActiveTab: "issues" });
+                  }
+                } else {
+                  saveWithFeedback({ enableTracking: val });
+                }
+              }}
               class="toggle toggle-primary"
             />
           </SettingRow>

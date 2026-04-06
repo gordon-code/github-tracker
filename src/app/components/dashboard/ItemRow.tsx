@@ -16,7 +16,9 @@ export interface ItemRowProps {
   url: string;
   labels: { name: string; color: string }[];
   children?: JSX.Element;
-  onIgnore: () => void;
+  onIgnore?: () => void;
+  onTrack?: () => void;
+  isTracked?: boolean;
   density: "compact" | "comfortable";
   commentCount?: number;
   hideRepo?: boolean;
@@ -174,35 +176,64 @@ export default function ItemRow(props: ItemRowProps) {
         </Show>
       </div>
 
-      {/* Ignore button — visible on hover */}
-      <Tooltip content="Ignore" class="shrink-0 self-center relative z-10">
-        <button
-          data-ignore-btn
-          onClick={() => props.onIgnore()}
-          class={`shrink-0 self-center rounded p-1
-            text-base-content/30
-            hover:text-error
-            opacity-0 group-hover:opacity-100 focus:opacity-100
-            transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
-          aria-label={`Ignore #${props.number} ${props.title}`}
-        >
-          {/* Eye-slash icon */}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            aria-hidden="true"
+      {/* Pin button — visible on hover, always visible when tracked */}
+      <Show when={props.onTrack !== undefined}>
+        <Tooltip content={props.isTracked ? "Untrack this item" : "Track this item"} class="shrink-0 self-center relative z-10">
+          <button
+            onClick={() => props.onTrack!()}
+            class={`shrink-0 self-center rounded p-1
+              transition-opacity focus:outline-none focus:ring-2 focus:ring-primary
+              ${props.isTracked
+                ? "text-primary opacity-100"
+                : "text-base-content/30 hover:text-primary opacity-0 group-hover:opacity-100 focus:opacity-100"
+              }`}
+            aria-label={props.isTracked ? `Unpin #${props.number} ${props.title}` : `Pin #${props.number} ${props.title}`}
           >
-            <path
-              fill-rule="evenodd"
-              d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
-              clip-rule="evenodd"
-            />
-            <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
-          </svg>
-        </button>
-      </Tooltip>
+            <Show
+              when={props.isTracked}
+              fallback={
+                /* Outline bookmark (not tracked) */
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+              }
+            >
+              {/* Solid bookmark (tracked) */}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
+            </Show>
+          </button>
+        </Tooltip>
+      </Show>
+
+      {/* Ignore button — visible on hover */}
+      <Show when={props.onIgnore !== undefined}>
+        <Tooltip content="Ignore" class="shrink-0 self-center relative z-10">
+          <button
+            data-ignore-btn
+            onClick={() => props.onIgnore!()}
+            class={`shrink-0 self-center rounded p-1
+              text-base-content/30
+              hover:text-error
+              opacity-0 group-hover:opacity-100 focus:opacity-100
+              transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
+            aria-label={`Ignore #${props.number} ${props.title}`}
+          >
+            {/* Eye-slash icon */}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
+                clip-rule="evenodd"
+              />
+              <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+            </svg>
+          </button>
+        </Tooltip>
+      </Show>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -326,6 +326,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
   });
 
+  const trackedPrIds = createMemo(() =>
+    config.enableTracking
+      ? new Set(viewState.trackedItems.filter(t => t.type === "pullRequest").map(t => t.id))
+      : new Set<number>()
+  );
+
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
@@ -341,6 +347,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       title: pr.title,
       ignoredAt: Date.now(),
     });
+    if (config.enableTracking) untrackItem(pr.id, "pullRequest");
   }
 
   return (
@@ -553,6 +560,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 labels={pr.labels}
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
+                                onTrack={config.enableTracking ? () => {
+                                  if (trackedPrIds().has(pr.id)) {
+                                    untrackItem(pr.id, "pullRequest");
+                                  } else {
+                                    trackItem({ id: pr.id, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
+                                  }
+                                } : undefined}
+                                isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
                                 density={config.viewDensity}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0

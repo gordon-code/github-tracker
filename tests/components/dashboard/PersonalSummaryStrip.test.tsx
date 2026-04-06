@@ -21,7 +21,7 @@ function renderStrip(opts: {
   pullRequests?: PullRequest[];
   workflowRuns?: WorkflowRun[];
   userLogin?: string;
-  onTabChange?: (tab: "issues" | "pullRequests" | "actions") => void;
+  onTabChange?: (tab: import("../../../src/app/components/layout/TabBar").TabId) => void;
 }) {
   const onTabChange = opts.onTabChange ?? vi.fn();
   return render(() => (

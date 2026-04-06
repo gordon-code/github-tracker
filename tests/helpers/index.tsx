@@ -1,6 +1,7 @@
 import { render } from "@solidjs/testing-library";
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { resetViewState } from "../../src/app/stores/view";
+import type { TrackedItem } from "../../src/app/stores/view";
 import type { Issue, PullRequest, WorkflowRun, ApiError } from "../../src/app/services/api";
 import type { JSX } from "solid-js";
 
@@ -78,6 +79,17 @@ export function makeWorkflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowR
     runAttempt: 1,
     displayTitle: "Workflow 1",
     actorLogin: "user",
+    ...overrides,
+  };
+}
+
+export function makeTrackedItem(overrides: Partial<TrackedItem> = {}): TrackedItem {
+  return {
+    id: nextId++,
+    type: "issue",
+    repoFullName: "owner/repo",
+    title: "Test tracked item",
+    addedAt: Date.now(),
     ...overrides,
   };
 }

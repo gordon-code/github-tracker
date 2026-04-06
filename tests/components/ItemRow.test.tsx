@@ -353,6 +353,60 @@ describe("ItemRow", () => {
     vi.useRealTimers();
   });
 
+  it("does not render pin button when onTrack is undefined", () => {
+    render(() => <ItemRow {...defaultProps} />);
+    expect(screen.queryByLabelText(/Pin #42/i)).toBeNull();
+    expect(screen.queryByLabelText(/Unpin #42/i)).toBeNull();
+  });
+
+  it("renders pin button when onTrack is provided", () => {
+    render(() => <ItemRow {...defaultProps} onTrack={vi.fn()} />);
+    expect(screen.getByLabelText(/Pin #42/i)).not.toBeNull();
+  });
+
+  it("calls onTrack when pin button clicked", async () => {
+    const user = userEvent.setup();
+    const onTrack = vi.fn();
+    render(() => <ItemRow {...defaultProps} onTrack={onTrack} />);
+    await user.click(screen.getByLabelText(/Pin #42/i));
+    expect(onTrack).toHaveBeenCalledOnce();
+  });
+
+  it("shows filled pin icon (solid bookmark) when isTracked is true", () => {
+    render(() => (
+      <ItemRow {...defaultProps} onTrack={vi.fn()} isTracked={true} />
+    ));
+    // Solid bookmark uses fill="currentColor" with fill-rule="evenodd" and has no stroke attr
+    const btn = screen.getByLabelText(/Unpin #42/i);
+    const svg = btn.querySelector("svg");
+    expect(svg?.getAttribute("fill")).toBe("currentColor");
+  });
+
+  it("shows outline pin icon (outline bookmark) when isTracked is false", () => {
+    render(() => (
+      <ItemRow {...defaultProps} onTrack={vi.fn()} isTracked={false} />
+    ));
+    const btn = screen.getByLabelText(/Pin #42/i);
+    const svg = btn.querySelector("svg");
+    expect(svg?.getAttribute("fill")).toBe("none");
+  });
+
+  it("pin button has aria-label 'Unpin' when isTracked is true", () => {
+    render(() => <ItemRow {...defaultProps} onTrack={vi.fn()} isTracked={true} />);
+    expect(screen.getByLabelText("Unpin #42 Fix a bug")).not.toBeNull();
+  });
+
+  it("pin button has aria-label 'Pin' when isTracked is false", () => {
+    render(() => <ItemRow {...defaultProps} onTrack={vi.fn()} isTracked={false} />);
+    expect(screen.getByLabelText("Pin #42 Fix a bug")).not.toBeNull();
+  });
+
+  it("does not render ignore button when onIgnore is undefined", () => {
+    const { onIgnore: _onIgnore, ...propsWithoutIgnore } = defaultProps;
+    render(() => <ItemRow {...propsWithoutIgnore} />);
+    expect(screen.queryByLabelText(/Ignore #42/i)).toBeNull();
+  });
+
   it("refreshTick forces time display update", () => {
     const [tick, setTick] = createSignal(0);
     let mockNow = MOCK_NOW;

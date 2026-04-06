@@ -70,9 +70,11 @@ let capturedOnHotData: ((
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
 let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
+let _resetHasFetchedFresh: typeof import("../../src/app/components/dashboard/DashboardPage")._resetHasFetchedFresh;
 let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 let viewStore: typeof import("../../src/app/stores/view");
+let configStore: typeof import("../../src/app/stores/config");
 
 beforeEach(async () => {
   // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
@@ -121,9 +123,11 @@ beforeEach(async () => {
   // Re-import with fresh module instances
   const dashboardModule = await import("../../src/app/components/dashboard/DashboardPage");
   DashboardPage = dashboardModule.default;
+  _resetHasFetchedFresh = dashboardModule._resetHasFetchedFresh;
   pollService = await import("../../src/app/services/poll");
   authStore = await import("../../src/app/stores/auth");
   viewStore = await import("../../src/app/stores/view");
+  configStore = await import("../../src/app/stores/config");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -810,5 +814,86 @@ describe("DashboardPage — onHotData integration", () => {
     // callback executed without error. The PR test above fully validates
     // the produce() mechanism; this confirms the run path is wired.
     expect(screen.getByText(/1 workflow/)).toBeTruthy();
+  });
+});
+
+describe("DashboardPage — tracked tab", () => {
+  it("renders Tracked tab when enableTracking is true", () => {
+    configStore.updateConfig({ enableTracking: true });
+    render(() => <DashboardPage />);
+    expect(screen.getByText("Tracked")).toBeTruthy();
+  });
+
+  it("does not render Tracked tab when enableTracking is false", () => {
+    configStore.updateConfig({ enableTracking: false });
+    render(() => <DashboardPage />);
+    expect(screen.queryByText("Tracked")).toBeNull();
+  });
+
+  it("auto-prunes tracked items absent from open poll data", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 999,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Will be pruned",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    // Trigger poll with empty issues — item 999 absent means it was closed
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
+  });
+
+  it("preserves tracked items from deselected repos", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "other-repo", fullName: "org/other-repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 888,
+        type: "issue" as const,
+        repoFullName: "org/deselected-repo",
+        title: "Should be kept",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    // Item from deselected repo should NOT be pruned
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+      expect(viewStore.viewState.trackedItems[0].id).toBe(888);
+    });
   });
 });

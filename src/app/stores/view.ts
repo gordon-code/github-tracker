@@ -5,6 +5,17 @@ import { pushNotification } from "../lib/errors";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
+const TRACKED_ITEMS_CAP = 200;
+
+export const TrackedItemSchema = z.object({
+  id: z.number(),
+  type: z.enum(["issue", "pullRequest"]),
+  repoFullName: z.string(),
+  title: z.string(),
+  addedAt: z.number(),
+});
+
+export type TrackedItem = z.infer<typeof TrackedItemSchema>;
 
 export const IssueFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
@@ -37,7 +48,7 @@ export type ActionsFilterField = keyof ActionsFilters;
 
 export const ViewStateSchema = z.object({
   lastActiveTab: z
-    .enum(["issues", "pullRequests", "actions"])
+    .enum(["issues", "pullRequests", "actions", "tracked"])
     .default("issues"),
   globalSort: z.object({
     field: z.string(),
@@ -90,6 +101,7 @@ export const ViewStateSchema = z.object({
     pullRequests: [],
     actions: [],
   }),
+  trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -128,6 +140,7 @@ export function resetViewState(): void {
     hideDepDashboard: true,
     expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
     lockedRepos: { issues: [], pullRequests: [], actions: [] },
+    trackedItems: [],
   });
 }
 
@@ -325,6 +338,60 @@ export function pruneLockedRepos(
   setViewState(produce((draft) => {
     draft.lockedRepos[tab] = filtered;
   }));
+}
+
+export function trackItem(item: TrackedItem): void {
+  setViewState(
+    produce((draft) => {
+      const already = draft.trackedItems.some(
+        (i) => i.id === item.id && i.type === item.type
+      );
+      if (!already) {
+        // FIFO eviction: remove oldest if at cap
+        if (draft.trackedItems.length >= TRACKED_ITEMS_CAP) {
+          draft.trackedItems.shift();
+        }
+        draft.trackedItems.push(item);
+      }
+    })
+  );
+}
+
+export function untrackItem(id: number, type: "issue" | "pullRequest"): void {
+  setViewState(
+    produce((draft) => {
+      draft.trackedItems = draft.trackedItems.filter(
+        (i) => !(i.id === id && i.type === type)
+      );
+    })
+  );
+}
+
+export function moveTrackedItem(
+  id: number,
+  type: "issue" | "pullRequest",
+  direction: "up" | "down"
+): void {
+  setViewState(produce((draft) => {
+    const arr = draft.trackedItems;
+    const idx = arr.findIndex((i) => i.id === id && i.type === type);
+    if (idx === -1) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= arr.length) return;
+    const tmp = arr[idx];
+    arr[idx] = arr[targetIdx];
+    arr[targetIdx] = tmp;
+  }));
+}
+
+export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
+  setViewState(
+    produce((draft) => {
+      draft.trackedItems = draft.trackedItems.filter(
+        (i) => !pruneKeys.has(`${i.type}:${i.id}`)
+      );
+    })
+  );
 }
 
 export function initViewPersistence(): void {

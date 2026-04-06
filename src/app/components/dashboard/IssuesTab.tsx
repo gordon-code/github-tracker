@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -220,6 +220,12 @@ export default function IssuesTab(props: IssuesTabProps) {
     pruneLockedRepos("issues", names);
   });
 
+  const trackedIssueIds = createMemo(() =>
+    config.enableTracking
+      ? new Set(viewState.trackedItems.filter(t => t.type === "issue").map(t => t.id))
+      : new Set<number>()
+  );
+
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
@@ -235,6 +241,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       title: issue.title,
       ignoredAt: Date.now(),
     });
+    if (config.enableTracking) untrackItem(issue.id, "issue");
   }
 
   return (
@@ -394,6 +401,14 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 url={issue.htmlUrl}
                                 labels={issue.labels}
                                 onIgnore={() => handleIgnore(issue)}
+                                onTrack={config.enableTracking ? () => {
+                                  if (trackedIssueIds().has(issue.id)) {
+                                    untrackItem(issue.id, "issue");
+                                  } else {
+                                    trackItem({ id: issue.id, type: "issue", repoFullName: issue.repoFullName, title: issue.title, addedAt: Date.now() });
+                                  }
+                                } : undefined}
+                                isTracked={config.enableTracking ? trackedIssueIds().has(issue.id) : undefined}
                                 density={config.viewDensity}
                                 commentCount={issue.comments}
                                 surfacedByBadge={

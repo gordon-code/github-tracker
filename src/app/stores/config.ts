@@ -59,10 +59,11 @@ export const ConfigSchema = z.object({
   theme: z.enum(THEME_OPTIONS).default("auto"),
   viewDensity: z.enum(["compact", "comfortable"]).default("comfortable"),
   itemsPerPage: z.number().min(10).max(100).default(25),
-  defaultTab: z.enum(["issues", "pullRequests", "actions"]).default("issues"),
+  defaultTab: z.enum(["issues", "pullRequests", "actions", "tracked"]).default("issues"),
   rememberLastTab: z.boolean().default(true),
   onboardingComplete: z.boolean().default(false),
   authMethod: z.enum(["oauth", "pat"]).default("oauth"),
+  enableTracking: z.boolean().default(false),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

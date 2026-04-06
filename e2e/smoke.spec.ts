@@ -188,3 +188,56 @@ test("unknown path redirects to dashboard when authenticated", async ({ page }) 
   // catch-all → Navigate "/" → RootRedirect → validateToken() succeeds → Navigate "/dashboard"
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
 });
+
+// ── Tracked items ─────────────────────────────────────────────────────────────
+
+test("tracked items tab appears when enabled", async ({ page }) => {
+  // Override the GraphQL mock to return an issue
+  await page.route("https://api.github.com/graphql", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        data: {
+          issues: {
+            issueCount: 1,
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              __typename: "Issue",
+              databaseId: 1001,
+              number: 42,
+              title: "Test tracked issue",
+              state: "OPEN",
+              url: "https://github.com/testorg/testrepo/issues/42",
+              createdAt: "2026-01-01T00:00:00Z",
+              updatedAt: "2026-01-02T00:00:00Z",
+              author: { login: "testuser" },
+              labels: { nodes: [] },
+              assignees: { nodes: [] },
+              comments: { totalCount: 0 },
+              repository: { nameWithOwner: "testorg/testrepo", stargazerCount: 5 },
+            }],
+          },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
+        },
+      },
+    })
+  );
+  await setupAuth(page, { enableTracking: true });
+  await page.goto("/dashboard");
+
+  // Verify Tracked tab is visible
+  await expect(page.getByRole("tab", { name: /tracked/i })).toBeVisible();
+});
+
+test("tracked items tab hidden when disabled", async ({ page }) => {
+  await setupAuth(page);
+  await page.goto("/dashboard");
+
+  // Verify Tracked tab is NOT visible
+  await expect(page.getByRole("tab", { name: /tracked/i })).toHaveCount(0);
+
+  // Verify no pin buttons exist
+  await expect(page.locator("[aria-label^='Pin']")).toHaveCount(0);
+});

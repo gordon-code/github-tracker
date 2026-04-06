@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
  * OAuth App uses permanent tokens stored in localStorage — no refresh endpoint needed.
  * The app calls validateToken() on load, which GETs /user to verify the token.
  */
-export async function setupAuth(page: Page) {
+export async function setupAuth(page: Page, configOverrides?: Record<string, unknown>) {
   // Catch-all: abort any unmocked GitHub API request so failures are loud
   await page.route("https://api.github.com/**", (route) => route.abort());
 
@@ -46,7 +46,7 @@ export async function setupAuth(page: Page) {
   );
 
   // Seed localStorage with auth token and config before the page loads
-  await page.addInitScript(() => {
+  await page.addInitScript((overrides) => {
     localStorage.setItem("github-tracker:auth-token", "fake-token");
     localStorage.setItem(
       "github-tracker:config",
@@ -54,7 +54,8 @@ export async function setupAuth(page: Page) {
         selectedOrgs: ["testorg"],
         selectedRepos: [{ owner: "testorg", name: "testrepo", fullName: "testorg/testrepo" }],
         onboardingComplete: true,
+        ...overrides,
       })
     );
-  });
+  }, configOverrides ?? {});
 }

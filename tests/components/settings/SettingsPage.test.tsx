@@ -683,6 +683,74 @@ describe("SettingsPage — Manage org access button", () => {
   });
 });
 
+describe("SettingsPage — enableTracking toggle", () => {
+  it("renders enableTracking toggle with aria-label 'Enable tracked items'", () => {
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /enable tracked items/i });
+    expect(toggle).toBeDefined();
+  });
+
+  it("toggles enableTracking setting", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: false });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /enable tracked items/i });
+    await user.click(toggle);
+    expect(config.enableTracking).toBe(true);
+  });
+
+  it("disabling tracking resets defaultTab to 'issues' when it was 'tracked'", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true, defaultTab: "tracked" });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /enable tracked items/i });
+    await user.click(toggle);
+    expect(config.enableTracking).toBe(false);
+    expect(config.defaultTab).toBe("issues");
+  });
+
+  it("disabling tracking preserves defaultTab when it was not 'tracked'", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true, defaultTab: "pullRequests" });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /enable tracked items/i });
+    await user.click(toggle);
+    expect(config.enableTracking).toBe(false);
+    expect(config.defaultTab).toBe("pullRequests");
+  });
+
+  it("shows 'Tracked Items' option in defaultTab select when enableTracking is true", () => {
+    updateConfig({ enableTracking: true });
+    renderSettings();
+    screen.getByRole("option", { name: "Tracked Items" });
+  });
+
+  it("hides 'Tracked Items' option in defaultTab select when enableTracking is false", () => {
+    updateConfig({ enableTracking: false });
+    renderSettings();
+    expect(screen.queryByRole("option", { name: "Tracked Items" })).toBeNull();
+  });
+
+  it("includes enableTracking in exported settings JSON", async () => {
+    updateConfig({ enableTracking: true });
+    renderSettings();
+    const exportBtn = screen.getByRole("button", { name: /export/i });
+    const user = userEvent.setup();
+    const blobParts: BlobPart[] = [];
+    const originalBlob = globalThis.Blob;
+    globalThis.Blob = class MockBlob extends originalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        if (parts) blobParts.push(...parts);
+      }
+    } as typeof Blob;
+    await user.click(exportBtn);
+    globalThis.Blob = originalBlob;
+    const json = JSON.parse(blobParts[0] as string);
+    expect(json.enableTracking).toBe(true);
+  });
+});
+
 describe("SettingsPage — monitor toggle wiring", () => {
   it("shows monitored repos indicator when repos are monitored", () => {
     updateConfig({
