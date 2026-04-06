@@ -121,8 +121,8 @@ src/
       view.ts       # View state (tabs, sorting, filters, ignored items, locked repos)
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
-tests/              # 1522 unit/component tests across 69 test files
-e2e/                # 14 E2E tests across 2 spec files
+tests/              # 1534 unit/component tests across 70 test files
+e2e/                # 15 E2E tests across 3 spec files
 ```
 
 ## Development

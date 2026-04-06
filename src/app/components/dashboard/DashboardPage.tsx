@@ -470,7 +470,7 @@ export default function DashboardPage() {
             <div class="flex justify-end">
               <Show when={getGraphqlRateLimit()}>
                 {(rl) => (
-                  <Tooltip content={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`} placement="left">
+                  <Tooltip content={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`} placement="left" focusable>
                     <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
                       API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
                     </span>

@@ -39,6 +39,7 @@ export function Tooltip(props: TooltipProps) {
         class="inline-flex items-center"
         tabindex={props.focusable ? "0" : undefined}
         onPointerEnter={() => {
+          clearTimeout(hoverTimer);
           hoverTimer = setTimeout(() => setIsHovered(true), 300);
         }}
         onPointerLeave={() => {

@@ -86,6 +86,44 @@ describe("Tooltip", () => {
     vi.advanceTimersByTime(300);
     expect(document.body.textContent).not.toContain("tooltip text");
   });
+
+  it("closes tooltip state when pointer leaves after it is visible", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.pointerLeave(trigger);
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+  });
+
+  it("shows tooltip on focusIn (keyboard access)", () => {
+    const { container } = render(() => (
+      <Tooltip content="focus tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.focusIn(trigger);
+    expect(document.body.textContent).toContain("focus tooltip");
+  });
+
+  it("closes tooltip state on focusOut", () => {
+    const { container } = render(() => (
+      <Tooltip content="focus tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.focusIn(trigger);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.focusOut(trigger);
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+  });
 });
 
 describe("InfoTooltip", () => {
