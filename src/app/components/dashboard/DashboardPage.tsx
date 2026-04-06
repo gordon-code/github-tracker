@@ -94,13 +94,13 @@ function resetDashboardData(): void {
   localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
 }
 
-let hasFetchedFresh = false;
-export function _resetHasFetchedFresh(value = false) { hasFetchedFresh = value; }
+const [hasFetchedFresh, setHasFetchedFresh] = createSignal(false);
+export function _resetHasFetchedFresh(value = false) { setHasFetchedFresh(value); }
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
-  hasFetchedFresh = false;
+  setHasFetchedFresh(false);
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
@@ -143,7 +143,7 @@ async function pollFetch(): Promise<DashboardData> {
     });
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
-      hasFetchedFresh = true;
+      setHasFetchedFresh(true);
       const now = new Date();
 
       if (phaseOneFired) {
@@ -277,7 +277,7 @@ export default function DashboardPage() {
     // so SolidJS registers them as dependencies
     const issues = dashboardData.issues;
     const prs = dashboardData.pullRequests;
-    if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh) return;
+    if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh()) return;
 
     const polledRepos = new Set([
       ...config.selectedRepos.map((r) => r.fullName),
