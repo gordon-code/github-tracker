@@ -59,17 +59,6 @@ describe("UserAvatarBadge", () => {
     expect(imgs[0].getAttribute("alt")).toBe("tracked1");
   });
 
-  it("shows tooltip with login via title attribute", () => {
-    render(() => (
-      <UserAvatarBadge
-        users={[{ login: "octocat", avatarUrl: "https://avatars.githubusercontent.com/u/583231" }]}
-        currentUserLogin="me"
-      />
-    ));
-    const img = screen.getByRole("img");
-    expect(img.getAttribute("title")).toBe("octocat");
-  });
-
   it("uses avatarUrl as img src", () => {
     const avatarUrl = "https://avatars.githubusercontent.com/u/583231";
     render(() => (

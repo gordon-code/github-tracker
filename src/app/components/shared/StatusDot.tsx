@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import { Tooltip } from "./Tooltip";
 
 export interface StatusDotProps {
   status: "success" | "pending" | "failure" | "error" | "conflict" | null;
@@ -42,7 +43,6 @@ export default function StatusDot(props: StatusDotProps) {
   const dot = () => (
     <span
       class={`relative inline-flex items-center justify-center w-3 h-3${props.href ? " cursor-pointer" : ""}`}
-      title={cfg().label}
       aria-label={cfg().label}
     >
       <Show when={cfg().pulse}>
@@ -57,17 +57,19 @@ export default function StatusDot(props: StatusDotProps) {
   );
 
   return (
-    <Show when={props.href} fallback={dot()}>
-      {(url) => (
-        <a
-          href={url()}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {dot()}
-        </a>
-      )}
-    </Show>
+    <Tooltip content={cfg().label} focusable={!props.href}>
+      <Show when={props.href} fallback={dot()}>
+        {(url) => (
+          <a
+            href={url()}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {dot()}
+          </a>
+        )}
+      </Show>
+    </Tooltip>
   );
 }

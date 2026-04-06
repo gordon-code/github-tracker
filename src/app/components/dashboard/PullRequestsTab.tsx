@@ -23,6 +23,7 @@ import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
+import { Tooltip } from "../shared/Tooltip";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -470,7 +471,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
-                          <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          <Tooltip content="Showing all activity, not just yours" focusable>
+                            <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          </Tooltip>
                         </Show>
                         <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
                           <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>

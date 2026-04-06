@@ -18,6 +18,7 @@ import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUse
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
+import { Tooltip } from "../shared/Tooltip";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -271,17 +272,18 @@ export default function IssuesTab(props: IssuesTabProps) {
               setPage(0);
             }}
           />
-          <button
-            onClick={() => {
-              updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
-              setPage(0);
-            }}
-            class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
-            aria-pressed={!viewState.hideDepDashboard}
-            title="Toggle visibility of Dependency Dashboard issues"
-          >
-            Show Dep Dashboard
-          </button>
+          <Tooltip content="Toggle Dependency Dashboard issues">
+            <button
+              onClick={() => {
+                updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
+                setPage(0);
+              }}
+              class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
+              aria-pressed={!viewState.hideDepDashboard}
+            >
+              Show Dep Dashboard
+            </button>
+          </Tooltip>
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
@@ -360,7 +362,9 @@ export default function IssuesTab(props: IssuesTabProps) {
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
-                          <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          <Tooltip content="Showing all activity, not just yours" focusable>
+                            <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          </Tooltip>
                         </Show>
                         <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
                           <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>

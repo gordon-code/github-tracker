@@ -14,6 +14,7 @@ import type { TrackedUser } from "../../stores/config";
 import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
+import { Tooltip, InfoTooltip } from "../shared/Tooltip";
 
 // Validates owner/repo format (both segments must be non-empty, no spaces)
 const VALID_REPO_NAME = /^[a-zA-Z0-9._-]{1,100}\/[a-zA-Z0-9._-]{1,100}$/;
@@ -556,27 +557,28 @@ export default function RepoSelector(props: RepoSelectorProps) {
                                   </div>
                                 </label>
                                 <Show when={isSelected(repo().fullName) && props.onMonitorToggle && !upstreamSelectedSet().has(repo().fullName)}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      props.onMonitorToggle?.(toRepoRef(repo()), !monitoredSet().has(repo().fullName));
-                                    }}
-                                    class="btn btn-ghost btn-sm btn-circle mr-2"
-                                    classList={{
-                                      "text-info": monitoredSet().has(repo().fullName),
-                                      "text-base-content/20": !monitoredSet().has(repo().fullName),
-                                    }}
-                                    title={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
-                                    aria-label={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
-                                    aria-pressed={monitoredSet().has(repo().fullName)}
-                                  >
-                                    {/* Heroicons eye outline 16px */}
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
-                                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                    </svg>
-                                  </button>
+                                  <Tooltip content={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        props.onMonitorToggle?.(toRepoRef(repo()), !monitoredSet().has(repo().fullName));
+                                      }}
+                                      class="btn btn-ghost btn-sm btn-circle mr-2"
+                                      classList={{
+                                        "text-info": monitoredSet().has(repo().fullName),
+                                        "text-base-content/20": !monitoredSet().has(repo().fullName),
+                                      }}
+                                      aria-label={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
+                                      aria-pressed={monitoredSet().has(repo().fullName)}
+                                    >
+                                      {/* Heroicons eye outline 16px */}
+                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                      </svg>
+                                    </button>
+                                  </Tooltip>
                                 </Show>
                               </div>
                             </li>
@@ -597,7 +599,10 @@ export default function RepoSelector(props: RepoSelectorProps) {
         <div class="flex flex-col gap-3">
           {/* Section heading */}
           <div class="border-t border-base-300 pt-3">
-            <h3 class="text-sm font-semibold text-base-content">Upstream Repositories</h3>
+            <h3 class="flex items-center gap-1.5 text-sm font-semibold text-base-content">
+              Upstream Repositories
+              <InfoTooltip content="Repos discovered from your tracked users' activity. Issues and PRs from these repos appear in your dashboard." />
+            </h3>
             <p class="text-xs text-base-content/60 mt-0.5">
               Repos you contribute to but don't own. Issues and PRs are tracked; workflow runs are not.
             </p>

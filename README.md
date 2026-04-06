@@ -10,6 +10,10 @@ A dashboard for tracking GitHub issues, PRs, and Actions workflow runs across ma
 
 ![Dashboard](docs/dashboard-screenshot.png)
 
+## Documentation
+
+For detailed feature documentation, see the [User Guide](docs/USER_GUIDE.md).
+
 ## Features
 
 ### Issues

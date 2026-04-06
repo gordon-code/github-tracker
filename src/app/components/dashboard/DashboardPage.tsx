@@ -25,6 +25,7 @@ import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
+import { Tooltip } from "../shared/Tooltip";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -451,6 +452,15 @@ export default function DashboardPage() {
               </a>
               <span aria-hidden="true">&middot;</span>
               <a
+                href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link link-hover"
+              >
+                Guide
+              </a>
+              <span aria-hidden="true">&middot;</span>
+              <a
                 href="/privacy"
                 class="link link-hover"
               >
@@ -460,11 +470,11 @@ export default function DashboardPage() {
             <div class="flex justify-end">
               <Show when={getGraphqlRateLimit()}>
                 {(rl) => (
-                  <div class="tooltip tooltip-left" data-tip={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`}>
+                  <Tooltip content={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`} placement="left">
                     <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
                       API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
                     </span>
-                  </div>
+                  </Tooltip>
                 )}
               </Show>
             </div>

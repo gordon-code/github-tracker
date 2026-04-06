@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from "solid-js";
+import { Tooltip } from "./Tooltip";
 
 export function buildSurfacedByUsers(
   surfacedBy: string[] | undefined,
@@ -34,11 +35,12 @@ export default function UserAvatarBadge(props: UserAvatarBadgeProps) {
               class={`avatar${i() > 0 ? " -ml-1.5" : ""}`}
             >
               <div class="w-5 rounded-full ring-1 ring-base-100">
-                <img
-                  src={u.avatarUrl}
-                  alt={u.login}
-                  title={u.login}
-                />
+                <Tooltip content={`Surfaced by ${u.login}`} focusable>
+                  <img
+                    src={u.avatarUrl}
+                    alt={u.login}
+                  />
+                </Tooltip>
               </div>
             </div>
           )}

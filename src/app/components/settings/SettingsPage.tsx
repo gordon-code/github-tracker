@@ -14,6 +14,7 @@ import Section from "./Section";
 import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
 import TrackedUsersSection from "./TrackedUsersSection";
+import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
 
 export default function SettingsPage() {
@@ -377,24 +378,30 @@ export default function SettingsPage() {
               ))}
             </select>
           </SettingRow>
-          <SettingRow
-            label="CI status refresh"
-            description="How often to re-check in-flight CI checks and workflow runs (10-120s)"
-          >
-            <input
-              type="number"
-              min={10}
-              max={120}
-              value={config.hotPollInterval}
-              onInput={(e) => {
-                const val = parseInt(e.currentTarget.value, 10);
-                if (!isNaN(val) && val >= 10 && val <= 120) {
-                  saveWithFeedback({ hotPollInterval: val });
-                }
-              }}
-              class="input input-sm w-20"
-            />
-          </SettingRow>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-base-300 last:border-b-0">
+            <div>
+              <div class="flex items-center gap-1.5 text-sm font-medium text-base-content">
+                CI status refresh
+                <InfoTooltip content="Targeted refresh for in-flight CI checks and pending PR status. Separate from the full refresh cycle." />
+              </div>
+              <div class="text-xs text-base-content/60">How often to re-check in-flight CI checks and workflow runs (10-120s)</div>
+            </div>
+            <div>
+              <input
+                type="number"
+                min={10}
+                max={120}
+                value={config.hotPollInterval}
+                onInput={(e) => {
+                  const val = parseInt(e.currentTarget.value, 10);
+                  if (!isNaN(val) && val >= 10 && val <= 120) {
+                    saveWithFeedback({ hotPollInterval: val });
+                  }
+                }}
+                class="input input-sm w-20"
+              />
+            </div>
+          </div>
         </Section>
 
         {/* Section 4: GitHub Actions */}
@@ -716,6 +723,35 @@ export default function SettingsPage() {
             </button>
           </SettingRow>
         </Section>
+
+        <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
+          <div class="flex items-center justify-center gap-3">
+            <a
+              href="https://github.com/gordon-code/github-tracker"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="link link-hover"
+            >
+              Source
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="link link-hover"
+            >
+              Guide
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href="/privacy"
+              class="link link-hover"
+            >
+              Privacy
+            </a>
+          </div>
+        </footer>
       </div>
     </div>
   );
