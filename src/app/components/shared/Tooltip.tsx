@@ -36,7 +36,7 @@ export function Tooltip(props: TooltipProps) {
     >
       <KobalteTooltip.Trigger
         as="span"
-        class="inline-flex"
+        class="inline-flex items-center"
         tabindex={props.focusable ? "0" : undefined}
         onPointerEnter={() => {
           hoverTimer = setTimeout(() => setIsHovered(true), 300);
