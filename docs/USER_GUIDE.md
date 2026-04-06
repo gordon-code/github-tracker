@@ -129,7 +129,7 @@ Filters can be combined. Click **Reset all** to clear all active filters at once
 
 ### Dependency Dashboard Toggle
 
-The **Show Dep Dashboard** button controls whether the Renovate "Dependency Dashboard" issue appears in the list. It is hidden by default. This setting applies across all repos.
+The **Show Dep Dashboard** button controls whether the Renovate "Dependency Dashboard" issue appears in the list. The Dependency Dashboard issue is hidden by default. This setting applies across all repos.
 
 ### Issues Sorting
 

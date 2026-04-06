@@ -132,7 +132,7 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
                 </Show>
               </div>
             </div>
-            <Tooltip content={`Remove ${trackedUser.login}`}>
+            <Tooltip content={`Stop tracking ${trackedUser.login}`}>
               <button
                 type="button"
                 onClick={() => handleRemove(trackedUser.login)}

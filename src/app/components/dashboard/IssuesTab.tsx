@@ -272,7 +272,7 @@ export default function IssuesTab(props: IssuesTabProps) {
               setPage(0);
             }}
           />
-          <Tooltip content="Toggle Dependency Dashboard issues">
+          <Tooltip content="Show or hide Renovate Dependency Dashboard issues">
             <button
               onClick={() => {
                 updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });

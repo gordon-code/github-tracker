@@ -20,7 +20,11 @@ export function Tooltip(props: TooltipProps) {
 
   // openDelay is ignored in controlled mode; implement the delay manually
   let hoverTimer: ReturnType<typeof setTimeout> | undefined;
-  onCleanup(() => clearTimeout(hoverTimer));
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => {
+    clearTimeout(hoverTimer);
+    clearTimeout(closeTimer);
+  });
 
   return (
     <KobalteTooltip
@@ -40,11 +44,12 @@ export function Tooltip(props: TooltipProps) {
         tabindex={props.focusable ? "0" : undefined}
         onPointerEnter={() => {
           clearTimeout(hoverTimer);
+          clearTimeout(closeTimer);
           hoverTimer = setTimeout(() => setIsHovered(true), 300);
         }}
         onPointerLeave={() => {
           clearTimeout(hoverTimer);
-          setIsHovered(false);
+          closeTimer = setTimeout(() => setIsHovered(false), 100);
         }}
         onFocusIn={() => setIsFocused(true)}
         onFocusOut={() => setIsFocused(false)}

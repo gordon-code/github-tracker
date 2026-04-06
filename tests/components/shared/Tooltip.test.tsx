@@ -98,6 +98,9 @@ describe("Tooltip", () => {
     vi.advanceTimersByTime(300);
     expect(trigger.getAttribute("data-expanded")).toBe("");
     fireEvent.pointerLeave(trigger);
+    // closeDelay is 100ms. Advance 300ms to cover both the 100ms closeDelay and Kobalte's
+    // globalSkipDelayTimeout (300ms), so global tooltip state resets before the next test.
+    vi.advanceTimersByTime(300);
     expect(trigger.hasAttribute("data-expanded")).toBe(false);
   });
 

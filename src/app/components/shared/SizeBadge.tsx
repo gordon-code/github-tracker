@@ -32,7 +32,7 @@ export default function SizeBadge(props: SizeBadgeProps) {
   return (
     <Show when={props.additions + props.deletions > 0 || props.changedFiles > 0}>
       <span class="flex items-center gap-1 text-xs">
-        <Tooltip content={SIZE_TOOLTIP[size()]} focusable>
+        <Tooltip content={SIZE_TOOLTIP[size()]} focusable={!props.filesUrl}>
           <span class={SIZE_CONFIG[size()]}>
             {size()}
           </span>
