@@ -67,7 +67,7 @@ export default function FilterPopover(props: FilterPopoverProps) {
               <button
                 type="button"
                 aria-pressed={value() === opt.value}
-                class="w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+                class={`w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${value() === opt.value ? "font-medium" : ""}`}
                 onClick={() => {
                   props.onChange(props.group.field, opt.value);
                   setOpen(false);
