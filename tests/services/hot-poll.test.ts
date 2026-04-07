@@ -134,10 +134,26 @@ describe("fetchHotPRStatus", () => {
     expect(results.get(43)!.checkStatus).toBe("conflict");
   });
 
-  it("applies mergeStateStatus overrides: UNSTABLE -> failure", async () => {
+  it("applies mergeStateStatus overrides: UNSTABLE with failed rollup -> failure", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [{
         databaseId: 44,
+        state: "OPEN",
+        mergeStateStatus: "UNSTABLE",
+        reviewDecision: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+      }],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node3"]);
+    expect(results.get(44)!.checkStatus).toBe("failure");
+  });
+
+  it("preserves pending when mergeStateStatus is UNSTABLE but rollup is PENDING", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [{
+        databaseId: 45,
         state: "OPEN",
         mergeStateStatus: "UNSTABLE",
         reviewDecision: null,
@@ -146,8 +162,8 @@ describe("fetchHotPRStatus", () => {
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
 
-    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node3"]);
-    expect(results.get(44)!.checkStatus).toBe("failure");
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node4"]);
+    expect(results.get(45)!.checkStatus).toBe("pending");
   });
 });
 

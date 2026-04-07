@@ -1284,7 +1284,7 @@ export async function fetchPREnrichment(
         const mss = node.mergeStateStatus;
         if (mss === "DIRTY" || mss === "BEHIND") {
           checkStatus = "conflict";
-        } else if (mss === "UNSTABLE") {
+        } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
           checkStatus = "failure";
         }
 
@@ -1670,7 +1670,7 @@ async function graphqlSearchPRs(
     const mss = node.mergeStateStatus;
     if (mss === "DIRTY" || mss === "BEHIND") {
       checkStatus = "conflict";
-    } else if (mss === "UNSTABLE") {
+    } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
       checkStatus = "failure";
     } else if (mss === "UNKNOWN" && checkStatus === null) {
       checkStatus = null; // no-op, kept explicit for clarity
@@ -2105,7 +2105,7 @@ export async function fetchHotPRStatus(
       const mss = node.mergeStateStatus;
       if (mss === "DIRTY" || mss === "BEHIND") {
         checkStatus = "conflict";
-      } else if (mss === "UNSTABLE") {
+      } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
         checkStatus = "failure";
       }
 
