@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import type { IgnoredItem } from "../../stores/view";
+import { Tooltip } from "../shared/Tooltip";
 
 interface IgnoreBadgeProps {
   items: IgnoredItem[];
@@ -84,9 +85,11 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
                       <p class="text-xs text-base-content/60 truncate">
                         {item.repo}
                       </p>
-                      <p class="text-sm text-base-content truncate" title={item.title}>
-                        {item.title}
-                      </p>
+                      <Tooltip content={item.title}>
+                        <p class="text-sm text-base-content truncate">
+                          {item.title}
+                        </p>
+                      </Tooltip>
                       <p class="text-xs text-base-content/40">
                         Ignored {formatDate(item.ignoredAt)}
                       </p>

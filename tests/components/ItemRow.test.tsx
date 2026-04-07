@@ -104,8 +104,10 @@ describe("ItemRow", () => {
   it("ignore button has relative z-10 to sit above overlay link", () => {
     render(() => <ItemRow {...defaultProps} />);
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    expect(ignoreBtn.className).toContain("relative");
-    expect(ignoreBtn.className).toContain("z-10");
+    // The Tooltip wrapper span carries relative z-10; the button itself is inside it
+    const tooltipTrigger = ignoreBtn.closest("span.relative");
+    expect(tooltipTrigger).not.toBeNull();
+    expect(tooltipTrigger!.className).toContain("z-10");
   });
 
   it("applies compact padding in compact density", () => {
@@ -180,9 +182,7 @@ describe("ItemRow", () => {
     const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
     const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
     expect(created!.textContent).toBe("2h");
-    expect(created!.getAttribute("title")).toBe(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
     expect(updated!.textContent).toBe("30m");
-    expect(updated!.getAttribute("title")).toBe(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
     // Middle dot separator is a <span> with aria-hidden
     const dot = container.querySelector('span[aria-hidden="true"]');
     expect(dot).not.toBeNull();

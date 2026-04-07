@@ -608,11 +608,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                     </span>
                                   </Show>
                                   <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
-                                    <span class="text-xs text-base-content/60" title={pr.reviewerLogins.join(", ")}>
-                                      Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
-                                      {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
-                                      {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
-                                    </span>
+                                    <Tooltip content={pr.reviewerLogins.join(", ")} focusable>
+                                      <span class="text-xs text-base-content/60">
+                                        Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
+                                        {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
+                                        {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
+                                      </span>
+                                    </Tooltip>
                                   </Show>
                                 </div>
                               </ItemRow>

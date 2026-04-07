@@ -10,6 +10,7 @@ interface TooltipProps {
   content: string;
   placement?: "top" | "bottom" | "left" | "right";
   focusable?: boolean;
+  class?: string;
   children: JSX.Element;
 }
 
@@ -42,7 +43,7 @@ export function Tooltip(props: TooltipProps) {
     >
       <KobalteTooltip.Trigger
         as="span"
-        class="inline-flex items-center"
+        class={`inline-flex items-center${props.class ? ` ${props.class}` : ""}`}
         tabindex={props.focusable ? "0" : undefined}
         onPointerEnter={() => {
           clearTimeout(hoverTimer);

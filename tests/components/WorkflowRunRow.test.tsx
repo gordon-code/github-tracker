@@ -36,7 +36,6 @@ describe("WorkflowRunRow", () => {
     const timeEl = container.querySelector("time");
     expect(timeEl).not.toBeNull();
     expect(timeEl!.getAttribute("datetime")).toBe(createdAt);
-    expect(timeEl!.getAttribute("title")).toBe(`Created: ${new Date(createdAt).toLocaleString()}`);
     expect(timeEl!.textContent).toMatch(/2 hours? ago/);
   });
 

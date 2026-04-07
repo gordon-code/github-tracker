@@ -3,6 +3,7 @@ import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
 import { labelColorClass } from "../../lib/label-colors";
+import { Tooltip } from "../shared/Tooltip";
 
 export interface ItemRowProps {
   repo: string;
@@ -78,14 +79,15 @@ export default function ItemRow(props: ItemRowProps) {
 
       {/* Repo badge */}
       <Show when={!props.hideRepo}>
-        <span
-          class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
-            bg-primary/10 text-primary
-            ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
-          title={props.repo}
-        >
-          {props.repo}
-        </span>
+        <Tooltip content={props.repo} class="relative z-10">
+          <span
+            class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
+              bg-primary/10 text-primary
+              ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
+          >
+            {props.repo}
+          </span>
+        </Tooltip>
       </Show>
 
       {/* Main content */}
@@ -127,22 +129,24 @@ export default function ItemRow(props: ItemRowProps) {
           <div class="relative z-10">{props.surfacedByBadge}</div>
         </Show>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
-          <time
-            datetime={props.createdAt}
-            title={staticDateInfo().createdTitle}
-            aria-label={dateDisplay().createdLabel}
-          >
-            {dateDisplay().created}
-          </time>
+          <Tooltip content={staticDateInfo().createdTitle} class="relative z-10">
+            <time
+              datetime={props.createdAt}
+              aria-label={dateDisplay().createdLabel}
+            >
+              {dateDisplay().created}
+            </time>
+          </Tooltip>
           <Show when={shouldShowUpdated()}>
             <span aria-hidden="true">{"\u00B7"}</span>
-            <time
-              datetime={props.updatedAt}
-              title={staticDateInfo().updatedTitle}
-              aria-label={dateDisplay().updatedLabel}
-            >
-              {dateDisplay().updated}
-            </time>
+            <Tooltip content={staticDateInfo().updatedTitle} class="relative z-10">
+              <time
+                datetime={props.updatedAt}
+                aria-label={dateDisplay().updatedLabel}
+              >
+                {dateDisplay().updated}
+              </time>
+            </Tooltip>
           </Show>
         </span>
         <Show when={props.isPolling}>
@@ -169,33 +173,34 @@ export default function ItemRow(props: ItemRowProps) {
       </div>
 
       {/* Ignore button — visible on hover */}
-      <button
-        data-ignore-btn
-        onClick={() => props.onIgnore()}
-        class={`relative z-10 shrink-0 self-center rounded p-1
-          text-base-content/30
-          hover:text-error
-          opacity-0 group-hover:opacity-100 focus:opacity-100
-          transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
-        title="Ignore this item"
-        aria-label={`Ignore #${props.number} ${props.title}`}
-      >
-        {/* Eye-slash icon */}
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          aria-hidden="true"
+      <Tooltip content="Ignore" class="relative z-10">
+        <button
+          data-ignore-btn
+          onClick={() => props.onIgnore()}
+          class={`shrink-0 self-center rounded p-1
+            text-base-content/30
+            hover:text-error
+            opacity-0 group-hover:opacity-100 focus:opacity-100
+            transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
+          aria-label={`Ignore #${props.number} ${props.title}`}
         >
-          <path
-            fill-rule="evenodd"
-            d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
-            clip-rule="evenodd"
-          />
-          <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
-        </svg>
-      </button>
+          {/* Eye-slash icon */}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
+              clip-rule="evenodd"
+            />
+            <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
+          </svg>
+        </button>
+      </Tooltip>
     </div>
   );
 }
