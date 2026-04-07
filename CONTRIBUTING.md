@@ -13,13 +13,30 @@ pnpm run dev
 
 The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app client ID in `.env` (copy `.env.example` and fill in your value).
 
+The repo uses a pnpm workspace: the root package is the SolidJS SPA; `mcp/` is a separate package (`github-tracker-mcp`) built with tsup. Running `pnpm install` at the root installs both.
+
+To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:
+
+```bash
+GITHUB_TOKEN=ghp_... pnpm mcp:serve
+```
+
+Fine-grained PATs with Contents (read) and Metadata (read) are sufficient for most tools.
+
 ## Running checks
 
 ```bash
-pnpm test           # unit tests (Vitest)
+pnpm test           # unit tests (Vitest — root + mcp/)
 pnpm test:e2e       # Playwright E2E tests (chromium)
-pnpm run typecheck  # TypeScript validation
+pnpm run typecheck  # TypeScript validation (root + mcp/)
 pnpm run screenshot # Capture dashboard screenshot (saves to docs/)
+pnpm mcp:serve      # Start the MCP server (requires GITHUB_TOKEN)
+```
+
+To test MCP tools interactively, use the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector tsx mcp/src/index.ts
 ```
 
 CI runs typecheck, unit tests, and E2E tests on every PR. Make sure they pass locally before pushing.
