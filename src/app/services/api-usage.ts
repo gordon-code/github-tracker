@@ -180,6 +180,9 @@ export function updateResetAt(resetAt: number): void {
 
 // ── Automatic tracking via Octokit hook ──────────────────────────────────────
 
+// Order matters: more specific patterns must come before general ones.
+// /^\/user$/ uses $ to avoid shadowing /user/orgs and /user/repos.
+// /actions/runs/\d+$ must precede /actions/runs/ (specific before general).
 const REST_SOURCE_PATTERNS: Array<[RegExp, ApiCallSource]> = [
   [/^\/notifications/, "notifications"],
   [/^\/users\/[^/]+$/, "validateUser"],
