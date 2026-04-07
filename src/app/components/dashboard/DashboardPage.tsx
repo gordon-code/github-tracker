@@ -1,5 +1,5 @@
 import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
@@ -23,6 +23,7 @@ import {
   type DashboardData,
 } from "../../services/poll";
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { formatCount } from "../../lib/format";
@@ -479,6 +480,24 @@ export default function DashboardPage() {
       }).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
     };
+  });
+
+  // Push dashboard data into the MCP relay snapshot when relay is enabled.
+  // Reads through the store proxy first to establish reactive tracking,
+  // then uses unwrap() for a plain JS copy (avoids proxy overhead in the snapshot).
+  createEffect(() => {
+    if (!config.mcpRelayEnabled) return;
+    const issues = dashboardData.issues;
+    const prs = dashboardData.pullRequests;
+    const runs = dashboardData.workflowRuns;
+    if (issues.length || prs.length || runs.length) {
+      updateRelaySnapshot({
+        issues: unwrap(dashboardData).issues,
+        pullRequests: unwrap(dashboardData).pullRequests,
+        workflowRuns: unwrap(dashboardData).workflowRuns,
+        lastUpdatedAt: Date.now(),
+      });
+    }
   });
 
   const userLogin = createMemo(() => user()?.login ?? "");

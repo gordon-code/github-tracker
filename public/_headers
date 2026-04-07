@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-uEFqyYCMaNy1Su5VmWLZ1hOCRBjkhm4+ieHHxQW6d3Y='; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests; report-uri /api/csp-report; report-to csp-endpoint
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-uEFqyYCMaNy1Su5VmWLZ1hOCRBjkhm4+ieHHxQW6d3Y='; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com ws://127.0.0.1:9876 ws://localhost:9876; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests; report-uri /api/csp-report; report-to csp-endpoint
   Reporting-Endpoints: csp-endpoint="/api/csp-report"
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

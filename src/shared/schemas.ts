@@ -54,6 +54,8 @@ export const ConfigSchema = z.object({
   onboardingComplete: z.boolean().default(false),
   authMethod: z.enum(["oauth", "pat"]).default("oauth"),
   enableTracking: z.boolean().default(false),
+  mcpRelayEnabled: z.boolean().default(false),
+  mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

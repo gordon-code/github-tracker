@@ -80,6 +80,14 @@ export function setMonitoredRepo(repo: z.infer<typeof RepoRefSchema>, monitored:
   );
 }
 
+export function setMcpRelayEnabled(enabled: boolean): void {
+  updateConfig({ mcpRelayEnabled: enabled });
+}
+
+export function setMcpRelayPort(port: number): void {
+  updateConfig({ mcpRelayPort: port });
+}
+
 export function resetConfig(): void {
   const defaults = ConfigSchema.parse({});
   setConfig(defaults);

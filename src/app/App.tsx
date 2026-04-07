@@ -5,6 +5,7 @@ import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
+import { initMcpRelay } from "./lib/mcp-relay";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -165,6 +166,7 @@ export default function App() {
     initConfigPersistence();
     initViewPersistence();
     initClientWatcher();
+    initMcpRelay();
     pruneStaleIgnoredItems();
     evictStaleEntries(24 * 60 * 60 * 1000).catch(() => {
       // Non-fatal — stale eviction failure is acceptable
