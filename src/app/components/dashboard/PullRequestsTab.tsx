@@ -168,7 +168,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
       setTabFilter("pullRequests", "scope", "involves_me");

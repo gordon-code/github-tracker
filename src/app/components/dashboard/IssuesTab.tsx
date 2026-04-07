@@ -98,7 +98,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && viewState.tabFilters.issues.scope !== "involves_me") {
       setTabFilter("issues", "scope", "involves_me");
