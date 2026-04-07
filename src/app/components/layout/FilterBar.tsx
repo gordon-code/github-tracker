@@ -119,7 +119,7 @@ export default function FilterBar(props: FilterBarProps) {
         </span>
       </Show>
 
-      <Tooltip content="Refresh data">
+      <Tooltip content={updatedLabel() ? `Refresh — ${updatedLabel()!.toLowerCase()}` : "Refresh data"}>
         <button
           onClick={props.onRefresh}
           disabled={props.isRefreshing}
