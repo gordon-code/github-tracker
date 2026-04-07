@@ -1584,7 +1584,11 @@ export async function fetchRepos(
       direction: "desc" as const,
     })) {
       trackApiCall("fetchRepos", "core");
-      if (response.headers) updateRateLimitFromHeaders(response.headers as Record<string, string>);
+      if (response.headers) {
+        updateRateLimitFromHeaders(response.headers as Record<string, string>);
+        const resetHeader = (response.headers as Record<string, string>)["x-ratelimit-reset"];
+        if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
+      }
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
@@ -1598,7 +1602,11 @@ export async function fetchRepos(
       direction: "desc" as const,
     })) {
       trackApiCall("fetchRepos", "core");
-      if (response.headers) updateRateLimitFromHeaders(response.headers as Record<string, string>);
+      if (response.headers) {
+        updateRateLimitFromHeaders(response.headers as Record<string, string>);
+        const resetHeader = (response.headers as Record<string, string>)["x-ratelimit-reset"];
+        if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
+      }
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }

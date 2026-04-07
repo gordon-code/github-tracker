@@ -109,29 +109,9 @@ describe("fetchRateLimitDetails — staleness cache", () => {
 });
 
 describe("fetchRateLimitDetails — null client", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it("returns null when getClient() returns null", async () => {
-    // Spy on getClient to return null
-    const mod = await import("../../src/app/services/github");
-    const spy = vi.spyOn(mod, "getClient").mockReturnValue(null);
-
-    // Note: this test only works if fetchRateLimitDetails calls getClient() directly.
-    // If it's in the cache from a prior test, this spy still intercepts the fresh call.
-    // Force cache expiry by clearing with a far-future check — but we can't easily reset
-    // module state. Instead, we rely on the spy being honored on the next call.
-    // This test is best-effort: if the cache happens to be hit, the result won't be null.
-    // Accept that limitation in the test comment.
-
-    // Actually: if result is cached, getClient is not called at all, so spy doesn't help.
-    // This test verifies the behavior when no cache is present.
-    // We can't guarantee no cache without module reset.
-    // Skipping with a comment — null-client behavior is exercised in other tests
-    // that run after cache expiry.
-    expect(spy).toBeDefined(); // spy was created successfully
-    spy.mockRestore();
-  });
+  // Cannot reliably test null-client path due to module-level staleness cache.
+  // getClient() is only called when cache is expired (>5s), and vi.resetModules()
+  // + dynamic import is needed for clean state — but that conflicts with the auth
+  // module's eager client creation. Documented as a known test limitation.
+  it.todo("returns null when getClient() returns null");
 });
