@@ -11,6 +11,7 @@ interface TooltipProps {
   placement?: "top" | "bottom" | "left" | "right";
   focusable?: boolean;
   class?: string;
+  contentClass?: string;
   children: JSX.Element;
 }
 
@@ -60,7 +61,7 @@ export function Tooltip(props: TooltipProps) {
         {props.children}
       </KobalteTooltip.Trigger>
       <KobalteTooltip.Portal>
-        <KobalteTooltip.Content class={TOOLTIP_CONTENT_CLASS}>
+        <KobalteTooltip.Content class={TOOLTIP_CONTENT_CLASS + (props.contentClass ? ` ${props.contentClass}` : "")}>
           <KobalteTooltip.Arrow />
           {props.content}
         </KobalteTooltip.Content>

@@ -2,6 +2,7 @@ import { createSignal, createEffect, createRoot, untrack, onCleanup } from "soli
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
+import { trackApiCall, checkAndResetIfExpired } from "./api-usage.js";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
@@ -159,6 +160,7 @@ async function hasNotificationChanges(): Promise<boolean> {
       per_page: 1,
       headers,
     });
+    trackApiCall("notifications", "core");
 
     // Store Last-Modified for next conditional request
     const lastMod = (response.headers as Record<string, string>)["last-modified"];
@@ -168,6 +170,7 @@ async function hasNotificationChanges(): Promise<boolean> {
 
     return true; // 200 = something changed
   } catch (err) {
+    trackApiCall("notifications", "core"); // 304 and 403 are still real API calls
     if (
       typeof err === "object" &&
       err !== null &&
@@ -352,6 +355,7 @@ export function createPollCoordinator(
 
   async function doFetch(): Promise<void> {
     if (destroyed || isRefreshing()) return;
+    checkAndResetIfExpired();
     setIsRefreshing(true);
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
@@ -636,6 +640,7 @@ export function createHotPollCoordinator(
 
   async function cycle(myGeneration: number): Promise<void> {
     if (myGeneration !== chainGeneration) return; // Stale chain
+    checkAndResetIfExpired();
 
     // No-op cycle when nothing to poll
     if (_hotPRs.size === 0 && _hotRuns.size === 0) {

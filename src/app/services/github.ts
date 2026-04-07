@@ -15,7 +15,7 @@ const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
 
 type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
-interface RateLimitInfo {
+export interface RateLimitInfo {
   limit: number;
   remaining: number;
   resetAt: Date;
@@ -203,4 +203,48 @@ export function initClientWatcher(): void {
       _clientToken = null;
     }
   });
+}
+
+// ── Rate limit detail fetch ──────────────────────────────────────────────────
+
+let _lastFetchTime = 0;
+let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = null;
+
+/**
+ * Fetches current rate limit details for both core and GraphQL pools.
+ * Caches results for 5 seconds to avoid thrashing on rapid hovers.
+ * GET /rate_limit is free — not counted against rate limits by GitHub.
+ * Returns null if client unavailable or request fails.
+ */
+export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
+  // Return cached result within 5-second staleness window
+  if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
+    return _lastFetchResult;
+  }
+
+  const client = getClient();
+  if (!client) return null;
+
+  try {
+    const response = await client.request("GET /rate_limit");
+    const { core, graphql } = response.data.resources;
+    if (!graphql) return null;
+    const result = {
+      core: {
+        limit: core.limit,
+        remaining: core.remaining,
+        resetAt: new Date(core.reset * 1000),
+      },
+      graphql: {
+        limit: graphql.limit,
+        remaining: graphql.remaining,
+        resetAt: new Date(graphql.reset * 1000),
+      },
+    };
+    _lastFetchTime = Date.now();
+    _lastFetchResult = result;
+    return result;
+  } catch {
+    return null;
+  }
 }

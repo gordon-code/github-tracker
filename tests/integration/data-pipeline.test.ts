@@ -7,11 +7,10 @@
  *
  * Pipeline under test:
  *   fetchWorkflowRuns → cachedRequest → cachedFetch → IDB (fake-indexeddb)
- *   fetchIssues       → graphqlSearchIssues → octokit.graphql (no IDB)
  */
 import "fake-indexeddb/auto"; // Must be first import
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-import { fetchWorkflowRuns, fetchIssues, type RepoRef } from "../../src/app/services/api";
+import { fetchWorkflowRuns, type RepoRef } from "../../src/app/services/api";
 import { clearCache, getCacheEntry } from "../../src/app/stores/cache";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -42,32 +41,6 @@ const rawRun = {
   actor: { login: "octocat", avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4" },
 };
 
-const graphqlIssueNode = {
-  databaseId: 1,
-  number: 1347,
-  title: "Found a bug",
-  state: "open",
-  url: "https://github.com/octocat/Hello-World/issues/1347",
-  createdAt: "2024-01-01T00:00:00Z",
-  updatedAt: "2024-01-02T00:00:00Z",
-  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
-  labels: { nodes: [{ name: "bug", color: "d73a4a" }] },
-  assignees: { nodes: [{ login: "octocat" }] },
-  repository: { nameWithOwner: "octocat/Hello-World" },
-  comments: { totalCount: 0 },
-};
-
-function makeGraphqlSearchResponse(nodes = [graphqlIssueNode]) {
-  return {
-    search: {
-      issueCount: nodes.length,
-      pageInfo: { hasNextPage: false, endCursor: null },
-      nodes,
-    },
-    rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
-  };
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 type OctokitLike = {
@@ -78,11 +51,10 @@ type OctokitLike = {
 
 function makeOctokit(
   requestImpl: (route: string, params?: unknown) => Promise<unknown>,
-  graphqlImpl?: (query: string, variables?: unknown) => Promise<unknown>
 ): OctokitLike {
   return {
     request: vi.fn(requestImpl),
-    graphql: vi.fn(graphqlImpl ?? (async () => makeGraphqlSearchResponse([]))),
+    graphql: vi.fn(async () => ({})),
     paginate: { iterator: vi.fn() },
   };
 }
@@ -264,77 +236,5 @@ describe("data pipeline: fetch → IDB cache → return", () => {
     // IDB should NOT have been written
     const entry = await getCacheEntry("runs:octocat/Hello-World:p1");
     expect(entry).toBeUndefined();
-  });
-});
-
-describe("data pipeline: GraphQL search (no IDB cache) → return", () => {
-  /**
-   * GraphQL search does not use IDB — verifies the fetch→transform pipeline
-   * without the cache layer. Two calls always hit the GraphQL API.
-   */
-  it("fresh fetch: GraphQL search results are mapped and returned correctly", async () => {
-    const octokit = makeOctokit(
-      async () => ({ data: [], headers: {} }),
-      async () => makeGraphqlSearchResponse([graphqlIssueNode])
-    );
-
-    const { issues, errors } = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(errors).toEqual([]);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].id).toBe(1); // databaseId
-    expect(issues[0].title).toBe("Found a bug");
-    expect(issues[0].userLogin).toBe("octocat");
-    expect(issues[0].labels).toEqual([{ name: "bug", color: "d73a4a" }]);
-    expect(issues[0].assigneeLogins).toEqual(["octocat"]);
-    expect(issues[0].repoFullName).toBe("octocat/Hello-World");
-  });
-
-  it("second fetch calls GraphQL again (search is not cached in IDB)", async () => {
-    const octokit = makeOctokit(
-      async () => ({ data: [], headers: {} }),
-      async () => makeGraphqlSearchResponse([graphqlIssueNode])
-    );
-
-    await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-    await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    // Two calls, two GraphQL hits — no IDB caching for search
-    expect(octokit.graphql).toHaveBeenCalledTimes(2);
-
-    // Verify nothing written to IDB (GraphQL search doesn't use cachedRequest)
-    const entry = await getCacheEntry("search:octocat/Hello-World:issues");
-    expect(entry).toBeUndefined();
-  });
-
-  it("GraphQL search error is returned as ApiError without throwing", async () => {
-    const err503 = Object.assign(new Error("Service Unavailable"), { status: 503 });
-    const octokit = makeOctokit(
-      async () => ({ data: [], headers: {} }),
-      async () => { throw err503; }
-    );
-
-    const { issues, errors } = await fetchIssues(
-      octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>,
-      [testRepo],
-      "octocat"
-    );
-
-    expect(issues).toEqual([]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0].statusCode).toBe(503);
-    expect(errors[0].retryable).toBe(true);
   });
 });

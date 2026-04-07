@@ -1,8 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  fetchIssues,
-  fetchPullRequests,
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
   fetchPREnrichment,
@@ -35,36 +33,6 @@ const graphqlIssueNode = {
   assignees: { nodes: [{ login: "octocat" }] },
   repository: { nameWithOwner: "octocat/Hello-World" },
   comments: { totalCount: 3 },
-};
-
-/** Full PR node used by standalone fetchPullRequests (has all heavy fields) */
-const graphqlPRNode = {
-  databaseId: 42,
-  number: 42,
-  title: "Add feature",
-  state: "open",
-  isDraft: false,
-  url: "https://github.com/octocat/Hello-World/pull/42",
-  createdAt: "2024-01-01T00:00:00Z",
-  updatedAt: "2024-01-02T00:00:00Z",
-  author: { login: "octocat", avatarUrl: "https://github.com/images/error/octocat_happy.gif" },
-  headRefOid: "abc123",
-  headRefName: "feature-branch",
-  baseRefName: "main",
-  headRepository: { owner: { login: "octocat" }, nameWithOwner: "octocat/Hello-World" },
-  repository: { nameWithOwner: "octocat/Hello-World" },
-  mergeStateStatus: "CLEAN",
-  assignees: { nodes: [{ login: "octocat" }] },
-  reviewRequests: { nodes: [{ requestedReviewer: { login: "reviewer2" } }] },
-  labels: { nodes: [{ name: "feature", color: "a2eeef" }] },
-  additions: 100,
-  deletions: 20,
-  changedFiles: 5,
-  comments: { totalCount: 3 },
-  reviewThreads: { totalCount: 2 },
-  reviewDecision: "APPROVED",
-  latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
-  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
 };
 
 /** Light PR node used by the two-phase combined query (phase 1) */
@@ -192,25 +160,6 @@ describe("API call count: combined vs separate", () => {
   describe("with 1-50 repos (single chunk)", () => {
     const repos = makeRepos(30);
 
-    it("separate fetchIssues + fetchPullRequests makes 3 GraphQL calls", async () => {
-      const octokit = makeOctokit(async () => ({
-        search: makeSearchResponse([graphqlIssueNode]),
-        rateLimit,
-      }));
-
-      await fetchIssues(octokit as unknown as OctokitLike, repos, "testuser");
-      const issuesCalls = octokit.graphql.mock.calls.length;
-
-      octokit.graphql.mockClear();
-      await fetchPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
-      const prCalls = octokit.graphql.mock.calls.length;
-
-      // Issues: 1 call, PRs: 2 calls (involves + review-requested) = 3 total
-      expect(issuesCalls).toBe(1);
-      expect(prCalls).toBe(2);
-      expect(issuesCalls + prCalls).toBe(3);
-    });
-
     it("combined fetchIssuesAndPullRequests makes 2 GraphQL calls (light + heavy)", async () => {
       const lightPR = makeLightPRNode();
       const octokit = makeTwoPhaseOctokit(
@@ -223,59 +172,10 @@ describe("API call count: combined vs separate", () => {
       // 1 light combined + 1 heavy backfill = 2 total
       expect(octokit.graphql).toHaveBeenCalledTimes(2);
     });
-
-    it("combined returns same data shape as separate calls", async () => {
-      // Separate calls
-      const separateOctokit = makeOctokit(async (_query, variables) => {
-        const q = (variables as Record<string, unknown>).q as string;
-        if (q.includes("is:issue")) {
-          return { search: makeSearchResponse([graphqlIssueNode]), rateLimit };
-        }
-        return { search: makeSearchResponse([graphqlPRNode]), rateLimit };
-      });
-
-      const issueResult = await fetchIssues(separateOctokit as unknown as OctokitLike, repos, "testuser");
-      const prResult = await fetchPullRequests(separateOctokit as unknown as OctokitLike, repos, "testuser");
-
-      // Combined call (two-phase)
-      const lightPR = makeLightPRNode();
-      const combinedOctokit = makeTwoPhaseOctokit(
-        async () => makeLightCombinedResponse([graphqlIssueNode], [lightPR]),
-        [makeHeavyPRNode(42, "PR_kwDOtest42")],
-      );
-      const combinedResult = await fetchIssuesAndPullRequests(combinedOctokit as unknown as OctokitLike, repos, "testuser");
-
-      // Same data shape and content
-      expect(combinedResult.issues.length).toBe(issueResult.issues.length);
-      expect(combinedResult.pullRequests.length).toBe(prResult.pullRequests.length);
-      expect(combinedResult.issues[0].id).toBe(issueResult.issues[0].id);
-      expect(combinedResult.pullRequests[0].id).toBe(prResult.pullRequests[0].id);
-      // Enriched PRs should have enriched flag
-      expect(combinedResult.pullRequests[0].enriched).toBe(true);
-    });
   });
 
   describe("with 51-100 repos (two chunks)", () => {
     const repos = makeRepos(80);
-
-    it("separate fetchIssues + fetchPullRequests makes 6 GraphQL calls", async () => {
-      const octokit = makeOctokit(async () => ({
-        search: makeSearchResponse([{ ...graphqlIssueNode, databaseId: Math.random() * 100000 | 0 }]),
-        rateLimit,
-      }));
-
-      await fetchIssues(octokit as unknown as OctokitLike, repos, "testuser");
-      const issuesCalls = octokit.graphql.mock.calls.length;
-
-      octokit.graphql.mockClear();
-      await fetchPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
-      const prCalls = octokit.graphql.mock.calls.length;
-
-      // Issues: 2 chunks × 1 call = 2, PRs: 2 chunks × 2 query types = 4
-      expect(issuesCalls).toBe(2);
-      expect(prCalls).toBe(4);
-      expect(issuesCalls + prCalls).toBe(6);
-    });
 
     it("combined fetchIssuesAndPullRequests makes 3 GraphQL calls (2 light + 1 heavy)", async () => {
       let callId = 0;
@@ -300,24 +200,8 @@ describe("API call count: combined vs separate", () => {
   describe("with 101-150 repos (three chunks)", () => {
     const repos = makeRepos(120);
 
-    it("separate makes 9 calls, combined makes 4", async () => {
+    it("combined fetchIssuesAndPullRequests makes 4 GraphQL calls (3 light + 1 heavy)", async () => {
       let callId = 0;
-      const separateOctokit = makeOctokit(async () => ({
-        search: makeSearchResponse([{ ...graphqlIssueNode, databaseId: ++callId }]),
-        rateLimit,
-      }));
-
-      await fetchIssues(separateOctokit as unknown as OctokitLike, repos, "testuser");
-      const issuesCalls = separateOctokit.graphql.mock.calls.length;
-      separateOctokit.graphql.mockClear();
-      await fetchPullRequests(separateOctokit as unknown as OctokitLike, repos, "testuser");
-      const prCalls = separateOctokit.graphql.mock.calls.length;
-
-      // Issues: 3 chunks, PRs: 3 chunks × 2 = 6
-      expect(issuesCalls).toBe(3);
-      expect(prCalls).toBe(6);
-
-      callId = 0;
       const combinedOctokit = makeTwoPhaseOctokit(
         async () => {
           const id = ++callId;
@@ -632,33 +516,18 @@ describe("workflow run concurrency", () => {
 describe("scaling behavior", () => {
   // Two-phase: each chunk needs 1 light query + 1 heavy backfill total
   const repoCountsAndExpected = [
-    { repos: 10, separateCalls: 3, combinedCalls: 2 },   // 1 light + 1 heavy
-    { repos: 50, separateCalls: 3, combinedCalls: 2 },   // 1 light + 1 heavy
-    { repos: 51, separateCalls: 6, combinedCalls: 3 },   // 2 light + 1 heavy
-    { repos: 100, separateCalls: 6, combinedCalls: 3 },  // 2 light + 1 heavy
-    { repos: 150, separateCalls: 9, combinedCalls: 4 },  // 3 light + 1 heavy
+    { repos: 10, combinedCalls: 2 },   // 1 light + 1 heavy
+    { repos: 50, combinedCalls: 2 },   // 1 light + 1 heavy
+    { repos: 51, combinedCalls: 3 },   // 2 light + 1 heavy
+    { repos: 100, combinedCalls: 3 },  // 2 light + 1 heavy
+    { repos: 150, combinedCalls: 4 },  // 3 light + 1 heavy
   ];
 
-  for (const { repos: repoCount, separateCalls, combinedCalls } of repoCountsAndExpected) {
-    it(`${repoCount} repos: separate=${separateCalls} calls, combined=${combinedCalls} calls (${Math.round((1 - combinedCalls / separateCalls) * 100)}% reduction)`, async () => {
+  for (const { repos: repoCount, combinedCalls } of repoCountsAndExpected) {
+    it(`${repoCount} repos: combined makes ${combinedCalls} GraphQL calls`, async () => {
       const repos = makeRepos(repoCount);
       let nodeId = 0;
 
-      // Count separate calls
-      const sepOctokit = makeOctokit(async () => ({
-        search: makeSearchResponse([{ ...graphqlIssueNode, databaseId: ++nodeId }]),
-        rateLimit,
-      }));
-      await fetchIssues(sepOctokit as unknown as OctokitLike, repos, "testuser");
-      const issueCalls = sepOctokit.graphql.mock.calls.length;
-      sepOctokit.graphql.mockClear();
-      nodeId = 0;
-      await fetchPullRequests(sepOctokit as unknown as OctokitLike, repos, "testuser");
-      const prCalls = sepOctokit.graphql.mock.calls.length;
-      expect(issueCalls + prCalls).toBe(separateCalls);
-
-      // Count combined calls (two-phase)
-      nodeId = 0;
       const combOctokit = makeTwoPhaseOctokit(
         async () => {
           const id = ++nodeId;

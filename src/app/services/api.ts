@@ -1,5 +1,6 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit, updateRateLimitFromHeaders } from "./github";
 import { pushNotification } from "../lib/errors";
+import { trackApiCall, updateResetAt, type ApiCallSource } from "./api-usage.js";
 import type { TrackedUser } from "../stores/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -281,53 +282,6 @@ interface GraphQLIssueSearchResponse {
   rateLimit?: GraphQLRateLimit;
 }
 
-interface GraphQLPRNode {
-  databaseId: number;
-  number: number;
-  title: string;
-  state: string;
-  isDraft: boolean;
-  url: string;
-  createdAt: string;
-  updatedAt: string;
-  author: { login: string; avatarUrl: string } | null;
-  headRefOid: string;
-  headRefName: string;
-  baseRefName: string;
-  headRepository: { owner: { login: string }; nameWithOwner: string } | null;
-  repository: { nameWithOwner: string; stargazerCount: number } | null;
-  mergeStateStatus: string;
-  assignees: { nodes: { login: string }[] };
-  reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
-  labels: { nodes: { name: string; color: string }[] };
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  comments: { totalCount: number };
-  reviewThreads: { totalCount: number };
-  reviewDecision: string | null;
-  latestReviews: {
-    totalCount: number;
-    nodes: { author: { login: string } | null }[];
-  };
-  commits: {
-    nodes: {
-      commit: {
-        statusCheckRollup: { state: string } | null;
-      };
-    }[];
-  };
-}
-
-interface GraphQLPRSearchResponse {
-  search: {
-    issueCount: number;
-    pageInfo: { hasNextPage: boolean; endCursor: string | null };
-    nodes: (GraphQLPRNode | null)[];
-  };
-  rateLimit?: GraphQLRateLimit;
-}
-
 interface ForkCandidate {
   databaseId: number;
   headOwner: string;
@@ -379,58 +333,6 @@ const ISSUES_SEARCH_QUERY = `
   ${LIGHT_ISSUE_FRAGMENT}
 `;
 
-const PR_SEARCH_QUERY = `
-  query($q: String!, $cursor: String) {
-    # GitHub search API uses type: ISSUE for both issues and PRs
-    search(query: $q, type: ISSUE, first: 50, after: $cursor) {
-      issueCount
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        ... on PullRequest {
-          databaseId
-          number
-          title
-          state
-          isDraft
-          url
-          createdAt
-          updatedAt
-          author { login avatarUrl }
-          headRefOid
-          headRefName
-          baseRefName
-          headRepository { owner { login } nameWithOwner }
-          repository { nameWithOwner stargazerCount }
-          mergeStateStatus
-          assignees(first: 10) { nodes { login } }
-          reviewRequests(first: 10) {
-            # Team reviewers are excluded (only User fragment matched)
-            nodes { requestedReviewer { ... on User { login } } }
-          }
-          labels(first: 10) { nodes { name color } }
-          additions
-          deletions
-          changedFiles
-          comments { totalCount }
-          reviewThreads { totalCount }
-          reviewDecision
-          latestReviews(first: 5) {
-            totalCount
-            nodes { author { login } }
-          }
-          commits(last: 1) {
-            nodes {
-              commit {
-                statusCheckRollup { state }
-              }
-            }
-          }
-        }
-      }
-    }
-    rateLimit { limit remaining resetAt }
-  }
-`;
 
 // ── Two-phase rendering: light + heavy queries ───────────────────────────────
 
@@ -728,6 +630,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
   currentCount: () => number,
   cap: number,
   startCursor?: string | null,
+  source?: ApiCallSource,
 ): Promise<{ capReached: boolean }> {
   let cursor: string | null = startCursor ?? null;
   let capReached = false;
@@ -738,6 +641,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       let isPartial = false;
       try {
         response = await octokit.graphql<TResponse>(query, { q: queryString, cursor });
+        if (source) trackApiCall(source, "graphql");
       } catch (err) {
         const partial = extractSearchPartialData<TResponse>(err);
         if (partial) {
@@ -757,7 +661,10 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
         }
       }
 
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      if (response.rateLimit) {
+        updateGraphqlRateLimit(response.rateLimit);
+        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
+      }
 
       for (const node of response.search.nodes) {
         if (currentCount() >= cap) {
@@ -875,7 +782,11 @@ async function runForkPRFallback(
 
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-      if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
+      trackApiCall("forkCheck", "graphql");
+      if (forkResponse.rateLimit) {
+        updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
+        updateResetAt(new Date((forkResponse.rateLimit as GraphQLRateLimit).resetAt).getTime());
+      }
 
       for (let i = 0; i < forkChunk.length; i++) {
         const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
@@ -985,6 +896,7 @@ async function executeLightCombinedQuery(
   errors: ApiError[],
   issueCap: number,
   prCap: number,
+  source: ApiCallSource,
 ): Promise<void> {
   let response: LightCombinedSearchResponse;
   let isPartial = false;
@@ -993,6 +905,7 @@ async function executeLightCombinedQuery(
       issueQ, prInvQ, prRevQ,
       issueCursor: null, prInvCursor: null, prRevCursor: null,
     });
+    trackApiCall(source, "graphql");
   } catch (err) {
     const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
       ? err.data as Partial<LightCombinedSearchResponse>
@@ -1012,7 +925,10 @@ async function executeLightCombinedQuery(
     }
   }
 
-  if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+  if (response.rateLimit) {
+    updateGraphqlRateLimit(response.rateLimit);
+    updateResetAt(new Date(response.rateLimit.resetAt).getTime());
+  }
 
   for (const node of response.issues.nodes) {
     if (issues.length >= issueCap) break;
@@ -1036,7 +952,7 @@ async function executeLightCombinedQuery(
     await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
       octokit, ISSUES_SEARCH_QUERY, issueQ, errorLabel, errors,
       (node) => processIssueNode(node, issueSeen, issues),
-      () => issues.length, issueCap, response.issues.pageInfo.endCursor,
+      () => issues.length, issueCap, response.issues.pageInfo.endCursor, source,
     );
   }
 
@@ -1045,14 +961,14 @@ async function executeLightCombinedQuery(
     prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
       octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, errorLabel, errors,
       (node) => processLightPRNode(node, prMap, nodeIdMap),
-      () => prMap.size, prCap, response.prInvolves.pageInfo.endCursor,
+      () => prMap.size, prCap, response.prInvolves.pageInfo.endCursor, source,
     ));
   }
   if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < prCap) {
     prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
       octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, errorLabel, errors,
       (node) => processLightPRNode(node, prMap, nodeIdMap),
-      () => prMap.size, prCap, response.prReviewReq.pageInfo.endCursor,
+      () => prMap.size, prCap, response.prReviewReq.pageInfo.endCursor, source,
     ));
   }
   if (prPaginationTasks.length > 0) {
@@ -1093,7 +1009,8 @@ function finalizeSearchResult(
 async function graphqlLightCombinedSearch(
   octokit: GitHubOctokit,
   repos: RepoRef[],
-  userLogin: string
+  userLogin: string,
+  source: ApiCallSource,
 ): Promise<LightSearchResult> {
   if (!VALID_TRACKED_LOGIN.test(userLogin)) {
     return {
@@ -1120,7 +1037,7 @@ async function graphqlLightCombinedSearch(
     try {
       await executeLightCombinedQuery(
         octokit, issueQ, prInvQ, prRevQ, batchLabel,
-        issueSeen, issues, prMap, nodeIdMap, errors, SEARCH_RESULT_CAP, SEARCH_RESULT_CAP,
+        issueSeen, issues, prMap, nodeIdMap, errors, SEARCH_RESULT_CAP, SEARCH_RESULT_CAP, source,
       );
     } catch (err) {
       const { statusCode, message } = extractRejectionError(err);
@@ -1167,6 +1084,7 @@ async function graphqlUnfilteredSearch(
         response = await octokit.graphql<UnfilteredSearchResponse>(UNFILTERED_SEARCH_QUERY, {
           issueQ, prQ, issueCursor: null, prCursor: null,
         });
+        trackApiCall("unfilteredSearch", "graphql");
       } catch (err) {
         const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
           ? err.data as Partial<UnfilteredSearchResponse>
@@ -1187,7 +1105,10 @@ async function graphqlUnfilteredSearch(
         }
       }
 
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      if (response.rateLimit) {
+        updateGraphqlRateLimit(response.rateLimit);
+        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
+      }
 
       for (const node of response.issues.nodes) {
         if (issues.length >= SEARCH_RESULT_CAP) break;
@@ -1206,7 +1127,7 @@ async function graphqlUnfilteredSearch(
         await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
           octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
           (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, SEARCH_RESULT_CAP, response.issues.pageInfo.endCursor,
+          () => issues.length, SEARCH_RESULT_CAP, response.issues.pageInfo.endCursor, "unfilteredSearch",
         );
       }
 
@@ -1214,7 +1135,7 @@ async function graphqlUnfilteredSearch(
         await paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
           octokit, LIGHT_PR_SEARCH_QUERY, prQ, batchLabel, errors,
           (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, SEARCH_RESULT_CAP, response.prs.pageInfo.endCursor,
+          () => prMap.size, SEARCH_RESULT_CAP, response.prs.pageInfo.endCursor, "unfilteredSearch",
         );
       }
     } catch (err) {
@@ -1266,8 +1187,12 @@ export async function fetchPREnrichment(
       const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
         ids: batch,
       });
+      trackApiCall("heavyBackfill", "graphql");
 
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      if (response.rateLimit) {
+        updateGraphqlRateLimit(response.rateLimit);
+        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
+      }
 
       for (const node of response.nodes) {
         if (!node || node.databaseId == null) continue;
@@ -1438,7 +1363,7 @@ export async function fetchIssuesAndPullRequests(
 
   // Phase 1: main user light search over normal repos (those not in monitoredRepos)
   if (normalRepos.length > 0 && userLogin) {
-    const lightResult = await graphqlLightCombinedSearch(octokit, normalRepos, userLogin);
+    const lightResult = await graphqlLightCombinedSearch(octokit, normalRepos, userLogin, "lightSearch");
     allErrors.push(...lightResult.errors);
 
     // Annotate main user's items with surfacedBy BEFORE firing onLightData
@@ -1471,7 +1396,7 @@ export async function fetchIssuesAndPullRequests(
   // covered by graphqlUnfilteredSearch (all open items, no user qualifier), so running
   // involves: on them would duplicate work and add spurious surfacedBy annotations.
   const trackedSearchPromise = hasTrackedUsers && normalRepos.length > 0
-    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, normalRepos, u.login)))
+    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, normalRepos, u.login, "globalUserSearch")))
     : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
 
   // Unfiltered search for monitored repos — runs in parallel with tracked searches
@@ -1561,52 +1486,6 @@ export async function fetchIssuesAndPullRequests(
 }
 
 /**
- * Fetches open issues via GraphQL search, using cursor-based pagination.
- * Batches repos into chunks of SEARCH_REPO_BATCH_SIZE and runs chunks in parallel.
- */
-async function graphqlSearchIssues(
-  octokit: GitHubOctokit,
-  repos: RepoRef[],
-  userLogin: string
-): Promise<FetchIssuesResult> {
-  if (!VALID_TRACKED_LOGIN.test(userLogin)) return { issues: [], errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
-
-  const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
-  const seen = new Set<number>();
-  const issues: Issue[] = [];
-  const errors: ApiError[] = [];
-
-  const chunkResults = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
-    const repoQualifiers = buildRepoQualifiers(chunk);
-    const queryString = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
-
-    await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
-      octokit, ISSUES_SEARCH_QUERY, queryString,
-      `search-batch-${chunkIdx + 1}/${chunks.length}`,
-      errors,
-      (node) => processIssueNode(node, seen, issues),
-      () => issues.length,
-      SEARCH_RESULT_CAP,
-    );
-  }));
-
-  for (const result of chunkResults) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({ repo: "search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
-    }
-  }
-
-  if (issues.length >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] Issue search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/issues", `Issue search results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-    issues.splice(SEARCH_RESULT_CAP);
-  }
-
-  return { issues, errors };
-}
-
-/**
  * Maps a GraphQL statusCheckRollup state string to the app's CheckStatus type.
  */
 function mapCheckStatus(state: string | null | undefined): CheckStatus["status"] {
@@ -1647,186 +1526,6 @@ function mapReviewDecision(
   return null;
 }
 
-/**
- * Fetches open PRs via GraphQL search with two queries (involves + review-requested),
- * deduplicates by databaseId, and handles fork PR statusCheckRollup fallback.
- * Chunks run in parallel; fork fallback batches run in parallel.
- */
-async function graphqlSearchPRs(
-  octokit: GitHubOctokit,
-  repos: RepoRef[],
-  userLogin: string
-): Promise<FetchPullRequestsResult> {
-  if (!VALID_TRACKED_LOGIN.test(userLogin)) return { pullRequests: [], errors: [{ repo: "pr-search", statusCode: null, message: "Invalid userLogin", retryable: false }] };
-
-  const chunks = chunkArray(repos, SEARCH_REPO_BATCH_SIZE);
-  const prMap = new Map<number, PullRequest>();
-  const forkInfoMap = new Map<number, { owner: string; repoName: string }>();
-  const errors: ApiError[] = [];
-
-  function processPRNode(node: GraphQLPRNode): boolean {
-    if (node.databaseId == null || !node.repository) return false;
-    if (prMap.has(node.databaseId)) return false;
-
-    const pendingLogins = node.reviewRequests.nodes
-      .map((n) => n.requestedReviewer?.login)
-      .filter((l): l is string => l != null);
-    const actualLogins = node.latestReviews.nodes
-      .map((n) => n.author?.login)
-      .filter((l): l is string => l != null);
-    const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
-
-    // mergeStateStatus overrides checkStatus when it indicates action is needed.
-    // BLOCKED means required checks/reviews haven't passed — leave checkStatus from rollup.
-    const checkStatus = applyMergeStateOverride(
-      node.mergeStateStatus,
-      mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
-    );
-
-    // Store fork info for fallback detection
-    if (node.headRepository) {
-      const parts = node.headRepository.nameWithOwner.split("/");
-      if (parts.length === 2) {
-        forkInfoMap.set(node.databaseId, { owner: node.headRepository.owner.login, repoName: parts[1] });
-      }
-    }
-
-    prMap.set(node.databaseId, {
-      id: node.databaseId,
-      number: node.number,
-      title: node.title,
-      state: node.state,
-      draft: node.isDraft,
-      htmlUrl: node.url,
-      createdAt: node.createdAt,
-      updatedAt: node.updatedAt,
-      userLogin: node.author?.login ?? "",
-      userAvatarUrl: node.author?.avatarUrl ?? "",
-      headSha: node.headRefOid,
-      headRef: node.headRefName,
-      baseRef: node.baseRefName,
-      assigneeLogins: node.assignees.nodes.map((a) => a.login),
-      reviewerLogins,
-      repoFullName: node.repository.nameWithOwner,
-      checkStatus,
-      additions: node.additions,
-      deletions: node.deletions,
-      changedFiles: node.changedFiles,
-      comments: node.comments.totalCount,
-      reviewThreads: node.reviewThreads.totalCount,
-      labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
-      reviewDecision: mapReviewDecision(node.reviewDecision),
-      totalReviewCount: node.latestReviews.totalCount,
-      starCount: node.repository.stargazerCount,
-    });
-    return true;
-  }
-
-  // Run involves and review-requested searches across all repo chunks in parallel
-  const queryTypes = [
-    `is:pr is:open involves:${userLogin}`,
-    `is:pr is:open review-requested:${userLogin}`,
-  ];
-
-  const allTasks = queryTypes.flatMap((queryType) =>
-    chunks.map(async (chunk, chunkIdx) => {
-      const repoQualifiers = buildRepoQualifiers(chunk);
-      const queryString = `${queryType} ${repoQualifiers}`;
-      await paginateGraphQLSearch<GraphQLPRSearchResponse, GraphQLPRNode>(
-        octokit, PR_SEARCH_QUERY, queryString,
-        `pr-search-batch-${chunkIdx + 1}/${chunks.length}`,
-        errors, processPRNode, () => prMap.size, SEARCH_RESULT_CAP,
-      );
-    })
-  );
-
-  const taskResults = await Promise.allSettled(allTasks);
-  for (const result of taskResults) {
-    if (result.status === "rejected") {
-      const { statusCode, message } = extractRejectionError(result.reason);
-      errors.push({ repo: "pr-search-batch", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
-    }
-  }
-
-  if (prMap.size >= SEARCH_RESULT_CAP) {
-    console.warn(`[api] PR search results capped at ${SEARCH_RESULT_CAP}`);
-    pushNotification("search/prs", `PR search results capped at ${SEARCH_RESULT_CAP.toLocaleString("en-US")} — some items are hidden`, "warning");
-  }
-
-  // Fork PR fallback: for PRs with null checkStatus where head repo owner differs from base
-  const forkCandidates: ForkCandidate[] = [];
-  for (const [databaseId, pr] of prMap) {
-    if (pr.checkStatus !== null) continue;
-    const headInfo = forkInfoMap.get(databaseId);
-    if (!headInfo) continue;
-    const baseOwner = pr.repoFullName.split("/")[0].toLowerCase();
-    if (headInfo.owner.toLowerCase() === baseOwner) continue;
-    forkCandidates.push({ databaseId, headOwner: headInfo.owner, headRepo: headInfo.repoName, sha: pr.headSha });
-  }
-
-  if (forkCandidates.length > 0) {
-    const forkChunks = chunkArray(forkCandidates, GRAPHQL_CHECK_BATCH_SIZE);
-    // Run fork fallback batches in parallel
-    await Promise.allSettled(forkChunks.map(async (forkChunk) => {
-      const varDefs: string[] = [];
-      const variables: Record<string, string> = {};
-      const fragments: string[] = [];
-
-      for (let i = 0; i < forkChunk.length; i++) {
-        varDefs.push(`$owner${i}: String!`, `$repo${i}: String!`, `$sha${i}: String!`);
-        variables[`owner${i}`] = forkChunk[i].headOwner;
-        variables[`repo${i}`] = forkChunk[i].headRepo;
-        variables[`sha${i}`] = forkChunk[i].sha;
-        fragments.push(
-          `fork${i}: repository(owner: $owner${i}, name: $repo${i}) {
-            object(expression: $sha${i}) {
-              ... on Commit {
-                statusCheckRollup { state }
-              }
-            }
-          }`
-        );
-      }
-
-      const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
-
-      try {
-        const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-        if (forkResponse.rateLimit) updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
-
-        for (let i = 0; i < forkChunk.length; i++) {
-          const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
-          const state = data?.object?.statusCheckRollup?.state ?? null;
-          const pr = prMap.get(forkChunk[i].databaseId);
-          if (pr) pr.checkStatus = mapCheckStatus(state);
-        }
-      } catch (err) {
-        // Extract partial data from GraphqlResponseError — some fork aliases may have resolved
-        const partialData = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-          ? err.data as Record<string, ForkRepoResult | null | undefined>
-          : null;
-
-        if (partialData) {
-          for (let i = 0; i < forkChunk.length; i++) {
-            const data = partialData[`fork${i}`];
-            if (!data) continue;
-            const state = data.object?.statusCheckRollup?.state ?? null;
-            const pr = prMap.get(forkChunk[i].databaseId);
-            if (pr) pr.checkStatus = mapCheckStatus(state);
-          }
-        }
-
-        console.warn("[api] Fork PR statusCheckRollup fallback partially failed:", err);
-        pushNotification("graphql", "Fork PR check status unavailable — CI status may be missing for some PRs", "warning");
-      }
-    }));
-  }
-
-  const pullRequests = [...prMap.values()];
-  if (pullRequests.length >= SEARCH_RESULT_CAP) pullRequests.splice(SEARCH_RESULT_CAP);
-  return { pullRequests, errors };
-}
-
 // ── Step 1: fetchOrgs ────────────────────────────────────────────────────────
 
 /**
@@ -1841,6 +1540,7 @@ export async function fetchOrgs(
     cachedRequest(octokit, "orgs:user", "GET /user"),
     cachedRequest(octokit, "orgs:all", "GET /user/orgs", { per_page: 100 }),
   ]);
+  trackApiCall("fetchOrgs", "core", 2);
 
   const user = userResult.data as RawUser;
   const orgs = orgsResult.data as RawOrg[];
@@ -1883,6 +1583,8 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
+      trackApiCall("fetchRepos", "core");
+      if (response.headers) updateRateLimitFromHeaders(response.headers as Record<string, string>);
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
@@ -1895,6 +1597,8 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
+      trackApiCall("fetchRepos", "core");
+      if (response.headers) updateRateLimitFromHeaders(response.headers as Record<string, string>);
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
@@ -1913,45 +1617,7 @@ export async function fetchRepos(
   return repos;
 }
 
-// ── Step 3: fetchIssues (GraphQL Search) ─────────────────────────────────────
-
-/**
- * Fetches open issues across repos where the user is involved (author, assignee,
- * mentioned, or commenter) using GraphQL search queries, batched in chunks of 30 repos.
- */
-export interface FetchIssuesResult {
-  issues: Issue[];
-  errors: ApiError[];
-}
-
-export async function fetchIssues(
-  octokit: ReturnType<typeof getClient>,
-  repos: RepoRef[],
-  userLogin: string
-): Promise<FetchIssuesResult> {
-  if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0 || !userLogin) return { issues: [], errors: [] };
-  return graphqlSearchIssues(octokit, repos, userLogin);
-}
-
-// ── Step 4: fetchPullRequests (GraphQL search) ───────────────────────────────
-
-export interface FetchPullRequestsResult {
-  pullRequests: PullRequest[];
-  errors: ApiError[];
-}
-
-export async function fetchPullRequests(
-  octokit: ReturnType<typeof getClient>,
-  repos: RepoRef[],
-  userLogin: string
-): Promise<FetchPullRequestsResult> {
-  if (!octokit) throw new Error("No GitHub client available");
-  if (repos.length === 0 || !userLogin) return { pullRequests: [], errors: [] };
-  return graphqlSearchPRs(octokit, repos, userLogin);
-}
-
-// ── Step 5: fetchWorkflowRuns (single endpoint per repo) ─────────────────────
+// ── Step 3: fetchWorkflowRuns (single endpoint per repo) ─────────────────────
 
 /**
  * Fetches recent workflow runs per repo using a single API call per repo
@@ -1999,6 +1665,7 @@ export async function fetchWorkflowRuns(
         "GET /repos/{owner}/{repo}/actions/runs",
         { owner: repo.owner, repo: repo.name, per_page: perPage, page }
       );
+      trackApiCall("workflowRuns", "core");
 
       const data = result.data as {
         workflow_runs: RawWorkflowRun[];
@@ -2103,7 +1770,11 @@ export async function fetchHotPRStatus(
   let hadErrors = false;
   const settled = await Promise.allSettled(batches.map(async (batch) => {
     const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch });
-    if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+    trackApiCall("hotPRStatus", "graphql");
+    if (response.rateLimit) {
+      updateGraphqlRateLimit(response.rateLimit);
+      updateResetAt(new Date(response.rateLimit.resetAt).getTime());
+    }
 
     for (const node of response.nodes) {
       if (!node || node.databaseId == null) continue;
@@ -2154,7 +1825,11 @@ export async function fetchWorkflowRunById(
     repo,
     run_id: id,
   });
-  updateRateLimitFromHeaders(response.headers as Record<string, string>);
+  trackApiCall("hotRunStatus", "core");
+  const responseHeaders = response.headers as Record<string, string>;
+  updateRateLimitFromHeaders(responseHeaders);
+  const resetHeader = responseHeaders["x-ratelimit-reset"];
+  if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
   // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
   const run = response.data as unknown as RawWorkflowRun;
   return {
@@ -2190,9 +1865,9 @@ export async function validateGitHubUser(
 ): Promise<TrackedUser | null> {
   if (!VALID_TRACKED_LOGIN.test(login)) return null;
 
-  let response: { data: RawGitHubUser };
+  let response: { data: RawGitHubUser; headers: Record<string, string> };
   try {
-    response = await octokit.request("GET /users/{username}", { username: login }) as { data: RawGitHubUser };
+    response = await octokit.request("GET /users/{username}", { username: login }) as { data: RawGitHubUser; headers: Record<string, string> };
   } catch (err) {
     const status =
       typeof err === "object" && err !== null && "status" in err
@@ -2201,6 +1876,9 @@ export async function validateGitHubUser(
     if (status === 404) return null;
     throw err;
   }
+  trackApiCall("validateUser", "core");
+  const resetHeader = response.headers?.["x-ratelimit-reset"];
+  if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
 
   const raw = response.data;
   const avatarUrl = raw.avatar_url.startsWith(AVATAR_CDN_PREFIX)
@@ -2246,12 +1924,12 @@ export async function discoverUpstreamRepos(
       paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
         octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,
         (node) => extractRepoName(node),
-        () => repoNames.size, CAP,
+        () => repoNames.size, CAP, undefined, "upstreamDiscovery",
       ),
       paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
         octokit, LIGHT_PR_SEARCH_QUERY, prQ, `upstream-prs:${login}`, errors,
         (node) => extractRepoName(node),
-        () => repoNames.size, CAP,
+        () => repoNames.size, CAP, undefined, "upstreamDiscovery",
       ),
     ]);
   }

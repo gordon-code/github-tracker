@@ -376,12 +376,15 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
-    // Import poll.ts — this triggers onAuthCleared(resetPollState) at module scope
+    // Import poll.ts — this triggers onAuthCleared(resetPollState) at module scope.
+    // api-usage.ts also registers clearUsageData, so onAuthCleared is called multiple times.
     const { fetchAllData } = await import("../../src/app/services/poll");
 
-    // onAuthCleared mock must have been called with the resetPollState callback
-    expect(vi.mocked(onAuthCleared)).toHaveBeenCalledOnce();
-    const capturedAuthClearedCb = vi.mocked(onAuthCleared).mock.calls[0][0] as () => void;
+    // onAuthCleared mock must have been called (multiple registrations expected now)
+    expect(vi.mocked(onAuthCleared)).toHaveBeenCalled();
+    // The last call is resetPollState from poll.ts (api-usage registers first via api.ts import)
+    const calls = vi.mocked(onAuthCleared).mock.calls;
+    const capturedAuthClearedCb = calls[calls.length - 1][0] as () => void;
     expect(typeof capturedAuthClearedCb).toBe("function");
 
     // First call — sets _lastSuccessfulFetch
