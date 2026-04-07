@@ -3,7 +3,6 @@ import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
 import { labelColorClass } from "../../lib/label-colors";
-import { Tooltip } from "../shared/Tooltip";
 
 export interface ItemRowProps {
   repo: string;
@@ -170,7 +169,6 @@ export default function ItemRow(props: ItemRowProps) {
       </div>
 
       {/* Ignore button — visible on hover */}
-      <Tooltip content="Ignore">
       <button
         data-ignore-btn
         onClick={() => props.onIgnore()}
@@ -179,6 +177,7 @@ export default function ItemRow(props: ItemRowProps) {
           hover:text-error
           opacity-0 group-hover:opacity-100 focus:opacity-100
           transition-opacity focus:outline-none focus:ring-2 focus:ring-error`}
+        title="Ignore this item"
         aria-label={`Ignore #${props.number} ${props.title}`}
       >
         {/* Eye-slash icon */}
@@ -197,7 +196,6 @@ export default function ItemRow(props: ItemRowProps) {
           <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
         </svg>
       </button>
-      </Tooltip>
     </div>
   );
 }

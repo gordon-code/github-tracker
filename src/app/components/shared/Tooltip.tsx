@@ -31,6 +31,8 @@ export function Tooltip(props: TooltipProps) {
       open={open()}
       onOpenChange={(isOpen) => {
         if (!isOpen) {
+          clearTimeout(hoverTimer);
+          clearTimeout(closeTimer);
           setIsHovered(false);
           setIsFocused(false);
         }

@@ -104,6 +104,27 @@ describe("Tooltip", () => {
     expect(trigger.hasAttribute("data-expanded")).toBe(false);
   });
 
+  it("re-entering during closeDelay cancels the close timer", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.pointerLeave(trigger);
+    // Re-enter within 100ms closeDelay — should cancel close
+    vi.advanceTimersByTime(50);
+    fireEvent.pointerEnter(trigger);
+    // The tooltip should still be expanded (closeTimer was cancelled before it fired)
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    // Clean up: close the tooltip so Kobalte's global state resets
+    fireEvent.pointerLeave(trigger);
+    vi.advanceTimersByTime(500);
+  });
+
   it("shows tooltip on focusIn (keyboard access)", () => {
     const { container } = render(() => (
       <Tooltip content="focus tooltip" focusable>
