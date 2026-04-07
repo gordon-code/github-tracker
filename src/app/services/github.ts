@@ -148,11 +148,16 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       if (typeof err === "object" && err !== null && "status" in err) {
         status = (err as { status: number }).status;
       }
-      // Fire callbacks even on errors — these are real API calls
+      // Fire callbacks even on errors — these are real API calls.
+      // Octokit's RequestError includes response.headers for HTTP errors (403, 404, etc.)
+      // so we can still extract x-ratelimit-reset when available.
       if (status > 0 && _requestCallbacks.length > 0) {
+        let resetEpochMs: number | null = null;
+        const errResponse = (err as { response?: { headers?: Record<string, string> } }).response;
+        const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
+        if (errResetHeader) resetEpochMs = parseInt(errResetHeader, 10) * 1000;
         const info: ApiRequestInfo = {
-          url: options.url, method, status, isGraphql, apiSource,
-          resetEpochMs: null, // headers unavailable on error
+          url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
         };
         for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
       }

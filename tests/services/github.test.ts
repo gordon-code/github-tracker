@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, onApiRequest, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -379,5 +379,161 @@ describe("updateRateLimitFromHeaders", () => {
     const rl = getCoreRateLimit();
     expect(rl).not.toBeNull();
     expect(rl!.limit).toBe(5000);
+  });
+});
+
+// ── hook.wrap request tracking ──────────────────────────────────────────────
+
+describe("hook.wrap — request tracking callbacks", () => {
+  // onApiRequest pushes to a module-level array that persists across tests.
+  // We register once and capture calls via a vi.fn() spy.
+  const cbSpy = vi.fn<(info: ApiRequestInfo) => void>();
+  let registered = false;
+
+  function ensureRegistered() {
+    if (!registered) {
+      onApiRequest(cbSpy);
+      registered = true;
+    }
+  }
+
+  afterEach(() => {
+    cbSpy.mockClear();
+    vi.unstubAllGlobals();
+  });
+
+  it("fires callback on successful REST request with correct ApiRequestInfo", async () => {
+    ensureRegistered();
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-reset": String(resetEpoch),
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.request("GET /user");
+
+    expect(cbSpy).toHaveBeenCalled();
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.url).toBe("/user");
+    expect(info.method).toBe("GET");
+    expect(info.status).toBe(200);
+    expect(info.isGraphql).toBe(false);
+    expect(info.resetEpochMs).toBe(resetEpoch * 1000);
+  });
+
+  it("fires callback for GraphQL POST /graphql with isGraphql: true", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { viewer: { login: "test" } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.graphql("query { viewer { login } }");
+
+    expect(cbSpy).toHaveBeenCalled();
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.isGraphql).toBe(true);
+    expect(info.url).toBe("/graphql");
+    expect(info.method).toBe("POST");
+  });
+
+  it("extracts apiSource from request metadata on GraphQL calls", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { search: { nodes: [] } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.graphql("query($q: String!) { search(query: $q, type: ISSUE, first: 1) { nodes { __typename } } }", {
+      q: "is:issue",
+      request: { apiSource: "lightSearch" },
+    });
+
+    expect(cbSpy).toHaveBeenCalled();
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.apiSource).toBe("lightSearch");
+    expect(info.isGraphql).toBe(true);
+  });
+
+  it("sets resetEpochMs to null when x-ratelimit-reset header is absent", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.request("GET /user");
+
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.resetEpochMs).toBeNull();
+  });
+
+  it("fires callback on error response with status code (e.g., 404)", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Not Found" }), {
+        status: 404,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-reset": "1700000000",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await expect(client.request("GET /users/{username}", { username: "nonexistent" })).rejects.toThrow();
+
+    expect(cbSpy).toHaveBeenCalled();
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.status).toBe(404);
+    expect(info.resetEpochMs).toBe(1700000000 * 1000);
+  });
+
+  it("fires callback with status 500 on network failure (Octokit normalizes fetch errors)", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+
+    // Disable retries — the retry plugin uses real setTimeout for backoff
+    const client = createGitHubClient("test-token");
+    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow();
+
+    // Octokit wraps network errors as RequestError with status 500,
+    // so the hook fires with status 500 (a real API attempt was made)
+    expect(cbSpy).toHaveBeenCalled();
+    const info = cbSpy.mock.calls[0][0];
+    expect(info.status).toBe(500);
+  });
+
+  it("does not propagate callback errors to the request caller", async () => {
+    ensureRegistered();
+    const throwingCb = vi.fn(() => { throw new Error("callback boom"); });
+    onApiRequest(throwingCb);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    // Should not throw despite the callback throwing
+    await expect(client.request("GET /user")).resolves.toBeDefined();
+    expect(throwingCb).toHaveBeenCalled();
   });
 });
