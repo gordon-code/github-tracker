@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -12,7 +12,8 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
+import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
@@ -364,15 +365,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             direction={sortPref().direction}
             onChange={handleSort}
           />
-          <FilterChips
+          <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.pullRequests}
-            onChange={(field, value) => {
-              setTabFilter("pullRequests", field as PullRequestFilterField, value);
-              setPage(0);
-            }}
-            onReset={(field) => {
-              resetTabFilter("pullRequests", field as PullRequestFilterField);
+            onChange={(f, v) => {
+              setTabFilter("pullRequests", f as PullRequestFilterField, v);
               setPage(0);
             }}
             onResetAll={() => {

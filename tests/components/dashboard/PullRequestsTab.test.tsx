@@ -51,7 +51,7 @@ describe("PullRequestsTab — user filter chip", () => {
         allUsers={[{ login: "me", label: "Me" }]}
       />
     ));
-    expect(screen.queryByText("User:")).toBeNull();
+    expect(screen.queryByLabelText("Filter by User")).toBeNull();
   });
 
   it("shows User filter chip when allUsers has > 1 entry", () => {
@@ -65,7 +65,7 @@ describe("PullRequestsTab — user filter chip", () => {
         ]}
       />
     ));
-    screen.getByText("User:");
+    screen.getByLabelText("Filter by User");
   });
 });
 
@@ -480,23 +480,35 @@ describe("PullRequestsTab — scope chip visibility", () => {
   it("does not show Scope chip when no monitored repos and no tracked users", () => {
     const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
-    const { container } = render(() => (
+    render(() => (
       <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
     ));
 
-    expect(container.textContent).not.toContain("Scope:");
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).toBeNull();
   });
 
   it("shows Scope chip when monitored repos exist", () => {
     const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
-    const { container } = render(() => (
+    render(() => (
       <PullRequestsTab pullRequests={prs} userLogin="me"
         monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]}
       />
     ));
 
-    expect(container.textContent).toContain("Scope:");
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
+  });
+
+  it("shows Scope toggle when allUsers > 1", () => {
+    const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]}
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+      />
+    ));
+
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
   it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
