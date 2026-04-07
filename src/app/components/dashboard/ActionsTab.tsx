@@ -2,12 +2,12 @@ import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { config } from "../../stores/config";
-import { viewState, setViewState, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import FilterChips from "../shared/FilterChips";
-import type { FilterChipGroupDef } from "../shared/FilterChips";
+import type { FilterChipGroupDef } from "../shared/filterTypes";
+import FilterToolbar from "../shared/FilterToolbar";
 import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -229,11 +229,10 @@ export default function ActionsTab(props: ActionsTabProps) {
             />
             Show PR runs
           </label>
-          <FilterChips
+          <FilterToolbar
             groups={actionsFilterGroups}
             values={viewState.tabFilters.actions}
-            onChange={(field, value) => setTabFilter("actions", field as ActionsFilterField, value)}
-            onReset={(field) => resetTabFilter("actions", field as ActionsFilterField)}
+            onChange={(f, v) => setTabFilter("actions", f as ActionsFilterField, v)}
             onResetAll={() => resetAllTabFilters("actions")}
           />
         </div>
