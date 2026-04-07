@@ -142,9 +142,9 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Draft PR", draft: true, repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Draft" appears in both the filter chip button and the PR badge
+    // "Draft" appears as a PR badge
     const draftEls = screen.getAllByText("Draft");
-    // At least one is a span (the badge), not a button (the chip)
+    // Badge should be a span element
     const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
@@ -152,7 +152,7 @@ describe("PullRequestsTab", () => {
   it("does not show Draft badge for non-draft PRs", () => {
     const pr = makePullRequest({ id: 1, title: "Normal PR", draft: false, repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Draft" may appear as a filter chip button, but should NOT appear as a badge span
+    // "Draft" should NOT appear as a badge span for non-draft PRs
     const draftEls = screen.queryAllByText("Draft");
     const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeUndefined();
@@ -162,7 +162,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Author" appears in both the filter chip button and the role badge
+    // "Author" appears as a role badge
     const authorEls = screen.getAllByText("Author");
     const badgeEl = authorEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -172,7 +172,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [], repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Reviewer" appears in both the filter chip button and the role badge
+    // "Reviewer" appears as a role badge
     const reviewerEls = screen.getAllByText("Reviewer");
     const badgeEl = reviewerEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -182,7 +182,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED", repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Approved" appears in both the filter chip button and the review badge
+    // "Approved" appears as a review badge
     const approvedEls = screen.getAllByText("Approved");
     const badgeEl = approvedEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -193,7 +193,7 @@ describe("PullRequestsTab", () => {
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // prSizeCategory(300, 100) = 400 total -> M
-    // "M" appears in both the filter chip button and the size badge
+    // "M" appears as a size badge
     const mEls = screen.getAllByText("M");
     const badgeEl = mEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();

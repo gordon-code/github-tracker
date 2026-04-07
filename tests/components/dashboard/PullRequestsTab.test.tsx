@@ -42,8 +42,8 @@ beforeEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("PullRequestsTab — user filter chip", () => {
-  it("does not show User filter chip when allUsers has only 1 entry", () => {
+describe("PullRequestsTab — user filter", () => {
+  it("does not show User filter when allUsers has only 1 entry", () => {
     render(() => (
       <PullRequestsTab
         pullRequests={[makePullRequest()]}
@@ -54,7 +54,7 @@ describe("PullRequestsTab — user filter chip", () => {
     expect(screen.queryByLabelText("Filter by User")).toBeNull();
   });
 
-  it("shows User filter chip when allUsers has > 1 entry", () => {
+  it("shows User filter when allUsers has > 1 entry", () => {
     render(() => (
       <PullRequestsTab
         pullRequests={[makePullRequest()]}
@@ -474,10 +474,10 @@ describe("PullRequestsTab — star count in repo headers", () => {
   });
 });
 
-// ── PullRequestsTab — scope chip visibility ────────────────────────────────
+// ── PullRequestsTab — scope toggle visibility ──────────────────────────────
 
-describe("PullRequestsTab — scope chip visibility", () => {
-  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+describe("PullRequestsTab — scope toggle visibility", () => {
+  it("does not show Scope toggle when no monitored repos and no tracked users", () => {
     const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
     render(() => (
@@ -487,7 +487,7 @@ describe("PullRequestsTab — scope chip visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).toBeNull();
   });
 
-  it("shows Scope chip when monitored repos exist", () => {
+  it("shows Scope toggle when monitored repos exist", () => {
     const prs = [makePullRequest({ id: 1, title: "PR", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
     render(() => (
@@ -511,7 +511,7 @@ describe("PullRequestsTab — scope chip visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
-  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+  it("auto-resets scope to involves_me when scope toggle becomes hidden", () => {
     setTabFilter("pullRequests", "scope", "all");
     expect(viewState.tabFilters.pullRequests.scope).toBe("all");
 

@@ -42,8 +42,8 @@ beforeEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("IssuesTab — user filter chip", () => {
-  it("does not show User filter chip when allUsers has only 1 entry (no tracked users)", () => {
+describe("IssuesTab — user filter", () => {
+  it("does not show User filter when allUsers has only 1 entry (no tracked users)", () => {
     render(() => (
       <IssuesTab
         issues={[makeIssue()]}
@@ -55,7 +55,7 @@ describe("IssuesTab — user filter chip", () => {
     expect(screen.queryByLabelText("Filter by User")).toBeNull();
   });
 
-  it("shows User filter chip when allUsers has > 1 entry", () => {
+  it("shows User filter when allUsers has > 1 entry", () => {
     render(() => (
       <IssuesTab
         issues={[makeIssue()]}
@@ -69,7 +69,7 @@ describe("IssuesTab — user filter chip", () => {
     screen.getByLabelText("Filter by User");
   });
 
-  it("does not show User filter chip when allUsers is undefined", () => {
+  it("does not show User filter when allUsers is undefined", () => {
     render(() => (
       <IssuesTab issues={[makeIssue()]} userLogin="me" />
     ));
@@ -546,10 +546,10 @@ describe("IssuesTab — scope filter with undefined surfacedBy (non-monitored re
   });
 });
 
-// ── IssuesTab — scope chip visibility ──────────────────────────────────────
+// ── IssuesTab — scope toggle visibility ────────────────────────────────────
 
-describe("IssuesTab — scope chip visibility", () => {
-  it("does not show Scope chip when no monitored repos and no tracked users", () => {
+describe("IssuesTab — scope toggle visibility", () => {
+  it("does not show Scope toggle when no monitored repos and no tracked users", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
     render(() => (
@@ -559,7 +559,7 @@ describe("IssuesTab — scope chip visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).toBeNull();
   });
 
-  it("shows Scope chip when monitored repos exist", () => {
+  it("shows Scope toggle when monitored repos exist", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
     render(() => (
@@ -569,7 +569,7 @@ describe("IssuesTab — scope chip visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
-  it("shows Scope chip when tracked users exist (allUsers > 1)", () => {
+  it("shows Scope toggle when tracked users exist (allUsers > 1)", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
     render(() => (
@@ -581,11 +581,11 @@ describe("IssuesTab — scope chip visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
-  it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
+  it("auto-resets scope to involves_me when scope toggle becomes hidden", () => {
     setTabFilter("issues", "scope", "all");
     expect(viewState.tabFilters.issues.scope).toBe("all");
 
-    // Render with no monitored repos and no tracked users — scope chip hidden, effect should reset
+    // Render with no monitored repos and no tracked users — scope toggle hidden, effect should reset
     render(() => (
       <IssuesTab issues={[]} userLogin="me" monitoredRepos={[]} />
     ));
