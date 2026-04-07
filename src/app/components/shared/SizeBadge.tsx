@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import { prSizeCategory } from "../../lib/format";
+import { Tooltip } from "./Tooltip";
 
 interface SizeBadgeProps {
   additions: number;
@@ -17,15 +18,25 @@ const SIZE_CONFIG = {
   XL: "badge badge-error badge-sm",
 } as const;
 
+const SIZE_TOOLTIP: Record<"XS" | "S" | "M" | "L" | "XL", string> = {
+  XS: "XS: <10 lines changed",
+  S: "S: 10–99 lines changed",
+  M: "M: 100–499 lines changed",
+  L: "L: 500–999 lines changed",
+  XL: "XL: 1000+ lines changed",
+};
+
 export default function SizeBadge(props: SizeBadgeProps) {
   const size = () => props.category ?? prSizeCategory(props.additions, props.deletions);
 
   return (
     <Show when={props.additions + props.deletions > 0 || props.changedFiles > 0}>
       <span class="flex items-center gap-1 text-xs">
-        <span class={SIZE_CONFIG[size()]}>
-          {size()}
-        </span>
+        <Tooltip content={SIZE_TOOLTIP[size()]} focusable={!props.filesUrl}>
+          <span class={SIZE_CONFIG[size()]}>
+            {size()}
+          </span>
+        </Tooltip>
         <Show when={props.filesUrl} fallback={
           <>
             <span class="text-success">+{props.additions}</span>

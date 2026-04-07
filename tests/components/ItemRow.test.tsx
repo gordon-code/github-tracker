@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
@@ -104,8 +104,12 @@ describe("ItemRow", () => {
   it("ignore button has relative z-10 to sit above overlay link", () => {
     render(() => <ItemRow {...defaultProps} />);
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
-    expect(ignoreBtn.className).toContain("relative");
-    expect(ignoreBtn.className).toContain("z-10");
+    // The Tooltip wrapper span carries relative z-10; the button itself is inside it
+    const tooltipTrigger = ignoreBtn.closest("span.relative");
+    expect(tooltipTrigger).not.toBeNull();
+    expect(tooltipTrigger!.className).toContain("z-10");
+    expect(tooltipTrigger!.className).toContain("shrink-0");
+    expect(tooltipTrigger!.className).toContain("self-center");
   });
 
   it("applies compact padding in compact density", () => {
@@ -180,13 +184,47 @@ describe("ItemRow", () => {
     const created = container.querySelector(`time[datetime="${defaultProps.createdAt}"]`);
     const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
     expect(created!.textContent).toBe("2h");
-    expect(created!.getAttribute("title")).toBe(`Created: ${new Date(defaultProps.createdAt).toLocaleString()}`);
     expect(updated!.textContent).toBe("30m");
-    expect(updated!.getAttribute("title")).toBe(`Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`);
     // Middle dot separator is a <span> with aria-hidden
     const dot = container.querySelector('span[aria-hidden="true"]');
     expect(dot).not.toBeNull();
     expect(dot!.textContent).toBe("\u00B7");
+  });
+
+  it("shows date tooltip content on hover", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(() => <ItemRow {...defaultProps} />);
+    const createdTrigger = container.querySelector(
+      `time[datetime="${defaultProps.createdAt}"]`
+    )?.closest("span.inline-flex");
+    expect(createdTrigger).not.toBeNull();
+    fireEvent.pointerEnter(createdTrigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain(
+      `Created: ${new Date(defaultProps.createdAt).toLocaleString()}`
+    );
+    fireEvent.pointerLeave(createdTrigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("shows updated date tooltip content on hover", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(() => <ItemRow {...defaultProps} />);
+    const updatedTrigger = container.querySelector(
+      `time[datetime="${defaultProps.updatedAt}"]`
+    )?.closest("span.inline-flex");
+    expect(updatedTrigger).not.toBeNull();
+    fireEvent.pointerEnter(updatedTrigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain(
+      `Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`
+    );
+    fireEvent.pointerLeave(updatedTrigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
   });
 
   it("shows single date when createdAt equals updatedAt (zero diff)", () => {
@@ -274,6 +312,45 @@ describe("ItemRow", () => {
     const updated = container.querySelector(`time[datetime="${defaultProps.updatedAt}"]`);
     expect(created!.getAttribute("aria-label")).toMatch(/^Created 2 hours? ago$/);
     expect(updated!.getAttribute("aria-label")).toMatch(/^Updated 30 minutes? ago$/);
+  });
+
+  it("shows comment count tooltip with correct pluralization", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(() => (
+      <ItemRow {...defaultProps} commentCount={5} />
+    ));
+    const tooltipTriggers = container.querySelectorAll("span.inline-flex");
+    const commentTrigger = Array.from(tooltipTriggers).find(
+      (el) => el.textContent?.includes("5")
+    );
+    expect(commentTrigger).not.toBeNull();
+    fireEvent.pointerEnter(commentTrigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("5 total comments");
+    fireEvent.pointerLeave(commentTrigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("shows singular 'comment' for commentCount=1", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(() => (
+      <ItemRow {...defaultProps} commentCount={1} />
+    ));
+    const tooltipTriggers = container.querySelectorAll("span.inline-flex");
+    const commentTrigger = Array.from(tooltipTriggers).find(
+      (el) => el.textContent?.trim() === "1"
+    );
+    expect(commentTrigger).not.toBeNull();
+    fireEvent.pointerEnter(commentTrigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("1 total comment");
+    expect(document.body.textContent).not.toContain("1 total comments");
+    fireEvent.pointerLeave(commentTrigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
   });
 
   it("refreshTick forces time display update", () => {

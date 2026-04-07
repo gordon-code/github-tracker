@@ -23,6 +23,7 @@ import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
+import { Tooltip } from "../shared/Tooltip";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -470,7 +471,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
-                          <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          <Tooltip content="Showing all activity, not just yours" focusable>
+                            <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                          </Tooltip>
                         </Show>
                         <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
                           <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
@@ -605,11 +608,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                     </span>
                                   </Show>
                                   <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
-                                    <span class="text-xs text-base-content/60" title={pr.reviewerLogins.join(", ")}>
-                                      Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
-                                      {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
-                                      {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
-                                    </span>
+                                    <Tooltip content={pr.reviewerLogins.join(", ")} focusable>
+                                      <span class="text-xs text-base-content/60">
+                                        Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
+                                        {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
+                                        {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
+                                      </span>
+                                    </Tooltip>
                                   </Show>
                                 </div>
                               </ItemRow>

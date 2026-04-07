@@ -14,6 +14,7 @@ import Section from "./Section";
 import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
 import TrackedUsersSection from "./TrackedUsersSection";
+import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
 
 export default function SettingsPage() {
@@ -379,6 +380,7 @@ export default function SettingsPage() {
           </SettingRow>
           <SettingRow
             label="CI status refresh"
+            labelSuffix={<InfoTooltip content="Targeted refresh for in-flight CI checks and pending PR status. Separate from the full refresh cycle." />}
             description="How often to re-check in-flight CI checks and workflow runs (10-120s)"
           >
             <input
@@ -716,6 +718,35 @@ export default function SettingsPage() {
             </button>
           </SettingRow>
         </Section>
+
+        <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
+          <div class="flex items-center justify-center gap-3">
+            <a
+              href="https://github.com/gordon-code/github-tracker"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="link link-hover"
+            >
+              Source
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="link link-hover"
+            >
+              Guide
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href="/privacy"
+              class="link link-hover"
+            >
+              Privacy
+            </a>
+          </div>
+        </footer>
       </div>
     </div>
   );

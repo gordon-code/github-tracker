@@ -1,6 +1,7 @@
 import { createMemo, For, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
 import WorkflowRunRow from "./WorkflowRunRow";
+import { Tooltip } from "../shared/Tooltip";
 
 interface WorkflowSummaryCardProps {
   workflowName: string;
@@ -81,19 +82,25 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
         </span>
         <div class="flex items-center gap-1.5 shrink-0">
           <Show when={counts().success > 0}>
-            <span class="text-xs font-medium text-success" title={`${counts().success} successful`} aria-label={`${counts().success} successful`}>
-              {counts().success}
-            </span>
+            <Tooltip content={`${counts().success} successful`}>
+              <span class="text-xs font-medium text-success" aria-label={`${counts().success} successful`}>
+                {counts().success}
+              </span>
+            </Tooltip>
           </Show>
           <Show when={counts().failure > 0}>
-            <span class="text-xs font-medium text-error" title={`${counts().failure} failed`} aria-label={`${counts().failure} failed`}>
-              {counts().failure}
-            </span>
+            <Tooltip content={`${counts().failure} failed`}>
+              <span class="text-xs font-medium text-error" aria-label={`${counts().failure} failed`}>
+                {counts().failure}
+              </span>
+            </Tooltip>
           </Show>
           <Show when={counts().running > 0}>
-            <span class="text-xs font-medium text-warning" title={`${counts().running} running`} aria-label={`${counts().running} running`}>
-              {counts().running}
-            </span>
+            <Tooltip content={`${counts().running} running`}>
+              <span class="text-xs font-medium text-warning" aria-label={`${counts().running} running`}>
+                {counts().running}
+              </span>
+            </Tooltip>
           </Show>
         </div>
       </div>

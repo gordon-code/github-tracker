@@ -3,6 +3,7 @@ import type { TrackedUser } from "../../stores/config";
 import { user } from "../../stores/auth";
 import { validateGitHubUser } from "../../services/api";
 import { getClient } from "../../services/github";
+import { Tooltip } from "../shared/Tooltip";
 
 interface TrackedUsersSectionProps {
   users: TrackedUser[];
@@ -125,29 +126,33 @@ export default function TrackedUsersSection(props: TrackedUsersSectionProps) {
                   </span>
                 </Show>
                 <Show when={trackedUser.type === "bot"}>
-                  <span class="badge badge-xs badge-outline" aria-label={`${trackedUser.login} is a bot account`}>bot</span>
+                  <Tooltip content="GitHub identifies this as a bot account" focusable>
+                    <span class="badge badge-xs badge-outline" aria-label={`${trackedUser.login} is a bot account`}>bot</span>
+                  </Tooltip>
                 </Show>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => handleRemove(trackedUser.login)}
-              class="btn btn-sm btn-ghost btn-circle"
-              aria-label={`Remove ${trackedUser.login}`}
-            >
-              <svg
-                class="h-4 w-4"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                aria-hidden="true"
+            <Tooltip content={`Stop tracking ${trackedUser.login}`}>
+              <button
+                type="button"
+                onClick={() => handleRemove(trackedUser.login)}
+                class="btn btn-sm btn-ghost btn-circle"
+                aria-label={`Remove ${trackedUser.login}`}
               >
-                <path
-                  fill-rule="evenodd"
-                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                  clip-rule="evenodd"
-                />
-              </svg>
-            </button>
+                <svg
+                  class="h-4 w-4"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
         )}
       </For>

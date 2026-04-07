@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import WorkflowRunRow from "../../src/app/components/dashboard/WorkflowRunRow";
@@ -36,8 +36,27 @@ describe("WorkflowRunRow", () => {
     const timeEl = container.querySelector("time");
     expect(timeEl).not.toBeNull();
     expect(timeEl!.getAttribute("datetime")).toBe(createdAt);
-    expect(timeEl!.getAttribute("title")).toBe(`Created: ${new Date(createdAt).toLocaleString()}`);
     expect(timeEl!.textContent).toMatch(/2 hours? ago/);
+  });
+
+  it("shows date tooltip content on hover", () => {
+    vi.useFakeTimers();
+    const createdAt = new Date(MOCK_NOW - 2 * 60 * 60 * 1000).toISOString();
+    const run = makeWorkflowRun({ createdAt });
+    const { container, unmount } = render(() => (
+      <WorkflowRunRow run={run} onIgnore={() => {}} density="comfortable" />
+    ));
+    const timeTrigger = container.querySelector("time")?.closest("span.inline-flex");
+    expect(timeTrigger).not.toBeNull();
+    fireEvent.pointerEnter(timeTrigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain(
+      `Created: ${new Date(createdAt).toLocaleString()}`
+    );
+    fireEvent.pointerLeave(timeTrigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
   });
 
   it("updates time display when refreshTick changes", () => {

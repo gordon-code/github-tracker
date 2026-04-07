@@ -2,6 +2,7 @@ import { createMemo, For, Show } from "solid-js";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import type { TabId } from "../layout/TabBar";
 import { viewState, updateViewState, resetAllTabFilters, setTabFilter } from "../../stores/view";
+import { InfoTooltip } from "../shared/Tooltip";
 
 interface SummaryCount {
   label: string;
@@ -176,6 +177,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
             </>
           )}
         </For>
+        <InfoTooltip content="Click any count to view those items." placement="bottom" />
       </div>
     </Show>
   );

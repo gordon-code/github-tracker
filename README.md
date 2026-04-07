@@ -10,6 +10,10 @@ A dashboard for tracking GitHub issues, PRs, and Actions workflow runs across ma
 
 ![Dashboard](docs/dashboard-screenshot.png)
 
+## Documentation
+
+For detailed feature documentation, see the [User Guide](docs/USER_GUIDE.md).
+
 ## Features
 
 ### Issues
@@ -18,7 +22,7 @@ Open issues where you're the creator, assignee, or mentioned. A scope filter let
 
 ### Pull Requests
 
-Open PRs with CI status dots (green/yellow/red), review decision badges, size badges (XS–XXL by lines changed), and draft indicators. A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
+Open PRs with CI status dots (green/yellow/red), review decision badges, size badges (XS–XL by lines changed), and draft indicators. A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
 
 ### Actions
 
@@ -96,11 +100,11 @@ src/
       layout/       # Header, TabBar, FilterBar
       onboarding/   # OnboardingWizard, OrgSelector, RepoSelector
       settings/     # SettingsPage, TrackedUsersSection, ThemePicker, Section, SettingRow
-      shared/       # 18 shared components: FilterInput, FilterChips, StatusDot,
+      shared/       # 19 shared components: FilterInput, FilterChips, StatusDot,
                     # ReviewBadge, SizeBadge, RoleBadge, SortDropdown, PaginationControls,
                     # LoadingSpinner, SkeletonRows, ToastContainer, NotificationDrawer,
                     # RepoLockControls, UserAvatarBadge, ExpandCollapseButtons,
-                    # RepoGitHubLink, ChevronIcon, ExternalLinkIcon
+                    # RepoGitHubLink, ChevronIcon, ExternalLinkIcon, Tooltip/InfoTooltip
     lib/            # 14 modules: format, errors, notifications, oauth, pat, url,
                     # flashDetection, grouping, reorderHighlight, collections,
                     # emoji, label-colors, sentry, github-emoji-map.json
@@ -117,8 +121,8 @@ src/
       view.ts       # View state (tabs, sorting, filters, ignored items, locked repos)
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
-tests/              # 1522 unit/component tests across 69 test files
-e2e/                # 14 E2E tests across 2 spec files
+tests/              # unit/component tests across 70 test files
+e2e/                # 15 E2E tests across 3 spec files
 ```
 
 ## Development

@@ -1,0 +1,212 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { Tooltip, InfoTooltip } from "../../../src/app/components/shared/Tooltip";
+
+describe("Tooltip", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders children correctly", () => {
+    render(() => (
+      <Tooltip content="Tooltip text">
+        <button type="button">Click me</button>
+      </Tooltip>
+    ));
+    expect(screen.getByRole("button", { name: "Click me" })).toBeTruthy();
+  });
+
+  it("trigger has inline-flex class", () => {
+    const { container } = render(() => (
+      <Tooltip content="Tooltip text">
+        <span>Child</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger).not.toBeNull();
+  });
+
+  it("focusable prop adds tabindex='0' to trigger span", () => {
+    const { container } = render(() => (
+      <Tooltip content="Tooltip text" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("without focusable, trigger span has no tabindex", () => {
+    const { container } = render(() => (
+      <Tooltip content="Tooltip text">
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger?.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("class prop merges with trigger span classes", () => {
+    const { container } = render(() => (
+      <Tooltip content="Tooltip text" class="relative z-10">
+        <span>Child</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger?.classList.contains("inline-flex")).toBe(true);
+    expect(trigger?.classList.contains("relative")).toBe(true);
+    expect(trigger?.classList.contains("z-10")).toBe(true);
+  });
+
+  it("tooltip content is not visible before hover", () => {
+    render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    expect(document.body.textContent).not.toContain("tooltip text");
+  });
+
+  it("shows tooltip content after 300ms hover delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    // Content should not be visible before delay fires
+    expect(document.body.textContent).not.toContain("tooltip text");
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("tooltip text");
+  });
+
+  it("cancels tooltip if pointer leaves before 300ms delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(150);
+    fireEvent.pointerLeave(trigger);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).not.toContain("tooltip text");
+  });
+
+  it("closes tooltip state when pointer leaves after it is visible", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.pointerLeave(trigger);
+    // closeDelay is 100ms. Advance 300ms to cover both the 100ms closeDelay and Kobalte's
+    // globalSkipDelayTimeout (300ms), so global tooltip state resets before the next test.
+    vi.advanceTimersByTime(300);
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+  });
+
+  it("re-entering during closeDelay cancels the close timer", () => {
+    const { container } = render(() => (
+      <Tooltip content="tooltip text">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.pointerLeave(trigger);
+    // Re-enter within 100ms closeDelay — should cancel close
+    vi.advanceTimersByTime(50);
+    fireEvent.pointerEnter(trigger);
+    // The tooltip should still be expanded (closeTimer was cancelled before it fired)
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    // Clean up: close the tooltip so Kobalte's global state resets
+    fireEvent.pointerLeave(trigger);
+    vi.advanceTimersByTime(500);
+  });
+
+  it("shows tooltip on focusIn (keyboard access)", () => {
+    const { container } = render(() => (
+      <Tooltip content="focus tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.focusIn(trigger);
+    expect(document.body.textContent).toContain("focus tooltip");
+  });
+
+  it("closes tooltip state on focusOut", () => {
+    const { container } = render(() => (
+      <Tooltip content="focus tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.focusIn(trigger);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    fireEvent.focusOut(trigger);
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+  });
+
+  it("closes tooltip on Escape key via onOpenChange", () => {
+    const { container } = render(() => (
+      <Tooltip content="escape tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    // Open via focus
+    fireEvent.focusIn(trigger);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    // Escape should close via Kobalte's onOpenChange(false)
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+    // Advance past Kobalte's globalSkipDelayTimeout (300ms) so global state resets
+    vi.advanceTimersByTime(500);
+  });
+});
+
+describe("InfoTooltip", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders (i) button with aria-label 'More information'", () => {
+    render(() => <InfoTooltip content="Helpful info" />);
+    const btn = screen.getByRole("button", { name: "More information" });
+    expect(btn).toBeTruthy();
+    expect(btn.textContent?.trim()).toBe("i");
+  });
+
+  it("button has cursor-help class", () => {
+    render(() => <InfoTooltip content="Helpful info" />);
+    const btn = screen.getByRole("button", { name: "More information" });
+    expect(btn.classList.contains("cursor-help")).toBe(true);
+  });
+
+  it("shows tooltip content after hover (openDelay=300ms)", () => {
+    render(() => <InfoTooltip content="helpful info text" />);
+    const btn = screen.getByRole("button", { name: "More information" });
+    fireEvent.pointerEnter(btn);
+    expect(document.body.textContent).not.toContain("helpful info text");
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("helpful info text");
+  });
+});
