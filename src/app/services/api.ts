@@ -1280,13 +1280,10 @@ export async function fetchPREnrichment(
           .filter((l): l is string => l != null);
         const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
 
-        let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
-        const mss = node.mergeStateStatus;
-        if (mss === "DIRTY" || mss === "BEHIND") {
-          checkStatus = "conflict";
-        } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
-          checkStatus = "failure";
-        }
+        const checkStatus = applyMergeStateOverride(
+          node.mergeStateStatus,
+          mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+        );
 
         let headRepository: PREnrichmentData["headRepository"] = null;
         if (node.headRepository) {
@@ -1620,6 +1617,21 @@ function mapCheckStatus(state: string | null | undefined): CheckStatus["status"]
 }
 
 /**
+ * Applies mergeStateStatus overrides to a PR's checkStatus.
+ * DIRTY/BEHIND → conflict. UNSTABLE → failure unless checkStatus is already pending
+ * (a pending rollup means checks are still running, not conclusively failed).
+ * All other values (CLEAN, BLOCKED, HAS_HOOKS, UNKNOWN) pass through unchanged.
+ */
+function applyMergeStateOverride(
+  mergeStateStatus: string | null | undefined,
+  checkStatus: CheckStatus["status"],
+): CheckStatus["status"] {
+  if (mergeStateStatus === "DIRTY" || mergeStateStatus === "BEHIND") return "conflict";
+  if (mergeStateStatus === "UNSTABLE" && checkStatus !== "pending") return "failure";
+  return checkStatus;
+}
+
+/**
  * Maps a GraphQL reviewDecision string to the typed union or null.
  */
 function mapReviewDecision(
@@ -1664,17 +1676,12 @@ async function graphqlSearchPRs(
       .filter((l): l is string => l != null);
     const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
 
-    let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
     // mergeStateStatus overrides checkStatus when it indicates action is needed.
     // BLOCKED means required checks/reviews haven't passed — leave checkStatus from rollup.
-    const mss = node.mergeStateStatus;
-    if (mss === "DIRTY" || mss === "BEHIND") {
-      checkStatus = "conflict";
-    } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
-      checkStatus = "failure";
-    } else if (mss === "UNKNOWN" && checkStatus === null) {
-      checkStatus = null; // no-op, kept explicit for clarity
-    }
+    const checkStatus = applyMergeStateOverride(
+      node.mergeStateStatus,
+      mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+    );
 
     // Store fork info for fallback detection
     if (node.headRepository) {
@@ -2101,13 +2108,10 @@ export async function fetchHotPRStatus(
     for (const node of response.nodes) {
       if (!node || node.databaseId == null) continue;
 
-      let checkStatus = mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null);
-      const mss = node.mergeStateStatus;
-      if (mss === "DIRTY" || mss === "BEHIND") {
-        checkStatus = "conflict";
-      } else if (mss === "UNSTABLE" && checkStatus !== "pending") {
-        checkStatus = "failure";
-      }
+      const checkStatus = applyMergeStateOverride(
+        node.mergeStateStatus,
+        mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+      );
 
       results.set(node.databaseId, {
         state: node.state,

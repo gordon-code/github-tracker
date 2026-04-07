@@ -134,14 +134,14 @@ describe("fetchHotPRStatus", () => {
     expect(results.get(43)!.checkStatus).toBe("conflict");
   });
 
-  it("applies mergeStateStatus overrides: UNSTABLE with failed rollup -> failure", async () => {
+  it("applies mergeStateStatus overrides: UNSTABLE overrides SUCCESS rollup to failure", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [{
         databaseId: 44,
         state: "OPEN",
         mergeStateStatus: "UNSTABLE",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));

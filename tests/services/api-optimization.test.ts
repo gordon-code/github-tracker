@@ -5,6 +5,7 @@ import {
   fetchPullRequests,
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
+  fetchPREnrichment,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
@@ -675,4 +676,106 @@ describe("scaling behavior", () => {
       expect(combOctokit.graphql).toHaveBeenCalledTimes(combinedCalls);
     });
   }
+});
+
+// ── fetchPREnrichment: UNSTABLE+pending override ───────────────────────────────
+
+describe("fetchPREnrichment mergeStateStatus UNSTABLE override", () => {
+  function makeEnrichmentOctokit(mergeStateStatus: string, rollupState: string | null) {
+    return {
+      request: vi.fn(async () => ({ data: [], headers: {} })),
+      graphql: vi.fn(async () => ({
+        nodes: [{
+          databaseId: 100,
+          headRefOid: "abc123",
+          headRepository: { owner: { login: "octocat" }, nameWithOwner: "octocat/Hello-World" },
+          mergeStateStatus,
+          assignees: { nodes: [] },
+          reviewRequests: { nodes: [] },
+          latestReviews: { totalCount: 0, nodes: [] },
+          additions: 5,
+          deletions: 2,
+          changedFiles: 1,
+          comments: { totalCount: 0 },
+          reviewThreads: { totalCount: 0 },
+          commits: {
+            nodes: rollupState
+              ? [{ commit: { statusCheckRollup: { state: rollupState } } }]
+              : [],
+          },
+        }],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+      })),
+      paginate: { iterator: vi.fn() },
+    };
+  }
+
+  it("preserves pending checkStatus when UNSTABLE and rollup is PENDING", async () => {
+    const octokit = makeEnrichmentOctokit("UNSTABLE", "PENDING");
+    const { enrichments } = await fetchPREnrichment(octokit as never, ["PR_node1"]);
+    expect(enrichments.get(100)!.checkStatus).toBe("pending");
+  });
+
+  it("forces failure checkStatus when UNSTABLE and rollup is SUCCESS", async () => {
+    const octokit = makeEnrichmentOctokit("UNSTABLE", "SUCCESS");
+    const { enrichments } = await fetchPREnrichment(octokit as never, ["PR_node1"]);
+    expect(enrichments.get(100)!.checkStatus).toBe("failure");
+  });
+
+  it("forces failure checkStatus when UNSTABLE and rollup is absent", async () => {
+    const octokit = makeEnrichmentOctokit("UNSTABLE", null);
+    const { enrichments } = await fetchPREnrichment(octokit as never, ["PR_node1"]);
+    expect(enrichments.get(100)!.checkStatus).toBe("failure");
+  });
+});
+
+// ── fetchPullRequests (graphqlSearchPRs): UNSTABLE+pending override ───────────
+
+describe("fetchPullRequests processPRNode UNSTABLE override", () => {
+  const repos: RepoRef[] = [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }];
+
+  function makePRNodeWithMSS(mergeStateStatus: string, rollupState: string | null) {
+    return {
+      ...graphqlPRNode,
+      mergeStateStatus,
+      commits: {
+        nodes: rollupState
+          ? [{ commit: { statusCheckRollup: { state: rollupState } } }]
+          : [],
+      },
+    };
+  }
+
+  it("preserves pending checkStatus when UNSTABLE and rollup is PENDING", async () => {
+    const octokit = makeOctokit(async () => ({
+      search: makeSearchResponse([makePRNodeWithMSS("UNSTABLE", "PENDING")]),
+      rateLimit,
+    }));
+
+    const result = await fetchPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+    expect(result.pullRequests).toHaveLength(1);
+    expect(result.pullRequests[0].checkStatus).toBe("pending");
+  });
+
+  it("forces failure checkStatus when UNSTABLE and rollup is SUCCESS", async () => {
+    const octokit = makeOctokit(async () => ({
+      search: makeSearchResponse([makePRNodeWithMSS("UNSTABLE", "SUCCESS")]),
+      rateLimit,
+    }));
+
+    const result = await fetchPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+    expect(result.pullRequests).toHaveLength(1);
+    expect(result.pullRequests[0].checkStatus).toBe("failure");
+  });
+
+  it("forces failure checkStatus when UNSTABLE and rollup is absent", async () => {
+    const octokit = makeOctokit(async () => ({
+      search: makeSearchResponse([makePRNodeWithMSS("UNSTABLE", null)]),
+      rateLimit,
+    }));
+
+    const result = await fetchPullRequests(octokit as unknown as OctokitLike, repos, "testuser");
+    expect(result.pullRequests).toHaveLength(1);
+    expect(result.pullRequests[0].checkStatus).toBe("failure");
+  });
 });
