@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import { z } from "zod";
-import { pushNotification } from "../lib/errors.js";
-import { onAuthCleared } from "../stores/auth.js";
+import { pushNotification } from "../lib/errors";
+import { onAuthCleared } from "../stores/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -171,7 +171,10 @@ export function getUsageResetAt(): number | null {
 }
 
 export function updateResetAt(resetAt: number): void {
+  if (!Number.isFinite(resetAt) || resetAt <= 0) return;
   const current = _usageData.resetAt;
-  _usageData.resetAt = current === null ? resetAt : Math.max(current, resetAt);
+  const next = current === null ? resetAt : Math.max(current, resetAt);
+  if (next === current) return;
+  _usageData.resetAt = next;
   _setVersion((v) => v + 1);
 }

@@ -215,11 +215,12 @@ let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = n
  * Caches results for 5 seconds to avoid thrashing on rapid hovers.
  * GET /rate_limit is free — not counted against rate limits by GitHub.
  * Returns null if client unavailable or request fails.
+ * `fromCache: true` when the result came from the staleness cache (no HTTP call made).
  */
-export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
+export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo; fromCache: boolean } | null> {
   // Return cached result within 5-second staleness window
   if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
-    return _lastFetchResult;
+    return { ..._lastFetchResult, fromCache: true };
   }
 
   const client = getClient();
@@ -243,7 +244,7 @@ export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; gr
     };
     _lastFetchTime = Date.now();
     _lastFetchResult = result;
-    return result;
+    return { ...result, fromCache: false };
   } catch {
     return null;
   }

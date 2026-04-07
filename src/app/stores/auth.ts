@@ -108,7 +108,7 @@ export function expireToken(): void {
   localStorage.removeItem(DASHBOARD_STORAGE_KEY);
   _setToken(null);
   setUser(null);
-  _onClearCallbacks.forEach(cb => cb());
+  _onClearCallbacks.forEach((cb) => { try { cb(); } catch (e) { console.warn("[auth] callback failed during expireToken:", e); } });
   console.info("[auth] token expired (dashboard cache cleared)");
 }
 

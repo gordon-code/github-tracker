@@ -11,7 +11,7 @@ import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
-import { getUsageSnapshot, getUsageResetAt, resetUsageData } from "../../services/api-usage.js";
+import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpired } from "../../services/api-usage";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
@@ -71,7 +71,7 @@ export default function SettingsPage() {
     }
   });
 
-  const usageSnapshot = createMemo(() => getUsageSnapshot());
+  const usageSnapshot = createMemo(() => { checkAndResetIfExpired(); return getUsageSnapshot(); });
 
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
@@ -462,7 +462,7 @@ export default function SettingsPage() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colspan="2" class="font-medium">Total</td>
+                      <td colSpan={2} class="font-medium">Total</td>
                       <td class="tabular-nums font-medium">
                         {usageSnapshot().reduce((sum, r) => sum + r.count, 0).toLocaleString()}
                       </td>

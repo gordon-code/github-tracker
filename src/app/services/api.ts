@@ -1,6 +1,6 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit, updateRateLimitFromHeaders } from "./github";
 import { pushNotification } from "../lib/errors";
-import { trackApiCall, updateResetAt, type ApiCallSource } from "./api-usage.js";
+import { trackApiCall, updateResetAt, type ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────

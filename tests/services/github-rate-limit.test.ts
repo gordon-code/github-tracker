@@ -91,16 +91,20 @@ describe("fetchRateLimitDetails — staleness cache", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns same object reference for two calls within 5 seconds", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeSuccessResponse()));
+  it("returns the same data for two calls within 5 seconds (cache hit)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeSuccessResponse());
+    vi.stubGlobal("fetch", mockFetch);
 
-    // Seed the cache with a fresh call
+    // First call — may hit cache from prior test or hit network
     const result1 = await fetchRateLimitDetails();
     expect(result1).not.toBeNull();
+    const callsAfterFirst = mockFetch.mock.calls.length;
 
-    // Second call immediately (within the 5s window) — should hit cache
+    // Second call immediately — must not make a new network request
     const result2 = await fetchRateLimitDetails();
-    expect(result2).toBe(result1); // same object reference = cache hit
+    expect(result2).not.toBeNull();
+    expect(mockFetch.mock.calls.length).toBe(callsAfterFirst); // no extra calls
+    expect(result2!.core.remaining).toBe(result1!.core.remaining); // same data
   });
 });
 

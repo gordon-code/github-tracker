@@ -2,7 +2,7 @@ import { createSignal, createEffect, createRoot, untrack, onCleanup } from "soli
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
-import { trackApiCall, checkAndResetIfExpired } from "./api-usage.js";
+import { trackApiCall, checkAndResetIfExpired } from "./api-usage";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
