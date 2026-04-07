@@ -333,7 +333,6 @@ const ISSUES_SEARCH_QUERY = `
   ${LIGHT_ISSUE_FRAGMENT}
 `;
 
-
 // ── Two-phase rendering: light + heavy queries ───────────────────────────────
 
 const LIGHT_PR_FRAGMENT = `
