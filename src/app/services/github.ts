@@ -133,7 +133,11 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
   client.hook.wrap("request", async (request, options) => {
     const isGraphql = options.url === "/graphql";
     const method = (options.method ?? "GET").toUpperCase();
-    const apiSource = (options as Record<string, unknown>).apiSource as string | undefined;
+    // GraphQL: apiSource is passed via `request: { apiSource }` because @octokit/graphql
+    // treats unknown top-level keys as GraphQL variables. The `request` key is in
+    // NON_VARIABLE_OPTIONS so it's preserved in the parsed request options.
+    const reqMeta = (options as Record<string, unknown>).request as Record<string, unknown> | undefined;
+    const apiSource = reqMeta?.apiSource as string | undefined;
 
     let response;
     let status = 0;

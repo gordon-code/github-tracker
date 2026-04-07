@@ -640,7 +640,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       let response: TResponse;
       let isPartial = false;
       try {
-        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor, apiSource: source });
+        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor, request: { apiSource: source } });
       } catch (err) {
         const partial = extractSearchPartialData<TResponse>(err);
         if (partial) {
@@ -779,7 +779,7 @@ async function runForkPRFallback(
     const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
 
     try {
-      const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, apiSource: "forkCheck" });
+      const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, request: { apiSource: "forkCheck" } });
       if (forkResponse.rateLimit) {
         updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
       }
@@ -900,7 +900,7 @@ async function executeLightCombinedQuery(
     response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
       issueQ, prInvQ, prRevQ,
       issueCursor: null, prInvCursor: null, prRevCursor: null,
-      apiSource: source,
+      request: { apiSource: source },
     });
   } catch (err) {
     const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
@@ -1078,7 +1078,7 @@ async function graphqlUnfilteredSearch(
       try {
         response = await octokit.graphql<UnfilteredSearchResponse>(UNFILTERED_SEARCH_QUERY, {
           issueQ, prQ, issueCursor: null, prCursor: null,
-          apiSource: "unfilteredSearch",
+          request: { apiSource: "unfilteredSearch" },
         });
       } catch (err) {
         const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
@@ -1180,7 +1180,7 @@ export async function fetchPREnrichment(
     try {
       const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
         ids: batch,
-        apiSource: "heavyBackfill",
+        request: { apiSource: "heavyBackfill" },
       });
 
       if (response.rateLimit) {
@@ -1756,7 +1756,7 @@ export async function fetchHotPRStatus(
   const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
   let hadErrors = false;
   const settled = await Promise.allSettled(batches.map(async (batch) => {
-    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch, apiSource: "hotPRStatus" });
+    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch, request: { apiSource: "hotPRStatus" } });
     if (response.rateLimit) {
       updateGraphqlRateLimit(response.rateLimit);
     }
