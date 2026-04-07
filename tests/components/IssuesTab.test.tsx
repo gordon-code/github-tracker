@@ -407,7 +407,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("org/repo-b")).toBeNull();
 
     // Collapse all — only affects visible (filtered) repos
-    await user.click(screen.getByLabelText("Collapse all"));
+    await user.click(screen.getByLabelText("Collapse all repos"));
     expect(screen.queryByText("Alice issue")).toBeNull();
 
     // Remove filter — repo-b should still be expanded (was hidden during collapse-all)
@@ -469,7 +469,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Issue A")).toBeNull();
     expect(screen.queryByText("Issue B")).toBeNull();
 
-    await user.click(screen.getByLabelText("Expand all"));
+    await user.click(screen.getByLabelText("Expand all repos"));
     screen.getByText("Issue A");
     screen.getByText("Issue B");
   });
@@ -485,7 +485,7 @@ describe("IssuesTab", () => {
     screen.getByText("Issue A");
     screen.getByText("Issue B");
 
-    await user.click(screen.getByLabelText("Collapse all"));
+    await user.click(screen.getByLabelText("Collapse all repos"));
     expect(screen.queryByText("Issue A")).toBeNull();
     expect(screen.queryByText("Issue B")).toBeNull();
   });
@@ -581,7 +581,7 @@ describe("IssuesTab", () => {
     screen.getByText(/Page 1 of 2/);
 
     // Expand all — affects repos on ALL pages
-    await user.click(screen.getByLabelText("Expand all"));
+    await user.click(screen.getByLabelText("Expand all repos"));
     // Repo-a items visible on page 1
     screen.getByText("Repo A issue 0");
 

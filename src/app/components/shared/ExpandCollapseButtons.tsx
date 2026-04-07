@@ -8,10 +8,10 @@ export interface ExpandCollapseButtonsProps {
 export default function ExpandCollapseButtons(props: ExpandCollapseButtonsProps) {
   return (
     <div class="flex items-center gap-1">
-      <Tooltip content="Expand all">
+      <Tooltip content="Expand all repos">
         <button
           class="btn btn-ghost btn-xs"
-          aria-label="Expand all"
+          aria-label="Expand all repos"
           onClick={props.onExpandAll}
         >
           <svg
@@ -30,10 +30,10 @@ export default function ExpandCollapseButtons(props: ExpandCollapseButtonsProps)
           </svg>
         </button>
       </Tooltip>
-      <Tooltip content="Collapse all">
+      <Tooltip content="Collapse all repos">
         <button
           class="btn btn-ghost btn-xs"
-          aria-label="Collapse all"
+          aria-label="Collapse all repos"
           onClick={props.onCollapseAll}
         >
           <svg

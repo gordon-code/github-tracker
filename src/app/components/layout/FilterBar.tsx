@@ -2,6 +2,7 @@ import { createMemo, createSignal, createEffect, onCleanup, Show } from "solid-j
 import { Select } from "@kobalte/core/select";
 import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
+import { Tooltip } from "../shared/Tooltip";
 
 interface FilterBarProps {
   isRefreshing?: boolean;
@@ -118,34 +119,35 @@ export default function FilterBar(props: FilterBarProps) {
         </span>
       </Show>
 
-      <button
-        onClick={props.onRefresh}
-        disabled={props.isRefreshing}
-        class="btn btn-ghost btn-sm"
-        aria-label="Refresh data"
-      >
-        <Show
-          when={props.isRefreshing}
-          fallback={
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4 inline-block mr-1"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          }
+      <Tooltip content="Refresh data">
+        <button
+          onClick={props.onRefresh}
+          disabled={props.isRefreshing}
+          class="btn btn-ghost btn-sm"
+          aria-label="Refresh data"
         >
-          <span class="loading loading-spinner loading-xs mr-1" />
-        </Show>
-        Refresh
-      </button>
+          <Show
+            when={props.isRefreshing}
+            fallback={
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            }
+          >
+            <span class="loading loading-spinner loading-xs" />
+          </Show>
+        </button>
+      </Tooltip>
     </div>
   );
 }

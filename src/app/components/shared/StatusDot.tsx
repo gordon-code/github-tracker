@@ -57,7 +57,7 @@ export default function StatusDot(props: StatusDotProps) {
   );
 
   return (
-    <Tooltip content={cfg().label} focusable={!props.href}>
+    <Tooltip content={cfg().label} focusable={!props.href} placement="right">
       <Show when={props.href} fallback={dot()}>
         {(url) => (
           <a

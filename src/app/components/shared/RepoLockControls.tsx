@@ -49,7 +49,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
             </svg>
           </button>
         </Tooltip>
-        <Tooltip content={lockInfo().isFirst ? "Already at top" : "Move up"}>
+        <Tooltip content={lockInfo().isFirst ? "Already at top of pinned list" : "Move up"}>
           <button
             class="btn btn-ghost btn-xs"
             onClick={() => moveLockedRepo(props.tab, props.repoFullName, "up")}
@@ -62,7 +62,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
             </svg>
           </button>
         </Tooltip>
-        <Tooltip content={lockInfo().isLast ? "Already at bottom" : "Move down"}>
+        <Tooltip content={lockInfo().isLast ? "Already at bottom of pinned list" : "Move down"}>
           <button
             class="btn btn-ghost btn-xs"
             onClick={() => moveLockedRepo(props.tab, props.repoFullName, "down")}

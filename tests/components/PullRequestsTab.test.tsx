@@ -509,7 +509,7 @@ describe("PullRequestsTab", () => {
     expect(screen.queryByText("PR in repo A")).toBeNull();
     expect(screen.queryByText("PR in repo B")).toBeNull();
 
-    await user.click(screen.getByLabelText("Expand all"));
+    await user.click(screen.getByLabelText("Expand all repos"));
 
     screen.getByText("PR in repo A");
     screen.getByText("PR in repo B");
@@ -527,7 +527,7 @@ describe("PullRequestsTab", () => {
     screen.getByText("PR in repo A");
     screen.getByText("PR in repo B");
 
-    await user.click(screen.getByLabelText("Collapse all"));
+    await user.click(screen.getByLabelText("Collapse all repos"));
 
     expect(screen.queryByText("PR in repo A")).toBeNull();
     expect(screen.queryByText("PR in repo B")).toBeNull();
@@ -618,7 +618,7 @@ describe("PullRequestsTab", () => {
     screen.getByText(/Page 1 of 2/);
 
     // Expand all — affects repos on ALL pages
-    await user.click(screen.getByLabelText("Expand all"));
+    await user.click(screen.getByLabelText("Expand all repos"));
     // Repo-a items visible on page 1
     screen.getByText("Repo A PR 0");
 

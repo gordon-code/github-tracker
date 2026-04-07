@@ -177,7 +177,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
             </>
           )}
         </For>
-        <InfoTooltip content="Click a stat to jump to that tab with filters applied." placement="bottom" />
+        <InfoTooltip content="Click any count to view those items." placement="bottom" />
       </div>
     </Show>
   );
