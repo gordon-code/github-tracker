@@ -70,14 +70,23 @@ export default function ItemRow(props: ItemRowProps) {
   });
   const hasCompactTooltip = createMemo(() => isCompact() && compactLabelTooltip() !== "");
   const hasLabels = createMemo(() => props.labels.length > 0);
+  const repoShortName = createMemo(() => {
+    const slash = props.repo.indexOf("/");
+    return slash >= 0 ? props.repo.slice(slash + 1) : props.repo;
+  });
 
   return (
     <div
-      class={`group relative flex px-4 py-3 items-start gap-3 compact:px-3 compact:py-1 compact:items-center compact:gap-2
+      class={`group relative flex pl-6 pr-4 py-3 items-start gap-3 compact:pl-6 compact:pr-3 compact:py-1 compact:items-center compact:gap-2
         hover:bg-base-200
         transition-colors
         ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
+      {/* Poll spinner — absolute so it never causes reflow */}
+      <Show when={props.isPolling}>
+        <span class="absolute left-1 top-1/2 -translate-y-1/2 loading loading-spinner loading-xs text-base-content/40" />
+      </Show>
+
       {/* Overlay link — covers entire row; interactive children use relative z-10 */}
       <Show when={safeUrl()}>
         {(url) => (
@@ -91,17 +100,28 @@ export default function ItemRow(props: ItemRowProps) {
         )}
       </Show>
 
-      {/* Repo badge */}
+      {/* Repo badge — compact: short name + tooltip; comfortable: full name, no tooltip */}
       <Show when={!props.hideRepo}>
-        <Tooltip content={props.repo} class="shrink-0 relative z-10">
-          <span
-            class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
-              bg-primary/10 text-primary
-              text-xs px-2.5 py-1 compact:px-2 compact:py-0.5"
-          >
-            {props.repo}
-          </span>
-        </Tooltip>
+        <Show
+          when={isCompact()}
+          fallback={
+            <span
+              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
+                bg-primary/10 text-primary text-xs px-2.5 py-1"
+            >
+              {props.repo}
+            </span>
+          }
+        >
+          <Tooltip content={props.repo} class="shrink-0 relative z-10">
+            <span
+              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
+                bg-primary/10 text-primary text-xs px-2 py-0.5"
+            >
+              {repoShortName()}
+            </span>
+          </Tooltip>
+        </Show>
       </Show>
 
       {/* ── COMPACT LAYOUT: everything on one line ── */}
@@ -157,10 +177,6 @@ export default function ItemRow(props: ItemRowProps) {
           </time>
         </span>
 
-        {/* Poll spinner */}
-        <Show when={props.isPolling}>
-          <span class="loading loading-spinner loading-xs text-base-content/40 shrink-0" />
-        </Show>
       </Show>
 
       {/* ── COMFORTABLE LAYOUT: multi-line original ── */}
@@ -224,9 +240,6 @@ export default function ItemRow(props: ItemRowProps) {
               </Tooltip>
             </Show>
           </span>
-          <Show when={props.isPolling}>
-            <span class="loading loading-spinner loading-xs text-base-content/40" />
-          </Show>
           <Show when={(props.commentCount ?? 0) > 0}>
             <Tooltip content={`${props.commentCount} total ${props.commentCount === 1 ? "comment" : "comments"}`} focusable class="relative z-10">
               <span class="flex items-center gap-0.5">
@@ -293,7 +306,7 @@ export default function ItemRow(props: ItemRowProps) {
             {/* Eye-slash icon */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
+              class="h-4 w-4 compact:h-3.5 compact:w-3.5"
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden="true"

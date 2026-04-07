@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createStore, produce } from "solid-js/store";
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
@@ -133,15 +133,26 @@ export function resetConfig(): void {
 
 export function initConfigPersistence(): void {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingJson: string | undefined;
   createEffect(() => {
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
+    const json = JSON.stringify(snapshot);
+    pendingJson = json;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      pendingJson = undefined;
       try {
-        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(snapshot));
+        localStorage.setItem(CONFIG_STORAGE_KEY, json);
       } catch {
         pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
       }
     }, 200);
+    onCleanup(() => {
+      clearTimeout(debounceTimer);
+      if (pendingJson !== undefined) {
+        try { localStorage.setItem(CONFIG_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
+        pendingJson = undefined;
+      }
+    });
   });
 }
