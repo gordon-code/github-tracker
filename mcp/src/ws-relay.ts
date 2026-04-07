@@ -24,6 +24,8 @@ let _wss: WebSocketServer | null = null;
 let _client: WebSocket | null = null;
 let _isAlive = false;
 let _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+// PERF-005: Track the pong-timeout handle so we can clear it on disconnect/stop.
+let _pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let _idCounter = 0;
 
 interface PendingRequest {
@@ -56,12 +58,14 @@ function buildAllowedOrigins(): Set<string> {
   return combined;
 }
 
+// PERF-004: Compute allowed origins once at module scope rather than per connection.
+const ALLOWED_ORIGINS = buildAllowedOrigins();
+
 function isOriginAllowed(origin: string | undefined): boolean {
   // Non-browser clients (e.g. CLI tools) do not send Origin — allow them.
   if (origin === undefined) return true;
 
-  const allowed = buildAllowedOrigins();
-  if (allowed.has(origin)) return true;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
 
   // Allow any localhost/127.0.0.1 origin with any port
   try {
@@ -89,8 +93,10 @@ function startHeartbeat(): void {
     _isAlive = false;
     client.ping();
 
-    // Mark stalled if pong not received within timeout
-    setTimeout(() => {
+    // PERF-005: Store the pong-timeout handle so stopHeartbeat() can clear it.
+    if (_pongTimeoutTimer !== null) clearTimeout(_pongTimeoutTimer);
+    _pongTimeoutTimer = setTimeout(() => {
+      _pongTimeoutTimer = null;
       if (!_isAlive && _client === client && client.readyState === WebSocket.OPEN) {
         console.error("[mcp/ws] Pong timeout. Terminating stalled client.");
         client.terminate();
@@ -103,6 +109,11 @@ function stopHeartbeat(): void {
   if (_heartbeatTimer) {
     clearInterval(_heartbeatTimer);
     _heartbeatTimer = null;
+  }
+  // PERF-005: Also clear any pending pong-timeout timer.
+  if (_pongTimeoutTimer !== null) {
+    clearTimeout(_pongTimeoutTimer);
+    _pongTimeoutTimer = null;
   }
 }
 

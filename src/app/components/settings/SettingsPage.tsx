@@ -694,35 +694,50 @@ export default function SettingsPage() {
           description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
         >
           <SettingRow label="Enable relay">
+            {/* UI-001: Add role/aria-checked/aria-label for accessibility. */}
+            {/* UI-004: Use toggle toggle-primary (no toggle-sm) to match other toggles. */}
             <input
               type="checkbox"
-              class="toggle toggle-sm toggle-primary"
+              role="switch"
+              aria-checked={config.mcpRelayEnabled}
+              aria-label="Enable MCP relay"
+              class="toggle toggle-primary"
               checked={config.mcpRelayEnabled}
               onChange={(e) => saveWithFeedback({ mcpRelayEnabled: e.currentTarget.checked })}
             />
           </SettingRow>
           <Show when={config.mcpRelayEnabled}>
             <SettingRow label="Relay status">
-              <span
-                class={
-                  getRelayStatus() === "connected"
-                    ? "text-sm text-success"
-                    : getRelayStatus() === "connecting"
-                      ? "text-sm text-warning"
-                      : "text-sm text-base-content/60"
-                }
-              >
-                {getRelayStatus() === "connected"
-                  ? "Connected"
-                  : getRelayStatus() === "connecting"
-                    ? "Connecting..."
-                    : "Not connected"}
-              </span>
+              {/* UI-003: Memoize relay status to avoid redundant reactive reads. */}
+              {(() => {
+                const relayStatus = createMemo(() => getRelayStatus());
+                return (
+                  <span
+                    class={
+                      relayStatus() === "connected"
+                        ? "text-sm text-success"
+                        : relayStatus() === "connecting"
+                          ? "text-sm text-warning"
+                          : "text-sm text-base-content/60"
+                    }
+                  >
+                    {relayStatus() === "connected"
+                      ? "Connected"
+                      : relayStatus() === "connecting"
+                        ? "Connecting..."
+                        : "Not connected"}
+                  </span>
+                );
+              })()}
             </SettingRow>
             <SettingRow label="Port">
+              {/* UI-002: Add aria-label for accessibility. */}
+              {/* UI-005: Use input input-sm w-24 (no input-bordered) to match other inputs. */}
+              {/* UI-008: Reset to stored value on invalid blur. */}
               <input
                 type="number"
-                class="input input-sm input-bordered w-24"
+                aria-label="MCP relay port"
+                class="input input-sm w-24"
                 value={config.mcpRelayPort}
                 min={1024}
                 max={65535}
@@ -730,6 +745,8 @@ export default function SettingsPage() {
                   const port = parseInt(e.currentTarget.value, 10);
                   if (port >= 1024 && port <= 65535) {
                     saveWithFeedback({ mcpRelayPort: port });
+                  } else {
+                    e.currentTarget.value = String(config.mcpRelayPort);
                   }
                 }}
               />

@@ -1,3 +1,4 @@
+// FIX-008: All imports are at the top of the file.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -8,6 +9,8 @@ import {
   CompositeDataSource,
   setCachedConfig,
 } from "./data-source.js";
+import type { DataSource } from "./data-source.js";
+import type { DashboardSummary, Issue, PullRequest, RateLimitInfo, RepoRef, WorkflowRun } from "../../src/shared/types.js";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 import { startWebSocketServer, closeWebSocketServer, onNotification } from "./ws-relay.js";
@@ -101,9 +104,6 @@ async function main() {
 
 // ── Unavailable data source stub ──────────────────────────────────────────────
 // Used when no GITHUB_TOKEN is set — all methods throw a clear error.
-
-import type { DataSource } from "./data-source.js";
-import type { DashboardSummary, Issue, PullRequest, RateLimitInfo, RepoRef, WorkflowRun } from "../../src/shared/types.js";
 
 function createUnavailableDataSource(): DataSource {
   const err = () => Promise.reject(new Error(

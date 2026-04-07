@@ -163,6 +163,8 @@ interface WorkflowRunRaw {
   created_at: string;
   updated_at: string;
   run_started_at: string;
+  // BUG-007: completed_at is present in GitHub API response but was missing from the interface.
+  completed_at: string | null;
   run_attempt: number;
   display_title: string;
   actor: { login: string } | null;
@@ -187,7 +189,7 @@ function mapWorkflowRun(raw: WorkflowRunRaw, repoFullName: string): WorkflowRun 
     repoFullName,
     isPrRun: Array.isArray(raw.pull_requests) && raw.pull_requests.length > 0,
     runStartedAt: raw.run_started_at ?? raw.created_at,
-    completedAt: null,
+    completedAt: raw.completed_at ?? null,
     runAttempt: raw.run_attempt ?? 1,
     displayTitle: raw.display_title ?? raw.name ?? "",
     actorLogin: raw.actor?.login ?? "",
@@ -207,12 +209,11 @@ export class OctokitDataSource implements DataSource {
 
   private async getLogin(): Promise<string> {
     if (this._login) return this._login;
-    try {
-      const { data } = await this.octokit.request("GET /user");
-      this._login = (data as { login: string }).login;
-    } catch {
-      this._login = "";
-    }
+    // BUG-006: Throw if login cannot be determined to prevent empty `involves:` query strings.
+    const { data } = await this.octokit.request("GET /user");
+    const login = (data as { login: string }).login;
+    if (!login) throw new Error("Could not determine authenticated user login from GET /user");
+    this._login = login;
     return this._login;
   }
 
@@ -221,21 +222,38 @@ export class OctokitDataSource implements DataSource {
     const repos = resolveRepos(repo);
     const results: PullRequest[] = [];
 
-    for (const r of repos) {
-      const q = `is:pr+is:open+involves:${login}+repo:${r.owner}/${r.name}`;
-      try {
-        const { data } = await this.octokit.request("GET /search/issues", {
-          q,
-          per_page: 100,
-        });
-        const items = (data as { items: SearchItem[] }).items ?? [];
-        for (const item of items) {
-          if (item.pull_request !== undefined) {
-            results.push(mapSearchItemToPR(item, r.fullName));
+    // PERF-001: Batch repos into groups of 20 to avoid N+1 REST calls.
+    // GitHub search supports multiple repo: qualifiers in a single query.
+    const BATCH_SIZE = 20;
+    const batches: RepoRef[][] = [];
+    for (let i = 0; i < repos.length; i += BATCH_SIZE) {
+      batches.push(repos.slice(i, i + BATCH_SIZE));
+    }
+
+    const batchResults = await Promise.allSettled(
+      batches.map((batch) => {
+        const repoFilter = batch.map((r) => `repo:${r.owner}/${r.name}`).join("+");
+        const q = `is:pr+is:open+involves:${login}+${repoFilter}`;
+        return this.octokit.request("GET /search/issues", { q, per_page: 100 }).then(({ data }) => {
+          const items = (data as { items: SearchItem[] }).items ?? [];
+          const prs: PullRequest[] = [];
+          for (const item of items) {
+            if (item.pull_request !== undefined) {
+              // Derive repo from repository_url (last two segments: owner/name)
+              const repoFullName = item.repository_url.replace("https://api.github.com/repos/", "");
+              prs.push(mapSearchItemToPR(item, repoFullName));
+            }
           }
-        }
-      } catch (err) {
-        console.error(`[mcp] getOpenPRs error for ${r.fullName}:`, err instanceof Error ? err.message : String(err));
+          return prs;
+        });
+      })
+    );
+
+    for (const settled of batchResults) {
+      if (settled.status === "fulfilled") {
+        results.push(...settled.value);
+      } else {
+        console.error("[mcp] getOpenPRs batch error:", settled.reason instanceof Error ? settled.reason.message : String(settled.reason));
       }
     }
 
@@ -259,22 +277,37 @@ export class OctokitDataSource implements DataSource {
     const repos = resolveRepos(repo);
     const results: Issue[] = [];
 
-    for (const r of repos) {
-      const q = `is:issue+is:open+involves:${login}+repo:${r.owner}/${r.name}`;
-      try {
-        const { data } = await this.octokit.request("GET /search/issues", {
-          q,
-          per_page: 100,
-        });
-        const items = (data as { items: SearchItem[] }).items ?? [];
-        for (const item of items) {
-          // Filter out PRs from issue search
-          if (item.pull_request === undefined) {
-            results.push(mapSearchItemToIssue(item, r.fullName));
+    // PERF-002: Batch repos into groups of 20 to avoid N+1 REST calls.
+    const BATCH_SIZE = 20;
+    const batches: RepoRef[][] = [];
+    for (let i = 0; i < repos.length; i += BATCH_SIZE) {
+      batches.push(repos.slice(i, i + BATCH_SIZE));
+    }
+
+    const batchResults = await Promise.allSettled(
+      batches.map((batch) => {
+        const repoFilter = batch.map((r) => `repo:${r.owner}/${r.name}`).join("+");
+        const q = `is:issue+is:open+involves:${login}+${repoFilter}`;
+        return this.octokit.request("GET /search/issues", { q, per_page: 100 }).then(({ data }) => {
+          const items = (data as { items: SearchItem[] }).items ?? [];
+          const issues: Issue[] = [];
+          for (const item of items) {
+            // Filter out PRs from issue search
+            if (item.pull_request === undefined) {
+              const repoFullName = item.repository_url.replace("https://api.github.com/repos/", "");
+              issues.push(mapSearchItemToIssue(item, repoFullName));
+            }
           }
-        }
-      } catch (err) {
-        console.error(`[mcp] getOpenIssues error for ${r.fullName}:`, err instanceof Error ? err.message : String(err));
+          return issues;
+        });
+      })
+    );
+
+    for (const settled of batchResults) {
+      if (settled.status === "fulfilled") {
+        results.push(...settled.value);
+      } else {
+        console.error("[mcp] getOpenIssues batch error:", settled.reason instanceof Error ? settled.reason.message : String(settled.reason));
       }
     }
 
@@ -283,22 +316,32 @@ export class OctokitDataSource implements DataSource {
 
   async getFailingActions(repo?: string): Promise<WorkflowRun[]> {
     const repos = resolveRepos(repo);
-    const results: WorkflowRun[] = [];
 
-    for (const r of repos) {
-      for (const status of ["in_progress", "failure"] as const) {
-        try {
-          const { data } = await this.octokit.request(
-            "GET /repos/{owner}/{repo}/actions/runs",
-            { owner: r.owner, repo: r.name, status, per_page: 20 }
-          );
+    // PERF-003: Collect all {repo, status} pairs and run them in parallel.
+    const pairs = repos.flatMap((r) =>
+      (["in_progress", "failure"] as const).map((status) => ({ r, status }))
+    );
+
+    const settled = await Promise.allSettled(
+      pairs.map(({ r, status }) =>
+        this.octokit.request(
+          "GET /repos/{owner}/{repo}/actions/runs",
+          { owner: r.owner, repo: r.name, status, per_page: 20 }
+        ).then(({ data }) => {
           const runs = (data as { workflow_runs: WorkflowRunRaw[] }).workflow_runs ?? [];
-          for (const run of runs) {
-            results.push(mapWorkflowRun(run, r.fullName));
-          }
-        } catch (err) {
-          console.error(`[mcp] getFailingActions error for ${r.fullName} (${status}):`, err instanceof Error ? err.message : String(err));
-        }
+          return runs.map((run) => mapWorkflowRun(run, r.fullName));
+        })
+      )
+    );
+
+    const results: WorkflowRun[] = [];
+    for (let i = 0; i < settled.length; i++) {
+      const result = settled[i];
+      if (result.status === "fulfilled") {
+        results.push(...result.value);
+      } else {
+        const { r, status } = pairs[i];
+        console.error(`[mcp] getFailingActions error for ${r.fullName} (${status}):`, result.reason instanceof Error ? result.reason.message : String(result.reason));
       }
     }
 
@@ -420,16 +463,19 @@ export class OctokitDataSource implements DataSource {
       console.error("[mcp] getDashboardSummary review count error:", err instanceof Error ? err.message : String(err));
     }
 
-    // Failing runs: count across all repos
-    for (const r of repos) {
-      try {
-        const { data: runData } = await this.octokit.request(
+    // Failing runs: count across all repos (BUG-008: use total_count, not repo presence).
+    // Run in parallel with Promise.allSettled for performance (PERF-003).
+    const failingRunResults = await Promise.allSettled(
+      repos.map((r) =>
+        this.octokit.request(
           "GET /repos/{owner}/{repo}/actions/runs",
           { owner: r.owner, repo: r.name, status: "failure", per_page: 5 }
-        );
-        failingRunCount += (runData as { total_count: number }).total_count > 0 ? 1 : 0;
-      } catch {
-        // best-effort
+        )
+      )
+    );
+    for (const settled of failingRunResults) {
+      if (settled.status === "fulfilled") {
+        failingRunCount += (settled.value.data as { total_count: number }).total_count;
       }
     }
 
@@ -472,11 +518,18 @@ export class WebSocketDataSource implements DataSource {
   }
 
   async getRateLimit(): Promise<RateLimitInfo> {
-    const raw = await sendRelayRequest(METHODS.GET_RATE_LIMIT, {}) as { limit: number; remaining: number; resetAt: string };
+    // BUG-002: SPA relay returns { core: {...}, graphql: {...} } — unwrap the core property.
+    const raw = await sendRelayRequest(METHODS.GET_RATE_LIMIT, {}) as {
+      core?: { limit: number; remaining: number; resetAt: string };
+      limit?: number;
+      remaining?: number;
+      resetAt?: string;
+    };
+    const core = raw.core ?? (raw as { limit: number; remaining: number; resetAt: string });
     return {
-      limit: raw.limit,
-      remaining: raw.remaining,
-      resetAt: new Date(raw.resetAt),
+      limit: core.limit,
+      remaining: core.remaining,
+      resetAt: new Date(core.resetAt),
     };
   }
 

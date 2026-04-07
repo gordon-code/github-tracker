@@ -62,6 +62,16 @@ function getRelaySnapshot(): RelaySnapshot | null {
   return _snapshot;
 }
 
+// PERF-006: Hoist snapshot-dependent methods to a module-level Set to avoid
+// rebuilding the array on every request.
+const SNAPSHOT_METHODS: Set<string> = new Set([
+  METHODS.GET_DASHBOARD_SUMMARY,
+  METHODS.GET_OPEN_PRS,
+  METHODS.GET_OPEN_ISSUES,
+  METHODS.GET_FAILING_ACTIONS,
+  METHODS.GET_PR_DETAILS,
+]);
+
 // ── WebSocket connection ───────────────────────────────────────────────────────
 
 function clearBackoffTimer(): void {
@@ -73,16 +83,16 @@ function clearBackoffTimer(): void {
 
 function sendConfigUpdate(ws: WebSocket): void {
   if (ws.readyState !== WebSocket.OPEN) return;
+  // BUG-001: Send fields directly in params (not nested under config:)
+  // to match ConfigUpdatePayloadSchema on the MCP server side.
   const notification = {
     jsonrpc: "2.0",
     method: NOTIFICATIONS.CONFIG_UPDATE,
     params: {
-      config: {
-        selectedRepos: config.selectedRepos,
-        trackedUsers: config.trackedUsers,
-        upstreamRepos: config.upstreamRepos,
-        monitoredRepos: config.monitoredRepos,
-      },
+      selectedRepos: config.selectedRepos,
+      trackedUsers: config.trackedUsers,
+      upstreamRepos: config.upstreamRepos,
+      monitoredRepos: config.monitoredRepos,
     },
   };
   ws.send(JSON.stringify(notification));
@@ -98,16 +108,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
   const snapshot = getRelaySnapshot();
 
-  // Methods that need snapshot first
-  const snapshotMethods: string[] = [
-    METHODS.GET_DASHBOARD_SUMMARY,
-    METHODS.GET_OPEN_PRS,
-    METHODS.GET_OPEN_ISSUES,
-    METHODS.GET_FAILING_ACTIONS,
-    METHODS.GET_PR_DETAILS,
-  ];
-
-  if (snapshotMethods.includes(req.method) && !snapshot) {
+  if (SNAPSHOT_METHODS.has(req.method) && !snapshot) {
     sendResponse(ws, {
       jsonrpc: "2.0",
       id,
@@ -118,6 +119,11 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
   switch (req.method) {
     case METHODS.GET_DASHBOARD_SUMMARY: {
+      // BUG-005: The relay snapshot is inherently scoped to the user's items because
+      // the SPA's GraphQL search uses `involves:{user}`. The `scope` param is intentionally
+      // ignored here — the relay always reflects the user's current dashboard view.
+      // When scope is "all", relay mode still only returns the user's items (known limitation
+      // vs the Octokit fallback path which uses the scope param in the search query).
       const s = snapshot!;
       const openPRs = s.pullRequests.filter((p) => p.state === "open");
       const result = {
@@ -140,8 +146,23 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
         prs = prs.filter((p) => p.repoFullName === params["repo"]);
       }
       if (typeof params["status"] === "string" && params["status"]) {
+        // BUG-003: Map semantic status values to PR fields (same logic as OctokitDataSource).
         const status = params["status"];
-        prs = prs.filter((p) => p.checkStatus === status);
+        switch (status) {
+          case "draft":
+            prs = prs.filter((p) => p.draft);
+            break;
+          case "needs_review":
+            prs = prs.filter((p) => !p.draft && p.reviewDecision === "REVIEW_REQUIRED");
+            break;
+          case "failing":
+            prs = prs.filter((p) => p.checkStatus === "failure");
+            break;
+          case "approved":
+            prs = prs.filter((p) => p.reviewDecision === "APPROVED");
+            break;
+          // "all" and unknown values: no filter
+        }
       }
       sendResponse(ws, { jsonrpc: "2.0", id, result: prs });
       break;
@@ -159,8 +180,9 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
     case METHODS.GET_FAILING_ACTIONS: {
       const params = req.params ?? {};
+      // BUG-004: Include in_progress runs alongside failed/timed_out.
       let runs = snapshot!.workflowRuns.filter(
-        (r) => r.conclusion === "failure" || r.conclusion === "timed_out"
+        (r) => r.status === "in_progress" || r.conclusion === "failure" || r.conclusion === "timed_out"
       );
       if (typeof params["repo"] === "string" && params["repo"]) {
         runs = runs.filter((r) => r.repoFullName === params["repo"]);

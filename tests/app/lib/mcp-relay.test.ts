@@ -508,8 +508,9 @@ describe("connectRelay — config update on connect", () => {
     expect(sentMessages.length).toBeGreaterThan(0);
     const configMsg = sentMessages.find((m) => (JSON.parse(m) as { method?: string }).method === "config_update");
     expect(configMsg).toBeDefined();
-    const parsed = JSON.parse(configMsg!) as { params: { config: { selectedRepos: unknown[] } } };
-    expect(parsed.params.config.selectedRepos).toBeDefined();
+    // BUG-001 fix: params are flat (no config: wrapper) to match ConfigUpdatePayloadSchema.
+    const parsed = JSON.parse(configMsg!) as { params: { selectedRepos: unknown[] } };
+    expect(parsed.params.selectedRepos).toBeDefined();
   });
 
   it("uses the WebSocket constructor with the correct URL", () => {
