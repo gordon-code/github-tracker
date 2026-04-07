@@ -3,11 +3,16 @@ import { Select } from "@kobalte/core/select";
 import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
 import { Tooltip } from "../shared/Tooltip";
+import SortDropdown, { type SortOption } from "../shared/SortDropdown";
 
 interface FilterBarProps {
   isRefreshing?: boolean;
   lastRefreshedAt?: Date | null;
   onRefresh?: () => void;
+  sortOptions?: SortOption[];
+  sortValue?: string;
+  sortDirection?: "asc" | "desc";
+  onSortChange?: (field: string, direction: "asc" | "desc") => void;
 }
 
 export default function FilterBar(props: FilterBarProps) {
@@ -106,6 +111,15 @@ export default function FilterBar(props: FilterBarProps) {
           </Select.Content>
         </Select.Portal>
       </Select>
+
+      <Show when={props.sortOptions && props.sortValue != null && props.sortDirection && props.onSortChange}>
+        <SortDropdown
+          options={props.sortOptions!}
+          value={props.sortValue!}
+          direction={props.sortDirection!}
+          onChange={props.onSortChange!}
+        />
+      </Show>
 
       <div class="flex-1" />
 

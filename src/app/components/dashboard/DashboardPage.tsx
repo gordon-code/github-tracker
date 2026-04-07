@@ -8,7 +8,9 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference } from "../../stores/view";
+import { sortOptions as issueSortOptions } from "./IssuesTab";
+import { sortOptions as prSortOptions } from "./PullRequestsTab";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
 import {
@@ -372,6 +374,21 @@ export default function DashboardPage() {
     ];
   });
 
+  const activeSortOptions = createMemo(() => {
+    switch (activeTab()) {
+      case "issues": return issueSortOptions;
+      case "pullRequests": return prSortOptions;
+      default: return undefined;
+    }
+  });
+
+  const activeSortPref = createMemo(() => {
+    const tab = activeTab();
+    if (tab === "actions") return undefined;
+    const pref = viewState.sortPreferences[tab];
+    return pref ?? { field: "updatedAt", direction: "desc" as const };
+  });
+
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -397,6 +414,10 @@ export default function DashboardPage() {
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
               onRefresh={() => _coordinator()?.manualRefresh()}
+              sortOptions={activeSortOptions()}
+              sortValue={activeSortPref()?.field}
+              sortDirection={activeSortPref()?.direction}
+              onSortChange={(field, dir) => setSortPreference(activeTab(), field, dir)}
             />
           </div>
 

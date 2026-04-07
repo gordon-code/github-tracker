@@ -68,9 +68,9 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    // "All" button should appear
-    const allBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("All"));
-    expect(allBtn).toBeDefined();
+    // "All" option should appear (now role="option")
+    const allOption = screen.getAllByRole("option").find((o) => o.textContent?.includes("All"));
+    expect(allOption).toBeDefined();
     screen.getByText("Approved");
     screen.getByText("Changes requested");
   });
@@ -99,9 +99,9 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const buttons = screen.getAllByRole("button");
-    const approvedBtn = buttons.find((b) => b.textContent?.includes("Approved") && b !== trigger);
-    expect(approvedBtn?.textContent).toContain("✓");
+    const options = screen.getAllByRole("option");
+    const approvedOpt = options.find((o) => o.textContent?.includes("Approved"));
+    expect(approvedOpt?.textContent).toContain("✓");
   });
 
   it("clicking option calls onChange and closes popover", () => {
@@ -122,9 +122,9 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const buttons = screen.getAllByRole("button");
-    const allBtn = buttons.find((b) => b.textContent?.includes("All") && b !== trigger);
-    fireEvent.click(allBtn!);
+    const options = screen.getAllByRole("option");
+    const allOption = options.find((o) => o.textContent?.includes("All"));
+    fireEvent.click(allOption!);
     expect(onChange).toHaveBeenCalledWith("reviewDecision", "all");
   });
 
@@ -136,5 +136,40 @@ describe("FilterPopover", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("Escape closes popover (focus management)", () => {
+    render(() => <FilterPopover group={reviewGroup} value="all" onChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Filter by Review/i });
+    fireEvent.click(trigger);
+    vi.advanceTimersByTime(0);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    vi.advanceTimersByTime(0);
+    // Popover is closed; focus is managed by Kobalte (returns to trigger or nearby element)
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("option buttons use role='option' and aria-selected", () => {
+    render(() => <FilterPopover group={reviewGroup} value="APPROVED" onChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Filter by Review/i });
+    fireEvent.click(trigger);
+    vi.advanceTimersByTime(0);
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    const approvedOpt = options.find(o => o.textContent?.includes("Approved"));
+    expect(approvedOpt?.getAttribute("aria-selected")).toBe("true");
+    const changesOpt = options.find(o => o.textContent?.includes("Changes requested"));
+    expect(changesOpt?.getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("popover content has role='listbox' with group label", () => {
+    render(() => <FilterPopover group={reviewGroup} value="all" onChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Filter by Review/i });
+    fireEvent.click(trigger);
+    vi.advanceTimersByTime(0);
+    const listbox = document.querySelector("[role='listbox']");
+    expect(listbox).toBeTruthy();
+    expect(listbox?.getAttribute("aria-label")).toBe("Review");
   });
 });

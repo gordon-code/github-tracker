@@ -1,11 +1,10 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
-import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
 import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
@@ -52,7 +51,7 @@ const issueFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
-const sortOptions: SortOption[] = [
+export const sortOptions: SortOption[] = [
   { label: "Repo", field: "repo", type: "text" },
   { label: "Title", field: "title", type: "text" },
   { label: "Author", field: "author", type: "text" },
@@ -82,6 +81,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
   );
 
+  const isValidUserFilter = createMemo(() =>
+    !props.allUsers || props.allUsers.some(u => u.login === viewState.tabFilters.issues.user)
+  );
+
+  const ignoredIssues = createMemo(() =>
+    viewState.ignoredItems.filter(i => i.type === "issue")
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     const base = showScopeFilter()
@@ -105,6 +112,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     }
   });
 
+  // Auto-reset user filter when User filter group is hidden
+  createEffect(() => {
+    const users = props.allUsers;
+    if ((!users || users.length <= 1) && viewState.tabFilters.issues.user !== "all") {
+      setTabFilter("issues", "user", "all");
+    }
+  });
+
   const isInvolvedItem = (item: Issue) =>
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
@@ -117,8 +132,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     const filter = viewState.globalFilter;
     const tabFilter = viewState.tabFilters.issues;
     const ignored = new Set(
-      viewState.ignoredItems
-        .filter((i) => i.type === "issue")
+      ignoredIssues()
         .map((i) => i.id)
     );
 
@@ -149,7 +163,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
         if (!monitoredRepoNameSet().has(issue.repoFullName)) {
-          const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
+          const validUser = isValidUserFilter();
           if (validUser) {
             const surfacedBy = issue.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilter.user)) return false;
@@ -227,14 +241,9 @@ export default function IssuesTab(props: IssuesTabProps) {
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
-    () => viewState.ignoredItems.filter(i => i.type === "issue").length,
+    () => ignoredIssues().length,
     () => JSON.stringify(viewState.tabFilters.issues),
   );
-
-  function handleSort(field: string, direction: "asc" | "desc") {
-    setSortPreference("issues", field, direction);
-    setPage(0);
-  }
 
   function handleIgnore(issue: Issue) {
     ignoreItem({
@@ -248,15 +257,9 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Sort dropdown + filter chips + ignore badge toolbar */}
+      {/* Filter chips + ignore badge toolbar */}
       <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
-          <SortDropdown
-            options={sortOptions}
-            value={sortPref().field}
-            direction={sortPref().direction}
-            onChange={handleSort}
-          />
           <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.issues}
@@ -288,7 +291,7 @@ export default function IssuesTab(props: IssuesTabProps) {
             onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
-            items={viewState.ignoredItems.filter((i) => i.type === "issue")}
+            items={ignoredIssues()}
             onUnignore={unignoreItem}
           />
         </div>

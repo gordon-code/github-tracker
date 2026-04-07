@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
@@ -90,36 +90,10 @@ describe("PullRequestsTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("renders SortDropdown with all sort options", async () => {
-    const user = userEvent.setup();
+  it("SortDropdown is not rendered in the tab toolbar (moved to FilterBar)", () => {
     render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    const trigger = screen.getByRole("button", { name: /Sort by/ });
-    expect(trigger).toBeDefined();
-    await user.click(trigger);
-    const optionText = screen.getAllByRole("option").map((o) => o.textContent ?? "");
-    expect(optionText.some((t) => t.includes("Repo"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Title"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Author"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Checks"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Review"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Size"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Created"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Updated"))).toBe(true);
-  });
-
-  it("changes sort when SortDropdown selection changes", async () => {
-    const user = userEvent.setup();
-    const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
-    const prs = [makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })];
-    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
-
-    await user.click(screen.getByRole("button", { name: /Sort by/ }));
-    const titleDesc = screen.getAllByRole("option").find((o) => o.textContent?.includes("Title") && o.textContent?.includes("(Z-A)"));
-    expect(titleDesc).toBeDefined();
-    await user.click(titleDesc!);
-
-    expect(setSortSpy).toHaveBeenCalledWith("pullRequests", "title", "desc");
-    setSortSpy.mockRestore();
+    // SortDropdown was moved to FilterBar; not rendered in tab isolation
+    expect(screen.queryByRole("button", { name: /Sort by/ })).toBeNull();
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -435,8 +409,8 @@ describe("PullRequestsTab", () => {
       ignoredAt: Date.now(),
     });
     render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    // IgnoreBadge shows ignored count
-    screen.getByText(/1 ignored/i);
+    // IgnoreBadge now shows an icon button with aria-label
+    screen.getByRole("button", { name: /1 ignored/i });
   });
 
   it("paginates repo groups across pages", async () => {

@@ -6,14 +6,14 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 
-const IssueFiltersSchema = z.object({
+export const IssueFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "assignee"]).default("all"),
   comments: z.enum(["all", "has", "none"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
-const PullRequestFiltersSchema = z.object({
+export const PullRequestFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
@@ -23,7 +23,7 @@ const PullRequestFiltersSchema = z.object({
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
-const ActionsFiltersSchema = z.object({
+export const ActionsFiltersSchema = z.object({
   conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "other"]).default("all"),
   event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
 });

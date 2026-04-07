@@ -48,11 +48,12 @@ export default function FilterPopover(props: FilterPopoverProps) {
         </svg>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content class="filter-popover-content bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 p-2 min-w-40 max-h-64 overflow-y-auto">
+        <Popover.Content role="listbox" aria-label={props.group.label} class="filter-popover-content bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 p-2 min-w-40 max-h-64 overflow-y-auto">
           <Show when={!props.group.defaultValue}>
             <button
               type="button"
-              aria-pressed={value() === "all"}
+              role="option"
+              aria-selected={value() === "all"}
               class={`w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${value() === "all" ? "font-medium" : ""}`}
               onClick={() => {
                 props.onChange(props.group.field, "all");
@@ -66,7 +67,8 @@ export default function FilterPopover(props: FilterPopoverProps) {
             {(opt) => (
               <button
                 type="button"
-                aria-pressed={value() === opt.value}
+                role="option"
+                aria-selected={value() === opt.value}
                 class={`w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${value() === opt.value ? "font-medium" : ""}`}
                 onClick={() => {
                   props.onChange(props.group.field, opt.value);

@@ -117,9 +117,11 @@
   to   { opacity: 0; transform: scale(0.95); }
 }
 .filter-popover-content[data-expanded] {
+  transform-origin: top;
   animation: popover-fade-in 0.15s ease-out forwards;
 }
 .filter-popover-content[data-closed] {
+  transform-origin: top;
   animation: popover-fade-out 0.15s ease-in forwards;
 }
 

@@ -135,6 +135,10 @@ export default function ActionsTab(props: ActionsTabProps) {
     [...new Set(props.workflowRuns.map((r) => r.repoFullName))]
   );
 
+  const ignoredWorkflowRuns = createMemo(() =>
+    viewState.ignoredItems.filter(i => i.type === "workflowRun")
+  );
+
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
@@ -163,8 +167,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   const filteredRuns = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
     const ignoredIds = new Set(
-      viewState.ignoredItems
-        .filter((i) => i.type === "workflowRun")
+      ignoredWorkflowRuns()
         .map((i) => i.id)
     );
     const conclusionFilter = viewState.tabFilters.actions.conclusion;
@@ -211,7 +214,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   const highlightedReposActions = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.actions,
-    () => viewState.ignoredItems.filter(i => i.type === "workflowRun").length,
+    () => ignoredWorkflowRuns().length,
     () => JSON.stringify(viewState.tabFilters.actions),
   );
 
@@ -242,7 +245,7 @@ export default function ActionsTab(props: ActionsTabProps) {
             onCollapseAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
-            items={viewState.ignoredItems.filter((i) => i.type === "workflowRun")}
+            items={ignoredWorkflowRuns()}
             onUnignore={unignoreItem}
           />
         </div>

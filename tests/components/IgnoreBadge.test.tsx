@@ -15,6 +15,11 @@ function makeIgnoredItem(overrides: Partial<IgnoredItem> = {}): IgnoredItem {
   };
 }
 
+// Helper to get the trigger button by aria-label pattern
+function getTrigger(count: number) {
+  return screen.getByRole("button", { name: new RegExp(`${count} ignored`, "i") });
+}
+
 describe("IgnoreBadge", () => {
   it("renders nothing when items is empty", () => {
     const { container } = render(() => (
@@ -23,17 +28,20 @@ describe("IgnoreBadge", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("shows count of ignored items in badge", () => {
+  it("shows count badge on the trigger button", () => {
     const items = [makeIgnoredItem(), makeIgnoredItem(), makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    screen.getByText("3 ignored");
+    // The count badge span shows the number
+    expect(screen.getByText("3")).toBeDefined();
+    // The button has accessible aria-label
+    getTrigger(3);
   });
 
   it("clicking badge toggles popover open (aria-expanded)", async () => {
     const user = userEvent.setup();
     const items = [makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    const button = screen.getByText("1 ignored");
+    const button = getTrigger(1);
     // Initially closed
     expect(button.getAttribute("aria-expanded")).toBe("false");
 
@@ -47,7 +55,7 @@ describe("IgnoreBadge", () => {
     const user = userEvent.setup();
     const items = [makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    const button = screen.getByText("1 ignored");
+    const button = getTrigger(1);
 
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
@@ -63,7 +71,7 @@ describe("IgnoreBadge", () => {
       makeIgnoredItem({ id: "2", repo: "owner/repo-b", title: "Issue Beta" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    await user.click(screen.getByText("2 ignored"));
+    await user.click(getTrigger(2));
 
     screen.getByText("Issue Alpha");
     screen.getByText("Issue Beta");
@@ -78,7 +86,7 @@ describe("IgnoreBadge", () => {
       makeIgnoredItem({ id: "abc-123", title: "My Issue" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
-    await user.click(screen.getByText("1 ignored"));
+    await user.click(getTrigger(1));
 
     const unignoreBtn = screen.getByText("Unignore");
     await user.click(unignoreBtn);
@@ -95,7 +103,7 @@ describe("IgnoreBadge", () => {
       makeIgnoredItem({ id: "3" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
-    await user.click(screen.getByText("3 ignored"));
+    await user.click(getTrigger(3));
 
     const unignoreAllBtn = screen.getByText("Unignore All");
     await user.click(unignoreAllBtn);
@@ -110,7 +118,7 @@ describe("IgnoreBadge", () => {
     const user = userEvent.setup();
     const items = [makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
-    const button = screen.getByText("1 ignored");
+    const button = getTrigger(1);
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
 
