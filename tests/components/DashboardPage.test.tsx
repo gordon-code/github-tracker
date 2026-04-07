@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import type { DashboardData } from "../../src/app/services/poll";
@@ -839,6 +839,7 @@ describe("DashboardPage — tracked tab", () => {
     viewStore.updateViewState({
       trackedItems: [{
         id: 999,
+        number: 99,
         type: "issue" as const,
         repoFullName: "org/repo",
         title: "Will be pruned",
@@ -872,6 +873,7 @@ describe("DashboardPage — tracked tab", () => {
     viewStore.updateViewState({
       trackedItems: [{
         id: 888,
+        number: 88,
         type: "issue" as const,
         repoFullName: "org/deselected-repo",
         title: "Should be kept",
@@ -894,6 +896,96 @@ describe("DashboardPage — tracked tab", () => {
     await waitFor(() => {
       expect(viewStore.viewState.trackedItems.length).toBe(1);
       expect(viewStore.viewState.trackedItems[0].id).toBe(888);
+    });
+  });
+
+  it("does not prune tracked items when hasFetchedFresh is false (cold start)", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 777,
+        number: 77,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Should survive cold start",
+        addedAt: Date.now(),
+      }],
+    });
+    // hasFetchedFresh stays false (its initial state) — do NOT call _resetHasFetchedFresh(true)
+    // Do NOT trigger a poll (which would set hasFetchedFresh=true internally).
+    // The prune effect should not fire against stale cached data.
+
+    // Allow reactive effects to settle
+    await waitFor(() => {
+      // Item should NOT be pruned — hasFetchedFresh is false
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+      expect(viewStore.viewState.trackedItems[0].id).toBe(777);
+    });
+  });
+
+  it("prunes tracked items from upstream repos", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [],
+      upstreamRepos: [{ owner: "ext", name: "upstream", fullName: "ext/upstream" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 666,
+        number: 66,
+        type: "issue" as const,
+        repoFullName: "ext/upstream",
+        title: "Upstream item closed",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
+  });
+
+  it("resolveInitialTab falls back to issues when tracked tab disabled", () => {
+    viewStore.updateViewState({ lastActiveTab: "tracked" });
+    configStore.updateConfig({ rememberLastTab: true, enableTracking: false });
+    render(() => <DashboardPage />);
+    // Should show Issues content, not Tracked content
+    expect(screen.queryByText("No tracked items")).toBeNull();
+  });
+
+  it("redirects away from tracked tab when tracking disabled at runtime", async () => {
+    configStore.updateConfig({ enableTracking: true });
+    render(() => <DashboardPage />);
+
+    // Switch to tracked tab
+    const trackedTab = screen.getByText("Tracked");
+    fireEvent.click(trackedTab);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("tracked");
+    });
+
+    // Disable tracking — should redirect to issues
+    configStore.updateConfig({ enableTracking: false });
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("issues");
     });
   });
 });

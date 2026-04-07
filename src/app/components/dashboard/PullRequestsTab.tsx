@@ -350,6 +350,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (config.enableTracking) untrackItem(pr.id, "pullRequest");
   }
 
+  function handleTrack(pr: PullRequest) {
+    if (trackedPrIds().has(pr.id)) {
+      untrackItem(pr.id, "pullRequest");
+    } else {
+      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
+    }
+  }
+
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar */}
@@ -560,13 +568,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 labels={pr.labels}
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
-                                onTrack={config.enableTracking ? () => {
-                                  if (trackedPrIds().has(pr.id)) {
-                                    untrackItem(pr.id, "pullRequest");
-                                  } else {
-                                    trackItem({ id: pr.id, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
-                                  }
-                                } : undefined}
+                                onTrack={config.enableTracking ? () => handleTrack(pr) : undefined}
                                 isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
                                 density={config.viewDensity}
                                 surfacedByBadge={

@@ -414,6 +414,7 @@ describe("resetAllTabFilters — scope reset", () => {
 describe("tracked items", () => {
   const item1: TrackedItem = {
     id: 1001,
+    number: 101,
     type: "issue",
     repoFullName: "owner/repo",
     title: "Bug fix",
@@ -421,6 +422,7 @@ describe("tracked items", () => {
   };
   const item2: TrackedItem = {
     id: 2002,
+    number: 202,
     type: "pullRequest",
     repoFullName: "owner/repo",
     title: "Add feature",
@@ -428,6 +430,7 @@ describe("tracked items", () => {
   };
   const item3: TrackedItem = {
     id: 3003,
+    number: 303,
     type: "issue",
     repoFullName: "owner/other",
     title: "Another issue",
@@ -462,12 +465,12 @@ describe("tracked items", () => {
     it("evicts oldest item when at 200 cap (FIFO)", () => {
       // Fill to 200
       for (let i = 0; i < 200; i++) {
-        trackItem({ id: i, type: "issue", repoFullName: "o/r", title: `T${i}`, addedAt: 1000 + i });
+        trackItem({ id: i, number: i, type: "issue", repoFullName: "o/r", title: `T${i}`, addedAt: 1000 + i });
       }
       expect(viewState.trackedItems).toHaveLength(200);
 
       // Adding 201st should evict item with id:0 (oldest)
-      trackItem({ id: 9999, type: "issue", repoFullName: "o/r", title: "New", addedAt: 2000 });
+      trackItem({ id: 9999, number: 9999, type: "issue", repoFullName: "o/r", title: "New", addedAt: 2000 });
       expect(viewState.trackedItems).toHaveLength(200);
       expect(viewState.trackedItems[0].id).toBe(1); // id:0 evicted
       expect(viewState.trackedItems[199].id).toBe(9999);

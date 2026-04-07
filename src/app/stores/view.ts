@@ -9,6 +9,7 @@ const TRACKED_ITEMS_CAP = 200;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
+  number: z.number(),
   type: z.enum(["issue", "pullRequest"]),
   repoFullName: z.string(),
   title: z.string(),

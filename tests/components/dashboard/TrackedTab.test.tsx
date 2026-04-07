@@ -88,9 +88,6 @@ describe("TrackedTab — ordering", () => {
 
     render(() => <TrackedTab issues={[issue1, issue2, issue3]} pullRequests={[]} />);
 
-    const titles = screen.getAllByText(/Issue/).filter(
-      (el) => el.classList.contains("badge") === false && el.textContent !== "Issue"
-    );
     // The items should appear in tracked order: Zebra, Apple, Mango
     const zebra = screen.getByText("Zebra Issue");
     const apple = screen.getByText("Apple Issue");
@@ -103,7 +100,6 @@ describe("TrackedTab — ordering", () => {
     expect(
       apple.compareDocumentPosition(mango) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    void titles;
   });
 });
 
@@ -117,6 +113,18 @@ describe("TrackedTab — fallback row", () => {
 
     expect(screen.getByText(/not in current data/)).toBeTruthy();
     expect(screen.getByText("Missing Issue")).toBeTruthy();
+  });
+
+  it("clicking fallback unpin button untracks item", () => {
+    const tracked = makeTrackedItem({ id: 888, type: "issue", title: "Stale Item" });
+    updateViewState({ trackedItems: [tracked] });
+
+    render(() => <TrackedTab issues={[]} pullRequests={[]} />);
+
+    const unpinBtn = screen.getByLabelText("Unpin #888 Stale Item");
+    fireEvent.click(unpinBtn);
+
+    expect(viewState.trackedItems).toHaveLength(0);
   });
 });
 
@@ -201,6 +209,30 @@ describe("TrackedTab — reordering", () => {
     // First item (id=50) should now be second
     expect(viewState.trackedItems[0].id).toBe(51);
     expect(viewState.trackedItems[1].id).toBe(50);
+  });
+});
+
+describe("TrackedTab — mixed types", () => {
+  it("renders both issues and PRs with correct type badges", () => {
+    const issue = makeIssue({ id: 80, title: "Mixed Issue" });
+    const pr = makePullRequest({ id: 81, title: "Mixed PR" });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 80, type: "issue", title: "Mixed Issue" }),
+        makeTrackedItem({ id: 81, type: "pullRequest", title: "Mixed PR" }),
+      ],
+    });
+
+    render(() => <TrackedTab issues={[issue]} pullRequests={[pr]} />);
+
+    expect(screen.getByText("Mixed Issue")).toBeTruthy();
+    expect(screen.getByText("Mixed PR")).toBeTruthy();
+
+    const issueBadges = screen.getAllByText("Issue");
+    const prBadges = screen.getAllByText("PR");
+    expect(issueBadges.length).toBeGreaterThan(0);
+    expect(prBadges.length).toBeGreaterThan(0);
   });
 });
 

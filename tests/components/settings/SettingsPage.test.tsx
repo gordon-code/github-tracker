@@ -59,6 +59,7 @@ import * as authStore from "../../../src/app/stores/auth";
 import * as cacheStore from "../../../src/app/stores/cache";
 import * as apiModule from "../../../src/app/services/api";
 import { updateConfig, config } from "../../../src/app/stores/config";
+import { viewState, updateViewState } from "../../../src/app/stores/view";
 import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
 
@@ -748,6 +749,17 @@ describe("SettingsPage — enableTracking toggle", () => {
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
     expect(json.enableTracking).toBe(true);
+  });
+
+  it("disabling tracking resets lastActiveTab to 'issues' when it was 'tracked'", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    updateViewState({ lastActiveTab: "tracked" });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /enable tracked items/i });
+    await user.click(toggle);
+    expect(config.enableTracking).toBe(false);
+    expect(viewState.lastActiveTab).toBe("issues");
   });
 });
 

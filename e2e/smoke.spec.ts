@@ -192,7 +192,9 @@ test("unknown path redirects to dashboard when authenticated", async ({ page }) 
 // ── Tracked items ─────────────────────────────────────────────────────────────
 
 test("tracked items tab appears when enabled", async ({ page }) => {
-  // Override the GraphQL mock to return an issue
+  // setupAuth FIRST — registers catch-all and default GraphQL handler
+  await setupAuth(page, { enableTracking: true });
+  // Override GraphQL AFTER setupAuth — Playwright matches routes LIFO, so this wins
   await page.route("https://api.github.com/graphql", (route) =>
     route.fulfill({
       status: 200,
@@ -224,11 +226,27 @@ test("tracked items tab appears when enabled", async ({ page }) => {
       },
     })
   );
-  await setupAuth(page, { enableTracking: true });
   await page.goto("/dashboard");
 
   // Verify Tracked tab is visible
   await expect(page.getByRole("tab", { name: /tracked/i })).toBeVisible();
+
+  // Wait for issue data to render, then expand the repo group
+  await page.getByText("testorg/testrepo").click();
+  await expect(page.getByText("Test tracked issue")).toBeVisible();
+
+  // Hover the row's group container to reveal the pin button (opacity-0 → group-hover:opacity-100)
+  const row = page.locator(".group").filter({ hasText: "Test tracked issue" });
+  await row.hover();
+  const pinBtn = page.getByRole("button", { name: /^Pin #42/i });
+  await expect(pinBtn).toBeVisible();
+  await pinBtn.click();
+
+  // Switch to Tracked tab
+  await page.getByRole("tab", { name: /tracked/i }).click();
+
+  // Verify the pinned item appears in the Tracked tab
+  await expect(page.getByText("Test tracked issue")).toBeVisible();
 });
 
 test("tracked items tab hidden when disabled", async ({ page }) => {

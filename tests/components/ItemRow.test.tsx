@@ -101,7 +101,7 @@ describe("ItemRow", () => {
     expect(onIgnore).toHaveBeenCalledOnce();
   });
 
-  it("ignore button has relative z-10 to sit above overlay link", () => {
+  it("ignore button wrapper has relative z-10 to sit above overlay link", () => {
     render(() => <ItemRow {...defaultProps} />);
     const ignoreBtn = screen.getByLabelText(/Ignore #42/i);
     // The Tooltip wrapper span carries relative z-10; the button itself is inside it

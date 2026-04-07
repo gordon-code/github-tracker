@@ -273,8 +273,8 @@ export default function DashboardPage() {
 
   // Auto-prune tracked items that are closed/merged (absent from is:open results)
   createEffect(() => {
-    // IMPORTANT: Access reactive store fields BEFORE non-reactive guards
-    // so SolidJS registers them as dependencies
+    // IMPORTANT: Access reactive store fields BEFORE early-return guards
+    // so SolidJS registers them as dependencies even when the guard short-circuits
     const issues = dashboardData.issues;
     const prs = dashboardData.pullRequests;
     if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh()) return;

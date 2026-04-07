@@ -244,6 +244,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (config.enableTracking) untrackItem(issue.id, "issue");
   }
 
+  function handleTrack(issue: Issue) {
+    if (trackedIssueIds().has(issue.id)) {
+      untrackItem(issue.id, "issue");
+    } else {
+      trackItem({ id: issue.id, number: issue.number, type: "issue", repoFullName: issue.repoFullName, title: issue.title, addedAt: Date.now() });
+    }
+  }
+
   return (
     <div class="flex flex-col h-full">
       {/* Filter chips + ignore badge toolbar */}
@@ -401,13 +409,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 url={issue.htmlUrl}
                                 labels={issue.labels}
                                 onIgnore={() => handleIgnore(issue)}
-                                onTrack={config.enableTracking ? () => {
-                                  if (trackedIssueIds().has(issue.id)) {
-                                    untrackItem(issue.id, "issue");
-                                  } else {
-                                    trackItem({ id: issue.id, type: "issue", repoFullName: issue.repoFullName, title: issue.title, addedAt: Date.now() });
-                                  }
-                                } : undefined}
+                                onTrack={config.enableTracking ? () => handleTrack(issue) : undefined}
                                 isTracked={config.enableTracking ? trackedIssueIds().has(issue.id) : undefined}
                                 density={config.viewDensity}
                                 commentCount={issue.comments}

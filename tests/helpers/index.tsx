@@ -84,8 +84,10 @@ export function makeWorkflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowR
 }
 
 export function makeTrackedItem(overrides: Partial<TrackedItem> = {}): TrackedItem {
+  const id = overrides.id ?? nextId++;
   return {
-    id: nextId++,
+    id,
+    number: id,
     type: "issue",
     repoFullName: "owner/repo",
     title: "Test tracked item",

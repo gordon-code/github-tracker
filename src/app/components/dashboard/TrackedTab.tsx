@@ -1,8 +1,9 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, Switch, Match, createMemo } from "solid-js";
 import { config } from "../../stores/config";
 import { viewState, ignoreItem, untrackItem, moveTrackedItem } from "../../stores/view";
 import type { Issue, PullRequest } from "../../services/api";
 import ItemRow from "./ItemRow";
+import { Tooltip } from "../shared/Tooltip";
 
 export interface TrackedTabProps {
   issues: Issue[];
@@ -23,12 +24,10 @@ export default function TrackedTab(props: TrackedTabProps) {
     return { issueMap, prMap };
   });
 
-  const trackedItems = () => viewState.trackedItems;
-
   return (
     <div class="flex flex-col h-full">
       <Show
-        when={trackedItems().length > 0}
+        when={viewState.trackedItems.length > 0}
         fallback={
           <div class="flex items-center justify-center py-16 text-center text-base-content/50 text-sm px-4">
             No tracked items. Pin issues or PRs from the Issues and Pull Requests tabs.
@@ -36,7 +35,7 @@ export default function TrackedTab(props: TrackedTabProps) {
         }
       >
         <div class="divide-y divide-base-300">
-          <For each={trackedItems()}>
+          <For each={viewState.trackedItems}>
             {(item, index) => {
               const liveData = () =>
                 item.type === "issue"
@@ -44,7 +43,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                   : maps().prMap.get(item.id);
 
               const isFirst = () => index() === 0;
-              const isLast = () => index() === trackedItems().length - 1;
+              const isLast = () => index() === viewState.trackedItems.length - 1;
 
               return (
                 <div class="flex items-center gap-1">
@@ -80,27 +79,30 @@ export default function TrackedTab(props: TrackedTabProps) {
                               <span class="font-medium text-sm text-base-content truncate">
                                 {item.title}
                               </span>
-                              <Show when={item.type === "issue"}>
-                                <span class="badge badge-outline badge-sm badge-info">Issue</span>
-                              </Show>
-                              <Show when={item.type === "pullRequest"}>
-                                <span class="badge badge-outline badge-sm badge-success">PR</span>
-                              </Show>
+                              <Switch>
+                                <Match when={item.type === "issue"}>
+                                  <span class="badge badge-outline badge-sm badge-info">Issue</span>
+                                </Match>
+                                <Match when={item.type === "pullRequest"}>
+                                  <span class="badge badge-outline badge-sm badge-success">PR</span>
+                                </Match>
+                              </Switch>
                             </div>
                             <div class="text-xs text-base-content/60 mt-0.5">
                               {item.repoFullName}{" "}
                               <span class="text-base-content/40">(not in current data)</span>
                             </div>
                           </div>
-                          <button
-                            class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
-                            aria-label={`Unpin ${item.title}`}
-                            title="Untrack this item"
-                            onClick={() => untrackItem(item.id, item.type)}
-                          >
+                          <Tooltip content="Untrack this item">
+                            <button
+                              class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
+                              aria-label={`Unpin #${item.number} ${item.title}`}
+                              onClick={() => untrackItem(item.id, item.type)}
+                            >
                             {/* Solid bookmark */}
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
-                          </button>
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
+                            </button>
+                          </Tooltip>
                         </div>
                       }
                     >
@@ -130,12 +132,14 @@ export default function TrackedTab(props: TrackedTabProps) {
                           }}
                           density={config.viewDensity}
                         >
-                          <Show when={item.type === "issue"}>
-                            <span class="badge badge-outline badge-sm badge-info">Issue</span>
-                          </Show>
-                          <Show when={item.type === "pullRequest"}>
-                            <span class="badge badge-outline badge-sm badge-success">PR</span>
-                          </Show>
+                          <Switch>
+                            <Match when={item.type === "issue"}>
+                              <span class="badge badge-outline badge-sm badge-info">Issue</span>
+                            </Match>
+                            <Match when={item.type === "pullRequest"}>
+                              <span class="badge badge-outline badge-sm badge-success">PR</span>
+                            </Match>
+                          </Switch>
                         </ItemRow>
                       )}
                     </Show>
