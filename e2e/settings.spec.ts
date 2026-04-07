@@ -6,6 +6,7 @@ import { setupAuth } from "./helpers";
 test("settings page renders section headings", async ({ page }) => {
   await setupAuth(page);
   await page.goto("/settings");
+  await page.waitForLoadState("networkidle");
 
   await expect(
     page.getByRole("heading", { name: /organizations & repositories/i })
