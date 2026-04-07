@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, setSortPreference, ignoreItem, unignoreItem, setTabFilter, resetTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -9,10 +9,9 @@ import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
-import SortDropdown from "../shared/SortDropdown";
-import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
+import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
@@ -119,16 +118,6 @@ const prFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
-const sortOptions: SortOption[] = [
-  { label: "Repo", field: "repo", type: "text" },
-  { label: "Title", field: "title", type: "text" },
-  { label: "Author", field: "author", type: "text" },
-  { label: "Checks", field: "checkStatus", type: "text" },
-  { label: "Review", field: "reviewDecision", type: "text" },
-  { label: "Size", field: "size", type: "number" },
-  { label: "Created", field: "createdAt", type: "date" },
-  { label: "Updated", field: "updatedAt", type: "date" },
-];
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
@@ -151,6 +140,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
   );
 
+  const ignoredPullRequests = createMemo(() =>
+    viewState.ignoredItems.filter(i => i.type === "pullRequest")
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     const base = showScopeFilter()
@@ -167,10 +160,18 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
       setTabFilter("pullRequests", "scope", "involves_me");
+    }
+  });
+
+  // Auto-reset user filter when User filter group is hidden
+  createEffect(() => {
+    const users = props.allUsers;
+    if ((!users || users.length <= 1) && viewState.tabFilters.pullRequests.user !== "all") {
+      setTabFilter("pullRequests", "user", "all");
     }
   });
 
@@ -178,17 +179,11 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet(),
       item.enriched !== false ? item.reviewerLogins : undefined);
 
-  const sortPref = createMemo(() => {
-    const pref = viewState.sortPreferences["pullRequests"];
-    return pref ?? { field: "updatedAt", direction: "desc" as const };
-  });
-
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
     const tabFilters = viewState.tabFilters.pullRequests;
     const ignored = new Set(
-      viewState.ignoredItems
-        .filter((i) => i.type === "pullRequest")
+      ignoredPullRequests()
         .map((i) => i.id)
     );
 
@@ -253,7 +248,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       return true;
     });
 
-    const { field, direction } = sortPref();
+    const { field, direction } = viewState.globalSort;
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (field as SortField) {
@@ -334,14 +329,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
-    () => viewState.ignoredItems.filter(i => i.type === "pullRequest").length,
+    () => ignoredPullRequests().length,
     () => JSON.stringify(viewState.tabFilters.pullRequests),
   );
-
-  function handleSort(field: string, direction: "asc" | "desc") {
-    setSortPreference("pullRequests", field, direction);
-    setPage(0);
-  }
 
   function handleIgnore(pr: PullRequest) {
     ignoreItem({
@@ -355,24 +345,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Filter toolbar with SortDropdown */}
+      {/* Filter toolbar */}
       <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
-          <SortDropdown
-            options={sortOptions}
-            value={sortPref().field}
-            direction={sortPref().direction}
-            onChange={handleSort}
-          />
-          <FilterChips
+          <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.pullRequests}
-            onChange={(field, value) => {
-              setTabFilter("pullRequests", field as PullRequestFilterField, value);
-              setPage(0);
-            }}
-            onReset={(field) => {
-              resetTabFilter("pullRequests", field as PullRequestFilterField);
+            onChange={(f, v) => {
+              setTabFilter("pullRequests", f as PullRequestFilterField, v);
               setPage(0);
             }}
             onResetAll={() => {
@@ -387,7 +367,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
-            items={viewState.ignoredItems.filter((i) => i.type === "pullRequest")}
+            items={ignoredPullRequests()}
             onUnignore={unignoreItem}
           />
         </div>

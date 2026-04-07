@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
@@ -91,38 +91,10 @@ describe("IssuesTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("renders SortDropdown in the toolbar", () => {
+  it("SortDropdown is not rendered in the tab toolbar (moved to FilterBar)", () => {
     render(() => <IssuesTab issues={[]} userLogin="" />);
-    const trigger = screen.getByRole("button", { name: /sort by/i });
-    expect(trigger).toBeDefined();
-  });
-
-  it("SortDropdown contains all sortable fields", async () => {
-    const user = userEvent.setup();
-    render(() => <IssuesTab issues={[]} userLogin="" />);
-    await user.click(screen.getByRole("button", { name: /sort by/i }));
-    const opts = screen.getAllByRole("option").map((o) => o.textContent ?? "");
-    expect(opts.some((v) => v.toLowerCase().includes("repo"))).toBe(true);
-    expect(opts.some((v) => v.toLowerCase().includes("title"))).toBe(true);
-    expect(opts.some((v) => v.toLowerCase().includes("author"))).toBe(true);
-    expect(opts.some((v) => v.toLowerCase().includes("comments"))).toBe(true);
-    expect(opts.some((v) => v.toLowerCase().includes("created"))).toBe(true);
-    expect(opts.some((v) => v.toLowerCase().includes("updated"))).toBe(true);
-  });
-
-  it("changes sort order when SortDropdown selection changes", async () => {
-    const user = userEvent.setup();
-    const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
-    const issues = [makeIssue({ title: "Issue A" })];
-    render(() => <IssuesTab issues={issues} userLogin="" />);
-
-    await user.click(screen.getByRole("button", { name: /sort by/i }));
-    const titleDesc = screen.getAllByRole("option").find((o) => o.textContent?.includes("Title") && o.textContent?.includes("(Z-A)"));
-    expect(titleDesc).toBeDefined();
-    await user.click(titleDesc!);
-
-    expect(setSortSpy).toHaveBeenCalledWith("issues", "title", "desc");
-    setSortSpy.mockRestore();
+    // SortDropdown was moved to FilterBar; not rendered in tab isolation
+    expect(screen.queryByRole("button", { name: /sort by/i })).toBeNull();
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -334,8 +306,8 @@ describe("IssuesTab", () => {
       ignoredAt: Date.now(),
     });
     render(() => <IssuesTab issues={[issue]} userLogin="" />);
-    // IgnoreBadge shows count of ignored items
-    screen.getByText(/1 ignored/i);
+    // IgnoreBadge now shows an icon button with aria-label
+    screen.getByRole("button", { name: /1 ignored/i });
   });
 
   it("paginates repo groups across pages", async () => {
@@ -382,7 +354,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("org/repo-b")).toBeNull();
 
     // Clear filter — repo-b reappears, repo-a stays expanded
-    viewStore.resetTabFilter("issues", "role");
+    viewStore.setTabFilter("issues", "role", "all");
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
     screen.getByText("Alice issue");
@@ -411,7 +383,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Alice issue")).toBeNull();
 
     // Remove filter — repo-b should still be expanded (was hidden during collapse-all)
-    viewStore.resetTabFilter("issues", "role");
+    viewStore.setTabFilter("issues", "role", "all");
     screen.getByText("Bob issue");
     // repo-a was collapsed by collapse-all
     expect(screen.queryByText("Alice issue")).toBeNull();

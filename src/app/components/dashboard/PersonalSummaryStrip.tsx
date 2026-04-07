@@ -1,7 +1,8 @@
 import { createMemo, For, Show } from "solid-js";
+import { produce } from "solid-js/store";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import type { TabId } from "../layout/TabBar";
-import { viewState, updateViewState, resetAllTabFilters, setTabFilter } from "../../stores/view";
+import { viewState, setViewState, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import { InfoTooltip } from "../shared/Tooltip";
 
 interface SummaryCount {
@@ -104,9 +105,9 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       count: assignedIssues,
       tab: "issues",
       applyFilters: () => {
-        resetAllTabFilters("issues");
-        setTabFilter("issues", "scope", "all");
-        setTabFilter("issues", "role", "assignee");
+        setViewState(produce(draft => {
+          draft.tabFilters.issues = { ...IssueFiltersSchema.parse({}), scope: "all", role: "assignee" };
+        }));
       },
     });
     if (prsAwaitingReview > 0) items.push({
@@ -114,10 +115,9 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       count: prsAwaitingReview,
       tab: "pullRequests",
       applyFilters: () => {
-        resetAllTabFilters("pullRequests");
-        setTabFilter("pullRequests", "scope", "all");
-        setTabFilter("pullRequests", "role", "reviewer");
-        setTabFilter("pullRequests", "reviewDecision", "REVIEW_REQUIRED");
+        setViewState(produce(draft => {
+          draft.tabFilters.pullRequests = { ...PullRequestFiltersSchema.parse({}), scope: "all", role: "reviewer", reviewDecision: "REVIEW_REQUIRED" };
+        }));
       },
     });
     if (prsReadyToMerge > 0) items.push({
@@ -125,12 +125,9 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       count: prsReadyToMerge,
       tab: "pullRequests",
       applyFilters: () => {
-        resetAllTabFilters("pullRequests");
-        setTabFilter("pullRequests", "scope", "all");
-        setTabFilter("pullRequests", "role", "author");
-        setTabFilter("pullRequests", "draft", "ready");
-        setTabFilter("pullRequests", "checkStatus", "success");
-        setTabFilter("pullRequests", "reviewDecision", "mergeable");
+        setViewState(produce(draft => {
+          draft.tabFilters.pullRequests = { ...PullRequestFiltersSchema.parse({}), scope: "all", role: "author", draft: "ready", checkStatus: "success", reviewDecision: "mergeable" };
+        }));
       },
     });
     if (prsBlocked > 0) items.push({
@@ -138,11 +135,9 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       count: prsBlocked,
       tab: "pullRequests",
       applyFilters: () => {
-        resetAllTabFilters("pullRequests");
-        setTabFilter("pullRequests", "scope", "all");
-        setTabFilter("pullRequests", "role", "author");
-        setTabFilter("pullRequests", "draft", "ready");
-        setTabFilter("pullRequests", "checkStatus", "blocked");
+        setViewState(produce(draft => {
+          draft.tabFilters.pullRequests = { ...PullRequestFiltersSchema.parse({}), scope: "all", role: "author", draft: "ready", checkStatus: "blocked" };
+        }));
       },
     });
     if (running > 0) items.push({
@@ -150,9 +145,10 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
       count: running,
       tab: "actions",
       applyFilters: () => {
-        resetAllTabFilters("actions");
-        setTabFilter("actions", "conclusion", "running");
-        updateViewState({ showPrRuns: true });
+        setViewState(produce(draft => {
+          draft.tabFilters.actions = { ...ActionsFiltersSchema.parse({}), conclusion: "running" };
+          draft.showPrRuns = true;
+        }));
       },
     });
     return items;

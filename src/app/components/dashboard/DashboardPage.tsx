@@ -8,7 +8,8 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference } from "../../stores/view";
+import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
 import {
@@ -26,6 +27,18 @@ import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { Tooltip } from "../shared/Tooltip";
+
+const globalSortOptions: SortOption[] = [
+  { label: "Repo", field: "repo", type: "text" },
+  { label: "Title", field: "title", type: "text" },
+  { label: "Author", field: "author", type: "text" },
+  { label: "Comments", field: "comments", type: "number" },
+  { label: "Checks", field: "checkStatus", type: "text" },
+  { label: "Review", field: "reviewDecision", type: "text" },
+  { label: "Size", field: "size", type: "number" },
+  { label: "Created", field: "createdAt", type: "date" },
+  { label: "Updated", field: "updatedAt", type: "date" },
+];
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
@@ -397,6 +410,10 @@ export default function DashboardPage() {
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
               onRefresh={() => _coordinator()?.manualRefresh()}
+              sortOptions={globalSortOptions}
+              sortValue={viewState.globalSort.field}
+              sortDirection={viewState.globalSort.direction}
+              onSortChange={(field, dir) => setSortPreference(field, dir)}
             />
           </div>
 

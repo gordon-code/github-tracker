@@ -1,14 +1,13 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
-import SortDropdown from "../shared/SortDropdown";
-import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
+import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import FilterToolbar from "../shared/FilterToolbar";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
@@ -51,14 +50,6 @@ const issueFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
-const sortOptions: SortOption[] = [
-  { label: "Repo", field: "repo", type: "text" },
-  { label: "Title", field: "title", type: "text" },
-  { label: "Author", field: "author", type: "text" },
-  { label: "Comments", field: "comments", type: "number" },
-  { label: "Created", field: "createdAt", type: "date" },
-  { label: "Updated", field: "updatedAt", type: "date" },
-];
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
@@ -81,6 +72,10 @@ export default function IssuesTab(props: IssuesTabProps) {
     (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
   );
 
+  const ignoredIssues = createMemo(() =>
+    viewState.ignoredItems.filter(i => i.type === "issue")
+  );
+
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
     const base = showScopeFilter()
@@ -97,27 +92,29 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
-  // Auto-reset scope to default when scope chip is hidden (localStorage hygiene)
+  // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && viewState.tabFilters.issues.scope !== "involves_me") {
       setTabFilter("issues", "scope", "involves_me");
     }
   });
 
+  // Auto-reset user filter when User filter group is hidden
+  createEffect(() => {
+    const users = props.allUsers;
+    if ((!users || users.length <= 1) && viewState.tabFilters.issues.user !== "all") {
+      setTabFilter("issues", "user", "all");
+    }
+  });
+
   const isInvolvedItem = (item: Issue) =>
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
-
-  const sortPref = createMemo(() => {
-    const pref = viewState.sortPreferences["issues"];
-    return pref ?? { field: "updatedAt", direction: "desc" as const };
-  });
 
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
     const tabFilter = viewState.tabFilters.issues;
     const ignored = new Set(
-      viewState.ignoredItems
-        .filter((i) => i.type === "issue")
+      ignoredIssues()
         .map((i) => i.id)
     );
 
@@ -160,7 +157,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       return true;
     });
 
-    const { field, direction } = sortPref();
+    const { field, direction } = viewState.globalSort;
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (field as SortField) {
@@ -226,14 +223,9 @@ export default function IssuesTab(props: IssuesTabProps) {
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.issues,
-    () => viewState.ignoredItems.filter(i => i.type === "issue").length,
+    () => ignoredIssues().length,
     () => JSON.stringify(viewState.tabFilters.issues),
   );
-
-  function handleSort(field: string, direction: "asc" | "desc") {
-    setSortPreference("issues", field, direction);
-    setPage(0);
-  }
 
   function handleIgnore(issue: Issue) {
     ignoreItem({
@@ -247,24 +239,14 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Sort dropdown + filter chips + ignore badge toolbar */}
+      {/* Filter chips + ignore badge toolbar */}
       <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
         <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
-          <SortDropdown
-            options={sortOptions}
-            value={sortPref().field}
-            direction={sortPref().direction}
-            onChange={handleSort}
-          />
-          <FilterChips
+          <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.issues}
-            onChange={(field, value) => {
-              setTabFilter("issues", field as IssueFilterField, value);
-              setPage(0);
-            }}
-            onReset={(field) => {
-              resetTabFilter("issues", field as IssueFilterField);
+            onChange={(f, v) => {
+              setTabFilter("issues", f as IssueFilterField, v);
               setPage(0);
             }}
             onResetAll={() => {
@@ -291,7 +273,7 @@ export default function IssuesTab(props: IssuesTabProps) {
             onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
-            items={viewState.ignoredItems.filter((i) => i.type === "issue")}
+            items={ignoredIssues()}
             onUnignore={unignoreItem}
           />
         </div>

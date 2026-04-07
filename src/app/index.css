@@ -107,6 +107,24 @@
   animation: overlay-fade-in 0.3s ease-out forwards;
 }
 
+/* Kobalte Popover animations */
+@keyframes popover-fade-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes popover-fade-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.95); }
+}
+.filter-popover-content[data-expanded] {
+  transform-origin: top;
+  animation: popover-fade-in 0.15s ease-out forwards;
+}
+.filter-popover-content[data-closed] {
+  transform-origin: top;
+  animation: popover-fade-out 0.15s ease-in forwards;
+}
+
 /* ── Fixed-element scrollbar compensation ────────────────────────────────── */
 /* solid-prevent-scroll sets --scrollbar-width on body when scroll is locked;
    fixed elements don't inherit body padding-right, so compensate explicitly.
@@ -142,6 +160,7 @@
   .drawer-content[data-expanded], .drawer-content[data-closed],
   .drawer-overlay[data-expanded], .drawer-overlay[data-closed],
   .animate-shimmer, .animate-flash, .animate-reorder-highlight,
+  .filter-popover-content[data-expanded], .filter-popover-content[data-closed],
   .loading {
     animation: none;
   }

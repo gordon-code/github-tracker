@@ -293,7 +293,7 @@ describe("ActionsTab", () => {
     expect(repoHeader.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("toolbar: Show PR runs checkbox, FilterChips, and IgnoreBadge are present", () => {
+  it("toolbar: Show PR runs checkbox, FilterToolbar, and IgnoreBadge are present", () => {
     render(() => <ActionsTab workflowRuns={[]} />);
     screen.getByRole("checkbox");
     screen.getByText("Show PR runs");

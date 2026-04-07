@@ -6,14 +6,14 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 
-const IssueFiltersSchema = z.object({
+export const IssueFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "assignee"]).default("all"),
   comments: z.enum(["all", "has", "none"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
-const PullRequestFiltersSchema = z.object({
+export const PullRequestFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
@@ -23,7 +23,7 @@ const PullRequestFiltersSchema = z.object({
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
-const ActionsFiltersSchema = z.object({
+export const ActionsFiltersSchema = z.object({
   conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "other"]).default("all"),
   event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
 });
@@ -39,15 +39,10 @@ export const ViewStateSchema = z.object({
   lastActiveTab: z
     .enum(["issues", "pullRequests", "actions"])
     .default("issues"),
-  sortPreferences: z
-    .record(
-      z.string(),
-      z.object({
-        field: z.string(),
-        direction: z.enum(["asc", "desc"]),
-      })
-    )
-    .default({}),
+  globalSort: z.object({
+    field: z.string(),
+    direction: z.enum(["asc", "desc"]),
+  }).default({ field: "updatedAt", direction: "desc" }),
   ignoredItems: z
     .array(
       z.object({
@@ -99,7 +94,6 @@ export const ViewStateSchema = z.object({
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
-export type SortPreference = ViewState["sortPreferences"][string];
 export type LockedReposTab = keyof ViewState["lockedRepos"];
 
 function loadViewState(): ViewState {
@@ -122,7 +116,7 @@ export const [viewState, setViewState] = createStore<ViewState>(
 export function resetViewState(): void {
   updateViewState({
     lastActiveTab: "issues",
-    sortPreferences: {},
+    globalSort: { field: "updatedAt", direction: "desc" },
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
     tabFilters: {
@@ -180,13 +174,12 @@ export function pruneStaleIgnoredItems(): void {
 }
 
 export function setSortPreference(
-  tabId: string,
   field: string,
   direction: "asc" | "desc"
 ): void {
   setViewState(
     produce((draft) => {
-      draft.sortPreferences[tabId] = { field, direction };
+      draft.globalSort = { field, direction };
     })
   );
 }
@@ -216,24 +209,6 @@ export function setTabFilter<T extends keyof TabFilterField>(
   setViewState(
     produce((draft) => {
       (draft.tabFilters[tab] as Record<string, string>)[field as string] = value;
-    })
-  );
-}
-
-const tabFilterDefaults: Record<string, Record<string, string>> = {
-  issues: IssueFiltersSchema.parse({}) as Record<string, string>,
-  pullRequests: PullRequestFiltersSchema.parse({}) as Record<string, string>,
-  actions: ActionsFiltersSchema.parse({}) as Record<string, string>,
-};
-
-export function resetTabFilter<T extends keyof TabFilterField>(
-  tab: T,
-  field: TabFilterField[T]
-): void {
-  const defaultValue = tabFilterDefaults[tab]?.[field as string] ?? "all";
-  setViewState(
-    produce((draft) => {
-      (draft.tabFilters[tab] as Record<string, string>)[field as string] = defaultValue;
     })
   );
 }

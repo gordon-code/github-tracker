@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
@@ -90,36 +90,10 @@ describe("PullRequestsTab", () => {
     expect(newerIdx).toBeLessThan(olderIdx);
   });
 
-  it("renders SortDropdown with all sort options", async () => {
-    const user = userEvent.setup();
+  it("SortDropdown is not rendered in the tab toolbar (moved to FilterBar)", () => {
     render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    const trigger = screen.getByRole("button", { name: /Sort by/ });
-    expect(trigger).toBeDefined();
-    await user.click(trigger);
-    const optionText = screen.getAllByRole("option").map((o) => o.textContent ?? "");
-    expect(optionText.some((t) => t.includes("Repo"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Title"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Author"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Checks"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Review"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Size"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Created"))).toBe(true);
-    expect(optionText.some((t) => t.includes("Updated"))).toBe(true);
-  });
-
-  it("changes sort when SortDropdown selection changes", async () => {
-    const user = userEvent.setup();
-    const setSortSpy = vi.spyOn(viewStore, "setSortPreference");
-    const prs = [makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })];
-    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
-
-    await user.click(screen.getByRole("button", { name: /Sort by/ }));
-    const titleDesc = screen.getAllByRole("option").find((o) => o.textContent?.includes("Title") && o.textContent?.includes("(Z-A)"));
-    expect(titleDesc).toBeDefined();
-    await user.click(titleDesc!);
-
-    expect(setSortSpy).toHaveBeenCalledWith("pullRequests", "title", "desc");
-    setSortSpy.mockRestore();
+    // SortDropdown was moved to FilterBar; not rendered in tab isolation
+    expect(screen.queryByRole("button", { name: /Sort by/ })).toBeNull();
   });
 
   it("does not show pagination when there is only one page", () => {
@@ -142,9 +116,9 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Draft PR", draft: true, repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Draft" appears in both the filter chip button and the PR badge
+    // "Draft" appears as a PR badge
     const draftEls = screen.getAllByText("Draft");
-    // At least one is a span (the badge), not a button (the chip)
+    // Badge should be a span element
     const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
@@ -152,7 +126,7 @@ describe("PullRequestsTab", () => {
   it("does not show Draft badge for non-draft PRs", () => {
     const pr = makePullRequest({ id: 1, title: "Normal PR", draft: false, repoFullName: "org/repo-a" });
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Draft" may appear as a filter chip button, but should NOT appear as a badge span
+    // "Draft" should NOT appear as a badge span for non-draft PRs
     const draftEls = screen.queryAllByText("Draft");
     const badgeEl = draftEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeUndefined();
@@ -162,7 +136,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Author" appears in both the filter chip button and the role badge
+    // "Author" appears as a role badge
     const authorEls = screen.getAllByText("Author");
     const badgeEl = authorEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -172,7 +146,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [], repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
-    // "Reviewer" appears in both the filter chip button and the role badge
+    // "Reviewer" appears as a role badge
     const reviewerEls = screen.getAllByText("Reviewer");
     const badgeEl = reviewerEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -182,7 +156,7 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED", repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // "Approved" appears in both the filter chip button and the review badge
+    // "Approved" appears as a review badge
     const approvedEls = screen.getAllByText("Approved");
     const badgeEl = approvedEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -193,7 +167,7 @@ describe("PullRequestsTab", () => {
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // prSizeCategory(300, 100) = 400 total -> M
-    // "M" appears in both the filter chip button and the size badge
+    // "M" appears as a size badge
     const mEls = screen.getAllByText("M");
     const badgeEl = mEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
@@ -435,8 +409,8 @@ describe("PullRequestsTab", () => {
       ignoredAt: Date.now(),
     });
     render(() => <PullRequestsTab pullRequests={[]} userLogin="" />);
-    // IgnoreBadge shows ignored count
-    screen.getByText(/1 ignored/i);
+    // IgnoreBadge now shows an icon button with aria-label
+    screen.getByRole("button", { name: /1 ignored/i });
   });
 
   it("paginates repo groups across pages", async () => {
