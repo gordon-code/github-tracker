@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { RepoRef, RepoEntry } from "../../../src/app/services/api";
 
@@ -390,8 +390,9 @@ describe("RepoSelector — upstream discovery", () => {
     await waitFor(() => {
       screen.getByText("repo-a");
     });
-    // Give time for any async effects to settle
-    await new Promise((r) => setTimeout(r, 50));
+    // Verify discoverUpstreamRepos was never called after repos finished loading.
+    // waitFor above already ensures the async effect settled (fetchRepos resolved),
+    // so no additional delay is needed.
     expect(api.discoverUpstreamRepos).not.toHaveBeenCalled();
   });
 
@@ -797,5 +798,351 @@ describe("RepoSelector — monitor toggle", () => {
     await waitFor(() => screen.getByText("repo-a"));
     // Monitor toggle should not appear for upstream repos
     expect(screen.queryByLabelText(/monitor all activity/i)).toBeNull();
+  });
+});
+
+// ── Org-grouped accordion (C2) ────────────────────────────────────────────────
+
+describe("RepoSelector — org accordion", () => {
+  // 6 org names that trigger accordion mode (threshold is >= 6)
+  const sixOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org", "epsilon-org", "zeta-org"];
+
+  // Minimal OrgEntry list for preloading (skips fetchOrgs network call)
+  const sixOrgEntries = sixOrgs.map((login) => ({
+    login,
+    avatarUrl: "",
+    type: "org" as const,
+  }));
+
+  // One repo per org
+  function makeOrgRepos(org: string): RepoEntry[] {
+    return [{ owner: org, name: `${org}-repo`, fullName: `${org}/${org}-repo`, pushedAt: "2026-03-20T10:00:00Z" }];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+  });
+
+  it("renders all orgs expanded when fewer than 6 orgs", async () => {
+    // 4 orgs → no accordion
+    const fourOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org"];
+    const fourOrgEntries = fourOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={fourOrgs}
+        orgEntries={fourOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+      screen.getByText("delta-org-repo");
+    });
+
+    // No accordion chevron buttons present
+    expect(screen.queryAllByRole("button", { name: /chevron|expand|collapse/i })).toHaveLength(0);
+    // All repo content visible (no inert panels)
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+
+  it("renders accordion with first org expanded by default when 6+ orgs", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // First org panel is not inert (expanded)
+    const panels = document.querySelectorAll("[inert]");
+    // All other 5 orgs are collapsed (inert)
+    expect(panels).toHaveLength(5);
+
+    // First org repo content is accessible
+    expect(screen.queryByText("alpha-org-repo")).not.toBeNull();
+  });
+
+  it("clicking another org header collapses the first and expands the clicked one", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Find and click the beta-org accordion header button
+    const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+    fireEvent.click(betaBtn);
+
+    // Now beta-org panel should be expanded (not inert), alpha-org collapsed
+    await waitFor(() => {
+      // 5 orgs still collapsed
+      expect(document.querySelectorAll("[inert]")).toHaveLength(5);
+    });
+
+    // The expanded button should now be beta-org (aria-expanded=true)
+    expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("clicking the currently-expanded org header is a no-op (content stays visible)", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Click the already-expanded first org header
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    fireEvent.click(alphaBtn);
+
+    // alpha-org is still expanded (setUserExpandedOrg sets to same value)
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelectorAll("[inert]")).toHaveLength(5);
+  });
+
+  it("shows repo count badge on org headers in accordion mode", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Each org has 1 repo — badge shows "1 repo"
+    const badges = screen.getAllByText("1 repo");
+    expect(badges.length).toBe(sixOrgs.length);
+  });
+
+  it("shows per-org Select All / Deselect All in expanded accordion panel", async () => {
+    const onChange = vi.fn();
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // The expanded org (alpha-org) should show per-org Select All inside the panel content
+    const selectAllBtns = screen.getAllByRole("button", { name: /Select All/i });
+    // Global Select All + per-org Select All for the expanded org
+    const perOrgSelectAll = selectAllBtns.filter(
+      (btn) => !btn.closest("[inert]") && btn.textContent === "Select All"
+    );
+    expect(perOrgSelectAll.length).toBeGreaterThanOrEqual(2); // global + expanded org
+
+    // Click per-org Select All inside the expanded panel (not the global one)
+    // The per-org one is inside the accordion panel content area
+    const panelContent = document.getElementById("accordion-panel-alpha-org");
+    expect(panelContent).not.toBeNull();
+    const perOrgBtn = panelContent!.querySelector("button");
+    expect(perOrgBtn).not.toBeNull();
+    expect(perOrgBtn!.textContent).toBe("Select All");
+    fireEvent.click(perOrgBtn!);
+
+    // Should select only alpha-org's repo
+    expect(onChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ fullName: "alpha-org/alpha-org-repo" })])
+    );
+    // Should NOT include repos from other orgs
+    const selectedNames = onChange.mock.calls[0][0].map((r: { fullName: string }) => r.fullName);
+    expect(selectedNames).toHaveLength(1);
+    expect(selectedNames[0]).toBe("alpha-org/alpha-org-repo");
+  });
+
+  it("global Select All includes repos from collapsed orgs", async () => {
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Click the global Select All (first button with that text)
+    const selectAllBtns = screen.getAllByText("Select All");
+    fireEvent.click(selectAllBtns[0]);
+
+    expect(onChange).toHaveBeenCalled();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    // Should include all 6 repos, one per org
+    expect(result.length).toBe(6);
+    for (const org of sixOrgs) {
+      expect(result.map((r) => r.fullName)).toContain(`${org}/${org}-repo`);
+    }
+  });
+
+  it("global Select All with text filter only includes repos matching the filter (PA-003)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Type a filter that only matches repos in "alpha-org"
+    const filterInput = screen.getByPlaceholderText(/Filter repos/i);
+    await user.type(filterInput, "alpha-org-repo");
+
+    // Wait for the debounce to fire and the filter to take effect:
+    // the badge for "beta-org" should drop to "0 repos" once the filter is active
+    await waitFor(() => {
+      const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+      expect(betaBtn.textContent).toContain("0 repos");
+    });
+
+    // Click global Select All — should only include repos visible after filter
+    const selectAllBtns = screen.getAllByText("Select All");
+    fireEvent.click(selectAllBtns[0]);
+
+    expect(onChange).toHaveBeenCalled();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    // Only alpha-org-repo matches the filter
+    expect(result.map((r) => r.fullName)).toContain("alpha-org/alpha-org-repo");
+    // Repos from other orgs must NOT be included
+    for (const org of sixOrgs.filter((o) => o !== "alpha-org")) {
+      expect(result.map((r) => r.fullName)).not.toContain(`${org}/${org}-repo`);
+    }
+  });
+
+  it("expanded org panel does not have inert; collapsed org panels do have inert", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // In accordion mode, expanded org is alpha-org (first alphabetically)
+    // The panel id is on the inner div that also carries the inert attribute
+    const alphaPanel = document.getElementById("accordion-panel-alpha-org") as HTMLElement;
+    expect(alphaPanel).not.toBeNull();
+    expect(alphaPanel.hasAttribute("inert")).toBe(false);
+
+    // All other org panels should have inert
+    for (const org of sixOrgs.filter((o) => o !== "alpha-org")) {
+      const panel = document.getElementById(`accordion-panel-${org}`) as HTMLElement;
+      expect(panel).not.toBeNull();
+      expect(panel.hasAttribute("inert")).toBe(true);
+    }
+  });
+
+  it("org removal falls back to first remaining org when removed org was expanded", async () => {
+    const { createSignal } = await import("solid-js");
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(sixOrgs);
+    const [orgEntries, setOrgEntries] = createSignal(sixOrgEntries);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Expand the 3rd org (gamma-org)
+    const gammaBtn = screen.getByRole("button", { name: /gamma-org/ });
+    fireEvent.click(gammaBtn);
+    expect(gammaBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // Re-render without gamma-org (still 5 orgs >= 6 threshold? No, 5 < 6 so accordion exits)
+    // Use 7 orgs to ensure >= 6 remains after removing one
+    // Actually: let's test with 7 orgs so we stay in accordion mode after removal
+    const sevenOrgs = [...sixOrgs, "eta-org"];
+    const sevenOrgEntries = sevenOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    // Re-render to 7 orgs first
+    setSelectedOrgs(sevenOrgs);
+    setOrgEntries(sevenOrgEntries);
+
+    await waitFor(() => {
+      screen.getByText("eta-org-repo");
+    });
+
+    // Expand gamma-org
+    const gammaBtnAgain = screen.getByRole("button", { name: /gamma-org/ });
+    fireEvent.click(gammaBtnAgain);
+    expect(gammaBtnAgain.getAttribute("aria-expanded")).toBe("true");
+
+    // Now remove gamma-org (still 6 orgs remain → still accordion)
+    const remainingOrgs = sevenOrgs.filter((o) => o !== "gamma-org");
+    const remainingEntries = remainingOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+    setSelectedOrgs(remainingOrgs);
+    setOrgEntries(remainingEntries);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /gamma-org/ })).toBeNull();
+    });
+
+    // expandedOrg should fall back to states[0] (alpha-org)
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
   });
 });

@@ -15,6 +15,7 @@ import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 import { Tooltip, InfoTooltip } from "../shared/Tooltip";
+import ChevronIcon from "../shared/ChevronIcon";
 
 // Validates owner/repo format (both segments must be non-empty, no spaces)
 const VALID_REPO_NAME = /^[a-zA-Z0-9._-]{1,100}\/[a-zA-Z0-9._-]{1,100}$/;
@@ -407,6 +408,18 @@ export default function RepoSelector(props: RepoSelectorProps) {
     );
   });
 
+  // ── Accordion state ───────────────────────────────────────────────────────
+
+  const [userExpandedOrg, setUserExpandedOrg] = createSignal<string | null>(null);
+  const isAccordion = createMemo(() => sortedOrgStates().length >= 6);
+  const expandedOrg = createMemo(() => {
+    if (!isAccordion()) return null;
+    const states = sortedOrgStates();
+    const userChoice = userExpandedOrg();
+    if (userChoice !== null && states.some(s => s.org === userChoice)) return userChoice;
+    return states.length > 0 ? states[0].org : null;
+  });
+
   // ── Status ────────────────────────────────────────────────────────────────
 
   const totalOrgs = () => props.selectedOrgs.length;
@@ -453,42 +466,40 @@ export default function RepoSelector(props: RepoSelectorProps) {
       <Index each={sortedOrgStates()}>
         {(state) => {
           const visible = createMemo(() => filteredReposForOrg(state()));
+          const selectedCount = createMemo(() =>
+            visible().filter((r) => isSelected(r.fullName)).length
+          );
 
-          return (
-            <div class="overflow-hidden rounded-lg border border-base-300">
-              {/* Org header */}
-              <div class="flex items-center justify-between border-b border-base-300 bg-base-200 px-4 py-2">
-                <span class="text-sm font-semibold text-base-content">
-                  {state().org}
-                </span>
-                <Show when={!state().loading && !state().error}>
-                  <div class="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => selectAllInOrg(state())}
-                      disabled={
-                        visible().length === 0 ||
-                        visible().every((r) => isSelected(r.fullName))
-                      }
-                      class="btn btn-ghost btn-xs"
-                    >
-                      Select All
-                    </button>
-                    <span class="text-base-content/30">·</span>
-                    <button
-                      type="button"
-                      onClick={() => deselectAllInOrg(state())}
-                      disabled={
-                        visible().length === 0 ||
-                        visible().every((r) => !isSelected(r.fullName))
-                      }
-                      class="btn btn-ghost btn-xs"
-                    >
-                      Deselect All
-                    </button>
-                  </div>
-                </Show>
-              </div>
+          const orgContent = () => (
+            <>
+              {/* Per-org bulk selection bar (accordion mode only — in non-accordion, these are in the header) */}
+              <Show when={isAccordion() && !state().loading && !state().error}>
+                <div class="flex justify-end gap-2 border-b border-base-300 px-4 py-1">
+                  <button
+                    type="button"
+                    onClick={() => selectAllInOrg(state())}
+                    disabled={
+                      visible().length === 0 ||
+                      visible().every((r) => isSelected(r.fullName))
+                    }
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Select All
+                  </button>
+                  <span class="text-base-content/30">&middot;</span>
+                  <button
+                    type="button"
+                    onClick={() => deselectAllInOrg(state())}
+                    disabled={
+                      visible().length === 0 ||
+                      visible().every((r) => !isSelected(r.fullName))
+                    }
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </Show>
 
               {/* Loading state for this org */}
               <Show when={state().loading}>
@@ -532,8 +543,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
                   >
                     <ul class="divide-y divide-base-300">
                       <Index each={visible()}>
-                        {(repo) => {
-                          return (
+                        {(repo) => (
                             <li>
                               <div class="flex items-center">
                                 <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200 flex-1">
@@ -582,12 +592,93 @@ export default function RepoSelector(props: RepoSelectorProps) {
                                 </Show>
                               </div>
                             </li>
-                          );
-                        }}
+                          )}
                       </Index>
                     </ul>
                   </div>
                 </Show>
+              </Show>
+            </>
+          );
+
+          return (
+            <div class="overflow-hidden rounded-lg border border-base-300">
+              {/* Org header — accordion button when >= 6 orgs, plain header otherwise */}
+              <Show
+                when={isAccordion()}
+                fallback={
+                  <div class="flex items-center justify-between border-b border-base-300 bg-base-200 px-4 py-2">
+                    <span class="text-sm font-semibold text-base-content">
+                      {state().org}
+                    </span>
+                    <Show when={!state().loading && !state().error}>
+                      <div class="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => selectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Select All
+                        </button>
+                        <span class="text-base-content/30">·</span>
+                        <button
+                          type="button"
+                          onClick={() => deselectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => !isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                    </Show>
+                  </div>
+                }
+              >
+                <button
+                  type="button"
+                  id={`accordion-header-${state().org}`}
+                  class="flex w-full items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2 text-left"
+                  aria-expanded={expandedOrg() === state().org}
+                  aria-controls={`accordion-panel-${state().org}`}
+                  onClick={() => setUserExpandedOrg(state().org)}
+                >
+                  <ChevronIcon size="md" rotated={expandedOrg() !== state().org} />
+                  <span class="text-sm font-semibold text-base-content flex-1">
+                    {state().org}
+                  </span>
+                  <span class="badge badge-sm badge-ghost">{visible().length} {visible().length === 1 ? "repo" : "repos"}</span>
+                  <Show when={selectedCount() > 0}>
+                    <span class="badge badge-sm badge-ghost">{selectedCount()} selected</span>
+                  </Show>
+                </button>
+              </Show>
+
+              {/* Content: wrapped in grid animation for accordion, direct otherwise */}
+              <Show when={!isAccordion()}>
+                {orgContent()}
+              </Show>
+              <Show when={isAccordion()}>
+                <div
+                  class="accordion-panel grid transition-[grid-template-rows] duration-200"
+                  style={{ "grid-template-rows": expandedOrg() === state().org ? "1fr" : "0fr" }}
+                >
+                  <div
+                    id={`accordion-panel-${state().org}`}
+                    role="region"
+                    aria-labelledby={`accordion-header-${state().org}`}
+                    class="overflow-hidden"
+                    inert={expandedOrg() !== state().org}
+                  >
+                    {orgContent()}
+                  </div>
+                </div>
               </Show>
             </div>
           );
