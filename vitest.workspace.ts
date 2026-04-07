@@ -6,6 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   test: {
     projects: [
+      // MCP server tests (Node.js environment)
+      "mcp/vitest.config.ts",
       // Browser/DOM tests (stores, services, UI)
       defineProject({
         plugins: [solid(), tailwindcss()],
