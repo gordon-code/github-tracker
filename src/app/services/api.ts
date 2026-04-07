@@ -2,6 +2,11 @@ import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
+import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP } from "../../shared/validation";
+import type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
+
+// ── Re-exports from shared/types (backward compat for existing importers) ─────
+export type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -9,107 +14,6 @@ interface GraphQLRateLimit {
   limit: number;
   remaining: number;
   resetAt: string;
-}
-
-export interface OrgEntry {
-  login: string;
-  avatarUrl: string;
-  type: "org" | "user";
-}
-
-export interface RepoRef {
-  owner: string;
-  name: string;
-  fullName: string;
-}
-
-export interface RepoEntry extends RepoRef {
-  pushedAt: string | null;
-}
-
-export interface Issue {
-  id: number;
-  number: number;
-  title: string;
-  state: string;
-  htmlUrl: string;
-  createdAt: string;
-  updatedAt: string;
-  userLogin: string;
-  userAvatarUrl: string;
-  labels: { name: string; color: string }[];
-  assigneeLogins: string[];
-  repoFullName: string;
-  comments: number;
-  starCount?: number;
-  surfacedBy?: string[];
-}
-
-export interface CheckStatus {
-  status: "success" | "failure" | "pending" | "conflict" | null;
-}
-
-export interface PullRequest {
-  id: number;
-  number: number;
-  title: string;
-  state: string;
-  draft: boolean;
-  htmlUrl: string;
-  createdAt: string;
-  updatedAt: string;
-  userLogin: string;
-  userAvatarUrl: string;
-  headSha: string;
-  headRef: string;
-  baseRef: string;
-  assigneeLogins: string[];
-  reviewerLogins: string[];
-  repoFullName: string;
-  checkStatus: CheckStatus["status"];
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  comments: number;
-  reviewThreads: number;
-  labels: { name: string; color: string }[];
-  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
-  totalReviewCount: number;
-  starCount?: number;
-  /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
-  enriched?: boolean;
-  /** GraphQL global node ID — used for hot-poll status updates */
-  nodeId?: string;
-  surfacedBy?: string[];
-}
-
-export interface WorkflowRun {
-  id: number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-  event: string;
-  workflowId: number;
-  headSha: string;
-  headBranch: string;
-  runNumber: number;
-  htmlUrl: string;
-  createdAt: string;
-  updatedAt: string;
-  repoFullName: string;
-  isPrRun: boolean;
-  runStartedAt: string;
-  completedAt: string | null;
-  runAttempt: number;
-  displayTitle: string;
-  actorLogin: string;
-}
-
-export interface ApiError {
-  repo: string;
-  statusCode: number | null;
-  message: string;
-  retryable: boolean;
 }
 
 // ── Raw GitHub API shapes (minimal) ─────────────────────────────────────────
@@ -207,13 +111,6 @@ function extractSearchPartialData<T>(err: unknown): T | null {
   }
   return null;
 }
-
-const VALID_REPO_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
-// Allows alphanumeric/hyphen base (1-39 chars) with optional literal [bot] suffix for GitHub
-// App bot accounts. Case-sensitive [bot] is intentional — GitHub always uses lowercase.
-const VALID_TRACKED_LOGIN = /^[A-Za-z0-9-]{1,39}(\[bot\])?$/;
-
-const SEARCH_RESULT_CAP = 1000;
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];

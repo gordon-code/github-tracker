@@ -11,7 +11,7 @@
     "test": "vitest run --config vitest.workspace.ts",
     "test:watch": "vitest --config vitest.workspace.ts",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build src/shared/tsconfig.json && tsc --noEmit",
     "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test",
     "test:waf": "bash scripts/waf-smoke-test.sh",
     "screenshot": "pnpm exec playwright test --config playwright.config.screenshot.ts"

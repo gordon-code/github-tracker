@@ -13,13 +13,9 @@ const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
+import type { RateLimitInfo } from "../../shared/types";
 
-export interface RateLimitInfo {
-  limit: number;
-  remaining: number;
-  resetAt: Date;
-}
+type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
 // ── Rate limit signals ───────────────────────────────────────────────────────
 
