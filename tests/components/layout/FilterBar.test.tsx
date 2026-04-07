@@ -39,69 +39,79 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const defaultSortProps = {
+  sortOptions: [
+    { label: "Updated", field: "updatedAt", type: "date" as const },
+    { label: "Created", field: "createdAt", type: "date" as const },
+  ],
+  sortValue: "updatedAt",
+  sortDirection: "desc" as const,
+  onSortChange: vi.fn(),
+};
+
 describe("FilterBar", () => {
   it("renders org and repo filter dropdowns", () => {
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     screen.getByLabelText("Filter by organization");
     screen.getByLabelText("Filter by repository");
   });
 
   it("renders refresh button", () => {
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     screen.getByLabelText("Refresh data");
   });
 
   it("refresh button is enabled by default", () => {
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const refreshBtn = screen.getByLabelText("Refresh data") as HTMLButtonElement;
     expect(refreshBtn.disabled).toBe(false);
   });
 
   it("refresh button is disabled when isRefreshing=true", () => {
-    render(() => <FilterBar isRefreshing={true} />);
+    render(() => <FilterBar {...defaultSortProps} isRefreshing={true} />);
     const refreshBtn = screen.getByLabelText("Refresh data") as HTMLButtonElement;
     expect(refreshBtn.disabled).toBe(true);
   });
 
   it("shows 'Refreshing...' when isRefreshing=true", () => {
-    render(() => <FilterBar isRefreshing={true} />);
+    render(() => <FilterBar {...defaultSortProps} isRefreshing={true} />);
     screen.getByText("Refreshing...");
   });
 
   it("shows last refreshed time when lastRefreshedAt provided", () => {
     const now = new Date();
     const tenSecondsAgo = new Date(now.getTime() - 10_000);
-    render(() => <FilterBar lastRefreshedAt={tenSecondsAgo} />);
+    render(() => <FilterBar {...defaultSortProps} lastRefreshedAt={tenSecondsAgo} />);
     screen.getByText("Updated 10s ago");
   });
 
   it("shows minutes when lastRefreshedAt is more than 60s ago", () => {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
-    render(() => <FilterBar lastRefreshedAt={twoMinutesAgo} />);
+    render(() => <FilterBar {...defaultSortProps} lastRefreshedAt={twoMinutesAgo} />);
     screen.getByText("Updated 2m ago");
   });
 
   it("does not show updated label when lastRefreshedAt is null", () => {
-    render(() => <FilterBar lastRefreshedAt={null} />);
-    expect(screen.queryByText(/Updated/)).toBeNull();
+    render(() => <FilterBar {...defaultSortProps} lastRefreshedAt={null} />);
+    expect(screen.queryByText(/Updated \d+[sm] ago/)).toBeNull();
   });
 
   it("calls onRefresh when refresh button clicked", async () => {
     const user = userEvent.setup({ delay: null });
     const onRefresh = vi.fn();
-    render(() => <FilterBar onRefresh={onRefresh} />);
+    render(() => <FilterBar {...defaultSortProps} onRefresh={onRefresh} />);
     await user.click(screen.getByLabelText("Refresh data"));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
   it("org trigger shows 'All orgs' by default", () => {
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const orgTrigger = screen.getByLabelText("Filter by organization");
     expect(orgTrigger.textContent).toContain("All orgs");
   });
 
   it("repo trigger shows 'All repos' by default", () => {
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const repoTrigger = screen.getByLabelText("Filter by repository");
     expect(repoTrigger.textContent).toContain("All repos");
   });
@@ -111,14 +121,14 @@ describe("FilterBar", () => {
       org: "myorg",
       repo: null,
     };
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const orgTrigger = screen.getByLabelText("Filter by organization");
     expect(orgTrigger.textContent).toContain("myorg");
   });
 
   it("clicking org trigger opens listbox with org options", async () => {
     const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const orgTrigger = screen.getByLabelText("Filter by organization");
     await user.click(orgTrigger);
     // Options should now be visible in the listbox
@@ -128,7 +138,7 @@ describe("FilterBar", () => {
 
   it("clicking org trigger opens listbox with repo options", async () => {
     const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const repoTrigger = screen.getByLabelText("Filter by repository");
     await user.click(repoTrigger);
     expect(screen.getByRole("option", { name: "myorg/repo-a" })).toBeDefined();
@@ -138,7 +148,7 @@ describe("FilterBar", () => {
 
   it("selecting an org option calls setGlobalFilter and resets repo", async () => {
     const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const orgTrigger = screen.getByLabelText("Filter by organization");
     await user.click(orgTrigger);
     const myorgOption = screen.getByRole("option", { name: "myorg" });
@@ -148,7 +158,7 @@ describe("FilterBar", () => {
 
   it("selecting a repo option calls setGlobalFilter with current org and new repo", async () => {
     const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const repoTrigger = screen.getByLabelText("Filter by repository");
     await user.click(repoTrigger);
     const repoOption = screen.getByRole("option", { name: "myorg/repo-a" });
@@ -158,7 +168,7 @@ describe("FilterBar", () => {
 
   it("selecting 'All orgs' option calls setGlobalFilter with null org", async () => {
     const user = userEvent.setup({ delay: null });
-    render(() => <FilterBar />);
+    render(() => <FilterBar {...defaultSortProps} />);
     const orgTrigger = screen.getByLabelText("Filter by organization");
     await user.click(orgTrigger);
     const allOrgsOption = screen.getByRole("option", { name: "All orgs" });

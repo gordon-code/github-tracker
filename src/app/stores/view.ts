@@ -48,6 +48,10 @@ export const ViewStateSchema = z.object({
       })
     )
     .default({}),
+  globalSort: z.object({
+    field: z.string(),
+    direction: z.enum(["asc", "desc"]),
+  }).default({ field: "updatedAt", direction: "desc" }),
   ignoredItems: z
     .array(
       z.object({
@@ -180,13 +184,13 @@ export function pruneStaleIgnoredItems(): void {
 }
 
 export function setSortPreference(
-  tabId: string,
+  _tabId: string,
   field: string,
   direction: "asc" | "desc"
 ): void {
   setViewState(
     produce((draft) => {
-      draft.sortPreferences[tabId] = { field, direction };
+      draft.globalSort = { field, direction };
     })
   );
 }

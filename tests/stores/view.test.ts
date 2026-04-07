@@ -92,22 +92,23 @@ describe("setGlobalFilter", () => {
 });
 
 describe("setSortPreference", () => {
-  it("sets sort field and direction for a tab", () => {
+  it("sets global sort field and direction", () => {
     setSortPreference("issues", "updatedAt", "desc");
-    expect(viewState.sortPreferences["issues"]).toEqual({ field: "updatedAt", direction: "desc" });
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
   });
 
-  it("updates existing sort preference for a tab", () => {
+  it("updates existing global sort preference", () => {
     setSortPreference("issues", "updatedAt", "desc");
     setSortPreference("issues", "title", "asc");
-    expect(viewState.sortPreferences["issues"]).toEqual({ field: "title", direction: "asc" });
+    expect(viewState.globalSort).toEqual({ field: "title", direction: "asc" });
   });
 
-  it("sets preferences for multiple tabs independently", () => {
+  it("global sort is shared across tabs", () => {
     setSortPreference("issues", "updatedAt", "desc");
     setSortPreference("pullRequests", "createdAt", "asc");
-    expect(viewState.sortPreferences["issues"].field).toBe("updatedAt");
-    expect(viewState.sortPreferences["pullRequests"].field).toBe("createdAt");
+    // Global sort reflects the last call regardless of tab
+    expect(viewState.globalSort.field).toBe("createdAt");
+    expect(viewState.globalSort.direction).toBe("asc");
   });
 });
 

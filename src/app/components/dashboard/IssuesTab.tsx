@@ -5,7 +5,6 @@ import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
-import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
 import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
@@ -51,14 +50,6 @@ const issueFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
-export const sortOptions: SortOption[] = [
-  { label: "Repo", field: "repo", type: "text" },
-  { label: "Title", field: "title", type: "text" },
-  { label: "Author", field: "author", type: "text" },
-  { label: "Comments", field: "comments", type: "number" },
-  { label: "Created", field: "createdAt", type: "date" },
-  { label: "Updated", field: "updatedAt", type: "date" },
-];
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
@@ -123,10 +114,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   const isInvolvedItem = (item: Issue) =>
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
-  const sortPref = createMemo(() => {
-    const pref = viewState.sortPreferences["issues"];
-    return pref ?? { field: "updatedAt", direction: "desc" as const };
-  });
+  const sortPref = createMemo(() => viewState.globalSort);
 
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;

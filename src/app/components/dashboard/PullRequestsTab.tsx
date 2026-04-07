@@ -9,7 +9,6 @@ import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
-import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
 import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
@@ -119,16 +118,6 @@ const prFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
-export const sortOptions: SortOption[] = [
-  { label: "Repo", field: "repo", type: "text" },
-  { label: "Title", field: "title", type: "text" },
-  { label: "Author", field: "author", type: "text" },
-  { label: "Checks", field: "checkStatus", type: "text" },
-  { label: "Review", field: "reviewDecision", type: "text" },
-  { label: "Size", field: "size", type: "number" },
-  { label: "Created", field: "createdAt", type: "date" },
-  { label: "Updated", field: "updatedAt", type: "date" },
-];
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
@@ -194,10 +183,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet(),
       item.enriched !== false ? item.reviewerLogins : undefined);
 
-  const sortPref = createMemo(() => {
-    const pref = viewState.sortPreferences["pullRequests"];
-    return pref ?? { field: "updatedAt", direction: "desc" as const };
-  });
+  const sortPref = createMemo(() => viewState.globalSort);
 
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
