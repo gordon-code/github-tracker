@@ -156,7 +156,7 @@ export default function ActionsTab(props: ActionsTabProps) {
 
   function handleIgnore(run: WorkflowRun) {
     ignoreItem({
-      id: String(run.id),
+      id: run.id,
       type: "workflowRun",
       repo: run.repoFullName,
       title: run.name,
@@ -174,7 +174,7 @@ export default function ActionsTab(props: ActionsTabProps) {
     const eventFilter = viewState.tabFilters.actions.event;
 
     return props.workflowRuns.filter((run) => {
-      if (ignoredIds.has(String(run.id))) return false;
+      if (ignoredIds.has(run.id)) return false;
       if (!viewState.showPrRuns && run.isPrRun) return false;
       if (org && !run.repoFullName.startsWith(`${org}/`)) return false;
       if (repo && run.repoFullName !== repo) return false;

@@ -22,7 +22,7 @@ interface PersonalSummaryStripProps {
 
 export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
   const ignoredIds = createMemo(() => {
-    const ids = new Set<string>();
+    const ids = new Set<number>();
     for (const item of viewState.ignoredItems) ids.add(item.id);
     return ids;
   });
@@ -34,7 +34,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     const ignored = ignoredIds();
     let assignedIssues = 0;
     for (const i of props.issues) {
-      if (ignored.has(String(i.id))) continue;
+      if (ignored.has(i.id)) continue;
       if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") continue;
       if (i.assigneeLogins.some((a) => a.toLowerCase() === login)) assignedIssues++;
     }
@@ -50,7 +50,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     let prsReadyToMerge = 0;
     let prsBlocked = 0;
     for (const pr of props.pullRequests) {
-      if (ignored.has(String(pr.id))) continue;
+      if (ignored.has(pr.id)) continue;
       const isAuthor = pr.userLogin.toLowerCase() === login;
       if (
         !isAuthor &&
@@ -81,7 +81,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
 
   const runningActions = createMemo(() => {
     const ignored = ignoredIds();
-    return props.workflowRuns.filter((r) => !ignored.has(String(r.id)) && r.status === "in_progress").length;
+    return props.workflowRuns.filter((r) => !ignored.has(r.id) && r.status === "in_progress").length;
   });
 
   const summaryItems = createMemo(() => {

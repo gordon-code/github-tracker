@@ -121,7 +121,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
-      if (ignored.has(String(issue.id))) return false;
+      if (ignored.has(issue.id)) return false;
       if (filter.repo && issue.repoFullName !== filter.repo) return false;
       if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
 
@@ -235,7 +235,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   function handleIgnore(issue: Issue) {
     ignoreItem({
-      id: String(issue.id),
+      id: issue.id,
       type: "issue",
       repo: issue.repoFullName,
       title: issue.title,

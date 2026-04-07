@@ -190,7 +190,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
-      if (ignored.has(String(pr.id))) return false;
+      if (ignored.has(pr.id)) return false;
       if (filter.repo && pr.repoFullName !== filter.repo) return false;
       if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
 
@@ -341,7 +341,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   function handleIgnore(pr: PullRequest) {
     ignoreItem({
-      id: String(pr.id),
+      id: pr.id,
       type: "pullRequest",
       repo: pr.repoFullName,
       title: pr.title,

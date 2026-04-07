@@ -142,6 +142,8 @@ beforeEach(async () => {
   });
   // Reset view store to defaults
   viewStore.resetViewState();
+  // Reset config store to defaults — prevents enableTracking, selectedRepos, etc. from leaking between tests
+  configStore.resetConfig();
 });
 
 describe("DashboardPage — tab switching", () => {
@@ -269,13 +271,13 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one item — badge should decrement to 1
-    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 1, type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Un-ignore — badge should increment back to 2
-    viewStore.unignoreItem("1");
+    viewStore.unignoreItem(1);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -299,7 +301,7 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one real issue — badge should drop to 1
-    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 1, type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
@@ -322,13 +324,13 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
 
-    viewStore.ignoreItem({ id: "10", type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 10, type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
 
     // Un-ignore — badge should increment back to 3
-    viewStore.unignoreItem("10");
+    viewStore.unignoreItem(10);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
@@ -350,13 +352,13 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
 
-    viewStore.ignoreItem({ id: "20", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 20, type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Un-ignore — badge should increment back to 2
-    viewStore.unignoreItem("20");
+    viewStore.unignoreItem(20);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -424,7 +426,7 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one PR-triggered run — badge should drop to 2
-    viewStore.ignoreItem({ id: "21", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 21, type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -597,6 +599,43 @@ describe("DashboardPage — data flow", () => {
     await capturedFetchAll?.();
     // Data still present (collapsed repo group summary persists)
     screen.getByText("1 issue");
+  });
+
+  it("auto-prune runs after first non-skipped poll even if a skipped poll occurred first", async () => {
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 555,
+        number: 55,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Will be pruned after non-skipped poll",
+        addedAt: Date.now(),
+      }],
+    });
+
+    // First call: skipped — hasFetchedFresh must stay false, no pruning
+    vi.mocked(pollService.fetchAllData)
+      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true })
+      // Second call: real data with empty issues — item 555 absent means closed
+      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [] });
+
+    render(() => <DashboardPage />);
+
+    // After the first (skipped) fetch, tracked item must NOT be pruned yet
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+    });
+
+    // Trigger a second fetch — non-skipped, sets hasFetchedFresh=true, triggers prune
+    await capturedFetchAll?.();
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
   });
 });
 
@@ -828,6 +867,24 @@ describe("DashboardPage — tracked tab", () => {
     configStore.updateConfig({ enableTracking: false });
     render(() => <DashboardPage />);
     expect(screen.queryByText("Tracked")).toBeNull();
+  });
+
+  it("Tracked tab badge shows count equal to trackedItems length", async () => {
+    configStore.updateConfig({ enableTracking: true });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 42,
+        number: 7,
+        type: "issue" as const,
+        repoFullName: "owner/repo",
+        title: "Tracked issue",
+        addedAt: Date.now(),
+      }],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Tracked/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
   });
 
   it("auto-prunes tracked items absent from open poll data", async () => {

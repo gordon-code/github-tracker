@@ -58,7 +58,7 @@ export const ViewStateSchema = z.object({
   ignoredItems: z
     .array(
       z.object({
-        id: z.string(),
+        id: z.coerce.number(),
         type: z.enum(["issue", "pullRequest", "workflowRun"]),
         repo: z.string(),
         title: z.string(),
@@ -168,7 +168,7 @@ export function ignoreItem(item: IgnoredItem): void {
   );
 }
 
-export function unignoreItem(id: string): void {
+export function unignoreItem(id: number): void {
   setViewState(
     produce((draft) => {
       draft.ignoredItems = draft.ignoredItems.filter((i) => i.id !== id);

@@ -252,21 +252,15 @@ describe("TrackedTab — pin button", () => {
   });
 });
 
-describe("TrackedTab — ignore", () => {
-  it("ignoring a tracked item removes it from both lists", () => {
+describe("TrackedTab — no ignore action", () => {
+  it("does not render ignore button on tracked items", () => {
     const issue = makeIssue({ id: 70, title: "Ignorable Issue" });
     const tracked = makeTrackedItem({ id: 70, type: "issue", title: "Ignorable Issue" });
     updateViewState({ trackedItems: [tracked] });
 
     render(() => <TrackedTab issues={[issue]} pullRequests={[]} />);
 
-    const ignoreBtn = screen.getByLabelText(`Ignore #${issue.number} ${issue.title}`);
-    fireEvent.click(ignoreBtn);
-
-    // Removed from trackedItems
-    expect(viewState.trackedItems).toHaveLength(0);
-    // Added to ignoredItems
-    expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("70");
+    // Ignore button should NOT be present — TrackedTab only allows untracking
+    expect(screen.queryByLabelText(`Ignore #${issue.number} ${issue.title}`)).toBeNull();
   });
 });

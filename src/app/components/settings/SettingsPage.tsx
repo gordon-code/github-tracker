@@ -619,17 +619,12 @@ export default function SettingsPage() {
               checked={config.enableTracking}
               onChange={(e) => {
                 const val = e.currentTarget.checked;
-                if (!val) {
-                  if (config.defaultTab === "tracked") {
-                    saveWithFeedback({ enableTracking: val, defaultTab: "issues" });
-                  } else {
-                    saveWithFeedback({ enableTracking: val });
-                  }
-                  if (viewState.lastActiveTab === "tracked") {
-                    updateViewState({ lastActiveTab: "issues" });
-                  }
-                } else {
-                  saveWithFeedback({ enableTracking: val });
+                saveWithFeedback({
+                  enableTracking: val,
+                  ...(!val && config.defaultTab === "tracked" ? { defaultTab: "issues" as const } : {}),
+                });
+                if (!val && viewState.lastActiveTab === "tracked") {
+                  updateViewState({ lastActiveTab: "issues" });
                 }
               }}
               class="toggle toggle-primary"

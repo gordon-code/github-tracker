@@ -4,7 +4,7 @@ import { Tooltip } from "../shared/Tooltip";
 
 interface IgnoreBadgeProps {
   items: IgnoredItem[];
-  onUnignore: (id: string) => void;
+  onUnignore: (id: number) => void;
 }
 
 function typeIcon(type: IgnoredItem["type"]): string {

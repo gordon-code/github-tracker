@@ -328,6 +328,22 @@ export default function DashboardPage() {
               run.completedAt = update.completedAt;
             }
           }));
+          // Prune tracked PRs that became closed/merged via hot poll.
+          // The auto-prune createEffect only fires when the pullRequests array
+          // reference changes (full refresh). Hot poll mutates nested pr.state
+          // in-place via produce(), leaving the array ref unchanged.
+          if (config.enableTracking && viewState.trackedItems.length > 0 && prUpdates.size > 0) {
+            const pruneKeys = new Set<string>();
+            for (const [prId, update] of prUpdates) {
+              const stateVal = update.state?.toUpperCase();
+              if (stateVal === "CLOSED" || stateVal === "MERGED") {
+                if (viewState.trackedItems.some(t => t.type === "pullRequest" && t.id === prId)) {
+                  pruneKeys.add(`pullRequest:${prId}`);
+                }
+              }
+            }
+            if (pruneKeys.size > 0) pruneClosedTrackedItems(pruneKeys);
+          }
         },
         {
           onStart: (prDbIds, runIds) => {
@@ -389,20 +405,20 @@ export default function DashboardPage() {
 
     return {
       issues: dashboardData.issues.filter((i) => {
-        if (ignoredIssues.has(String(i.id))) return false;
+        if (ignoredIssues.has(i.id)) return false;
         if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") return false;
         if (repo && i.repoFullName !== repo) return false;
         if (org && !i.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
       pullRequests: dashboardData.pullRequests.filter((p) => {
-        if (ignoredPRs.has(String(p.id))) return false;
+        if (ignoredPRs.has(p.id)) return false;
         if (repo && p.repoFullName !== repo) return false;
         if (org && !p.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
       actions: dashboardData.workflowRuns.filter((w) => {
-        if (ignoredRuns.has(String(w.id))) return false;
+        if (ignoredRuns.has(w.id)) return false;
         if (!viewState.showPrRuns && w.isPrRun) return false;
         if (repo && w.repoFullName !== repo) return false;
         if (org && !w.repoFullName.startsWith(org + "/")) return false;

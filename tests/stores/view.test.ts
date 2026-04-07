@@ -110,14 +110,14 @@ describe("setSortPreference", () => {
 
 describe("ignoreItem / unignoreItem", () => {
   const item1: IgnoredItem = {
-    id: "issue-1",
+    id: 1,
     type: "issue",
     repo: "owner/repo",
     title: "Bug fix",
     ignoredAt: 1711000000000,
   };
   const item2: IgnoredItem = {
-    id: "pr-42",
+    id: 42,
     type: "pullRequest",
     repo: "owner/repo",
     title: "Add feature",
@@ -127,7 +127,7 @@ describe("ignoreItem / unignoreItem", () => {
   it("ignoreItem adds an item to ignoredItems", () => {
     ignoreItem(item1);
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("issue-1");
+    expect(viewState.ignoredItems[0].id).toBe(1);
   });
 
   it("ignoreItem does not add duplicates", () => {
@@ -145,29 +145,29 @@ describe("ignoreItem / unignoreItem", () => {
   it("unignoreItem removes the item with the given id", () => {
     ignoreItem(item1);
     ignoreItem(item2);
-    unignoreItem("issue-1");
+    unignoreItem(1);
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("pr-42");
+    expect(viewState.ignoredItems[0].id).toBe(42);
   });
 
   it("unignoreItem is a no-op for an unknown id", () => {
     ignoreItem(item1);
-    unignoreItem("does-not-exist");
+    unignoreItem(9999);
     expect(viewState.ignoredItems).toHaveLength(1);
   });
 
   it("evicts oldest item when at 500 cap (FIFO)", () => {
     // Fill to 500
     for (let i = 0; i < 500; i++) {
-      ignoreItem({ id: `item-${i}`, type: "issue", repo: "o/r", title: `T${i}`, ignoredAt: 1000 + i });
+      ignoreItem({ id: i, type: "issue", repo: "o/r", title: `T${i}`, ignoredAt: 1000 + i });
     }
     expect(viewState.ignoredItems).toHaveLength(500);
 
     // Adding 501st should evict item-0 (oldest)
-    ignoreItem({ id: "item-new", type: "issue", repo: "o/r", title: "New", ignoredAt: 2000 });
+    ignoreItem({ id: 9999, type: "issue", repo: "o/r", title: "New", ignoredAt: 2000 });
     expect(viewState.ignoredItems).toHaveLength(500);
-    expect(viewState.ignoredItems[0].id).toBe("item-1"); // item-0 evicted
-    expect(viewState.ignoredItems[499].id).toBe("item-new");
+    expect(viewState.ignoredItems[0].id).toBe(1); // item-0 evicted
+    expect(viewState.ignoredItems[499].id).toBe(9999);
   });
 });
 
@@ -177,13 +177,13 @@ describe("pruneStaleIgnoredItems", () => {
     const old = now - 31 * 24 * 60 * 60 * 1000;
     const recent = now - 1 * 24 * 60 * 60 * 1000;
 
-    ignoreItem({ id: "old-1", type: "issue", repo: "o/r", title: "Old", ignoredAt: old });
-    ignoreItem({ id: "recent-1", type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
+    ignoreItem({ id: 1, type: "issue", repo: "o/r", title: "Old", ignoredAt: old });
+    ignoreItem({ id: 2, type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
     expect(viewState.ignoredItems).toHaveLength(2);
 
     pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("recent-1");
+    expect(viewState.ignoredItems[0].id).toBe(2);
   });
 
   it("is a no-op when ignoredItems is empty", () => {
@@ -195,7 +195,7 @@ describe("pruneStaleIgnoredItems", () => {
     const now = Date.now();
     const exactly30 = now - 30 * 24 * 60 * 60 * 1000 + 1000;
 
-    ignoreItem({ id: "boundary", type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
+    ignoreItem({ id: 1, type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
     pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
   });

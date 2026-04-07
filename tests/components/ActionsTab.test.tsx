@@ -162,7 +162,7 @@ describe("ActionsTab", () => {
   it("filters out ignored workflow runs", () => {
     const run = makeWorkflowRun({ id: 42, name: "Ignored Run", repoFullName: "owner/repo" });
     viewStore.ignoreItem({
-      id: "42",
+      id: 42,
       type: "workflowRun",
       repo: "owner/repo",
       title: "Ignored Run",
