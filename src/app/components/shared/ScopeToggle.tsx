@@ -7,7 +7,7 @@ export default function ScopeToggle(props: ScopeToggleProps) {
   const checked = () => props.value === "involves_me";
 
   return (
-    <div class="flex items-center gap-2">
+    <label class="flex items-center gap-2 cursor-pointer">
       <input
         type="checkbox"
         aria-label="Scope filter"
@@ -20,6 +20,6 @@ export default function ScopeToggle(props: ScopeToggleProps) {
       <span class="text-sm text-base-content/70">
         {checked() ? "Involves me" : "All activity"}
       </span>
-    </div>
+    </label>
   );
 }

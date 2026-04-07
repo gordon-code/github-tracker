@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createSignal } from "solid-js";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import FilterToolbar from "../../../src/app/components/shared/FilterToolbar";
 import type { FilterChipGroupDef } from "../../../src/app/components/shared/filterTypes";
@@ -117,6 +118,22 @@ describe("FilterToolbar", () => {
     ));
     fireEvent.click(screen.getByText("Reset all"));
     expect(onResetAll).toHaveBeenCalled();
+  });
+
+  it("renders correct trigger count when groups change dynamically", () => {
+    const [groups, setGroups] = createSignal<FilterChipGroupDef[]>([roleGroup]);
+    render(() => (
+      <FilterToolbar
+        groups={groups()}
+        values={{}}
+        onChange={() => {}}
+        onResetAll={() => {}}
+      />
+    ));
+    expect(screen.getAllByRole("button", { name: /Filter by/i })).toHaveLength(1);
+
+    setGroups([roleGroup, reviewGroup]);
+    expect(screen.getAllByRole("button", { name: /Filter by/i })).toHaveLength(2);
   });
 
   it("scope toggle defaults to 'involves_me' when value not set", () => {

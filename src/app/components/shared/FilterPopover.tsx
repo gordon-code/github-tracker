@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { Popover } from "@kobalte/core/popover";
 import type { FilterChipGroupDef } from "./filterTypes";
 
@@ -11,14 +11,17 @@ interface FilterPopoverProps {
 export default function FilterPopover(props: FilterPopoverProps) {
   const [open, setOpen] = createSignal(false);
 
-  const isDefault = () =>
-    props.value === (props.group.defaultValue ?? "all");
+  const value = () => props.value ?? (props.group.defaultValue ?? "all");
 
-  const activeLabel = () => {
-    const opt = props.group.options.find((o) => o.value === props.value);
+  const isDefault = createMemo(
+    () => value() === (props.group.defaultValue ?? "all")
+  );
+
+  const activeLabel = createMemo(() => {
+    const opt = props.group.options.find((o) => o.value === value());
     if (opt) return opt.label;
-    return props.value === "all" ? "All" : props.value;
-  };
+    return value() === "all" ? "All" : value();
+  });
 
   return (
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-end">
@@ -49,26 +52,28 @@ export default function FilterPopover(props: FilterPopoverProps) {
           <Show when={!props.group.defaultValue}>
             <button
               type="button"
-              class={`w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm ${props.value === "all" || props.value === undefined ? "font-medium" : ""}`}
+              aria-pressed={value() === "all"}
+              class={`w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${value() === "all" ? "font-medium" : ""}`}
               onClick={() => {
                 props.onChange(props.group.field, "all");
                 setOpen(false);
               }}
             >
-              {(props.value === "all" || props.value === undefined) && "✓ "}All
+              {value() === "all" && "✓ "}All
             </button>
           </Show>
           <For each={props.group.options}>
             {(opt) => (
               <button
                 type="button"
-                class="w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm"
+                aria-pressed={value() === opt.value}
+                class="w-full text-left px-3 py-1.5 rounded hover:bg-base-200 text-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
                 onClick={() => {
                   props.onChange(props.group.field, opt.value);
                   setOpen(false);
                 }}
               >
-                {props.value === opt.value && "✓ "}{opt.label}
+                {value() === opt.value && "✓ "}{opt.label}
               </button>
             )}
           </For>

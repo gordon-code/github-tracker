@@ -1,6 +1,7 @@
 import { createMemo, For, Show } from "solid-js";
 import FilterPopover from "./FilterPopover";
 import ScopeToggle from "./ScopeToggle";
+import { scopeFilterGroup } from "./filterTypes";
 import type { FilterChipGroupDef } from "./filterTypes";
 
 interface FilterToolbarProps {
@@ -28,7 +29,7 @@ export default function FilterToolbar(props: FilterToolbarProps) {
     <div class="flex items-center gap-2 flex-wrap">
       <Show when={showScope()}>
         <ScopeToggle
-          value={props.values["scope"] ?? "involves_me"}
+          value={props.values["scope"] ?? scopeFilterGroup.defaultValue ?? "all"}
           onChange={props.onChange}
         />
         <div class="w-px h-5 bg-base-300" />
@@ -45,7 +46,7 @@ export default function FilterToolbar(props: FilterToolbarProps) {
       <Show when={hasActiveFilter()}>
         <button
           type="button"
-          class="btn btn-ghost btn-xs"
+          class="btn btn-ghost btn-sm"
           onClick={props.onResetAll}
         >
           Reset all
