@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import RepoLockControls from "../../../src/app/components/shared/RepoLockControls";
 import { resetViewState, viewState, lockRepo } from "../../../src/app/stores/view";
@@ -103,5 +103,55 @@ describe("RepoLockControls", () => {
     ));
     fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
     expect(parentClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("RepoLockControls — scroll preservation", () => {
+  beforeEach(() => {
+    resetViewState();
+    document.documentElement.scrollTop = 500;
+    vi.spyOn(window, "scrollTo");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.documentElement.scrollTop = 0;
+  });
+
+  it("preserves scroll position when locking a repo", () => {
+    render(() => (
+      <RepoLockControls tab="issues" repoFullName="owner/repo" />
+    ));
+    fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
+  });
+
+  it("preserves scroll position when unlocking a repo", () => {
+    lockRepo("issues", "owner/repo");
+    render(() => (
+      <RepoLockControls tab="issues" repoFullName="owner/repo" />
+    ));
+    fireEvent.click(screen.getByLabelText("Unpin owner/repo"));
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
+  });
+
+  it("preserves scroll position when moving repo up", () => {
+    lockRepo("issues", "owner/a");
+    lockRepo("issues", "owner/b");
+    render(() => (
+      <RepoLockControls tab="issues" repoFullName="owner/b" />
+    ));
+    fireEvent.click(screen.getByLabelText("Move owner/b up"));
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
+  });
+
+  it("preserves scroll position when moving repo down", () => {
+    lockRepo("issues", "owner/a");
+    lockRepo("issues", "owner/b");
+    render(() => (
+      <RepoLockControls tab="issues" repoFullName="owner/a" />
+    ));
+    fireEvent.click(screen.getByLabelText("Move owner/a down"));
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
   });
 });
