@@ -13,6 +13,7 @@ export default defineConfig({
           name: "browser",
           environment: "happy-dom",
           globals: true,
+          hookTimeout: 30_000,
           setupFiles: ["tests/setup.ts"],
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
           exclude: ["tests/worker/**"],
