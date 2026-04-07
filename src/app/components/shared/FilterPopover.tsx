@@ -11,7 +11,7 @@ interface FilterPopoverProps {
 export default function FilterPopover(props: FilterPopoverProps) {
   const [open, setOpen] = createSignal(false);
 
-  const value = () => props.value ?? (props.group.defaultValue ?? "all");
+  const value = createMemo(() => props.value ?? (props.group.defaultValue ?? "all"));
 
   const isDefault = createMemo(
     () => value() === (props.group.defaultValue ?? "all")
