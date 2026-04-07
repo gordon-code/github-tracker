@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, For, onCleanup } from "solid-js";
+import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
@@ -71,7 +71,8 @@ export default function SettingsPage() {
     }
   });
 
-  const usageSnapshot = createMemo(() => { checkAndResetIfExpired(); return getUsageSnapshot(); });
+  onMount(() => checkAndResetIfExpired());
+  const usageSnapshot = createMemo(() => getUsageSnapshot());
 
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
