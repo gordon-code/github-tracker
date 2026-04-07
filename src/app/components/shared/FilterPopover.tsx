@@ -1,6 +1,5 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { Popover } from "@kobalte/core/popover";
-import { config } from "../../stores/config";
 import type { FilterChipGroupDef } from "./filterTypes";
 
 interface FilterPopoverProps {
@@ -30,7 +29,7 @@ export default function FilterPopover(props: FilterPopoverProps) {
         as="button"
         type="button"
         aria-label={`Filter by ${props.group.label}`}
-        class={`btn ${config.viewDensity === "compact" ? "btn-xs" : "btn-sm"} ${isDefault() ? "btn-ghost" : "btn-primary"}`}
+        class={`btn btn-sm compact:btn-xs ${isDefault() ? "btn-ghost" : "btn-primary"}`}
       >
         <Show when={isDefault()} fallback={<>{props.group.label}: {activeLabel()}</>}>
           {props.group.label}

@@ -9,7 +9,6 @@ interface WorkflowSummaryCardProps {
   expanded: boolean;
   onToggle: () => void;
   onIgnoreRun: (run: WorkflowRun) => void;
-  density: "compact" | "comfortable";
   refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
   flashingRunIds?: ReadonlySet<number>;
@@ -71,12 +70,12 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
       tabIndex={0}
       aria-expanded={props.expanded}
       aria-label={props.workflowName}
-      class={`rounded-lg border cursor-pointer transition-colors ${props.density === "compact" ? "p-2" : "p-3"} ${hoverClass()} ${borderLeftClass()} ${cardBgClass()}`}
+      class={`rounded-lg border cursor-pointer transition-colors p-3 compact:p-2 ${hoverClass()} ${borderLeftClass()} ${cardBgClass()}`}
       onClick={props.onToggle}
       onKeyDown={handleKeyDown}
     >
       {/* Card header */}
-      <div class={`flex items-center min-w-0 ${props.density === "compact" ? "gap-1.5" : "gap-2"}`}>
+      <div class="flex items-center min-w-0 gap-2 compact:gap-1.5">
         <span class="truncate text-sm font-medium text-base-content flex-1 min-w-0">
           {props.workflowName}
         </span>
@@ -116,7 +115,6 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
               <WorkflowRunRow
                 run={run}
                 onIgnore={props.onIgnoreRun}
-                density={props.density}
                 refreshTick={props.refreshTick}
                 isPolling={props.hotPollingRunIds?.has(run.id)}
                 isFlashing={props.flashingRunIds?.has(run.id)}

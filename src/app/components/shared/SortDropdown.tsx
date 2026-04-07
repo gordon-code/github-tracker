@@ -1,6 +1,5 @@
 import { createMemo } from "solid-js";
 import { Select } from "@kobalte/core/select";
-import { config } from "../../stores/config";
 
 export interface SortOption {
   label: string;
@@ -62,7 +61,7 @@ export default function SortDropdown(props: SortDropdownProps) {
     >
       <Select.Trigger
         aria-label="Sort by"
-        class={`btn btn-outline w-auto min-w-[180px] justify-between ${config.viewDensity === "compact" ? "btn-xs" : "btn-sm"}`}
+        class="btn btn-outline btn-sm compact:btn-xs w-auto min-w-[180px] justify-between"
       >
         <Select.Value<FlatOption>>{(state) => state.selectedOption()?.label ?? "Sort by"}</Select.Value>
         <Select.Icon class="ml-2">▾</Select.Icon>

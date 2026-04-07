@@ -1,6 +1,5 @@
 import { createMemo, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
-import type { Config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, formatDuration } from "../../lib/format";
 import { Tooltip } from "../shared/Tooltip";
@@ -8,7 +7,6 @@ import { Tooltip } from "../shared/Tooltip";
 interface WorkflowRunRowProps {
   run: WorkflowRun;
   onIgnore: (run: WorkflowRun) => void;
-  density: Config["viewDensity"];
   refreshTick?: number;
   isPolling?: boolean;
   isFlashing?: boolean;
@@ -130,9 +128,6 @@ function durationLabel(run: WorkflowRun): string {
 }
 
 export default function WorkflowRunRow(props: WorkflowRunRowProps) {
-  const paddingClass = () =>
-    props.density === "compact" ? "py-1 px-2" : "py-2.5 px-4";
-
   const createdTitle = createMemo(() => `Created: ${new Date(props.run.createdAt).toLocaleString()}`);
 
   // Reading props.refreshTick registers it as a SolidJS reactive dependency,
@@ -145,7 +140,7 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
 
   return (
     <div
-      class={`flex items-center gap-3 ${paddingClass()} group ${props.run.conclusion === "failure" ? "bg-error/5 hover:bg-error/10" : "hover:bg-base-200"} ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
+      class={`flex items-center gap-3 py-2.5 px-4 compact:py-1 compact:px-2 group ${props.run.conclusion === "failure" ? "bg-error/5 hover:bg-error/10" : "hover:bg-base-200"} ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       <StatusIcon status={props.run.status} conclusion={props.run.conclusion} />
 

@@ -61,7 +61,7 @@ export default function FilterBar(props: FilterBarProps) {
   });
 
   return (
-    <div class={`flex items-center gap-3 px-4 bg-base-100 border-b border-base-300 shadow-sm ${config.viewDensity === "compact" ? "py-1" : "py-2"}`}>
+    <div class="flex items-center gap-3 px-4 py-2 compact:py-1 bg-base-100 border-b border-base-300 shadow-sm">
       <Select<string>
         value={viewState.globalFilter.org ?? ""}
         onChange={handleOrgChange}
@@ -75,7 +75,7 @@ export default function FilterBar(props: FilterBarProps) {
         )}
       >
         <Select.Trigger
-          class={`btn btn-outline ${config.viewDensity === "compact" ? "btn-xs" : "btn-sm"}`}
+          class="btn btn-outline btn-sm compact:btn-xs"
           aria-label="Filter by organization"
         >
           {viewState.globalFilter.org ?? "All orgs"}
@@ -100,7 +100,7 @@ export default function FilterBar(props: FilterBarProps) {
         )}
       >
         <Select.Trigger
-          class={`btn btn-outline ${config.viewDensity === "compact" ? "btn-xs" : "btn-sm"}`}
+          class="btn btn-outline btn-sm compact:btn-xs"
           aria-label="Filter by repository"
         >
           {viewState.globalFilter.repo ?? "All repos"}
@@ -137,7 +137,7 @@ export default function FilterBar(props: FilterBarProps) {
         <button
           onClick={props.onRefresh}
           disabled={props.isRefreshing}
-          class={`btn btn-ghost ${config.viewDensity === "compact" ? "btn-xs" : "btn-sm"}`}
+          class="btn btn-ghost btn-sm compact:btn-xs"
           aria-label="Refresh data"
         >
           <Show

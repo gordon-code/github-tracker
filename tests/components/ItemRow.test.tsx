@@ -16,7 +16,6 @@ const defaultProps = {
   url: "https://github.com/octocat/Hello-World/issues/42",
   labels: [{ name: "bug", color: "d73a4a" }],
   onIgnore: vi.fn(),
-  density: "comfortable" as const,
 };
 
 describe("ItemRow", () => {
@@ -112,20 +111,13 @@ describe("ItemRow", () => {
     expect(tooltipTrigger!.className).toContain("self-center");
   });
 
-  it("applies compact padding in compact density", () => {
+  it("has both comfortable and compact classes (CSS-driven density)", () => {
     const { container } = render(() => (
-      <ItemRow {...defaultProps} density="compact" />
-    ));
-    const row = container.querySelector(".group")!;
-    expect(row.className).toContain("py-1");
-  });
-
-  it("applies comfortable padding in comfortable density", () => {
-    const { container } = render(() => (
-      <ItemRow {...defaultProps} density="comfortable" />
+      <ItemRow {...defaultProps} />
     ));
     const row = container.querySelector(".group")!;
     expect(row.className).toContain("py-3");
+    expect(row.className).toContain("compact:py-1");
   });
 
   it("renders no labels section when labels array is empty", () => {

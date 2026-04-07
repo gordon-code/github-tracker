@@ -1,4 +1,5 @@
 import { createMemo, For, JSX, Show } from "solid-js";
+import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
@@ -19,7 +20,6 @@ export interface ItemRowProps {
   onIgnore?: () => void;
   onTrack?: () => void;
   isTracked?: boolean;
-  density: "compact" | "comfortable";
   commentCount?: number;
   hideRepo?: boolean;
   surfacedByBadge?: JSX.Element;
@@ -28,7 +28,7 @@ export interface ItemRowProps {
 }
 
 export default function ItemRow(props: ItemRowProps) {
-  const isCompact = () => props.density === "compact";
+  const isCompact = () => config.viewDensity === "compact";
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
   // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
@@ -68,15 +68,14 @@ export default function ItemRow(props: ItemRowProps) {
     }
     return parts.join(" | ");
   });
-  const hasCompactTooltip = createMemo(() => isCompact() && compactLabelTooltip() !== "");
+  const hasCompactTooltip = createMemo(() => compactLabelTooltip() !== "");
   const hasLabels = createMemo(() => props.labels.length > 0);
 
   return (
     <div
-      class={`group relative flex items-center gap-2
+      class={`group relative flex px-4 py-3 items-start gap-3 compact:px-3 compact:py-1 compact:items-center compact:gap-2
         hover:bg-base-200
         transition-colors
-        ${isCompact() ? "px-3 py-1 items-center gap-2" : "px-4 py-3 items-start gap-3"}
         ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
       {/* Overlay link — covers entire row; interactive children use relative z-10 */}
@@ -96,9 +95,9 @@ export default function ItemRow(props: ItemRowProps) {
       <Show when={!props.hideRepo}>
         <Tooltip content={props.repo} class="shrink-0 relative z-10">
           <span
-            class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
+            class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
               bg-primary/10 text-primary
-              ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
+              text-xs px-2.5 py-1 compact:px-2 compact:py-0.5"
           >
             {props.repo}
           </span>

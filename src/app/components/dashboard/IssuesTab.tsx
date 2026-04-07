@@ -255,8 +255,8 @@ export default function IssuesTab(props: IssuesTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter chips + ignore badge toolbar */}
-      <div class={`flex items-start px-4 border-b border-base-300 bg-base-100 ${config.viewDensity === "compact" ? "py-0.5 gap-2" : "py-2 gap-3"}`}>
-        <div class={`flex flex-wrap items-center min-w-0 flex-1 ${config.viewDensity === "compact" ? "gap-2" : "gap-3"}`}>
+      <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.issues}
@@ -354,7 +354,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                       <button
                         onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
                         aria-expanded={isExpanded()}
-                        class={`flex-1 flex items-center gap-2 px-4 text-left text-sm font-semibold text-base-content ${config.viewDensity === "compact" ? "py-1.5" : "py-2.5"}`}
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
                       >
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
@@ -411,7 +411,6 @@ export default function IssuesTab(props: IssuesTabProps) {
                                 onIgnore={() => handleIgnore(issue)}
                                 onTrack={config.enableTracking ? () => handleTrack(issue) : undefined}
                                 isTracked={config.enableTracking ? trackedIssueIds().has(issue.id) : undefined}
-                                density={config.viewDensity}
                                 commentCount={issue.comments}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0

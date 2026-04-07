@@ -1,7 +1,6 @@
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
-import { config } from "../../stores/config";
 import { viewState, setViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
@@ -221,8 +220,8 @@ export default function ActionsTab(props: ActionsTabProps) {
   return (
     <div class="divide-y divide-base-300">
       {/* Toolbar */}
-      <div class={`flex items-start px-4 border-b border-base-300 bg-base-100 ${config.viewDensity === "compact" ? "py-0.5 gap-2" : "py-2 gap-3"}`}>
-        <div class={`flex flex-wrap items-center min-w-0 flex-1 ${config.viewDensity === "compact" ? "gap-2" : "gap-3"}`}>
+      <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -299,7 +298,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   <button
                     onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
                     aria-expanded={isExpanded()}
-                    class={`flex-1 flex items-center gap-2 px-4 text-left text-sm font-semibold text-base-content ${config.viewDensity === "compact" ? "py-1.5" : "py-2.5"}`}
+                    class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
                   >
                     <ChevronIcon size="md" rotated={!isExpanded()} />
                     {repoGroup.repoFullName}
@@ -356,7 +355,6 @@ export default function ActionsTab(props: ActionsTabProps) {
                               expanded={isWfExpanded()}
                               onToggle={() => toggleWorkflow(wfKey)}
                               onIgnoreRun={handleIgnore}
-                              density={config.viewDensity}
                               refreshTick={props.refreshTick}
                               hotPollingRunIds={props.hotPollingRunIds}
                               flashingRunIds={flashingRunIds()}

@@ -361,8 +361,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar */}
-      <div class={`flex items-start px-4 border-b border-base-300 bg-base-100 ${config.viewDensity === "compact" ? "py-0.5 gap-2" : "py-2 gap-3"}`}>
-        <div class={`flex flex-wrap items-center min-w-0 flex-1 ${config.viewDensity === "compact" ? "gap-2" : "gap-3"}`}>
+      <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.pullRequests}
@@ -461,7 +461,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       <button
                         onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
                         aria-expanded={isExpanded()}
-                        class={`flex-1 flex items-center gap-2 px-4 text-left text-sm font-semibold text-base-content ${config.viewDensity === "compact" ? "py-1.5" : "py-2.5"}`}
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
                       >
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
@@ -570,7 +570,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 onIgnore={() => handleIgnore(pr)}
                                 onTrack={config.enableTracking ? () => handleTrack(pr) : undefined}
                                 isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
-                                density={config.viewDensity}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
@@ -627,7 +626,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
                                     </Show>
                                     <Show when={pr.checkStatus === "conflict"}>
-                                      {/* small conflict icon only, no text */}
                                       <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
                                         <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
                                       </svg>
