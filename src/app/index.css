@@ -154,6 +154,25 @@
   scrollbar-color: color-mix(in oklch, var(--color-base-content) 30%, transparent) var(--color-base-200);
 }
 
+/* ── Kobalte accordion animation ─────────────────────────────────────────── */
+
+.kb-accordion-content {
+  overflow: hidden;
+  animation: kb-accordion-down 200ms ease-in-out forwards;
+}
+.kb-accordion-content[data-closed] {
+  animation: kb-accordion-up 200ms ease-in-out forwards;
+}
+
+@keyframes kb-accordion-down {
+  from { height: 0; }
+  to { height: var(--kb-accordion-content-height); }
+}
+@keyframes kb-accordion-up {
+  from { height: var(--kb-accordion-content-height); }
+  to { height: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-slow-pulse,
   .animate-toast-in, .animate-toast-out,
@@ -162,6 +181,10 @@
   .animate-shimmer, .animate-flash, .animate-reorder-highlight,
   .filter-popover-content[data-expanded], .filter-popover-content[data-closed],
   .loading {
+    animation: none;
+  }
+  .kb-accordion-content,
+  .kb-accordion-content[data-closed] {
     animation: none;
   }
 }

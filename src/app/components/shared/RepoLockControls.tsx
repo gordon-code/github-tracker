@@ -1,6 +1,7 @@
 import { Show, createMemo } from "solid-js";
 import { viewState, lockRepo, unlockRepo, moveLockedRepo, type LockedReposTab } from "../../stores/view";
 import { Tooltip } from "./Tooltip";
+import { withFlipAnimation } from "../../lib/scroll";
 
 interface RepoLockControlsProps {
   tab: LockedReposTab;
@@ -26,7 +27,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
           <Tooltip content="Pin to top">
             <button
               class="btn btn-ghost btn-xs opacity-0 group-hover/repo-header:opacity-100 focus:opacity-100 max-sm:opacity-60 sm:max-lg:opacity-60 transition-opacity"
-              onClick={() => lockRepo(props.tab, props.repoFullName)}
+              onClick={() => withFlipAnimation(() => lockRepo(props.tab, props.repoFullName))}
               aria-label={`Pin ${props.repoFullName} to top of list`}
             >
               {/* Heroicons 20px solid: lock-open */}
@@ -40,7 +41,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         <Tooltip content="Unpin">
           <button
             class="btn btn-ghost btn-xs"
-            onClick={() => unlockRepo(props.tab, props.repoFullName)}
+            onClick={() => withFlipAnimation(() => unlockRepo(props.tab, props.repoFullName))}
             aria-label={`Unpin ${props.repoFullName}`}
           >
             {/* Heroicons 20px solid: lock-closed */}
@@ -52,7 +53,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         <Tooltip content={lockInfo().isFirst ? "Already at top of pinned list" : "Move up"}>
           <button
             class="btn btn-ghost btn-xs"
-            onClick={() => moveLockedRepo(props.tab, props.repoFullName, "up")}
+            onClick={() => withFlipAnimation(() => moveLockedRepo(props.tab, props.repoFullName, "up"))}
             disabled={lockInfo().isFirst}
             aria-label={`Move ${props.repoFullName} up`}
           >
@@ -65,7 +66,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         <Tooltip content={lockInfo().isLast ? "Already at bottom of pinned list" : "Move down"}>
           <button
             class="btn btn-ghost btn-xs"
-            onClick={() => moveLockedRepo(props.tab, props.repoFullName, "down")}
+            onClick={() => withFlipAnimation(() => moveLockedRepo(props.tab, props.repoFullName, "down"))}
             disabled={lockInfo().isLast}
             aria-label={`Move ${props.repoFullName} down`}
           >

@@ -15,6 +15,8 @@ import { relativeTime } from "../../lib/format";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 import { Tooltip, InfoTooltip } from "../shared/Tooltip";
+import ChevronIcon from "../shared/ChevronIcon";
+import { Accordion } from "@kobalte/core";
 
 // Validates owner/repo format (both segments must be non-empty, no spaces)
 const VALID_REPO_NAME = /^[a-zA-Z0-9._-]{1,100}\/[a-zA-Z0-9._-]{1,100}$/;
@@ -38,6 +40,115 @@ interface OrgRepoState {
   repos: RepoEntry[];
   loading: boolean;
   error: string | null;
+}
+
+interface OrgContentProps {
+  state: OrgRepoState;
+  visible: RepoEntry[];
+  isSelected: (fullName: string) => boolean;
+  toggleRepo: (repo: RepoEntry) => void;
+  retryOrg: (org: string) => void;
+  q: string;
+  monitoredSet: Set<string>;
+  upstreamSelectedSet: Set<string>;
+  toRepoRef: (entry: RepoEntry) => RepoRef;
+  onMonitorToggle?: (repo: RepoRef, monitored: boolean) => void;
+}
+
+function OrgContent(props: OrgContentProps) {
+  return (
+    <>
+      <Show when={props.state.loading}>
+        <div class="flex justify-center py-6">
+          <LoadingSpinner size="sm" label="Loading..." />
+        </div>
+      </Show>
+
+      <Show when={!props.state.loading && props.state.error !== null}>
+        <div class="flex items-center justify-between px-4 py-3">
+          <span class="text-sm text-error">
+            {props.state.error}
+          </span>
+          <button
+            type="button"
+            onClick={() => props.retryOrg(props.state.org)}
+            class="btn btn-ghost btn-xs ml-3"
+          >
+            Retry
+          </button>
+        </div>
+      </Show>
+
+      <Show when={!props.state.loading && props.state.error === null}>
+        <Show
+          when={props.visible.length > 0}
+          fallback={
+            <p class="px-4 py-4 text-center text-sm text-base-content/50">
+              {props.q
+                ? "No repos match your filter."
+                : "No repositories found."}
+            </p>
+          }
+        >
+          <div class="max-h-[300px] overflow-y-auto">
+            <ul class="divide-y divide-base-300">
+              <Index each={props.visible}>
+                {(repo) => (
+                  <li>
+                    <div class="flex items-center">
+                      <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200 flex-1">
+                        <input
+                          type="checkbox"
+                          checked={props.isSelected(repo().fullName)}
+                          onChange={() => props.toggleRepo(repo())}
+                          class="checkbox checkbox-primary checkbox-sm mt-0.5"
+                        />
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center gap-2">
+                            <span class="min-w-0 truncate text-sm font-medium text-base-content">
+                              {repo().name}
+                            </span>
+                            <Show when={repo().pushedAt}>
+                              <span class="ml-auto shrink-0 text-xs text-base-content/60">
+                                {relativeTime(repo().pushedAt!)}
+                              </span>
+                            </Show>
+                          </div>
+                        </div>
+                      </label>
+                      <Show when={props.isSelected(repo().fullName) && props.onMonitorToggle && !props.upstreamSelectedSet.has(repo().fullName)}>
+                        <Tooltip content={props.monitoredSet.has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              props.onMonitorToggle?.(props.toRepoRef(repo()), !props.monitoredSet.has(repo().fullName));
+                            }}
+                            class="btn btn-ghost btn-sm btn-circle mr-2"
+                            classList={{
+                              "text-info": props.monitoredSet.has(repo().fullName),
+                              "text-base-content/20": !props.monitoredSet.has(repo().fullName),
+                            }}
+                            aria-label={props.monitoredSet.has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
+                            aria-pressed={props.monitoredSet.has(repo().fullName)}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                          </button>
+                        </Tooltip>
+                      </Show>
+                    </div>
+                  </li>
+                )}
+              </Index>
+            </ul>
+          </div>
+        </Show>
+      </Show>
+    </>
+  );
 }
 
 export default function RepoSelector(props: RepoSelectorProps) {
@@ -407,6 +518,22 @@ export default function RepoSelector(props: RepoSelectorProps) {
     );
   });
 
+  // ── Accordion state ───────────────────────────────────────────────────────
+
+  const isAccordion = createMemo(() => props.selectedOrgs.length >= 6);
+  // Stable default: props.selectedOrgs[0] avoids the mid-load shift that
+  // occurs when sortedOrgStates switches from insertion-order to alphabetical
+  const [expandedOrg, setExpandedOrg] = createSignal<string>(
+    props.selectedOrgs[0] ?? ""
+  );
+  const safeExpandedOrg = createMemo(() => {
+    const states = sortedOrgStates();
+    const current = expandedOrg();
+    if (states.some(s => s.org === current)) return current;
+    const stateOrgs = new Set(states.map(s => s.org));
+    return props.selectedOrgs.find(o => stateOrgs.has(o)) ?? (states.length > 0 ? states[0].org : "");
+  });
+
   // ── Status ────────────────────────────────────────────────────────────────
 
   const totalOrgs = () => props.selectedOrgs.length;
@@ -450,149 +577,130 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
       {/* Per-org repo lists — Index (not For) avoids tearing down every org's
            DOM subtree when a single org's state updates via setOrgStates(prev.map(...)) */}
-      <Index each={sortedOrgStates()}>
-        {(state) => {
-          const visible = createMemo(() => filteredReposForOrg(state()));
-
-          return (
-            <div class="overflow-hidden rounded-lg border border-base-300">
-              {/* Org header */}
-              <div class="flex items-center justify-between border-b border-base-300 bg-base-200 px-4 py-2">
-                <span class="text-sm font-semibold text-base-content">
-                  {state().org}
-                </span>
-                <Show when={!state().loading && !state().error}>
-                  <div class="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => selectAllInOrg(state())}
-                      disabled={
-                        visible().length === 0 ||
-                        visible().every((r) => isSelected(r.fullName))
-                      }
-                      class="btn btn-ghost btn-xs"
-                    >
-                      Select All
-                    </button>
-                    <span class="text-base-content/30">·</span>
-                    <button
-                      type="button"
-                      onClick={() => deselectAllInOrg(state())}
-                      disabled={
-                        visible().length === 0 ||
-                        visible().every((r) => !isSelected(r.fullName))
-                      }
-                      class="btn btn-ghost btn-xs"
-                    >
-                      Deselect All
-                    </button>
+      <Show
+        when={isAccordion()}
+        fallback={
+          <Index each={sortedOrgStates()}>
+            {(state) => {
+              const visible = createMemo(() => filteredReposForOrg(state()));
+              return (
+                <div class="overflow-hidden rounded-lg border border-base-300" role="region" aria-label={`${state().org} repositories`}>
+                  <div class="flex items-center justify-between border-b border-base-300 bg-base-200 px-4 py-2">
+                    <span class="text-sm font-semibold text-base-content">
+                      {state().org}
+                    </span>
+                    <Show when={!state().loading && !state().error}>
+                      <div class="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => selectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Select All
+                        </button>
+                        <span class="text-base-content/30">·</span>
+                        <button
+                          type="button"
+                          onClick={() => deselectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => !isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                    </Show>
                   </div>
-                </Show>
-              </div>
-
-              {/* Loading state for this org */}
-              <Show when={state().loading}>
-                <div class="flex justify-center py-6">
-                  <LoadingSpinner size="sm" label="Loading..." />
+                  <OrgContent state={state()} visible={visible()} isSelected={isSelected} toggleRepo={toggleRepo} retryOrg={retryOrg} q={q()} monitoredSet={monitoredSet()} upstreamSelectedSet={upstreamSelectedSet()} toRepoRef={toRepoRef} onMonitorToggle={props.onMonitorToggle} />
                 </div>
-              </Show>
-
-              {/* Error state for this org */}
-              <Show when={!state().loading && state().error !== null}>
-                <div class="flex items-center justify-between px-4 py-3">
-                  <span class="text-sm text-error">
-                    {state().error}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => retryOrg(state().org)}
-                    class="btn btn-ghost btn-xs ml-3"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </Show>
-
-              {/* Repo list */}
-              <Show when={!state().loading && state().error === null}>
-                <Show
-                  when={visible().length > 0}
-                  fallback={
-                    <p class="px-4 py-4 text-center text-sm text-base-content/50">
-                      {q()
-                        ? "No repos match your filter."
-                        : "No repositories found."}
-                    </p>
-                  }
-                >
-                  <div
-                    class="max-h-[300px] overflow-y-auto"
-                    role="region"
-                    aria-label={`${state().org} repositories`}
-                  >
-                    <ul class="divide-y divide-base-300">
-                      <Index each={visible()}>
-                        {(repo) => {
-                          return (
-                            <li>
-                              <div class="flex items-center">
-                                <label class="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-base-200 flex-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected(repo().fullName)}
-                                    onChange={() => toggleRepo(repo())}
-                                    class="checkbox checkbox-primary checkbox-sm mt-0.5"
-                                  />
-                                  <div class="min-w-0 flex-1">
-                                    <div class="flex items-center gap-2">
-                                      <span class="min-w-0 truncate text-sm font-medium text-base-content">
-                                        {repo().name}
-                                      </span>
-                                      <Show when={repo().pushedAt}>
-                                        <span class="ml-auto shrink-0 text-xs text-base-content/60">
-                                          {relativeTime(repo().pushedAt!)}
-                                        </span>
-                                      </Show>
-                                    </div>
-                                  </div>
-                                </label>
-                                <Show when={isSelected(repo().fullName) && props.onMonitorToggle && !upstreamSelectedSet().has(repo().fullName)}>
-                                  <Tooltip content={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        props.onMonitorToggle?.(toRepoRef(repo()), !monitoredSet().has(repo().fullName));
-                                      }}
-                                      class="btn btn-ghost btn-sm btn-circle mr-2"
-                                      classList={{
-                                        "text-info": monitoredSet().has(repo().fullName),
-                                        "text-base-content/20": !monitoredSet().has(repo().fullName),
-                                      }}
-                                      aria-label={monitoredSet().has(repo().fullName) ? "Stop monitoring all activity" : "Monitor all activity"}
-                                      aria-pressed={monitoredSet().has(repo().fullName)}
-                                    >
-                                      {/* Heroicons eye outline 16px */}
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2} aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                      </svg>
-                                    </button>
-                                  </Tooltip>
-                                </Show>
-                              </div>
-                            </li>
-                          );
-                        }}
-                      </Index>
-                    </ul>
+              );
+            }}
+          </Index>
+        }
+      >
+        <Accordion.Root
+          class="overflow-hidden rounded-lg border border-base-300 divide-y divide-base-300"
+          value={[safeExpandedOrg()]}
+          // Guard: Kobalte fires onChange([]) when clicking the open panel's trigger
+          // in single-select mode. The guard enforces always-one-open by ignoring
+          // empty selections. Tested indirectly via "re-click is a no-op" tests.
+          onChange={(vals) => {
+            if (vals.length > 0) setExpandedOrg(vals[0]);
+          }}
+        >
+          <Index each={sortedOrgStates()}>
+            {(state) => {
+              const visible = createMemo(() => filteredReposForOrg(state()));
+              // Count against ALL repos in the org (unfiltered) so the badge
+              // doesn't mislead users into thinking selections were lost when
+              // a text filter is active.
+              const selectedCount = createMemo(() =>
+                state().repos.filter((r) => isSelected(r.fullName)).length
+              );
+              const isExpanded = () => safeExpandedOrg() === state().org;
+              return (
+                <Accordion.Item value={state().org}>
+                  <div class="flex items-center border-b border-base-300 bg-base-200">
+                    <Accordion.Header class="flex-1">
+                      <Accordion.Trigger class="flex w-full items-center gap-2 px-4 py-2 text-left">
+                        <ChevronIcon size="md" rotated={!isExpanded()} />
+                        <span class="text-sm font-semibold text-base-content flex-1">
+                          {state().org}
+                        </span>
+                        <Show
+                          when={!state().loading}
+                          fallback={<span class="loading loading-spinner loading-xs" />}
+                        >
+                          <span class="badge badge-sm badge-ghost">{visible().length} {visible().length === 1 ? "repo" : "repos"}</span>
+                          <Show when={selectedCount() > 0}>
+                            <span class="badge badge-sm badge-ghost">{selectedCount()} selected</span>
+                          </Show>
+                        </Show>
+                      </Accordion.Trigger>
+                    </Accordion.Header>
+                    <Show when={isExpanded() && !state().loading && !state().error}>
+                      <div class="flex items-center gap-2 pr-3">
+                        <button
+                          type="button"
+                          onClick={() => selectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Select All
+                        </button>
+                        <span class="text-base-content/30">·</span>
+                        <button
+                          type="button"
+                          onClick={() => deselectAllInOrg(state())}
+                          disabled={
+                            visible().length === 0 ||
+                            visible().every((r) => !isSelected(r.fullName))
+                          }
+                          class="btn btn-ghost btn-xs"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                    </Show>
                   </div>
-                </Show>
-              </Show>
-            </div>
-          );
-        }}
-      </Index>
+                  <Accordion.Content class="kb-accordion-content">
+                    <OrgContent state={state()} visible={visible()} isSelected={isSelected} toggleRepo={toggleRepo} retryOrg={retryOrg} q={q()} monitoredSet={monitoredSet()} upstreamSelectedSet={upstreamSelectedSet()} toRepoRef={toRepoRef} onMonitorToggle={props.onMonitorToggle} />
+                  </Accordion.Content>
+                </Accordion.Item>
+              );
+            }}
+          </Index>
+        </Accordion.Root>
+      </Show>
 
       {/* Upstream Repositories section */}
       <Show when={props.showUpstreamDiscovery}>

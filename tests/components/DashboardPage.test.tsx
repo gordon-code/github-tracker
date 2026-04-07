@@ -724,6 +724,51 @@ describe("DashboardPage — onAuthCleared integration", () => {
   });
 });
 
+describe("DashboardPage — scroll preservation on poll refresh", () => {
+  // MOCK INVARIANT: fetchAllData is mocked via vi.fn() and never calls its
+  // onLightData callback, so phaseOneFired is always false inside pollFetch().
+  // This means every poll cycle takes the withScrollLock branch (not the
+  // fine-grained produce() path). If fetchAllData is ever changed to invoke
+  // onLightData in tests, phaseOneFired will become true and withScrollLock
+  // will NOT be called, silently breaking this test.
+  //
+  // window.scrollTo is the correct behavioral proxy for withScrollLock:
+  // withScrollLock captures scrollY then calls window.scrollTo(0, y) after
+  // the setter. Asserting scrollTo was called with the saved position is
+  // equivalent to asserting withScrollLock ran and completed successfully.
+  it("preserves scroll position when setDashboardData replaces arrays", async () => {
+    const issues = [makeIssue({ id: 1, title: "Scroll test issue" })];
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues,
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("owner/repo");
+    });
+
+    // Simulate user scrolled down
+    document.documentElement.scrollTop = 500;
+    vi.spyOn(window, "scrollTo");
+
+    // Trigger a second poll (subsequent refresh — the path that uses withScrollLock).
+    // phaseOneFired is false (mock never calls onLightData), so withScrollLock
+    // wraps the full atomic setDashboardData replacement and restores scroll.
+    if (capturedFetchAll) {
+      await capturedFetchAll();
+    }
+
+    // window.scrollTo(0, 500) is the observable side-effect of withScrollLock
+    // saving and restoring the pre-update scroll position.
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
+    vi.restoreAllMocks();
+    document.documentElement.scrollTop = 0;
+  });
+});
+
 describe("DashboardPage — onHotData integration", () => {
   it("applies hot poll PR status updates to the store", async () => {
     const testPR = makePullRequest({

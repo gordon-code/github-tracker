@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { RepoRef, RepoEntry } from "../../../src/app/services/api";
 
@@ -348,8 +348,9 @@ describe("RepoSelector", () => {
     await waitFor(() => {
       screen.getByText("repo-a");
     });
-    const scrollContainer = screen.getByRole("region", { name: "myorg repositories" });
-    expect(scrollContainer.classList.contains("max-h-[300px]")).toBe(true);
+    const region = screen.getByRole("region", { name: "myorg repositories" });
+    const scrollContainer = region.querySelector(".max-h-\\[300px\\]")!;
+    expect(scrollContainer).not.toBeNull();
     expect(scrollContainer.classList.contains("overflow-y-auto")).toBe(true);
   });
 
@@ -372,6 +373,41 @@ describe("RepoSelector", () => {
     });
     expect(api.fetchOrgs).not.toHaveBeenCalled();
   });
+
+  it("per-org Select All is disabled when all repos already selected (non-accordion)", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    const allSelected: RepoRef[] = myorgRepos.map((r) => ({ owner: r.owner, name: r.name, fullName: r.fullName }));
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={allSelected} onChange={vi.fn()} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+
+    // Non-accordion: per-org Select All is in the header
+    const selectAllBtns = screen.getAllByText("Select All");
+    const perOrgSelectAll = selectAllBtns[selectAllBtns.length - 1] as HTMLButtonElement;
+    expect(perOrgSelectAll.disabled).toBe(true);
+  });
+
+  it("per-org Deselect All is disabled when no repos selected (non-accordion)", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+
+    // Non-accordion: per-org Deselect All is in the header
+    const deselectAllBtns = screen.getAllByText("Deselect All");
+    const perOrgDeselectAll = deselectAllBtns[deselectAllBtns.length - 1] as HTMLButtonElement;
+    expect(perOrgDeselectAll.disabled).toBe(true);
+  });
 });
 
 describe("RepoSelector — upstream discovery", () => {
@@ -390,8 +426,9 @@ describe("RepoSelector — upstream discovery", () => {
     await waitFor(() => {
       screen.getByText("repo-a");
     });
-    // Give time for any async effects to settle
-    await new Promise((r) => setTimeout(r, 50));
+    // Verify discoverUpstreamRepos was never called after repos finished loading.
+    // waitFor above already ensures the async effect settled (fetchRepos resolved),
+    // so no additional delay is needed.
     expect(api.discoverUpstreamRepos).not.toHaveBeenCalled();
   });
 
@@ -797,5 +834,658 @@ describe("RepoSelector — monitor toggle", () => {
     await waitFor(() => screen.getByText("repo-a"));
     // Monitor toggle should not appear for upstream repos
     expect(screen.queryByLabelText(/monitor all activity/i)).toBeNull();
+  });
+});
+
+// ── Org-grouped accordion (C2) ────────────────────────────────────────────────
+
+describe("RepoSelector — org accordion", () => {
+  // 6 org names that trigger accordion mode (threshold is >= 6)
+  const sixOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org", "epsilon-org", "zeta-org"];
+
+  // Minimal OrgEntry list for preloading (skips fetchOrgs network call)
+  const sixOrgEntries = sixOrgs.map((login) => ({
+    login,
+    avatarUrl: "",
+    type: "org" as const,
+  }));
+
+  // One repo per org
+  function makeOrgRepos(org: string): RepoEntry[] {
+    return [{ owner: org, name: `${org}-repo`, fullName: `${org}/${org}-repo`, pushedAt: "2026-03-20T10:00:00Z" }];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+  });
+
+  it("renders all orgs expanded when fewer than 6 orgs", async () => {
+    const fourOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org"];
+    const fourOrgEntries = fourOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={fourOrgs}
+        orgEntries={fourOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+      screen.getByText("delta-org-repo");
+    });
+
+    // No accordion triggers present (no aria-expanded attributes)
+    expect(document.querySelectorAll("[aria-expanded]")).toHaveLength(0);
+  });
+
+  it("renders all orgs expanded when exactly 5 orgs (boundary below threshold)", async () => {
+    const fiveOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org", "epsilon-org"];
+    const fiveOrgEntries = fiveOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={fiveOrgs}
+        orgEntries={fiveOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+      screen.getByText("epsilon-org-repo");
+    });
+
+    // No accordion triggers present — 5 orgs is still below the >= 6 threshold
+    expect(document.querySelectorAll("[aria-expanded]")).toHaveLength(0);
+  });
+
+  it("renders accordion with first org expanded by default when 6+ orgs", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // First org is expanded (content visible)
+    expect(screen.queryByText("alpha-org-repo")).not.toBeNull();
+    // Other orgs' content is not rendered (Kobalte unmounts collapsed panels)
+    expect(screen.queryByText("beta-org-repo")).toBeNull();
+    // First org trigger has aria-expanded=true
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("clicking another org header collapses the first and expands the clicked one", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+    fireEvent.click(betaBtn);
+
+    await waitFor(() => {
+      expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
+      // beta-org content now visible
+      screen.getByText("beta-org-repo");
+    });
+
+    // alpha-org trigger is now collapsed
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("clicking the default-expanded org header is a no-op (null → explicit path)", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    fireEvent.click(alphaBtn);
+
+    // alpha-org is still expanded (not collapsible)
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByText("alpha-org-repo")).not.toBeNull();
+  });
+
+  it("clicking the explicitly-expanded org header a second time is a no-op (re-click path)", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+    fireEvent.click(betaBtn);
+    expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // Re-click beta — still expanded (not collapsible)
+    fireEvent.click(betaBtn);
+    expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
+    screen.getByText("beta-org-repo");
+  });
+
+  it("shows repo count badge on org headers in accordion mode", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Each org has 1 repo — badge shows "1 repo"
+    const badges = screen.getAllByText("1 repo");
+    expect(badges.length).toBe(sixOrgs.length);
+  });
+
+  it("shows per-org Select All / Deselect All in expanded accordion panel", async () => {
+    const onChange = vi.fn();
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // The expanded org (alpha-org) has per-org Select All next to the trigger
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    const headerRow = alphaBtn.closest("[class*='border-b']") ?? alphaBtn.parentElement!.parentElement!;
+    const perOrgBtn = Array.from(headerRow.querySelectorAll("button")).find(
+      (b) => b.textContent === "Select All" && b !== alphaBtn
+    );
+    expect(perOrgBtn).not.toBeUndefined();
+    fireEvent.click(perOrgBtn!);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ fullName: "alpha-org/alpha-org-repo" })])
+    );
+    const selectedNames = onChange.mock.calls[0][0].map((r: { fullName: string }) => r.fullName);
+    expect(selectedNames).toHaveLength(1);
+    expect(selectedNames[0]).toBe("alpha-org/alpha-org-repo");
+  });
+
+  it("per-org Select All is disabled when all repos already selected; Deselect All is disabled when none selected", async () => {
+    const allSelected: RepoRef[] = sixOrgs.map((org) => ({
+      owner: org,
+      name: `${org}-repo`,
+      fullName: `${org}/${org}-repo`,
+    }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={allSelected}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    const headerRow = alphaBtn.closest("[class*='border-b']") ?? alphaBtn.parentElement!.parentElement!;
+    const actionBtns = Array.from(headerRow.querySelectorAll("button")).filter((b) => b !== alphaBtn);
+    const perOrgSelectAll = actionBtns.find((b) => b.textContent === "Select All") as HTMLButtonElement;
+    const perOrgDeselectAll = actionBtns.find((b) => b.textContent === "Deselect All") as HTMLButtonElement;
+
+    expect(perOrgSelectAll).not.toBeUndefined();
+    expect(perOrgSelectAll.disabled).toBe(true);
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(false);
+  });
+
+  it("'N selected' badge counts all selected repos in org, not just filtered ones", async () => {
+    const user = userEvent.setup();
+    const alphaSelected: RepoRef[] = [
+      { owner: "alpha-org", name: "alpha-org-repo", fullName: "alpha-org/alpha-org-repo" },
+    ];
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={alphaSelected}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.textContent).toContain("1 selected");
+
+    // Type a filter that does NOT match alpha-org's repo
+    const filterInput = screen.getByPlaceholderText(/Filter repos/i);
+    await user.type(filterInput, "nonexistent");
+
+    await waitFor(() => {
+      expect(alphaBtn.textContent).toContain("0 repos");
+    });
+
+    // Badge should still show "1 selected" (unfiltered count)
+    expect(alphaBtn.textContent).toContain("1 selected");
+  });
+
+  it("per-org Deselect All is disabled when no repos are selected in that org", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    const headerRow = alphaBtn.closest("[class*='border-b']") ?? alphaBtn.parentElement!.parentElement!;
+    const actionBtns = Array.from(headerRow.querySelectorAll("button")).filter((b) => b !== alphaBtn);
+    const perOrgSelectAll = actionBtns.find((b) => b.textContent === "Select All") as HTMLButtonElement;
+    const perOrgDeselectAll = actionBtns.find((b) => b.textContent === "Deselect All") as HTMLButtonElement;
+
+    expect(perOrgSelectAll).not.toBeUndefined();
+    expect(perOrgSelectAll.disabled).toBe(false);
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(true);
+  });
+
+  it("per-org Deselect All in accordion panel deselects repos from that org", async () => {
+    const preSelected: RepoRef[] = ["alpha-org", "beta-org"].map((org) => ({
+      owner: org,
+      name: `${org}-repo`,
+      fullName: `${org}/${org}-repo`,
+    }));
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={preSelected}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    const headerRow = alphaBtn.closest("[class*='border-b']") ?? alphaBtn.parentElement!.parentElement!;
+    const perOrgDeselectAll = Array.from(headerRow.querySelectorAll("button")).find(
+      (b) => b.textContent === "Deselect All"
+    ) as HTMLButtonElement;
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(false);
+
+    fireEvent.click(perOrgDeselectAll);
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    expect(result.map((r) => r.fullName)).not.toContain("alpha-org/alpha-org-repo");
+    expect(result.map((r) => r.fullName)).toContain("beta-org/beta-org-repo");
+  });
+
+  it("global Select All includes repos from collapsed orgs", async () => {
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Click the global Select All (first button with that text)
+    const selectAllBtns = screen.getAllByText("Select All");
+    fireEvent.click(selectAllBtns[0]);
+
+    expect(onChange).toHaveBeenCalled();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    // Should include all 6 repos, one per org
+    expect(result.length).toBe(6);
+    for (const org of sixOrgs) {
+      expect(result.map((r) => r.fullName)).toContain(`${org}/${org}-repo`);
+    }
+  });
+
+  it("global Select All with text filter only includes repos matching the filter (PA-003)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Type a filter that only matches repos in "alpha-org"
+    const filterInput = screen.getByPlaceholderText(/Filter repos/i);
+    await user.type(filterInput, "alpha-org-repo");
+
+    // Wait for the debounce to fire and the filter to take effect:
+    // the badge for "beta-org" should drop to "0 repos" once the filter is active
+    await waitFor(() => {
+      const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+      expect(betaBtn.textContent).toContain("0 repos");
+    });
+
+    // Click global Select All — should only include repos visible after filter
+    const selectAllBtns = screen.getAllByText("Select All");
+    fireEvent.click(selectAllBtns[0]);
+
+    expect(onChange).toHaveBeenCalled();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    // Only alpha-org-repo matches the filter
+    expect(result.map((r) => r.fullName)).toContain("alpha-org/alpha-org-repo");
+    // Repos from other orgs must NOT be included
+    for (const org of sixOrgs.filter((o) => o !== "alpha-org")) {
+      expect(result.map((r) => r.fullName)).not.toContain(`${org}/${org}-repo`);
+    }
+  });
+
+  it("expanded org has aria-expanded=true; collapsed orgs have aria-expanded=false", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // alpha-org trigger is expanded
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // All other org triggers are collapsed
+    for (const org of sixOrgs.filter((o) => o !== "alpha-org")) {
+      const btn = screen.getByRole("button", { name: new RegExp(org) });
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+    }
+  });
+
+  it("org removal falls back to first remaining org when removed org was expanded", async () => {
+    const { createSignal } = await import("solid-js");
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(sixOrgs);
+    const [orgEntries, setOrgEntries] = createSignal(sixOrgEntries);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Expand gamma-org
+    const gammaBtn = screen.getByRole("button", { name: /gamma-org/ });
+    fireEvent.click(gammaBtn);
+    expect(gammaBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // Start with 7 orgs so removing one leaves 6 (still in accordion mode)
+    const sevenOrgs = [...sixOrgs, "eta-org"];
+    const sevenOrgEntries = sevenOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    setSelectedOrgs(sevenOrgs);
+    setOrgEntries(sevenOrgEntries);
+
+    await waitFor(() => {
+      screen.getByText("eta-org-repo");
+    });
+
+    const gammaBtnAgain = screen.getByRole("button", { name: /gamma-org/ });
+    fireEvent.click(gammaBtnAgain);
+    expect(gammaBtnAgain.getAttribute("aria-expanded")).toBe("true");
+
+    // Remove gamma-org (still 6 orgs remain → still accordion)
+    const remainingOrgs = sevenOrgs.filter((o) => o !== "gamma-org");
+    const remainingEntries = remainingOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+    setSelectedOrgs(remainingOrgs);
+    setOrgEntries(remainingEntries);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /gamma-org/ })).toBeNull();
+    });
+
+    // safeExpandedOrg should fall back to first selectedOrg still present
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("transitions back to flat mode when org count drops from 6 to 5", async () => {
+    const { createSignal } = await import("solid-js");
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(sixOrgs);
+    const [orgEntries, setOrgEntries] = createSignal(sixOrgEntries);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Verify accordion mode is active (aria-expanded attributes present)
+    expect(document.querySelectorAll("[aria-expanded]").length).toBeGreaterThan(0);
+
+    // Remove one org to drop to 5 — below the >= 6 threshold
+    const fiveOrgs = sixOrgs.slice(0, 5);
+    const fiveOrgEntries = fiveOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+    setSelectedOrgs(fiveOrgs);
+    setOrgEntries(fiveOrgEntries);
+
+    await waitFor(() => {
+      // Flat mode: no aria-expanded attributes
+      expect(document.querySelectorAll("[aria-expanded]")).toHaveLength(0);
+      // All 5 org repos visible
+      screen.getByText("alpha-org-repo");
+      screen.getByText("epsilon-org-repo");
+      expect(screen.queryByText("zeta-org-repo")).toBeNull();
+    });
+
+    // Re-add the 6th org — accordion mode should re-activate
+    setSelectedOrgs(sixOrgs);
+    setOrgEntries(sixOrgEntries);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll("[aria-expanded]").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("shows 'N selected' badge on expanded accordion header when repos are selected", async () => {
+    const alphaSelected: RepoRef[] = [
+      { owner: "alpha-org", name: "alpha-org-repo", fullName: "alpha-org/alpha-org-repo" },
+    ];
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={alphaSelected}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const alphaBtn = screen.getByRole("button", { name: /alpha-org/ });
+    expect(alphaBtn.textContent).toContain("1 selected");
+  });
+
+  it("hides per-org bulk actions and shows loading spinner in accordion header while org loads", async () => {
+    let resolveZeta!: (repos: RepoEntry[]) => void;
+    const zetaPending = new Promise<RepoEntry[]>((res) => { resolveZeta = res; });
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "zeta-org") return zetaPending;
+      return Promise.resolve(makeOrgRepos(org as string));
+    });
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Expand zeta-org to see its header state
+    const zetaBtn = screen.getByRole("button", { name: /zeta-org/ });
+    fireEvent.click(zetaBtn);
+
+    await waitFor(() => {
+      // The spinner should be visible in the trigger button
+      expect(zetaBtn.querySelector(".loading-spinner")).not.toBeNull();
+    });
+
+    // Per-org bulk actions must NOT appear while loading
+    const headerRow = zetaBtn.closest("[class*='border-b']") ?? zetaBtn.parentElement!.parentElement!;
+    const actionBtns = Array.from(headerRow.querySelectorAll("button")).filter(
+      (b) => b !== zetaBtn && (b.textContent === "Select All" || b.textContent === "Deselect All")
+    );
+    expect(actionBtns).toHaveLength(0);
+
+    // Resolve zeta — spinner disappears, bulk actions appear
+    resolveZeta(makeOrgRepos("zeta-org"));
+    await waitFor(() => {
+      screen.getByText("zeta-org-repo");
+    });
+  });
+
+  it("expanding a failed accordion org panel shows Retry button and allows re-fetch", async () => {
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "zeta-org") return Promise.reject(new Error("zeta load failed"));
+      return Promise.resolve(makeOrgRepos(org as string));
+    });
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Expand zeta-org (which failed)
+    const zetaBtn = screen.getByRole("button", { name: /zeta-org/ });
+    fireEvent.click(zetaBtn);
+
+    // Error message and Retry should be visible
+    await waitFor(() => {
+      screen.getByText(/zeta load failed/);
+      screen.getByText("Retry");
+    });
+
+    // Set up the retry to succeed
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      return Promise.resolve(makeOrgRepos(org as string));
+    });
+
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      screen.getByText("zeta-org-repo");
+    });
   });
 });
