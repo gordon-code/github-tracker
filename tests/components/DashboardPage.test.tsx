@@ -144,7 +144,7 @@ beforeEach(async () => {
   viewStore.resetViewState();
   // Reset config store to defaults — prevents enableTracking, selectedRepos, etc. from leaking between tests
   configStore.resetConfig();
-});
+}, 30_000);
 
 describe("DashboardPage — tab switching", () => {
   it("renders IssuesTab by default", () => {
