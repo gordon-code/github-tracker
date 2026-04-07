@@ -93,22 +93,14 @@ describe("setGlobalFilter", () => {
 
 describe("setSortPreference", () => {
   it("sets global sort field and direction", () => {
-    setSortPreference("issues", "updatedAt", "desc");
+    setSortPreference("updatedAt", "desc");
     expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
   });
 
   it("updates existing global sort preference", () => {
-    setSortPreference("issues", "updatedAt", "desc");
-    setSortPreference("issues", "title", "asc");
+    setSortPreference("updatedAt", "desc");
+    setSortPreference("title", "asc");
     expect(viewState.globalSort).toEqual({ field: "title", direction: "asc" });
-  });
-
-  it("global sort is shared across tabs", () => {
-    setSortPreference("issues", "updatedAt", "desc");
-    setSortPreference("pullRequests", "createdAt", "asc");
-    // Global sort reflects the last call regardless of tab
-    expect(viewState.globalSort.field).toBe("createdAt");
-    expect(viewState.globalSort.direction).toBe("asc");
   });
 });
 
@@ -234,7 +226,7 @@ describe("ViewStateSchema", () => {
   it("returns defaults for empty object", () => {
     const result = ViewStateSchema.parse({});
     expect(result.lastActiveTab).toBe("issues");
-    expect(result.sortPreferences).toEqual({});
+    expect(result.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
     expect(result.ignoredItems).toEqual([]);
     expect(result.globalFilter).toEqual({ org: null, repo: null });
     expect(result.hideDepDashboard).toBe(true);
@@ -254,6 +246,15 @@ describe("ViewStateSchema", () => {
   it("missing expandedRepos field parses to defaults", () => {
     const result = ViewStateSchema.parse({ lastActiveTab: "actions" });
     expect(result.expandedRepos).toEqual({ issues: {}, pullRequests: {}, actions: {} });
+  });
+
+  it("old localStorage data with sortPreferences parses cleanly with globalSort default", () => {
+    const oldData = {
+      lastActiveTab: "issues",
+      sortPreferences: { issues: { field: "title", direction: "asc" } },
+    };
+    const result = ViewStateSchema.parse(oldData);
+    expect(result.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
   });
 });
 
@@ -341,6 +342,13 @@ describe("expandedRepos helpers", () => {
 });
 
 describe("resetViewState", () => {
+  it("resets globalSort to default", () => {
+    setSortPreference("title", "asc");
+    expect(viewState.globalSort.field).toBe("title");
+    resetViewState();
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
+  });
+
   it("clears dynamically-added expandedRepos keys", () => {
     setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
     setAllExpanded("pullRequests", ["org/repo-c"], true);

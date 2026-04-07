@@ -140,10 +140,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
   );
 
-  const isValidUserFilter = createMemo(() =>
-    !props.allUsers || props.allUsers.some(u => u.login === viewState.tabFilters.pullRequests.user)
-  );
-
   const ignoredPullRequests = createMemo(() =>
     viewState.ignoredItems.filter(i => i.type === "pullRequest")
   );
@@ -182,8 +178,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const isInvolvedItem = (item: PullRequest) =>
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet(),
       item.enriched !== false ? item.reviewerLogins : undefined);
-
-  const sortPref = createMemo(() => viewState.globalSort);
 
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
@@ -242,7 +236,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       if (tabFilters.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
         if (!monitoredRepoNameSet().has(pr.repoFullName)) {
-          const validUser = isValidUserFilter();
+          const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilters.user);
           if (validUser) {
             const surfacedBy = pr.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilters.user)) return false;
@@ -254,7 +248,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       return true;
     });
 
-    const { field, direction } = sortPref();
+    const { field, direction } = viewState.globalSort;
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (field as SortField) {

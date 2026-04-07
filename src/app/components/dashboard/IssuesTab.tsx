@@ -72,10 +72,6 @@ export default function IssuesTab(props: IssuesTabProps) {
     (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
   );
 
-  const isValidUserFilter = createMemo(() =>
-    !props.allUsers || props.allUsers.some(u => u.login === viewState.tabFilters.issues.user)
-  );
-
   const ignoredIssues = createMemo(() =>
     viewState.ignoredItems.filter(i => i.type === "issue")
   );
@@ -114,8 +110,6 @@ export default function IssuesTab(props: IssuesTabProps) {
   const isInvolvedItem = (item: Issue) =>
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
-  const sortPref = createMemo(() => viewState.globalSort);
-
   const filteredSortedWithMeta = createMemo(() => {
     const filter = viewState.globalFilter;
     const tabFilter = viewState.tabFilters.issues;
@@ -151,7 +145,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
         if (!monitoredRepoNameSet().has(issue.repoFullName)) {
-          const validUser = isValidUserFilter();
+          const validUser = !props.allUsers || props.allUsers.some(u => u.login === tabFilter.user);
           if (validUser) {
             const surfacedBy = issue.surfacedBy ?? [userLoginLower()];
             if (!surfacedBy.includes(tabFilter.user)) return false;
@@ -163,7 +157,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       return true;
     });
 
-    const { field, direction } = sortPref();
+    const { field, direction } = viewState.globalSort;
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (field as SortField) {

@@ -581,6 +581,19 @@ describe("IssuesTab — scope toggle visibility", () => {
     expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
+  it("auto-resets user filter to 'all' when allUsers drops to 1", () => {
+    setTabFilter("issues", "user", "tracked1");
+    expect(viewState.tabFilters.issues.user).toBe("tracked1");
+
+    render(() => (
+      <IssuesTab issues={[]} userLogin="me" monitoredRepos={[]}
+        allUsers={[{ login: "me", label: "Me" }]}
+      />
+    ));
+
+    expect(viewState.tabFilters.issues.user).toBe("all");
+  });
+
   it("auto-resets scope to involves_me when scope toggle becomes hidden", () => {
     setTabFilter("issues", "scope", "all");
     expect(viewState.tabFilters.issues.scope).toBe("all");

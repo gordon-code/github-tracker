@@ -39,15 +39,6 @@ export const ViewStateSchema = z.object({
   lastActiveTab: z
     .enum(["issues", "pullRequests", "actions"])
     .default("issues"),
-  sortPreferences: z
-    .record(
-      z.string(),
-      z.object({
-        field: z.string(),
-        direction: z.enum(["asc", "desc"]),
-      })
-    )
-    .default({}),
   globalSort: z.object({
     field: z.string(),
     direction: z.enum(["asc", "desc"]),
@@ -103,7 +94,6 @@ export const ViewStateSchema = z.object({
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
-export type SortPreference = ViewState["sortPreferences"][string];
 export type LockedReposTab = keyof ViewState["lockedRepos"];
 
 function loadViewState(): ViewState {
@@ -126,7 +116,7 @@ export const [viewState, setViewState] = createStore<ViewState>(
 export function resetViewState(): void {
   updateViewState({
     lastActiveTab: "issues",
-    sortPreferences: {},
+    globalSort: { field: "updatedAt", direction: "desc" },
     ignoredItems: [],
     globalFilter: { org: null, repo: null },
     tabFilters: {
@@ -184,7 +174,6 @@ export function pruneStaleIgnoredItems(): void {
 }
 
 export function setSortPreference(
-  _tabId: string,
   field: string,
   direction: "asc" | "desc"
 ): void {

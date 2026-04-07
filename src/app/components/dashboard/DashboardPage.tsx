@@ -28,6 +28,18 @@ import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { Tooltip } from "../shared/Tooltip";
 
+const globalSortOptions: SortOption[] = [
+  { label: "Repo", field: "repo", type: "text" },
+  { label: "Title", field: "title", type: "text" },
+  { label: "Author", field: "author", type: "text" },
+  { label: "Comments", field: "comments", type: "number" },
+  { label: "Checks", field: "checkStatus", type: "text" },
+  { label: "Review", field: "reviewDecision", type: "text" },
+  { label: "Size", field: "size", type: "number" },
+  { label: "Created", field: "createdAt", type: "date" },
+  { label: "Updated", field: "updatedAt", type: "date" },
+];
+
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
 // Bump only for breaking schema changes (renames, type changes). Additive optional
@@ -373,18 +385,6 @@ export default function DashboardPage() {
     ];
   });
 
-  const globalSortOptions: SortOption[] = [
-    { label: "Repo", field: "repo", type: "text" },
-    { label: "Title", field: "title", type: "text" },
-    { label: "Author", field: "author", type: "text" },
-    { label: "Comments", field: "comments", type: "number" },
-    { label: "Checks", field: "checkStatus", type: "text" },
-    { label: "Review", field: "reviewDecision", type: "text" },
-    { label: "Size", field: "size", type: "number" },
-    { label: "Created", field: "createdAt", type: "date" },
-    { label: "Updated", field: "updatedAt", type: "date" },
-  ];
-
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -413,7 +413,7 @@ export default function DashboardPage() {
               sortOptions={globalSortOptions}
               sortValue={viewState.globalSort.field}
               sortDirection={viewState.globalSort.direction}
-              onSortChange={(field, dir) => setSortPreference(activeTab(), field, dir)}
+              onSortChange={(field, dir) => setSortPreference(field, dir)}
             />
           </div>
 

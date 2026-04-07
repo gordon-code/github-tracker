@@ -136,6 +136,18 @@ describe("FilterToolbar", () => {
     expect(screen.getAllByRole("button", { name: /Filter by/i })).toHaveLength(2);
   });
 
+  it("shows 'Reset all' when scope is 'all' (non-default 'involves_me') and other filters at default", () => {
+    render(() => (
+      <FilterToolbar
+        groups={[scopeFilterGroup, roleGroup]}
+        values={{ scope: "all", role: "all" }}
+        onChange={() => {}}
+        onResetAll={() => {}}
+      />
+    ));
+    screen.getByText("Reset all");
+  });
+
   it("scope toggle defaults to 'involves_me' when value not set", () => {
     render(() => (
       <FilterToolbar

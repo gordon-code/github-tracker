@@ -166,6 +166,21 @@ describe("FilterBar", () => {
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, "myorg/repo-a");
   });
 
+  it("renders SortDropdown trigger button", () => {
+    render(() => <FilterBar {...defaultSortProps} />);
+    screen.getByRole("button", { name: /Sort by/i });
+  });
+
+  it("SortDropdown is not rendered when sort props are omitted", () => {
+    render(() => <FilterBar />);
+    expect(screen.queryByRole("button", { name: /Sort by/i })).toBeNull();
+  });
+
+  it("SortDropdown is not rendered when sortOptions is provided but onSortChange is omitted", () => {
+    render(() => <FilterBar sortOptions={defaultSortProps.sortOptions} sortValue="updatedAt" sortDirection="desc" />);
+    expect(screen.queryByRole("button", { name: /Sort by/i })).toBeNull();
+  });
+
   it("selecting 'All orgs' option calls setGlobalFilter with null org", async () => {
     const user = userEvent.setup({ delay: null });
     render(() => <FilterBar {...defaultSortProps} />);

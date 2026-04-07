@@ -68,9 +68,10 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    // "All" option should appear (now role="option")
-    const allOption = screen.getAllByRole("option").find((o) => o.textContent?.includes("All"));
-    expect(allOption).toBeDefined();
+    // "All" option should appear as a button in the popover
+    const buttons = screen.getAllByRole("button").filter(b => b !== trigger);
+    const allBtn = buttons.find(b => b.textContent?.includes("All"));
+    expect(allBtn).toBeDefined();
     screen.getByText("Approved");
     screen.getByText("Changes requested");
   });
@@ -99,9 +100,9 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const options = screen.getAllByRole("option");
-    const approvedOpt = options.find((o) => o.textContent?.includes("Approved"));
-    expect(approvedOpt?.textContent).toContain("✓");
+    const buttons = screen.getAllByRole("button").filter(b => b !== trigger);
+    const approvedBtn = buttons.find(b => b.textContent?.includes("Approved"));
+    expect(approvedBtn?.textContent).toContain("✓");
   });
 
   it("clicking option calls onChange and closes popover", () => {
@@ -122,9 +123,9 @@ describe("FilterPopover", () => {
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const options = screen.getAllByRole("option");
-    const allOption = options.find((o) => o.textContent?.includes("All"));
-    fireEvent.click(allOption!);
+    const buttons = screen.getAllByRole("button").filter(b => b !== trigger);
+    const allBtn = buttons.find(b => b.textContent?.includes("All"));
+    fireEvent.click(allBtn!);
     expect(onChange).toHaveBeenCalledWith("reviewDecision", "all");
   });
 
@@ -150,26 +151,43 @@ describe("FilterPopover", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("option buttons use role='option' and aria-selected", () => {
+  it("selected option has aria-pressed='true', unselected has 'false'", () => {
     render(() => <FilterPopover group={reviewGroup} value="APPROVED" onChange={() => {}} />);
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const options = screen.getAllByRole("option");
-    expect(options.length).toBeGreaterThan(0);
-    const approvedOpt = options.find(o => o.textContent?.includes("Approved"));
-    expect(approvedOpt?.getAttribute("aria-selected")).toBe("true");
-    const changesOpt = options.find(o => o.textContent?.includes("Changes requested"));
-    expect(changesOpt?.getAttribute("aria-selected")).toBe("false");
+    const buttons = screen.getAllByRole("button").filter(b => b !== trigger);
+    const approvedBtn = buttons.find(b => b.textContent?.includes("Approved"));
+    expect(approvedBtn?.getAttribute("aria-pressed")).toBe("true");
+    const changesBtn = buttons.find(b => b.textContent?.includes("Changes requested"));
+    expect(changesBtn?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("popover content has role='listbox' with group label", () => {
+  it("'All' button has aria-pressed='true' when value is 'all'", () => {
     render(() => <FilterPopover group={reviewGroup} value="all" onChange={() => {}} />);
     const trigger = screen.getByRole("button", { name: /Filter by Review/i });
     fireEvent.click(trigger);
     vi.advanceTimersByTime(0);
-    const listbox = document.querySelector("[role='listbox']");
-    expect(listbox).toBeTruthy();
-    expect(listbox?.getAttribute("aria-label")).toBe("Review");
+    const buttons = screen.getAllByRole("button").filter(b => b !== trigger);
+    const allBtn = buttons.find(b => b.textContent?.includes("All"));
+    expect(allBtn?.getAttribute("aria-pressed")).toBe("true");
+    const approvedBtn = buttons.find(b => b.textContent?.includes("Approved"));
+    expect(approvedBtn?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("popover content has aria-label with group label", () => {
+    render(() => <FilterPopover group={reviewGroup} value="all" onChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Filter by Review/i });
+    fireEvent.click(trigger);
+    vi.advanceTimersByTime(0);
+    const content = document.querySelector("[aria-label='Review']");
+    expect(content).toBeTruthy();
+  });
+
+  it("shows raw value as label for unknown/stale filter values", () => {
+    render(() => <FilterPopover group={reviewGroup} value="STALE_VALUE" onChange={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Filter by Review/i });
+    expect(trigger.className).toContain("btn-primary");
+    expect(trigger.textContent).toContain("Review: STALE_VALUE");
   });
 });

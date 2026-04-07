@@ -29,12 +29,10 @@ export default function FilterToolbar(props: FilterToolbarProps) {
   return (
     <div class="flex items-center gap-2 flex-wrap">
       <Show when={showScope()}>
-        <Tooltip content="Toggle between your activity and all activity">
-          <ScopeToggle
-            value={props.values["scope"] ?? scopeFilterGroup.defaultValue ?? "all"}
-            onChange={props.onChange}
-          />
-        </Tooltip>
+        <ScopeToggle
+          value={props.values["scope"] ?? scopeFilterGroup.defaultValue ?? "all"}
+          onChange={props.onChange}
+        />
         <div class="w-px h-5 bg-base-300" />
       </Show>
       <For each={popoverGroups()}>
@@ -50,7 +48,7 @@ export default function FilterToolbar(props: FilterToolbarProps) {
         <Tooltip content="Reset all filters to defaults">
           <button
             type="button"
-            class="btn btn-ghost btn-sm"
+            class="btn btn-ghost btn-xs"
             onClick={props.onResetAll}
           >
             Reset all
