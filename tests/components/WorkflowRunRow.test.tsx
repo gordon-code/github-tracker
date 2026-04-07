@@ -157,8 +157,8 @@ describe("WorkflowRunRow", () => {
       <WorkflowRunRow run={run} onIgnore={() => {}} density="compact" />
     ));
     const row = screen.getByText("Compact Run").closest("div[class]");
-    expect(row?.className).toContain("py-1.5");
-    expect(row?.className).toContain("px-3");
+    expect(row?.className).toContain("py-1");
+    expect(row?.className).toContain("px-2");
   });
 
   it("applies comfortable padding class for comfortable density", () => {

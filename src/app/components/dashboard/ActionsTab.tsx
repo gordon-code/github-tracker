@@ -221,8 +221,8 @@ export default function ActionsTab(props: ActionsTabProps) {
   return (
     <div class="divide-y divide-base-300">
       {/* Toolbar */}
-      <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
-        <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+      <div class={`flex items-start px-4 border-b border-base-300 bg-base-100 ${config.viewDensity === "compact" ? "py-0.5 gap-2" : "py-2 gap-3"}`}>
+        <div class={`flex flex-wrap items-center min-w-0 flex-1 ${config.viewDensity === "compact" ? "gap-2" : "gap-3"}`}>
           <label class="flex items-center gap-1.5 text-sm text-base-content/70 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -299,7 +299,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   <button
                     onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
                     aria-expanded={isExpanded()}
-                    class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                    class={`flex-1 flex items-center gap-2 px-4 text-left text-sm font-semibold text-base-content ${config.viewDensity === "compact" ? "py-1.5" : "py-2.5"}`}
                   >
                     <ChevronIcon size="md" rotated={!isExpanded()} />
                     {repoGroup.repoFullName}

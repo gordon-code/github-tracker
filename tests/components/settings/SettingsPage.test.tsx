@@ -235,14 +235,14 @@ describe("SettingsPage — Appearance", () => {
 
   it("shows current view density value", () => {
     renderSettings();
-    screen.getByDisplayValue("Comfortable");
+    screen.getByRole("button", { name: /View density: Comfortable/i });
   });
 
   it("changing view density updates config", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const densitySelect = screen.getByDisplayValue("Comfortable");
-    await user.selectOptions(densitySelect, "compact");
+    const compactBtn = screen.getByRole("button", { name: /View density: Compact/i });
+    await user.click(compactBtn);
     expect(config.viewDensity).toBe("compact");
   });
 

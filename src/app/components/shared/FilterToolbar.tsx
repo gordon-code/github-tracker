@@ -2,6 +2,7 @@ import { createMemo, For, Show } from "solid-js";
 import FilterPopover from "./FilterPopover";
 import ScopeToggle from "./ScopeToggle";
 import { Tooltip } from "./Tooltip";
+import { config } from "../../stores/config";
 import { scopeFilterGroup } from "./filterTypes";
 import type { FilterChipGroupDef } from "./filterTypes";
 
@@ -27,7 +28,7 @@ export default function FilterToolbar(props: FilterToolbarProps) {
   );
 
   return (
-    <div class="flex items-center gap-2 flex-wrap">
+    <div class={`flex items-center flex-wrap ${config.viewDensity === "compact" ? "gap-1" : "gap-2"}`}>
       <Show when={showScope()}>
         <ScopeToggle
           value={props.values["scope"] ?? scopeFilterGroup.defaultValue ?? "all"}

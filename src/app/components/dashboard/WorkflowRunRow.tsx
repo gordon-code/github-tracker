@@ -131,7 +131,7 @@ function durationLabel(run: WorkflowRun): string {
 
 export default function WorkflowRunRow(props: WorkflowRunRowProps) {
   const paddingClass = () =>
-    props.density === "compact" ? "py-1.5 px-3" : "py-2.5 px-4";
+    props.density === "compact" ? "py-1 px-2" : "py-2.5 px-4";
 
   const createdTitle = createMemo(() => `Created: ${new Date(props.run.createdAt).toLocaleString()}`);
 

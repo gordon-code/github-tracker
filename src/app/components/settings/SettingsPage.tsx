@@ -15,6 +15,7 @@ import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
 import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
+import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
@@ -210,10 +211,6 @@ export default function SettingsPage() {
     ...(config.enableTracking ? [{ value: "tracked" as const, label: "Tracked Items" }] : []),
   ]);
 
-  const densityOptions = [
-    { value: "comfortable" as const, label: "Comfortable" },
-    { value: "compact" as const, label: "Compact" },
-  ];
 
   const itemsPerPageOptions = [
     { value: 10, label: "10" },
@@ -541,22 +538,10 @@ export default function SettingsPage() {
             <p class="text-sm font-medium text-base-content mb-2">Theme</p>
             <ThemePicker />
           </div>
-          <SettingRow
-            label="View density"
-            description="Controls spacing between items in lists"
-          >
-            <select
-              value={config.viewDensity}
-              onChange={(e) => {
-                saveWithFeedback({ viewDensity: e.currentTarget.value as "comfortable" | "compact" });
-              }}
-              class="select select-sm"
-            >
-              {densityOptions.map((opt) => (
-                <option value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </SettingRow>
+          <div class="px-4 py-2 border-b border-base-300">
+            <p class="text-sm font-medium text-base-content mb-2">View density</p>
+            <DensityPicker />
+          </div>
           <SettingRow
             label="Items per page"
             description="Number of items to show in each tab"

@@ -71,12 +71,12 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
       tabIndex={0}
       aria-expanded={props.expanded}
       aria-label={props.workflowName}
-      class={`rounded-lg border p-3 cursor-pointer transition-colors ${hoverClass()} ${borderLeftClass()} ${cardBgClass()}`}
+      class={`rounded-lg border cursor-pointer transition-colors ${props.density === "compact" ? "p-2" : "p-3"} ${hoverClass()} ${borderLeftClass()} ${cardBgClass()}`}
       onClick={props.onToggle}
       onKeyDown={handleKeyDown}
     >
       {/* Card header */}
-      <div class="flex items-center gap-2 min-w-0">
+      <div class={`flex items-center min-w-0 ${props.density === "compact" ? "gap-1.5" : "gap-2"}`}>
         <span class="truncate text-sm font-medium text-base-content flex-1 min-w-0">
           {props.workflowName}
         </span>

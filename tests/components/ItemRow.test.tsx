@@ -117,7 +117,7 @@ describe("ItemRow", () => {
       <ItemRow {...defaultProps} density="compact" />
     ));
     const row = container.querySelector(".group")!;
-    expect(row.className).toContain("py-2");
+    expect(row.className).toContain("py-1");
   });
 
   it("applies comfortable padding in comfortable density", () => {

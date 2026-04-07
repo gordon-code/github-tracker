@@ -1,3 +1,5 @@
+import { config } from "../../stores/config";
+
 interface ScopeToggleProps {
   value: string;
   onChange: (field: string, value: string) => void;
@@ -11,13 +13,13 @@ export default function ScopeToggle(props: ScopeToggleProps) {
       <input
         type="checkbox"
         aria-label="Scope filter"
-        class="toggle toggle-sm toggle-primary"
+        class={`toggle toggle-primary ${config.viewDensity === "compact" ? "toggle-xs" : "toggle-sm"}`}
         checked={checked()}
         onChange={(e) =>
           props.onChange("scope", e.currentTarget.checked ? "involves_me" : "all")
         }
       />
-      <span class="text-sm text-base-content/70">
+      <span class={`text-base-content/70 ${config.viewDensity === "compact" ? "text-xs" : "text-sm"}`}>
         {checked() ? "Involves me" : "All activity"}
       </span>
     </label>
