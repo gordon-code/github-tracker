@@ -220,24 +220,6 @@ export function setTabFilter<T extends keyof TabFilterField>(
   );
 }
 
-const tabFilterDefaults: Record<string, Record<string, string>> = {
-  issues: IssueFiltersSchema.parse({}) as Record<string, string>,
-  pullRequests: PullRequestFiltersSchema.parse({}) as Record<string, string>,
-  actions: ActionsFiltersSchema.parse({}) as Record<string, string>,
-};
-
-export function resetTabFilter<T extends keyof TabFilterField>(
-  tab: T,
-  field: TabFilterField[T]
-): void {
-  const defaultValue = tabFilterDefaults[tab]?.[field as string] ?? "all";
-  setViewState(
-    produce((draft) => {
-      (draft.tabFilters[tab] as Record<string, string>)[field as string] = defaultValue;
-    })
-  );
-}
-
 export function resetAllTabFilters(
   tab: "issues" | "pullRequests" | "actions"
 ): void {
