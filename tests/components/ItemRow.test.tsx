@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import ItemRow from "../../src/app/components/dashboard/ItemRow";
+import { setConfig } from "../../src/app/stores/config";
 
 const MOCK_NOW = new Date("2026-03-30T12:00:00Z").getTime();
 
@@ -111,13 +112,45 @@ describe("ItemRow", () => {
     expect(tooltipTrigger!.className).toContain("self-center");
   });
 
-  it("has both comfortable and compact classes (CSS-driven density)", () => {
+  it("outer row has both comfortable and compact variant classes", () => {
     const { container } = render(() => (
       <ItemRow {...defaultProps} />
     ));
     const row = container.querySelector(".group")!;
     expect(row.className).toContain("py-3");
     expect(row.className).toContain("compact:py-1");
+  });
+
+  describe("compact mode", () => {
+    beforeEach(() => { setConfig("viewDensity", "compact"); });
+    afterEach(() => { setConfig("viewDensity", "comfortable"); });
+
+    it("renders compact layout with inline number, title, and author", () => {
+      render(() => <ItemRow {...defaultProps} hideRepo />);
+      screen.getByText("#42");
+      screen.getByText("Fix a bug");
+      screen.getByText(/octocat/);
+    });
+
+    it("shows label count indicator when labels are present", () => {
+      render(() => (
+        <ItemRow {...defaultProps} labels={[{ name: "bug", color: "d73a4a" }, { name: "help", color: "0075ca" }]} />
+      ));
+      screen.getByText("2");
+    });
+
+    it("shows comment count indicator when comments are present", () => {
+      render(() => (
+        <ItemRow {...defaultProps} commentCount={5} />
+      ));
+      screen.getByText("5");
+    });
+
+    it("renders single time element in compact mode", () => {
+      const { container } = render(() => <ItemRow {...defaultProps} />);
+      const timeEls = container.querySelectorAll("time");
+      expect(timeEls.length).toBe(1);
+    });
   });
 
   it("renders no labels section when labels array is empty", () => {

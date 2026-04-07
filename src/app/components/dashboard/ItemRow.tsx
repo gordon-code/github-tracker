@@ -28,7 +28,7 @@ export interface ItemRowProps {
 }
 
 export default function ItemRow(props: ItemRowProps) {
-  const isCompact = () => config.viewDensity === "compact";
+  const isCompact = createMemo(() => config.viewDensity === "compact");
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
   // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
@@ -68,7 +68,7 @@ export default function ItemRow(props: ItemRowProps) {
     }
     return parts.join(" | ");
   });
-  const hasCompactTooltip = createMemo(() => compactLabelTooltip() !== "");
+  const hasCompactTooltip = createMemo(() => isCompact() && compactLabelTooltip() !== "");
   const hasLabels = createMemo(() => props.labels.length > 0);
 
   return (
