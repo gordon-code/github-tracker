@@ -261,7 +261,7 @@ export default function DashboardPage() {
         setRlDetail("Failed to load");
         return;
       }
-      const resetTime = detail.core.resetAt.toLocaleTimeString();
+      const resetTime = detail.graphql.resetAt.toLocaleTimeString();
       setRlDetail(
         `Core:    ${detail.core.remaining.toLocaleString()}/${detail.core.limit.toLocaleString()} remaining\n` +
         `GraphQL: ${detail.graphql.remaining.toLocaleString()}/${detail.graphql.limit.toLocaleString()} remaining\n` +

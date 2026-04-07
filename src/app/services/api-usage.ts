@@ -210,5 +210,5 @@ onApiRequest((info) => {
   const source = deriveSource(info);
   const pool: ApiPool = info.isGraphql ? "graphql" : "core";
   trackApiCall(source, pool);
-  if (info.resetEpochMs !== null) updateResetAt(info.resetEpochMs);
+  if (info.resetEpochMs !== null && info.isGraphql) updateResetAt(info.resetEpochMs);
 });
