@@ -5,7 +5,11 @@
  */
 export function withScrollLock(fn: () => void): void {
   const y = window.scrollY;
-  try { fn(); } finally { window.scrollTo(0, y); }
+  try {
+    fn();
+  } finally {
+    window.scrollTo(0, y);
+  }
 }
 
 /**
@@ -34,18 +38,29 @@ export function withFlipAnimation(fn: () => void): void {
   }
 
   // Execute state change (SolidJS updates DOM synchronously)
+  const scrollY = window.scrollY;
   fn();
 
-  // Last, Invert, Play
+  // Last, Invert, Play — reads before writes to avoid layout thrash.
+  // All getBoundingClientRect calls happen before scrollTo so the browser
+  // doesn't force a synchronous layout recalculation between them.
   requestAnimationFrame(() => {
     const afterItems = document.querySelectorAll<HTMLElement>("[data-repo-group]");
+    const scrollDrift = window.scrollY - scrollY;
+    const deltas: { el: HTMLElement; dy: number }[] = [];
     for (const el of afterItems) {
       const key = el.dataset.repoGroup!;
       const old = before.get(key);
       if (!old) continue;
       const now = el.getBoundingClientRect();
-      const dy = old.top - now.top;
+      // Adjust for scroll drift: old.top was measured at scrollY,
+      // now.top is measured at the current (possibly drifted) scroll position.
+      const dy = old.top - now.top - scrollDrift;
       if (Math.abs(dy) < 1) continue;
+      deltas.push({ el, dy });
+    }
+    window.scrollTo(0, scrollY);
+    for (const { el, dy } of deltas) {
       el.animate(
         [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
         { duration: 200, easing: "ease-in-out" },
