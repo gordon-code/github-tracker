@@ -382,7 +382,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("org/repo-b")).toBeNull();
 
     // Clear filter — repo-b reappears, repo-a stays expanded
-    viewStore.resetTabFilter("issues", "role");
+    viewStore.setTabFilter("issues", "role", "all");
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
     screen.getByText("Alice issue");
@@ -411,7 +411,7 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Alice issue")).toBeNull();
 
     // Remove filter — repo-b should still be expanded (was hidden during collapse-all)
-    viewStore.resetTabFilter("issues", "role");
+    viewStore.setTabFilter("issues", "role", "all");
     screen.getByText("Bob issue");
     // repo-a was collapsed by collapse-all
     expect(screen.queryByText("Alice issue")).toBeNull();

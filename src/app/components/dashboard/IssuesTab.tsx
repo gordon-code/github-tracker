@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, setTabFilter, resetTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
@@ -8,7 +8,8 @@ import IgnoreBadge from "./IgnoreBadge";
 import SortDropdown from "../shared/SortDropdown";
 import type { SortOption } from "../shared/SortDropdown";
 import PaginationControls from "../shared/PaginationControls";
-import FilterChips, { scopeFilterGroup, type FilterChipGroupDef } from "../shared/FilterChips";
+import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import FilterToolbar from "../shared/FilterToolbar";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import ChevronIcon from "../shared/ChevronIcon";
@@ -256,15 +257,11 @@ export default function IssuesTab(props: IssuesTabProps) {
             direction={sortPref().direction}
             onChange={handleSort}
           />
-          <FilterChips
+          <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.issues}
-            onChange={(field, value) => {
-              setTabFilter("issues", field as IssueFilterField, value);
-              setPage(0);
-            }}
-            onReset={(field) => {
-              resetTabFilter("issues", field as IssueFilterField);
+            onChange={(f, v) => {
+              setTabFilter("issues", f as IssueFilterField, v);
               setPage(0);
             }}
             onResetAll={() => {

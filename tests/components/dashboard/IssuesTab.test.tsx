@@ -51,8 +51,8 @@ describe("IssuesTab — user filter chip", () => {
         allUsers={[{ login: "me", label: "Me" }]}
       />
     ));
-    // FilterChips renders "User:" label — absent when only 1 user
-    expect(screen.queryByText("User:")).toBeNull();
+    // FilterToolbar renders a popover trigger — absent when only 1 user
+    expect(screen.queryByLabelText("Filter by User")).toBeNull();
   });
 
   it("shows User filter chip when allUsers has > 1 entry", () => {
@@ -66,14 +66,14 @@ describe("IssuesTab — user filter chip", () => {
         ]}
       />
     ));
-    screen.getByText("User:");
+    screen.getByLabelText("Filter by User");
   });
 
   it("does not show User filter chip when allUsers is undefined", () => {
     render(() => (
       <IssuesTab issues={[makeIssue()]} userLogin="me" />
     ));
-    expect(screen.queryByText("User:")).toBeNull();
+    expect(screen.queryByLabelText("Filter by User")).toBeNull();
   });
 });
 
@@ -552,33 +552,33 @@ describe("IssuesTab — scope chip visibility", () => {
   it("does not show Scope chip when no monitored repos and no tracked users", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
-    const { container } = render(() => (
+    render(() => (
       <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]} />
     ));
 
-    expect(container.textContent).not.toContain("Scope:");
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).toBeNull();
   });
 
   it("shows Scope chip when monitored repos exist", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
-    const { container } = render(() => (
+    render(() => (
       <IssuesTab issues={issues} userLogin="me" monitoredRepos={[{ owner: "org", name: "mon", fullName: "org/mon" }]} />
     ));
 
-    expect(container.textContent).toContain("Scope:");
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
   it("shows Scope chip when tracked users exist (allUsers > 1)", () => {
     const issues = [makeIssue({ id: 1, title: "Issue", repoFullName: "org/repo", surfacedBy: ["me"] })];
 
-    const { container } = render(() => (
+    render(() => (
       <IssuesTab issues={issues} userLogin="me" monitoredRepos={[]}
         allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
       />
     ));
 
-    expect(container.textContent).toContain("Scope:");
+    expect(screen.queryByRole("checkbox", { name: /Scope filter/i })).not.toBeNull();
   });
 
   it("auto-resets scope to involves_me when scope chip becomes hidden", () => {
