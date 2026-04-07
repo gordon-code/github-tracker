@@ -11,7 +11,7 @@ import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
-import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpired } from "../../services/api-usage";
+import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpired, SOURCE_LABELS } from "../../services/api-usage";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
@@ -20,25 +20,6 @@ import ThemePicker from "./ThemePicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
-
-const SOURCE_LABELS: Record<string, string> = {
-  lightSearch: "Light Search",
-  heavyBackfill: "PR Backfill",
-  forkCheck: "Fork Check",
-  globalUserSearch: "Tracked User Search",
-  unfilteredSearch: "Unfiltered Search",
-  upstreamDiscovery: "Upstream Discovery",
-  workflowRuns: "Workflow Runs",
-  hotPRStatus: "Hot PR Status",
-  hotRunStatus: "Hot Run Status",
-  notifications: "Notifications",
-  validateUser: "Validate User",
-  fetchOrgs: "Fetch Orgs",
-  fetchRepos: "Fetch Repos",
-  rateLimitCheck: "Rate Limit Check",
-  graphql: "GraphQL (other)",
-  rest: "REST (other)",
-};
 
 export default function SettingsPage() {
   const navigate = useNavigate();

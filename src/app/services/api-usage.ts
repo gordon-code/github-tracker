@@ -6,25 +6,36 @@ import { onApiRequest, type ApiRequestInfo } from "./github";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type ApiCallSource =
-  | "lightSearch"
-  | "heavyBackfill"
-  | "forkCheck"
-  | "globalUserSearch"
-  | "unfilteredSearch"
-  | "upstreamDiscovery"
-  | "workflowRuns"
-  | "hotPRStatus"
-  | "hotRunStatus"
-  | "notifications"
-  | "validateUser"
-  | "fetchOrgs"
-  | "fetchRepos"
-  | "rateLimitCheck"
-  | "graphql"
-  | "rest";
+const API_CALL_SOURCES = [
+  "lightSearch", "heavyBackfill", "forkCheck", "globalUserSearch", "unfilteredSearch",
+  "upstreamDiscovery", "workflowRuns", "hotPRStatus", "hotRunStatus", "notifications",
+  "validateUser", "fetchOrgs", "fetchRepos", "rateLimitCheck", "graphql", "rest",
+] as const;
 
-export type ApiPool = "graphql" | "core";
+export type ApiCallSource = (typeof API_CALL_SOURCES)[number];
+
+const API_POOLS = ["graphql", "core"] as const;
+
+export type ApiPool = (typeof API_POOLS)[number];
+
+export const SOURCE_LABELS: Record<ApiCallSource, string> = {
+  lightSearch: "Light Search",
+  heavyBackfill: "PR Backfill",
+  forkCheck: "Fork Check",
+  globalUserSearch: "Tracked User Search",
+  unfilteredSearch: "Unfiltered Search",
+  upstreamDiscovery: "Upstream Discovery",
+  workflowRuns: "Workflow Runs",
+  hotPRStatus: "Hot PR Status",
+  hotRunStatus: "Hot Run Status",
+  notifications: "Notifications",
+  validateUser: "Validate User",
+  fetchOrgs: "Fetch Orgs",
+  fetchRepos: "Fetch Repos",
+  rateLimitCheck: "Rate Limit Check",
+  graphql: "GraphQL (other)",
+  rest: "REST (other)",
+};
 
 export interface ApiCallRecord {
   source: ApiCallSource;
@@ -45,8 +56,8 @@ const USAGE_STORAGE_KEY = "github-tracker:api-usage";
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 const ApiCallRecordSchema = z.object({
-  source: z.string(),
-  pool: z.string(),
+  source: z.enum(API_CALL_SOURCES),
+  pool: z.enum(API_POOLS),
   count: z.number(),
   lastCalledAt: z.number(),
 });
@@ -64,7 +75,7 @@ export function loadUsageData(): ApiUsageData {
     if (raw === null || raw === undefined) return { records: {}, resetAt: null };
     const parsed = JSON.parse(raw) as unknown;
     const result = ApiUsageDataSchema.safeParse(parsed);
-    if (result.success) return result.data as ApiUsageData;
+    if (result.success) return result.data;
     return { records: {}, resetAt: null };
   } catch {
     return { records: {}, resetAt: null };
@@ -104,10 +115,10 @@ export function clearUsageData(): void {
 
 export function checkAndResetIfExpired(): void {
   if (_usageData.resetAt !== null && Date.now() > _usageData.resetAt) {
-    resetUsageData();
+    _usageData.records = {};
     _usageData.resetAt = null;
-    // Write immediately so the null resetAt persists (prevents redundant re-reset on page reload)
     _writeToStorage();
+    _setVersion((v) => v + 1);
   }
 }
 
@@ -195,9 +206,13 @@ const REST_SOURCE_PATTERNS: Array<[RegExp, ApiCallSource]> = [
   [/^\/rate_limit/, "rateLimitCheck"],
 ];
 
+const API_CALL_SOURCE_SET = new Set<string>(API_CALL_SOURCES);
+
 export function deriveSource(info: ApiRequestInfo): ApiCallSource {
   if (info.isGraphql) {
-    return (info.apiSource as ApiCallSource) ?? "graphql";
+    return info.apiSource && API_CALL_SOURCE_SET.has(info.apiSource)
+      ? (info.apiSource as ApiCallSource)
+      : "graphql";
   }
   for (const [pattern, source] of REST_SOURCE_PATTERNS) {
     if (pattern.test(info.url)) return source;
@@ -210,5 +225,6 @@ onApiRequest((info) => {
   const source = deriveSource(info);
   const pool: ApiPool = info.isGraphql ? "graphql" : "core";
   trackApiCall(source, pool);
-  if (info.resetEpochMs !== null && info.isGraphql) updateResetAt(info.resetEpochMs);
+  // Both pools tracked — Math.max keeps latest; may delay reset of the earlier pool's records
+  if (info.resetEpochMs !== null) updateResetAt(info.resetEpochMs);
 });

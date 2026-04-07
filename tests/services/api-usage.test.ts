@@ -187,6 +187,18 @@ describe("flushUsageData / loadUsageData", () => {
     expect(freshMod.getUsageSnapshot()).toHaveLength(0);
   });
 
+  it("calls pushNotification when localStorage.setItem throws (quota exceeded)", async () => {
+    const { pushNotification } = await import("../../src/app/lib/errors");
+    vi.spyOn(localStorageMock, "setItem").mockImplementationOnce(() => { throw new DOMException("QuotaExceededError"); });
+    mod.trackApiCall("lightSearch", "graphql");
+    vi.advanceTimersByTime(600); // fire debounced flush
+    expect(vi.mocked(pushNotification)).toHaveBeenCalledWith(
+      "localStorage:api-usage",
+      expect.stringContaining("write failed"),
+      "warning"
+    );
+  });
+
   it("loadUsageData restores state on module init from valid localStorage", async () => {
     const storedData = {
       records: {
@@ -342,6 +354,29 @@ describe("checkAndResetIfExpired", () => {
     const parsed = JSON.parse(raw!);
     expect(parsed.resetAt).toBeNull();
   });
+
+  it("clears records and nulls resetAt atomically on expiry", () => {
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    mod.trackApiCall("lightSearch", "graphql");
+    mod.updateResetAt(new Date("2026-01-01T11:00:00Z").getTime());
+    // Flush pending writes so state is settled
+    vi.advanceTimersByTime(600);
+
+    // Record localStorage state before the expiry check
+    const before = localStorageMock.getItem("github-tracker:api-usage");
+    const beforeParsed = JSON.parse(before!);
+    expect(beforeParsed.resetAt).not.toBeNull();
+    expect(Object.keys(beforeParsed.records)).toHaveLength(1);
+
+    vi.setSystemTime(new Date("2026-01-01T12:01:00Z"));
+    mod.checkAndResetIfExpired();
+
+    // After expiry: records cleared, resetAt null — written in a single pass
+    const after = localStorageMock.getItem("github-tracker:api-usage");
+    const afterParsed = JSON.parse(after!);
+    expect(afterParsed.resetAt).toBeNull();
+    expect(Object.keys(afterParsed.records)).toHaveLength(0);
+  });
 });
 
 describe("updateResetAt", () => {
@@ -368,6 +403,17 @@ describe("updateResetAt", () => {
     mod.updateResetAt(9000);
     mod.updateResetAt(5000);
     expect(mod.getUsageResetAt()).toBe(9000);
+  });
+
+  it.each([0, -1, NaN, Infinity, -Infinity])("rejects invalid resetAt: %s", (val) => {
+    mod.updateResetAt(val);
+    expect(mod.getUsageResetAt()).toBeNull();
+  });
+
+  it("does not overwrite valid resetAt with invalid value", () => {
+    mod.updateResetAt(5000);
+    mod.updateResetAt(NaN);
+    expect(mod.getUsageResetAt()).toBe(5000);
   });
 });
 
@@ -422,5 +468,9 @@ describe("deriveSource — URL pattern matching", () => {
 
   it("hotRunStatus pattern takes priority over workflowRuns (specific before general)", () => {
     expect(mod.deriveSource(makeInfo({ url: "/repos/foo/bar/actions/runs/999" }))).toBe("hotRunStatus");
+  });
+
+  it("falls back to 'graphql' for unrecognized apiSource string", () => {
+    expect(mod.deriveSource(makeInfo({ isGraphql: true, url: "/graphql", apiSource: "unknownLabel" }))).toBe("graphql");
   });
 });

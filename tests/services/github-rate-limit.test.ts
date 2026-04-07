@@ -61,15 +61,13 @@ describe("fetchRateLimitDetails — success response", () => {
     expect(result!.graphql.resetAt).toBeInstanceOf(Date);
   });
 
-  it("does not cache failures — returns null on error response without caching", async () => {
-    // First call with error — should return null
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeSuccessResponse())); // seed cache
-    await fetchRateLimitDetails();
-
-    // Now force a network error: since result is cached (within 5s), it returns cached
-    // We cannot easily test failure with caching without fake timers.
-    // Instead, test that the function handles errors gracefully at all.
-    // This is tested via: mock a response that results in no graphql key
+  it("returns null when response body is missing the graphql key", async () => {
+    // Use fresh module to bypass staleness cache
+    vi.resetModules();
+    vi.doMock("../../src/app/stores/auth", () => ({
+      token: () => "fake-token-for-rate-limit-tests",
+      onAuthCleared: vi.fn(),
+    }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({ resources: { core: { limit: 5000, remaining: 4800, reset: 99999, used: 0 } } }),
@@ -77,41 +75,51 @@ describe("fetchRateLimitDetails — success response", () => {
       )
     ));
 
-    // The cache from the prior test means this won't re-fetch within 5s
-    // That's expected behavior — just verify cached result is returned
-    const result = await fetchRateLimitDetails();
-    // Either the cache hit (from prior test within 5s) or a new fetch succeeded
-    // In both cases, result should not be null
-    expect(result).not.toBeNull();
+    const { fetchRateLimitDetails: freshFetch } = await import("../../src/app/services/github");
+    const result = await freshFetch();
+    expect(result).toBeNull();
   });
 });
 
 describe("fetchRateLimitDetails — staleness cache", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("returns the same data for two calls within 5 seconds (cache hit)", async () => {
+    // Fresh module for hermetic test — no cross-test cache dependency
+    vi.resetModules();
+    vi.doMock("../../src/app/stores/auth", () => ({
+      token: () => "fake-token-for-staleness-test",
+      onAuthCleared: vi.fn(),
+    }));
     const mockFetch = vi.fn().mockResolvedValue(makeSuccessResponse());
     vi.stubGlobal("fetch", mockFetch);
 
-    // First call — may hit cache from prior test or hit network
-    const result1 = await fetchRateLimitDetails();
+    const { fetchRateLimitDetails: freshFetch } = await import("../../src/app/services/github");
+
+    const result1 = await freshFetch();
     expect(result1).not.toBeNull();
-    const callsAfterFirst = mockFetch.mock.calls.length;
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     // Second call immediately — must not make a new network request
-    const result2 = await fetchRateLimitDetails();
+    const result2 = await freshFetch();
     expect(result2).not.toBeNull();
-    expect(mockFetch.mock.calls.length).toBe(callsAfterFirst); // no extra calls
-    expect(result2!.core.remaining).toBe(result1!.core.remaining); // same data
+    expect(mockFetch).toHaveBeenCalledTimes(1); // no extra calls
+    expect(result2!.core.remaining).toBe(result1!.core.remaining);
+
+    vi.unstubAllGlobals();
   });
 });
 
 describe("fetchRateLimitDetails — null client", () => {
-  // Cannot reliably test null-client path due to module-level staleness cache.
-  // getClient() is only called when cache is expired (>5s), and vi.resetModules()
-  // + dynamic import is needed for clean state — but that conflicts with the auth
-  // module's eager client creation. Documented as a known test limitation.
-  it.todo("returns null when getClient() returns null");
+  it("returns null when getClient() returns null", async () => {
+    // Use vi.resetModules() for clean module state (clears staleness cache).
+    // Mock auth to return null token so no eager client is created.
+    vi.resetModules();
+    vi.doMock("../../src/app/stores/auth", () => ({
+      token: () => null,
+      onAuthCleared: vi.fn(),
+    }));
+
+    const { fetchRateLimitDetails: freshFetch } = await import("../../src/app/services/github");
+    const result = await freshFetch();
+    expect(result).toBeNull();
+  });
 });

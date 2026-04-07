@@ -31,7 +31,14 @@ vi.mock("../../../src/app/services/api-usage", () => ({
   getUsageSnapshot: () => mockGetUsageSnapshot(),
   getUsageResetAt: () => mockGetUsageResetAt(),
   resetUsageData: () => mockResetUsageData(),
-  // Stubs for module-level side effects in dependent modules
+  SOURCE_LABELS: {
+    lightSearch: "Light Search", heavyBackfill: "PR Backfill", forkCheck: "Fork Check",
+    globalUserSearch: "Tracked User Search", unfilteredSearch: "Unfiltered Search",
+    upstreamDiscovery: "Upstream Discovery", workflowRuns: "Workflow Runs",
+    hotPRStatus: "Hot PR Status", hotRunStatus: "Hot Run Status", notifications: "Notifications",
+    validateUser: "Validate User", fetchOrgs: "Fetch Orgs", fetchRepos: "Fetch Repos",
+    rateLimitCheck: "Rate Limit Check", graphql: "GraphQL (other)", rest: "REST (other)",
+  },
   trackApiCall: vi.fn(),
   updateResetAt: vi.fn(),
   checkAndResetIfExpired: vi.fn(),
@@ -273,6 +280,10 @@ describe("ApiUsageSection — reset button", () => {
   });
 
   it("calls resetUsageData() when 'Reset counts' button is clicked", () => {
+    // Wire the mock to clear snapshot on reset, simulating real behavior
+    mockResetUsageData.mockImplementation(() => {
+      mockGetUsageSnapshot.mockReturnValue([]);
+    });
     renderSettings();
     const btn = screen.getByText("Reset counts");
     fireEvent.click(btn);

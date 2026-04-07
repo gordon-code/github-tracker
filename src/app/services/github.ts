@@ -151,7 +151,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       // Fire callbacks even on errors — these are real API calls.
       // Octokit's RequestError includes response.headers for HTTP errors (403, 404, etc.)
       // so we can still extract x-ratelimit-reset when available.
-      if (status > 0 && _requestCallbacks.length > 0) {
+      if (status > 0) {
         let resetEpochMs: number | null = null;
         const errResponse = (err as { response?: { headers?: Record<string, string> } }).response;
         const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
@@ -164,16 +164,14 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       throw err;
     }
 
-    // Success path — fire callbacks and update RL display
-    if (_requestCallbacks.length > 0) {
-      const headers = (response.headers ?? {}) as Record<string, string>;
-      const resetHeader = headers["x-ratelimit-reset"];
-      const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
-      const info: ApiRequestInfo = {
-        url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
-      };
-      for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
-    }
+    // Success path — fire callbacks (api-usage.ts registers at module scope) and update RL display
+    const headers = (response.headers ?? {}) as Record<string, string>;
+    const resetHeader = headers["x-ratelimit-reset"];
+    const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
+    const info: ApiRequestInfo = {
+      url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+    };
+    for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
 
     if (response.headers) {
       updateRateLimitFromHeaders(response.headers as Record<string, string>);

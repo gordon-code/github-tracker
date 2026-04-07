@@ -519,10 +519,42 @@ describe("hook.wrap — request tracking callbacks", () => {
     expect(info.status).toBe(500);
   });
 
+  it("does not fire callback when read-only guard throws (status remains 0)", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } })
+    ));
+
+    const client = createGitHubClient("test-token");
+    // Write operation — read-only guard throws before any HTTP request
+    await expect(client.request("DELETE /repos/{owner}/{repo}", { owner: "a", repo: "b" })).rejects.toThrow("Write operation blocked");
+    expect(cbSpy).not.toHaveBeenCalled();
+  });
+
+  it("fires callback exactly once per request even with multiple clients", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client1 = createGitHubClient("token-1");
+    const client2 = createGitHubClient("token-2");
+
+    await client1.request("GET /user");
+    expect(cbSpy).toHaveBeenCalledTimes(1);
+
+    cbSpy.mockClear();
+    await client2.request("GET /user");
+    expect(cbSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("does not propagate callback errors to the request caller", async () => {
     ensureRegistered();
-    const throwingCb = vi.fn(() => { throw new Error("callback boom"); });
-    onApiRequest(throwingCb);
+    // Use mockImplementationOnce to avoid permanently registering a throwing callback
+    cbSpy.mockImplementationOnce(() => { throw new Error("callback boom"); });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ login: "test" }), {
@@ -534,6 +566,6 @@ describe("hook.wrap — request tracking callbacks", () => {
     const client = createGitHubClient("test-token");
     // Should not throw despite the callback throwing
     await expect(client.request("GET /user")).resolves.toBeDefined();
-    expect(throwingCb).toHaveBeenCalled();
+    expect(cbSpy).toHaveBeenCalled();
   });
 });
