@@ -68,23 +68,23 @@ export function loadUsageData(): ApiUsageData {
   }
 }
 
-export function flushUsageData(): void {
+function _writeToStorage(): void {
   try {
     localStorage.setItem?.(USAGE_STORAGE_KEY, JSON.stringify(_usageData));
   } catch {
     pushNotification("localStorage:api-usage", "API usage write failed — storage may be full", "warning");
   }
+}
+
+export function flushUsageData(): void {
+  _writeToStorage();
   _setVersion((v) => v + 1);
 }
 
 export function resetUsageData(): void {
   _usageData.records = {};
   // Preserve current resetAt so the next window's reset time is still tracked
-  try {
-    localStorage.setItem?.(USAGE_STORAGE_KEY, JSON.stringify(_usageData));
-  } catch {
-    pushNotification("localStorage:api-usage", "API usage write failed — storage may be full", "warning");
-  }
+  _writeToStorage();
   _setVersion((v) => v + 1);
 }
 
@@ -104,11 +104,7 @@ export function checkAndResetIfExpired(): void {
     resetUsageData();
     _usageData.resetAt = null;
     // Write immediately so the null resetAt persists (prevents redundant re-reset on page reload)
-    try {
-      localStorage.setItem?.(USAGE_STORAGE_KEY, JSON.stringify(_usageData));
-    } catch {
-      // Non-fatal — next flush will retry
-    }
+    _writeToStorage();
   }
 }
 
