@@ -157,7 +157,7 @@ A small colored dot shows the aggregate CI status for the PR's latest commit:
 | Yellow (pulsing) | Checks in progress |
 | Red (solid) | Checks failing |
 | Yellow/faded (solid) | Checks blocked by merge conflict |
-| Gray (solid) | No checks configured |
+| Gray (solid) | No checks |
 
 The dot links to the PR's checks page on GitHub.
 

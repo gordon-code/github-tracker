@@ -50,6 +50,18 @@ describe("Tooltip", () => {
     expect(trigger?.hasAttribute("tabindex")).toBe(false);
   });
 
+  it("class prop merges with trigger span classes", () => {
+    const { container } = render(() => (
+      <Tooltip content="Tooltip text" class="relative z-10">
+        <span>Child</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger?.classList.contains("inline-flex")).toBe(true);
+    expect(trigger?.classList.contains("relative")).toBe(true);
+    expect(trigger?.classList.contains("z-10")).toBe(true);
+  });
+
   it("tooltip content is not visible before hover", () => {
     render(() => (
       <Tooltip content="tooltip text">
@@ -147,6 +159,23 @@ describe("Tooltip", () => {
     expect(trigger.getAttribute("data-expanded")).toBe("");
     fireEvent.focusOut(trigger);
     expect(trigger.hasAttribute("data-expanded")).toBe(false);
+  });
+
+  it("closes tooltip on Escape key via onOpenChange", () => {
+    const { container } = render(() => (
+      <Tooltip content="escape tooltip" focusable>
+        <span>Badge</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    // Open via focus
+    fireEvent.focusIn(trigger);
+    expect(trigger.getAttribute("data-expanded")).toBe("");
+    // Escape should close via Kobalte's onOpenChange(false)
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(trigger.hasAttribute("data-expanded")).toBe(false);
+    // Advance past Kobalte's globalSkipDelayTimeout (300ms) so global state resets
+    vi.advanceTimersByTime(500);
   });
 });
 

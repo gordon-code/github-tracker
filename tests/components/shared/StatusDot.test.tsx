@@ -33,6 +33,23 @@ describe("StatusDot", () => {
     expect(wrapper?.getAttribute("aria-label")).toBe("No checks");
   });
 
+  it('shows "Checks blocked by merge conflict" label for status="conflict"', () => {
+    const { container } = render(() => <StatusDot status="conflict" />);
+    const wrapper = container.querySelector("[aria-label]");
+    expect(wrapper?.getAttribute("aria-label")).toBe("Checks blocked by merge conflict");
+  });
+
+  it("wraps dot in a link when href is provided", () => {
+    const { container } = render(() => (
+      <StatusDot status="success" href="https://github.com/owner/repo/checks" />
+    ));
+    const link = container.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute("href")).toBe("https://github.com/owner/repo/checks");
+    expect(link!.getAttribute("target")).toBe("_blank");
+    expect(link!.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
   it("has animate-slow-pulse class only for status=pending", () => {
     const { container: pendingContainer } = render(() => <StatusDot status="pending" />);
     expect(pendingContainer.querySelector(".animate-slow-pulse")).not.toBeNull();

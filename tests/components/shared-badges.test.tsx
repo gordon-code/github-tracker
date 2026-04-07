@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import RoleBadge from "../../src/app/components/shared/RoleBadge";
 import ReviewBadge from "../../src/app/components/shared/ReviewBadge";
 import SizeBadge from "../../src/app/components/shared/SizeBadge";
@@ -83,5 +83,20 @@ describe("SizeBadge", () => {
   it("renders when only changedFiles > 0", () => {
     render(() => <SizeBadge additions={0} deletions={0} changedFiles={1} />);
     screen.getByText("XS");
+  });
+
+  it("shows tooltip with size description on hover", () => {
+    vi.useFakeTimers();
+    const { container } = render(() => (
+      <SizeBadge additions={3} deletions={2} changedFiles={1} />
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger).not.toBeNull();
+    fireEvent.pointerEnter(trigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("XS: <10 lines changed");
+    fireEvent.pointerLeave(trigger!);
+    vi.advanceTimersByTime(500);
+    vi.useRealTimers();
   });
 });

@@ -85,7 +85,7 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
                       <p class="text-xs text-base-content/60 truncate">
                         {item.repo}
                       </p>
-                      <Tooltip content={item.title}>
+                      <Tooltip content={item.title} class="min-w-0 w-full">
                         <p class="text-sm text-base-content truncate">
                           {item.title}
                         </p>

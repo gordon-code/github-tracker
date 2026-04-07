@@ -378,30 +378,25 @@ export default function SettingsPage() {
               ))}
             </select>
           </SettingRow>
-          <div class="flex items-center justify-between px-4 py-3 border-b border-base-300 last:border-b-0">
-            <div>
-              <div class="flex items-center gap-1.5 text-sm font-medium text-base-content">
-                CI status refresh
-                <InfoTooltip content="Targeted refresh for in-flight CI checks and pending PR status. Separate from the full refresh cycle." />
-              </div>
-              <div class="text-xs text-base-content/60">How often to re-check in-flight CI checks and workflow runs (10-120s)</div>
-            </div>
-            <div>
-              <input
-                type="number"
-                min={10}
-                max={120}
-                value={config.hotPollInterval}
-                onInput={(e) => {
-                  const val = parseInt(e.currentTarget.value, 10);
-                  if (!isNaN(val) && val >= 10 && val <= 120) {
-                    saveWithFeedback({ hotPollInterval: val });
-                  }
-                }}
-                class="input input-sm w-20"
-              />
-            </div>
-          </div>
+          <SettingRow
+            label="CI status refresh"
+            labelSuffix={<InfoTooltip content="Targeted refresh for in-flight CI checks and pending PR status. Separate from the full refresh cycle." />}
+            description="How often to re-check in-flight CI checks and workflow runs (10-120s)"
+          >
+            <input
+              type="number"
+              min={10}
+              max={120}
+              value={config.hotPollInterval}
+              onInput={(e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                if (!isNaN(val) && val >= 10 && val <= 120) {
+                  saveWithFeedback({ hotPollInterval: val });
+                }
+              }}
+              class="input input-sm w-20"
+            />
+          </SettingRow>
         </Section>
 
         {/* Section 4: GitHub Actions */}

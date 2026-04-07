@@ -64,6 +64,12 @@ describe("PersonalSummaryStrip — assigned issues", () => {
     expect(screen.getByText(/assigned/)).toBeDefined();
   });
 
+  it("shows InfoTooltip 'More information' button when counts are visible", () => {
+    const issues = [makeIssue({ assigneeLogins: ["me"] })];
+    renderStrip({ issues });
+    expect(screen.getByRole("button", { name: "More information" })).toBeTruthy();
+  });
+
   it("does not count issues where user is not assigned", () => {
     const issues = [
       makeIssue({ assigneeLogins: ["other-user"] }),

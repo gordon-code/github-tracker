@@ -79,7 +79,7 @@ export default function ItemRow(props: ItemRowProps) {
 
       {/* Repo badge */}
       <Show when={!props.hideRepo}>
-        <Tooltip content={props.repo} class="relative z-10">
+        <Tooltip content={props.repo} class="shrink-0 relative z-10">
           <span
             class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
               bg-primary/10 text-primary
@@ -153,27 +153,29 @@ export default function ItemRow(props: ItemRowProps) {
           <span class="loading loading-spinner loading-xs text-base-content/40" />
         </Show>
         <Show when={(props.commentCount ?? 0) > 0}>
-          <span class="flex items-center gap-0.5">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-3 w-3"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
-                clip-rule="evenodd"
-              />
-            </svg>
-            {formatCount(props.commentCount!)}
-          </span>
+          <Tooltip content={`${props.commentCount} total ${props.commentCount === 1 ? "comment" : "comments"}`} focusable class="relative z-10">
+            <span class="flex items-center gap-0.5">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-3 w-3"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              {formatCount(props.commentCount!)}
+            </span>
+          </Tooltip>
         </Show>
       </div>
 
       {/* Ignore button — visible on hover */}
-      <Tooltip content="Ignore" class="relative z-10">
+      <Tooltip content="Ignore" class="shrink-0 self-center relative z-10">
         <button
           data-ignore-btn
           onClick={() => props.onIgnore()}

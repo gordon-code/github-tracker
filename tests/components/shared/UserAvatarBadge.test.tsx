@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import UserAvatarBadge from "../../../src/app/components/shared/UserAvatarBadge";
 
 describe("UserAvatarBadge", () => {
@@ -57,6 +57,24 @@ describe("UserAvatarBadge", () => {
     const imgs = screen.getAllByRole("img");
     expect(imgs).toHaveLength(1);
     expect(imgs[0].getAttribute("alt")).toBe("tracked1");
+  });
+
+  it("shows 'Surfaced by' tooltip on hover", () => {
+    vi.useFakeTimers();
+    const { container } = render(() => (
+      <UserAvatarBadge
+        users={[{ login: "octocat", avatarUrl: "https://avatars.githubusercontent.com/u/583231" }]}
+        currentUserLogin="me"
+      />
+    ));
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger).not.toBeNull();
+    fireEvent.pointerEnter(trigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("Surfaced by octocat");
+    fireEvent.pointerLeave(trigger!);
+    vi.advanceTimersByTime(500);
+    vi.useRealTimers();
   });
 
   it("uses avatarUrl as img src", () => {

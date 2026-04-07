@@ -183,9 +183,9 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
         {durationLabel(props.run)}
       </span>
 
-      <Tooltip content={createdTitle()}>
+      <Tooltip content={createdTitle()} class="shrink-0">
         <time
-          class="text-xs text-base-content/40 shrink-0"
+          class="text-xs text-base-content/40"
           datetime={props.run.createdAt}
         >
           {timeLabel()}
@@ -196,10 +196,10 @@ export default function WorkflowRunRow(props: WorkflowRunRowProps) {
         <span class="loading loading-spinner loading-xs text-base-content/40" />
       </Show>
 
-      <Tooltip content="Ignore">
+      <Tooltip content="Ignore" class="shrink-0">
         <button
           onClick={() => props.onIgnore(props.run)}
-          class="shrink-0 rounded p-1 text-base-content/30 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-error"
+          class="rounded p-1 text-base-content/30 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity focus:outline-none focus:ring-2 focus:ring-error"
           aria-label={`Ignore run ${props.run.name}`}
         >
           <svg

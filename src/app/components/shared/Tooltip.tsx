@@ -2,7 +2,7 @@ import { createMemo, createSignal, onCleanup } from "solid-js";
 import { Tooltip as KobalteTooltip } from "@kobalte/core/tooltip";
 import type { JSX } from "solid-js";
 
-// SECURITY: tooltip content must be JSX children, never raw HTML
+// content is plain string — JSX children are intentionally not supported to avoid needing sanitization
 
 const TOOLTIP_CONTENT_CLASS = "z-50 max-w-xs rounded bg-neutral px-2 py-1 text-xs text-neutral-content shadow-lg";
 
@@ -79,6 +79,7 @@ export function InfoTooltip(props: InfoTooltipProps) {
     <KobalteTooltip
       placement={props.placement ?? "top"}
       gutter={4}
+      // Uncontrolled mode — Kobalte openDelay works here, unlike Tooltip which uses controlled mode
       openDelay={300}
     >
       <KobalteTooltip.Trigger
