@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { z } from "zod";
 import { pushNotification } from "../lib/errors";
 import { onAuthCleared } from "../stores/auth";
+import { onApiRequest, type ApiRequestInfo } from "./github";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,7 +20,9 @@ export type ApiCallSource =
   | "validateUser"
   | "fetchOrgs"
   | "fetchRepos"
-  | "rateLimitCheck";
+  | "rateLimitCheck"
+  | "graphql"
+  | "rest";
 
 export type ApiPool = "graphql" | "core";
 
@@ -174,3 +177,35 @@ export function updateResetAt(resetAt: number): void {
   _usageData.resetAt = next;
   _setVersion((v) => v + 1);
 }
+
+// ── Automatic tracking via Octokit hook ──────────────────────────────────────
+
+const REST_SOURCE_PATTERNS: Array<[RegExp, ApiCallSource]> = [
+  [/^\/notifications/, "notifications"],
+  [/^\/users\/[^/]+$/, "validateUser"],
+  [/^\/user$/, "fetchOrgs"],
+  [/^\/user\/orgs/, "fetchOrgs"],
+  [/^\/orgs\/[^/]+\/repos/, "fetchRepos"],
+  [/^\/user\/repos/, "fetchRepos"],
+  [/^\/repos\/[^/]+\/[^/]+\/actions\/runs\/\d+$/, "hotRunStatus"],
+  [/^\/repos\/[^/]+\/[^/]+\/actions\/runs/, "workflowRuns"],
+  [/^\/rate_limit/, "rateLimitCheck"],
+];
+
+export function deriveSource(info: ApiRequestInfo): ApiCallSource {
+  if (info.isGraphql) {
+    return (info.apiSource as ApiCallSource) ?? "graphql";
+  }
+  for (const [pattern, source] of REST_SOURCE_PATTERNS) {
+    if (pattern.test(info.url)) return source;
+  }
+  return "rest";
+}
+
+// Register at module scope — intercepts every Octokit request automatically
+onApiRequest((info) => {
+  const source = deriveSource(info);
+  const pool: ApiPool = info.isGraphql ? "graphql" : "core";
+  trackApiCall(source, pool);
+  if (info.resetEpochMs !== null) updateResetAt(info.resetEpochMs);
+});

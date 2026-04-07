@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 // Mock github client — factory must not reference hoisted consts
 vi.mock("../../src/app/services/github", () => ({
   getClient: vi.fn(),
+  onApiRequest: vi.fn(),
 }));
 
 // Mock config store

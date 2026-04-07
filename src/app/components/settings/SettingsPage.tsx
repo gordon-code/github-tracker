@@ -36,6 +36,8 @@ const SOURCE_LABELS: Record<string, string> = {
   fetchOrgs: "Fetch Orgs",
   fetchRepos: "Fetch Repos",
   rateLimitCheck: "Rate Limit Check",
+  graphql: "GraphQL (other)",
+  rest: "REST (other)",
 };
 
 export default function SettingsPage() {

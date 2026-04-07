@@ -10,6 +10,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
 }));
 
+vi.mock("../../src/app/services/github", () => ({
+  onApiRequest: vi.fn(),
+}));
+
 // ── localStorage mock ─────────────────────────────────────────────────────────
 
 const localStorageMock = (() => {
@@ -364,5 +368,59 @@ describe("updateResetAt", () => {
     mod.updateResetAt(9000);
     mod.updateResetAt(5000);
     expect(mod.getUsageResetAt()).toBe(9000);
+  });
+});
+
+// ── deriveSource ─────────────────────────────────────────────────────────────
+
+describe("deriveSource — URL pattern matching", () => {
+  let mod: typeof import("../../src/app/services/api-usage");
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    vi.resetModules();
+    mod = await import("../../src/app/services/api-usage");
+  });
+
+  function makeInfo(overrides: Partial<import("../../src/app/services/github").ApiRequestInfo>): import("../../src/app/services/github").ApiRequestInfo {
+    return {
+      url: "/unknown",
+      method: "GET",
+      status: 200,
+      isGraphql: false,
+      resetEpochMs: null,
+      ...overrides,
+    };
+  }
+
+  it.each([
+    ["/notifications", "notifications"],
+    ["/notifications?per_page=1", "notifications"],
+    ["/users/octocat", "validateUser"],
+    ["/user", "fetchOrgs"],
+    ["/user/orgs", "fetchOrgs"],
+    ["/orgs/my-org/repos", "fetchRepos"],
+    ["/user/repos", "fetchRepos"],
+    ["/repos/foo/bar/actions/runs/12345", "hotRunStatus"],
+    ["/repos/foo/bar/actions/runs", "workflowRuns"],
+    ["/rate_limit", "rateLimitCheck"],
+  ] as const)("REST %s → %s", (url, expected) => {
+    expect(mod.deriveSource(makeInfo({ url }))).toBe(expected);
+  });
+
+  it("returns 'rest' for unknown REST endpoints", () => {
+    expect(mod.deriveSource(makeInfo({ url: "/repos/foo/bar/stargazers" }))).toBe("rest");
+  });
+
+  it("returns apiSource for GraphQL calls with custom label", () => {
+    expect(mod.deriveSource(makeInfo({ isGraphql: true, url: "/graphql", apiSource: "heavyBackfill" }))).toBe("heavyBackfill");
+  });
+
+  it("returns 'graphql' for GraphQL calls without apiSource", () => {
+    expect(mod.deriveSource(makeInfo({ isGraphql: true, url: "/graphql" }))).toBe("graphql");
+  });
+
+  it("hotRunStatus pattern takes priority over workflowRuns (specific before general)", () => {
+    expect(mod.deriveSource(makeInfo({ url: "/repos/foo/bar/actions/runs/999" }))).toBe("hotRunStatus");
   });
 });

@@ -60,6 +60,25 @@ export function updateRateLimitFromHeaders(headers: Record<string, string>): voi
   }
 }
 
+// ── API request tracking callback ────────────────────────────────────────────
+
+export interface ApiRequestInfo {
+  url: string;
+  method: string;
+  status: number;
+  isGraphql: boolean;
+  /** Custom label from caller (e.g., "heavyBackfill"), passed via octokit options */
+  apiSource?: string;
+  /** x-ratelimit-reset converted to ms, or null if unavailable */
+  resetEpochMs: number | null;
+}
+
+const _requestCallbacks: Array<(info: ApiRequestInfo) => void> = [];
+
+export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
+  _requestCallbacks.push(cb);
+}
+
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(token: string): GitHubOctokitInstance {
@@ -110,6 +129,50 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
   });
 
+  // Track every API request for usage analytics + update rate limit display
+  client.hook.wrap("request", async (request, options) => {
+    const isGraphql = options.url === "/graphql";
+    const method = (options.method ?? "GET").toUpperCase();
+    const apiSource = (options as Record<string, unknown>).apiSource as string | undefined;
+
+    let response;
+    let status = 0;
+    try {
+      response = await request(options);
+      status = response.status;
+    } catch (err) {
+      if (typeof err === "object" && err !== null && "status" in err) {
+        status = (err as { status: number }).status;
+      }
+      // Fire callbacks even on errors — these are real API calls
+      if (status > 0 && _requestCallbacks.length > 0) {
+        const info: ApiRequestInfo = {
+          url: options.url, method, status, isGraphql, apiSource,
+          resetEpochMs: null, // headers unavailable on error
+        };
+        for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
+      }
+      throw err;
+    }
+
+    // Success path — fire callbacks and update RL display
+    if (_requestCallbacks.length > 0) {
+      const headers = (response.headers ?? {}) as Record<string, string>;
+      const resetHeader = headers["x-ratelimit-reset"];
+      const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
+      const info: ApiRequestInfo = {
+        url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+      };
+      for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
+    }
+
+    if (response.headers) {
+      updateRateLimitFromHeaders(response.headers as Record<string, string>);
+    }
+
+    return response;
+  });
+
   return client;
 }
 
@@ -140,7 +203,8 @@ export async function cachedRequest(
       const response = await octokit.request(route, requestParams);
       const headers = response.headers as Record<string, string>;
 
-      updateRateLimitFromHeaders(headers);
+      // NOTE: updateRateLimitFromHeaders is handled by the hook.wrap on the
+      // Octokit client — no need to call it here.
 
       return {
         data: response.data as unknown,
@@ -215,12 +279,11 @@ let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = n
  * Caches results for 5 seconds to avoid thrashing on rapid hovers.
  * GET /rate_limit is free — not counted against rate limits by GitHub.
  * Returns null if client unavailable or request fails.
- * `fromCache: true` when the result came from the staleness cache (no HTTP call made).
  */
-export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo; fromCache: boolean } | null> {
+export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
   // Return cached result within 5-second staleness window
   if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
-    return { ..._lastFetchResult, fromCache: true };
+    return { ..._lastFetchResult };
   }
 
   const client = getClient();
@@ -244,7 +307,7 @@ export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; gr
     };
     _lastFetchTime = Date.now();
     _lastFetchResult = result;
-    return { ...result, fromCache: false };
+    return { ...result };
   } catch {
     return null;
   }

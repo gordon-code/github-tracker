@@ -11,6 +11,7 @@ vi.mock("../../src/app/services/github", () => ({
   cachedRequest: vi.fn(),
   updateGraphqlRateLimit: vi.fn(),
   updateRateLimitFromHeaders: vi.fn(),
+  onApiRequest: vi.fn(),
 }));
 
 // Mock errors/notifications so poll.ts module doesn't crash
@@ -206,16 +207,9 @@ describe("fetchWorkflowRunById", () => {
     );
   });
 
-  it("calls updateRateLimitFromHeaders after request", async () => {
-    const { updateRateLimitFromHeaders } = await import("../../src/app/services/github");
-    const octokit = makeOctokit(() => Promise.resolve({
-      data: { id: 300, status: "completed", conclusion: "success", updated_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z" },
-      headers: { "x-ratelimit-remaining": "4999" },
-    }));
-
-    await fetchWorkflowRunById(octokit as never, { id: 300, owner: "org", repo: "repo" });
-    expect(updateRateLimitFromHeaders).toHaveBeenCalledWith({ "x-ratelimit-remaining": "4999" });
-  });
+  // NOTE: updateRateLimitFromHeaders is now handled by the Octokit hook.wrap
+  // in createGitHubClient, not by fetchWorkflowRunById directly. The hook
+  // cannot be tested here because the octokit mock bypasses client creation.
 });
 
 describe("resetPollState", () => {

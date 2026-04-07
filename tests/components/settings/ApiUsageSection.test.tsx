@@ -206,6 +206,8 @@ describe("ApiUsageSection — source label display", () => {
     ["fetchOrgs", "Fetch Orgs"],
     ["fetchRepos", "Fetch Repos"],
     ["rateLimitCheck", "Rate Limit Check"],
+    ["graphql", "GraphQL (other)"],
+    ["rest", "REST (other)"],
   ] as const)("displays '%s' as '%s'", (source, label) => {
     mockGetUsageSnapshot.mockReturnValue([
       { source, pool: "core", count: 1, lastCalledAt: now },

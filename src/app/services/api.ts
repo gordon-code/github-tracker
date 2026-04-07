@@ -1,6 +1,6 @@
-import { getClient, cachedRequest, updateGraphqlRateLimit, updateRateLimitFromHeaders } from "./github";
+import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import { pushNotification } from "../lib/errors";
-import { trackApiCall, updateResetAt, type ApiCallSource } from "./api-usage";
+import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -640,8 +640,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       let response: TResponse;
       let isPartial = false;
       try {
-        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor });
-        trackApiCall(source, "graphql");
+        response = await octokit.graphql<TResponse>(query, { q: queryString, cursor, apiSource: source });
       } catch (err) {
         const partial = extractSearchPartialData<TResponse>(err);
         if (partial) {
@@ -663,7 +662,6 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
 
       if (response.rateLimit) {
         updateGraphqlRateLimit(response.rateLimit);
-        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
       }
 
       for (const node of response.search.nodes) {
@@ -781,11 +779,9 @@ async function runForkPRFallback(
     const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
 
     try {
-      const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, variables);
-      trackApiCall("forkCheck", "graphql");
+      const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, apiSource: "forkCheck" });
       if (forkResponse.rateLimit) {
         updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
-        updateResetAt(new Date((forkResponse.rateLimit as GraphQLRateLimit).resetAt).getTime());
       }
 
       for (let i = 0; i < forkChunk.length; i++) {
@@ -904,8 +900,8 @@ async function executeLightCombinedQuery(
     response = await octokit.graphql<LightCombinedSearchResponse>(LIGHT_COMBINED_SEARCH_QUERY, {
       issueQ, prInvQ, prRevQ,
       issueCursor: null, prInvCursor: null, prRevCursor: null,
+      apiSource: source,
     });
-    trackApiCall(source, "graphql");
   } catch (err) {
     const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
       ? err.data as Partial<LightCombinedSearchResponse>
@@ -927,7 +923,6 @@ async function executeLightCombinedQuery(
 
   if (response.rateLimit) {
     updateGraphqlRateLimit(response.rateLimit);
-    updateResetAt(new Date(response.rateLimit.resetAt).getTime());
   }
 
   for (const node of response.issues.nodes) {
@@ -1083,8 +1078,8 @@ async function graphqlUnfilteredSearch(
       try {
         response = await octokit.graphql<UnfilteredSearchResponse>(UNFILTERED_SEARCH_QUERY, {
           issueQ, prQ, issueCursor: null, prCursor: null,
+          apiSource: "unfilteredSearch",
         });
-        trackApiCall("unfilteredSearch", "graphql");
       } catch (err) {
         const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
           ? err.data as Partial<UnfilteredSearchResponse>
@@ -1107,7 +1102,6 @@ async function graphqlUnfilteredSearch(
 
       if (response.rateLimit) {
         updateGraphqlRateLimit(response.rateLimit);
-        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
       }
 
       for (const node of response.issues.nodes) {
@@ -1186,12 +1180,11 @@ export async function fetchPREnrichment(
     try {
       const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
         ids: batch,
+        apiSource: "heavyBackfill",
       });
-      trackApiCall("heavyBackfill", "graphql");
 
       if (response.rateLimit) {
         updateGraphqlRateLimit(response.rateLimit);
-        updateResetAt(new Date(response.rateLimit.resetAt).getTime());
       }
 
       for (const node of response.nodes) {
@@ -1540,7 +1533,6 @@ export async function fetchOrgs(
     cachedRequest(octokit, "orgs:user", "GET /user"),
     cachedRequest(octokit, "orgs:all", "GET /user/orgs", { per_page: 100 }),
   ]);
-  trackApiCall("fetchOrgs", "core", 2);
 
   const user = userResult.data as RawUser;
   const orgs = orgsResult.data as RawOrg[];
@@ -1583,12 +1575,6 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
-      trackApiCall("fetchRepos", "core");
-      if (response.headers) {
-        updateRateLimitFromHeaders(response.headers as Record<string, string>);
-        const resetHeader = (response.headers as Record<string, string>)["x-ratelimit-reset"];
-        if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
-      }
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
@@ -1601,12 +1587,6 @@ export async function fetchRepos(
       sort: "pushed" as const,
       direction: "desc" as const,
     })) {
-      trackApiCall("fetchRepos", "core");
-      if (response.headers) {
-        updateRateLimitFromHeaders(response.headers as Record<string, string>);
-        const resetHeader = (response.headers as Record<string, string>)["x-ratelimit-reset"];
-        if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
-      }
       for (const repo of response.data as RawRepo[]) {
         repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
       }
@@ -1673,7 +1653,6 @@ export async function fetchWorkflowRuns(
         "GET /repos/{owner}/{repo}/actions/runs",
         { owner: repo.owner, repo: repo.name, per_page: perPage, page }
       );
-      trackApiCall("workflowRuns", "core");
 
       const data = result.data as {
         workflow_runs: RawWorkflowRun[];
@@ -1777,11 +1756,9 @@ export async function fetchHotPRStatus(
   const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
   let hadErrors = false;
   const settled = await Promise.allSettled(batches.map(async (batch) => {
-    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch });
-    trackApiCall("hotPRStatus", "graphql");
+    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch, apiSource: "hotPRStatus" });
     if (response.rateLimit) {
       updateGraphqlRateLimit(response.rateLimit);
-      updateResetAt(new Date(response.rateLimit.resetAt).getTime());
     }
 
     for (const node of response.nodes) {
@@ -1833,11 +1810,6 @@ export async function fetchWorkflowRunById(
     repo,
     run_id: id,
   });
-  trackApiCall("hotRunStatus", "core");
-  const responseHeaders = response.headers as Record<string, string>;
-  updateRateLimitFromHeaders(responseHeaders);
-  const resetHeader = responseHeaders["x-ratelimit-reset"];
-  if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
   // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
   const run = response.data as unknown as RawWorkflowRun;
   return {
@@ -1884,10 +1856,6 @@ export async function validateGitHubUser(
     if (status === 404) return null;
     throw err;
   }
-  trackApiCall("validateUser", "core");
-  const resetHeader = response.headers?.["x-ratelimit-reset"];
-  if (resetHeader) updateResetAt(parseInt(resetHeader, 10) * 1000);
-
   const raw = response.data;
   const avatarUrl = raw.avatar_url.startsWith(AVATAR_CDN_PREFIX)
     ? raw.avatar_url

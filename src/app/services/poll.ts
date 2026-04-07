@@ -2,7 +2,7 @@ import { createSignal, createEffect, createRoot, untrack, onCleanup } from "soli
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
-import { trackApiCall, checkAndResetIfExpired } from "./api-usage";
+import { checkAndResetIfExpired } from "./api-usage";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
@@ -160,7 +160,6 @@ async function hasNotificationChanges(): Promise<boolean> {
       per_page: 1,
       headers,
     });
-    trackApiCall("notifications", "core");
 
     // Store Last-Modified for next conditional request
     const lastMod = (response.headers as Record<string, string>)["last-modified"];
@@ -170,7 +169,7 @@ async function hasNotificationChanges(): Promise<boolean> {
 
     return true; // 200 = something changed
   } catch (err) {
-    trackApiCall("notifications", "core"); // 304 and 403 are still real API calls
+    // 304 and 403 are still real API calls — tracked automatically by the hook
     if (
       typeof err === "object" &&
       err !== null &&

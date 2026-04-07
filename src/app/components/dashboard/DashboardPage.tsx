@@ -25,7 +25,6 @@ import {
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { trackApiCall } from "../../services/api-usage";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
@@ -262,7 +261,6 @@ export default function DashboardPage() {
         setRlDetail("Failed to load");
         return;
       }
-      if (!detail.fromCache) trackApiCall("rateLimitCheck", "core");
       const resetTime = detail.core.resetAt.toLocaleTimeString();
       setRlDetail(
         `Core:    ${detail.core.remaining.toLocaleString()}/${detail.core.limit.toLocaleString()} remaining\n` +
