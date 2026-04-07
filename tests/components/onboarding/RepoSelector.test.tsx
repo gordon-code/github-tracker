@@ -372,6 +372,41 @@ describe("RepoSelector", () => {
     });
     expect(api.fetchOrgs).not.toHaveBeenCalled();
   });
+
+  it("per-org Select All is disabled when all repos already selected (non-accordion)", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    const allSelected: RepoRef[] = myorgRepos.map((r) => ({ owner: r.owner, name: r.name, fullName: r.fullName }));
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={allSelected} onChange={vi.fn()} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+
+    // Non-accordion: per-org Select All is in the header
+    const selectAllBtns = screen.getAllByText("Select All");
+    const perOrgSelectAll = selectAllBtns[selectAllBtns.length - 1] as HTMLButtonElement;
+    expect(perOrgSelectAll.disabled).toBe(true);
+  });
+
+  it("per-org Deselect All is disabled when no repos selected (non-accordion)", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+    });
+
+    // Non-accordion: per-org Deselect All is in the header
+    const deselectAllBtns = screen.getAllByText("Deselect All");
+    const perOrgDeselectAll = deselectAllBtns[deselectAllBtns.length - 1] as HTMLButtonElement;
+    expect(perOrgDeselectAll.disabled).toBe(true);
+  });
 });
 
 describe("RepoSelector — upstream discovery", () => {
@@ -846,9 +881,34 @@ describe("RepoSelector — org accordion", () => {
       screen.getByText("delta-org-repo");
     });
 
-    // No accordion chevron buttons present
-    expect(screen.queryAllByRole("button", { name: /chevron|expand|collapse/i })).toHaveLength(0);
+    // No accordion header buttons present (no aria-expanded attributes)
+    expect(document.querySelectorAll("[aria-expanded]")).toHaveLength(0);
     // All repo content visible (no inert panels)
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
+
+  it("renders all orgs expanded when exactly 5 orgs (boundary below threshold)", async () => {
+    // 5 orgs → still no accordion (threshold is >= 6)
+    const fiveOrgs = ["alpha-org", "beta-org", "gamma-org", "delta-org", "epsilon-org"];
+    const fiveOrgEntries = fiveOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={fiveOrgs}
+        orgEntries={fiveOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+      screen.getByText("epsilon-org-repo");
+    });
+
+    // No accordion chevron buttons present — 5 orgs is still below the >= 6 threshold
+    expect(screen.queryAllByRole("button", { name: /chevron|expand|collapse/i })).toHaveLength(0);
+    // All repo content visible — no inert panels
     expect(document.querySelectorAll("[inert]")).toHaveLength(0);
   });
 
@@ -903,7 +963,7 @@ describe("RepoSelector — org accordion", () => {
     expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("clicking the currently-expanded org header is a no-op (content stays visible)", async () => {
+  it("clicking the default-expanded org header is a no-op (null → explicit path)", async () => {
     render(() => (
       <RepoSelector
         selectedOrgs={sixOrgs}
@@ -923,6 +983,33 @@ describe("RepoSelector — org accordion", () => {
 
     // alpha-org is still expanded (setUserExpandedOrg sets to same value)
     expect(alphaBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelectorAll("[inert]")).toHaveLength(5);
+  });
+
+  it("clicking the explicitly-expanded org header a second time is a no-op (re-click path)", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // First: click beta-org to explicitly set userExpandedOrg = 'beta-org'
+    const betaBtn = screen.getByRole("button", { name: /beta-org/ });
+    fireEvent.click(betaBtn);
+    expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelectorAll("[inert]")).toHaveLength(5);
+
+    // Second: click beta-org again — userExpandedOrg is already 'beta-org',
+    // so setUserExpandedOrg('beta-org') is a no-op and beta-org must remain expanded
+    fireEvent.click(betaBtn);
+    expect(betaBtn.getAttribute("aria-expanded")).toBe("true");
     expect(document.querySelectorAll("[inert]")).toHaveLength(5);
   });
 
@@ -960,21 +1047,14 @@ describe("RepoSelector — org accordion", () => {
       screen.getByText("alpha-org-repo");
     });
 
-    // The expanded org (alpha-org) should show per-org Select All inside the panel content
-    const selectAllBtns = screen.getAllByRole("button", { name: /Select All/i });
-    // Global Select All + per-org Select All for the expanded org
-    const perOrgSelectAll = selectAllBtns.filter(
-      (btn) => !btn.closest("[inert]") && btn.textContent === "Select All"
+    // The expanded org (alpha-org) should show per-org Select All in the header bar
+    const headerBtn = document.getElementById("accordion-header-alpha-org")!;
+    expect(headerBtn).not.toBeNull();
+    const headerRow = headerBtn.parentElement!;
+    const perOrgBtn = Array.from(headerRow.querySelectorAll("button")).find(
+      (b) => b.textContent === "Select All" && b !== headerBtn
     );
-    expect(perOrgSelectAll.length).toBeGreaterThanOrEqual(2); // global + expanded org
-
-    // Click per-org Select All inside the expanded panel (not the global one)
-    // The per-org one is inside the accordion panel content area
-    const panelContent = document.getElementById("accordion-panel-alpha-org");
-    expect(panelContent).not.toBeNull();
-    const perOrgBtn = panelContent!.querySelector("button");
-    expect(perOrgBtn).not.toBeNull();
-    expect(perOrgBtn!.textContent).toBe("Select All");
+    expect(perOrgBtn).not.toBeUndefined();
     fireEvent.click(perOrgBtn!);
 
     // Should select only alpha-org's repo
@@ -985,6 +1065,111 @@ describe("RepoSelector — org accordion", () => {
     const selectedNames = onChange.mock.calls[0][0].map((r: { fullName: string }) => r.fullName);
     expect(selectedNames).toHaveLength(1);
     expect(selectedNames[0]).toBe("alpha-org/alpha-org-repo");
+  });
+
+  it("per-org Select All is disabled when all repos already selected; Deselect All is disabled when none selected", async () => {
+    const allSelected: RepoRef[] = sixOrgs.map((org) => ({
+      owner: org,
+      name: `${org}-repo`,
+      fullName: `${org}/${org}-repo`,
+    }));
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={allSelected}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // alpha-org is expanded — per-org buttons are in the header bar
+    const headerBtn = document.getElementById("accordion-header-alpha-org")!;
+    const headerRow = headerBtn.parentElement!;
+    const actionBtns = Array.from(headerRow.querySelectorAll("button")).filter((b) => b !== headerBtn);
+    const perOrgSelectAll = actionBtns.find((b) => b.textContent === "Select All") as HTMLButtonElement;
+    const perOrgDeselectAll = actionBtns.find((b) => b.textContent === "Deselect All") as HTMLButtonElement;
+
+    // All repos are already selected — Select All must be disabled
+    expect(perOrgSelectAll).not.toBeUndefined();
+    expect(perOrgSelectAll.disabled).toBe(true);
+
+    // All repos are selected — Deselect All must be enabled
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(false);
+  });
+
+  it("per-org Deselect All is disabled when no repos are selected in that org", async () => {
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    const headerBtn = document.getElementById("accordion-header-alpha-org")!;
+    const headerRow = headerBtn.parentElement!;
+    const actionBtns = Array.from(headerRow.querySelectorAll("button")).filter((b) => b !== headerBtn);
+    const perOrgSelectAll = actionBtns.find((b) => b.textContent === "Select All") as HTMLButtonElement;
+    const perOrgDeselectAll = actionBtns.find((b) => b.textContent === "Deselect All") as HTMLButtonElement;
+
+    // No repos selected — Select All must be enabled
+    expect(perOrgSelectAll).not.toBeUndefined();
+    expect(perOrgSelectAll.disabled).toBe(false);
+
+    // No repos selected — Deselect All must be disabled
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(true);
+  });
+
+  it("per-org Deselect All in accordion panel deselects repos from that org", async () => {
+    const preSelected: RepoRef[] = ["alpha-org", "beta-org"].map((org) => ({
+      owner: org,
+      name: `${org}-repo`,
+      fullName: `${org}/${org}-repo`,
+    }));
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sixOrgs}
+        orgEntries={sixOrgEntries}
+        selected={preSelected}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alpha-org-repo");
+    });
+
+    // Deselect All is in the header bar when expanded
+    const headerBtn = document.getElementById("accordion-header-alpha-org")!;
+    const headerRow = headerBtn.parentElement!;
+    const perOrgDeselectAll = Array.from(headerRow.querySelectorAll("button")).find(
+      (b) => b.textContent === "Deselect All"
+    ) as HTMLButtonElement;
+    expect(perOrgDeselectAll).not.toBeUndefined();
+    expect(perOrgDeselectAll.disabled).toBe(false);
+
+    fireEvent.click(perOrgDeselectAll);
+
+    // onChange should have been called with alpha-org's repo removed
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as RepoRef[];
+    expect(result.map((r) => r.fullName)).not.toContain("alpha-org/alpha-org-repo");
+    // beta-org's repo must still be selected
+    expect(result.map((r) => r.fullName)).toContain("beta-org/beta-org-repo");
   });
 
   it("global Select All includes repos from collapsed orgs", async () => {
@@ -1109,9 +1294,7 @@ describe("RepoSelector — org accordion", () => {
     fireEvent.click(gammaBtn);
     expect(gammaBtn.getAttribute("aria-expanded")).toBe("true");
 
-    // Re-render without gamma-org (still 5 orgs >= 6 threshold? No, 5 < 6 so accordion exits)
-    // Use 7 orgs to ensure >= 6 remains after removing one
-    // Actually: let's test with 7 orgs so we stay in accordion mode after removal
+    // Start with 7 orgs so removing one leaves 6 (still in accordion mode)
     const sevenOrgs = [...sixOrgs, "eta-org"];
     const sevenOrgEntries = sevenOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>

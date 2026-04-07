@@ -461,7 +461,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 });
 
                 return (
-                  <div class="bg-base-100">
+                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
                     <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposPRs().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
                       <button
                         onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}

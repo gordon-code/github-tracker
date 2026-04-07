@@ -352,7 +352,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                 });
 
                 return (
-                  <div class="bg-base-100">
+                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
                     <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposIssues().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
                       <button
                         onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}

@@ -463,44 +463,17 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
       {/* Per-org repo lists — Index (not For) avoids tearing down every org's
            DOM subtree when a single org's state updates via setOrgStates(prev.map(...)) */}
+      <div class={isAccordion() ? "overflow-hidden rounded-lg border border-base-300 divide-y divide-base-300" : "contents"}>
       <Index each={sortedOrgStates()}>
         {(state) => {
           const visible = createMemo(() => filteredReposForOrg(state()));
           const selectedCount = createMemo(() =>
             visible().filter((r) => isSelected(r.fullName)).length
           );
+          const orgId = createMemo(() => state().org.replace(/[^a-zA-Z0-9-]/g, "-"));
 
           const orgContent = () => (
             <>
-              {/* Per-org bulk selection bar (accordion mode only — in non-accordion, these are in the header) */}
-              <Show when={isAccordion() && !state().loading && !state().error}>
-                <div class="flex justify-end gap-2 border-b border-base-300 px-4 py-1">
-                  <button
-                    type="button"
-                    onClick={() => selectAllInOrg(state())}
-                    disabled={
-                      visible().length === 0 ||
-                      visible().every((r) => isSelected(r.fullName))
-                    }
-                    class="btn btn-ghost btn-xs"
-                  >
-                    Select All
-                  </button>
-                  <span class="text-base-content/30">&middot;</span>
-                  <button
-                    type="button"
-                    onClick={() => deselectAllInOrg(state())}
-                    disabled={
-                      visible().length === 0 ||
-                      visible().every((r) => !isSelected(r.fullName))
-                    }
-                    class="btn btn-ghost btn-xs"
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              </Show>
-
               {/* Loading state for this org */}
               <Show when={state().loading}>
                 <div class="flex justify-center py-6">
@@ -602,7 +575,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
           );
 
           return (
-            <div class="overflow-hidden rounded-lg border border-base-300">
+            <div class={isAccordion() ? "" : "overflow-hidden rounded-lg border border-base-300"}>
               {/* Org header — accordion button when >= 6 orgs, plain header otherwise */}
               <Show
                 when={isAccordion()}
@@ -641,38 +614,74 @@ export default function RepoSelector(props: RepoSelectorProps) {
                   </div>
                 }
               >
-                <button
-                  type="button"
-                  id={`accordion-header-${state().org}`}
-                  class="flex w-full items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2 text-left"
-                  aria-expanded={expandedOrg() === state().org}
-                  aria-controls={`accordion-panel-${state().org}`}
-                  onClick={() => setUserExpandedOrg(state().org)}
-                >
-                  <ChevronIcon size="md" rotated={expandedOrg() !== state().org} />
-                  <span class="text-sm font-semibold text-base-content flex-1">
-                    {state().org}
-                  </span>
-                  <span class="badge badge-sm badge-ghost">{visible().length} {visible().length === 1 ? "repo" : "repos"}</span>
-                  <Show when={selectedCount() > 0}>
-                    <span class="badge badge-sm badge-ghost">{selectedCount()} selected</span>
+                <div class="flex items-center border-b border-base-300 bg-base-200">
+                  <button
+                    type="button"
+                    id={`accordion-header-${orgId()}`}
+                    class="flex flex-1 items-center gap-2 px-4 py-2 text-left"
+                    aria-expanded={expandedOrg() === state().org}
+                    aria-controls={`accordion-panel-${orgId()}`}
+                    // Always-one-open: clicking the already-expanded header is intentionally a no-op
+                    onClick={() => setUserExpandedOrg(state().org)}
+                  >
+                    <ChevronIcon size="md" rotated={expandedOrg() !== state().org} />
+                    <span class="text-sm font-semibold text-base-content flex-1">
+                      {state().org}
+                    </span>
+                    <Show
+                      when={!state().loading}
+                      fallback={<span class="loading loading-spinner loading-xs" />}
+                    >
+                      <span class="badge badge-sm badge-ghost">{visible().length} {visible().length === 1 ? "repo" : "repos"}</span>
+                      <Show when={selectedCount() > 0}>
+                        <span class="badge badge-sm badge-ghost">{selectedCount()} selected</span>
+                      </Show>
+                    </Show>
+                  </button>
+                  {/* Per-org bulk actions — inline in the header bar when expanded */}
+                  <Show when={expandedOrg() === state().org && !state().loading && !state().error}>
+                    <div class="flex items-center gap-2 pr-3">
+                      <button
+                        type="button"
+                        onClick={() => selectAllInOrg(state())}
+                        disabled={
+                          visible().length === 0 ||
+                          visible().every((r) => isSelected(r.fullName))
+                        }
+                        class="btn btn-ghost btn-xs"
+                      >
+                        Select All
+                      </button>
+                      <span class="text-base-content/30">·</span>
+                      <button
+                        type="button"
+                        onClick={() => deselectAllInOrg(state())}
+                        disabled={
+                          visible().length === 0 ||
+                          visible().every((r) => !isSelected(r.fullName))
+                        }
+                        class="btn btn-ghost btn-xs"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
                   </Show>
-                </button>
+                </div>
               </Show>
 
               {/* Content: wrapped in grid animation for accordion, direct otherwise */}
-              <Show when={!isAccordion()}>
-                {orgContent()}
-              </Show>
-              <Show when={isAccordion()}>
+              <Show
+                when={isAccordion()}
+                fallback={orgContent()}
+              >
                 <div
                   class="accordion-panel grid transition-[grid-template-rows] duration-200"
                   style={{ "grid-template-rows": expandedOrg() === state().org ? "1fr" : "0fr" }}
                 >
                   <div
-                    id={`accordion-panel-${state().org}`}
+                    id={`accordion-panel-${orgId()}`}
                     role="region"
-                    aria-labelledby={`accordion-header-${state().org}`}
+                    aria-labelledby={`accordion-header-${orgId()}`}
                     class="overflow-hidden"
                     inert={expandedOrg() !== state().org}
                   >
@@ -684,6 +693,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
           );
         }}
       </Index>
+      </div>
 
       {/* Upstream Repositories section */}
       <Show when={props.showUpstreamDiscovery}>

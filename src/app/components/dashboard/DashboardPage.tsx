@@ -25,6 +25,7 @@ import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit } from "../../services/github";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
+import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
@@ -173,13 +174,17 @@ async function pollFetch(): Promise<DashboardData> {
       } else {
         // Phase 1 did NOT fire (cached data existed or subsequent poll).
         // Full atomic replacement — all fields (light + heavy) may have
-        // changed since the last cycle.
-        setDashboardData({
-          issues: data.issues,
-          pullRequests: data.pullRequests,
-          workflowRuns: data.workflowRuns,
-          loading: false,
-          lastRefreshedAt: now,
+        // changed since the last cycle. Preserve scroll position: SolidJS
+        // DOM updates are synchronous within the setter, so save/restore
+        // around it to prevent scroll reset from <For> DOM rebuild.
+        withScrollLock(() => {
+          setDashboardData({
+            issues: data.issues,
+            pullRequests: data.pullRequests,
+            workflowRuns: data.workflowRuns,
+            loading: false,
+            lastRefreshedAt: now,
+          });
         });
       }
       rebuildHotSets(data);

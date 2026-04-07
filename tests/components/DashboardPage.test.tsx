@@ -681,6 +681,36 @@ describe("DashboardPage — onAuthCleared integration", () => {
   });
 });
 
+describe("DashboardPage — scroll preservation on poll refresh", () => {
+  it("preserves scroll position when setDashboardData replaces arrays", async () => {
+    const issues = [makeIssue({ id: 1, title: "Scroll test issue" })];
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues,
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("owner/repo");
+    });
+
+    // Simulate user scrolled down
+    document.documentElement.scrollTop = 500;
+    vi.spyOn(window, "scrollTo");
+
+    // Trigger a second poll (subsequent refresh — the path that uses withScrollLock)
+    if (capturedFetchAll) {
+      await capturedFetchAll();
+    }
+
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
+    vi.restoreAllMocks();
+    document.documentElement.scrollTop = 0;
+  });
+});
+
 describe("DashboardPage — onHotData integration", () => {
   it("applies hot poll PR status updates to the store", async () => {
     const testPR = makePullRequest({

@@ -111,6 +111,9 @@ describe("RepoLockControls — scroll preservation", () => {
     resetViewState();
     document.documentElement.scrollTop = 500;
     vi.spyOn(window, "scrollTo");
+    // withFlipAnimation falls back to withScrollLock when reduced motion is preferred;
+    // happy-dom has no layout engine so FLIP deltas are always 0
+    vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
   });
 
   afterEach(() => {
