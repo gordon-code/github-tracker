@@ -101,8 +101,8 @@ export function clearAuth(): void {
  *  which is reserved for explicit user actions (Sign out, Reset all).
  *
  *  Callers MUST navigate away after calling this (e.g., window.location.replace or
- *  router navigate to /login). The poll coordinator is not stopped here — page
- *  navigation handles teardown. Use clearAuth() if not navigating. */
+ *  router navigate to /login). Fires onAuthCleared callbacks (resets poll state,
+ *  clears API usage data). Use clearAuth() if not navigating. */
 export function expireToken(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
   localStorage.removeItem(DASHBOARD_STORAGE_KEY);

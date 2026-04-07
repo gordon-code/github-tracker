@@ -629,8 +629,8 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
   processNode: (node: TNode) => boolean, // returns true if node was added (for cap counting)
   currentCount: () => number,
   cap: number,
+  source: ApiCallSource,
   startCursor?: string | null,
-  source?: ApiCallSource,
 ): Promise<{ capReached: boolean }> {
   let cursor: string | null = startCursor ?? null;
   let capReached = false;
@@ -641,7 +641,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       let isPartial = false;
       try {
         response = await octokit.graphql<TResponse>(query, { q: queryString, cursor });
-        if (source) trackApiCall(source, "graphql");
+        trackApiCall(source, "graphql");
       } catch (err) {
         const partial = extractSearchPartialData<TResponse>(err);
         if (partial) {
@@ -952,7 +952,7 @@ async function executeLightCombinedQuery(
     await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
       octokit, ISSUES_SEARCH_QUERY, issueQ, errorLabel, errors,
       (node) => processIssueNode(node, issueSeen, issues),
-      () => issues.length, issueCap, response.issues.pageInfo.endCursor, source,
+      () => issues.length, issueCap, source, response.issues.pageInfo.endCursor,
     );
   }
 
@@ -961,14 +961,14 @@ async function executeLightCombinedQuery(
     prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
       octokit, LIGHT_PR_SEARCH_QUERY, prInvQ, errorLabel, errors,
       (node) => processLightPRNode(node, prMap, nodeIdMap),
-      () => prMap.size, prCap, response.prInvolves.pageInfo.endCursor, source,
+      () => prMap.size, prCap, source, response.prInvolves.pageInfo.endCursor,
     ));
   }
   if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < prCap) {
     prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
       octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, errorLabel, errors,
       (node) => processLightPRNode(node, prMap, nodeIdMap),
-      () => prMap.size, prCap, response.prReviewReq.pageInfo.endCursor, source,
+      () => prMap.size, prCap, source, response.prReviewReq.pageInfo.endCursor,
     ));
   }
   if (prPaginationTasks.length > 0) {
@@ -1127,7 +1127,7 @@ async function graphqlUnfilteredSearch(
         await paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
           octokit, ISSUES_SEARCH_QUERY, issueQ, batchLabel, errors,
           (node) => processIssueNode(node, issueSeen, issues),
-          () => issues.length, SEARCH_RESULT_CAP, response.issues.pageInfo.endCursor, "unfilteredSearch",
+          () => issues.length, SEARCH_RESULT_CAP, "unfilteredSearch", response.issues.pageInfo.endCursor,
         );
       }
 
@@ -1135,7 +1135,7 @@ async function graphqlUnfilteredSearch(
         await paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
           octokit, LIGHT_PR_SEARCH_QUERY, prQ, batchLabel, errors,
           (node) => processLightPRNode(node, prMap, nodeIdMap),
-          () => prMap.size, SEARCH_RESULT_CAP, response.prs.pageInfo.endCursor, "unfilteredSearch",
+          () => prMap.size, SEARCH_RESULT_CAP, "unfilteredSearch", response.prs.pageInfo.endCursor,
         );
       }
     } catch (err) {
@@ -1932,12 +1932,12 @@ export async function discoverUpstreamRepos(
       paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
         octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,
         (node) => extractRepoName(node),
-        () => repoNames.size, CAP, undefined, "upstreamDiscovery",
+        () => repoNames.size, CAP, "upstreamDiscovery",
       ),
       paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
         octokit, LIGHT_PR_SEARCH_QUERY, prQ, `upstream-prs:${login}`, errors,
         (node) => extractRepoName(node),
-        () => repoNames.size, CAP, undefined, "upstreamDiscovery",
+        () => repoNames.size, CAP, "upstreamDiscovery",
       ),
     ]);
   }
