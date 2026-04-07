@@ -582,6 +582,27 @@ describe("setMonitoredRepo (C3)", () => {
   });
 });
 
+describe("ConfigSchema — enableTracking", () => {
+  it("defaults enableTracking to false", () => {
+    const result = ConfigSchema.parse({});
+    expect(result.enableTracking).toBe(false);
+  });
+
+  it("accepts enableTracking: true", () => {
+    const result = ConfigSchema.parse({ enableTracking: true });
+    expect(result.enableTracking).toBe(true);
+  });
+
+  it("defaultTab accepts 'tracked'", () => {
+    const result = ConfigSchema.parse({ defaultTab: "tracked" });
+    expect(result.defaultTab).toBe("tracked");
+  });
+
+  it("defaultTab rejects invalid value", () => {
+    expect(() => ConfigSchema.parse({ defaultTab: "invalid" })).toThrow();
+  });
+});
+
 describe("ConfigSchema — monitoredRepos max constraint", () => {
   it("rejects more than 10 monitored repos at schema level", () => {
     const repos = Array.from({ length: 11 }, (_, i) => ({

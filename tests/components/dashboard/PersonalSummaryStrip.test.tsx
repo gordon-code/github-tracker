@@ -21,7 +21,7 @@ function renderStrip(opts: {
   pullRequests?: PullRequest[];
   workflowRuns?: WorkflowRun[];
   userLogin?: string;
-  onTabChange?: (tab: "issues" | "pullRequests" | "actions") => void;
+  onTabChange?: (tab: import("../../../src/app/components/layout/TabBar").TabId) => void;
 }) {
   const onTabChange = opts.onTabChange ?? vi.fn();
   return render(() => (
@@ -671,7 +671,7 @@ describe("PersonalSummaryStrip — excludes ignored items", () => {
     const prs = [
       makePullRequest({ id: 99, enriched: true, reviewDecision: "REVIEW_REQUIRED", reviewerLogins: ["me"], userLogin: "author" }),
     ];
-    ignoreItem({ id: "99", type: "pullRequest", repo: "org/repo", title: "Ignored PR", ignoredAt: Date.now() });
+    ignoreItem({ id: 99, type: "pullRequest", repo: "org/repo", title: "Ignored PR", ignoredAt: Date.now() });
 
     const { container } = renderStrip({ pullRequests: prs });
     expect(container.textContent).not.toContain("awaiting review");
@@ -681,7 +681,7 @@ describe("PersonalSummaryStrip — excludes ignored items", () => {
     const prs = [
       makePullRequest({ id: 50, userLogin: "me", draft: false, checkStatus: "failure" }),
     ];
-    ignoreItem({ id: "50", type: "pullRequest", repo: "org/repo", title: "Ignored blocked", ignoredAt: Date.now() });
+    ignoreItem({ id: 50, type: "pullRequest", repo: "org/repo", title: "Ignored blocked", ignoredAt: Date.now() });
 
     const { container } = renderStrip({ pullRequests: prs });
     expect(container.textContent).not.toContain("blocked");
@@ -691,7 +691,7 @@ describe("PersonalSummaryStrip — excludes ignored items", () => {
     const issues = [
       makeIssue({ id: 200, assigneeLogins: ["me"] }),
     ];
-    ignoreItem({ id: "200", type: "issue", repo: "org/repo", title: "Ignored issue", ignoredAt: Date.now() });
+    ignoreItem({ id: 200, type: "issue", repo: "org/repo", title: "Ignored issue", ignoredAt: Date.now() });
 
     const { container } = renderStrip({ issues });
     expect(container.innerHTML).toBe("");
@@ -702,7 +702,7 @@ describe("PersonalSummaryStrip — excludes ignored items", () => {
       makePullRequest({ id: 1, userLogin: "me", draft: false, checkStatus: "failure" }),
       makePullRequest({ id: 2, userLogin: "me", draft: false, checkStatus: "conflict" }),
     ];
-    ignoreItem({ id: "1", type: "pullRequest", repo: "org/repo", title: "Ignored", ignoredAt: Date.now() });
+    ignoreItem({ id: 1, type: "pullRequest", repo: "org/repo", title: "Ignored", ignoredAt: Date.now() });
 
     renderStrip({ pullRequests: prs });
     const blockedButton = screen.getByText(/blocked/);

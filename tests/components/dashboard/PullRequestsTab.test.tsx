@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
-import { makePullRequest } from "../../helpers/index";
+import userEvent from "@testing-library/user-event";
+import { makePullRequest, makeTrackedItem } from "../../helpers/index";
 
 // ── localStorage mock ─────────────────────────────────────────────────────────
 
@@ -29,8 +30,9 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
-import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
+import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorageMock.clear();
   resetViewState();
+  resetConfig();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -575,5 +578,84 @@ describe("PullRequestsTab — reviewDecision=mergeable filter", () => {
     screen.getByText("Approved PR");
     screen.getByText("No Review PR");
     expect(screen.queryByText("Changes PR")).toBeNull();
+  });
+});
+
+// ── PullRequestsTab — pin button wiring ───────────────────────────────────────
+
+describe("PullRequestsTab — pin button wiring", () => {
+  it("pin button not rendered when enableTracking is false", () => {
+    updateConfig({ enableTracking: false });
+    const pr = makePullRequest({ id: 1, title: "Pin test PR", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={[pr]} userLogin="me" />
+    ));
+
+    expect(screen.queryByLabelText(/^Pin #/)).toBeNull();
+    expect(screen.queryByLabelText(/^Unpin #/)).toBeNull();
+  });
+
+  it("pin button rendered when enableTracking is true", () => {
+    updateConfig({ enableTracking: true });
+    const pr = makePullRequest({ id: 1, title: "Pin test PR", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={[pr]} userLogin="me" />
+    ));
+
+    expect(screen.getByLabelText(/^Pin #/)).not.toBeNull();
+  });
+
+  it("clicking pin button on untracked PR tracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const pr = makePullRequest({ id: 60, title: "My PR", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={[pr]} userLogin="me" />
+    ));
+
+    const pinBtn = screen.getByLabelText(/^Pin #/);
+    await user.click(pinBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 60 && t.type === "pullRequest")).toBe(true);
+  });
+
+  it("clicking pin button on tracked PR untracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const pr = makePullRequest({ id: 61, title: "Already tracked PR", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    updateViewState({ trackedItems: [makeTrackedItem({ id: 61, type: "pullRequest", repoFullName: "owner/repo", title: "Already tracked PR" })] });
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={[pr]} userLogin="me" />
+    ));
+
+    const unpinBtn = screen.getByLabelText(/^Unpin #/);
+    await user.click(unpinBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 61 && t.type === "pullRequest")).toBe(false);
+  });
+
+  it("ignoring a PR also untracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const pr = makePullRequest({ id: 62, title: "Tracked and ignored PR", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    updateViewState({ trackedItems: [makeTrackedItem({ id: 62, type: "pullRequest", repoFullName: "owner/repo", title: "Tracked and ignored PR" })] });
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={[pr]} userLogin="me" />
+    ));
+
+    const ignoreBtn = screen.getByLabelText(/Ignore #/);
+    await user.click(ignoreBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 62 && t.type === "pullRequest")).toBe(false);
   });
 });

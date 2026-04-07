@@ -41,7 +41,7 @@ describe("PullRequestsTab", () => {
   it("filters out ignored PRs", () => {
     const pr = makePullRequest({ id: 99, title: "Should be hidden" });
     viewStore.ignoreItem({
-      id: "99",
+      id: 99,
       type: "pullRequest",
       repo: pr.repoFullName,
       title: pr.title,
@@ -402,7 +402,7 @@ describe("PullRequestsTab", () => {
   it("renders IgnoreBadge in filter toolbar", () => {
     const pr = makePullRequest({ id: 42, title: "To Ignore", repoFullName: "org/repo-a" });
     viewStore.ignoreItem({
-      id: "42",
+      id: 42,
       type: "pullRequest",
       repo: pr.repoFullName,
       title: pr.title,

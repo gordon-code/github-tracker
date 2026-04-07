@@ -42,7 +42,7 @@ describe("IssuesTab", () => {
   it("filters out ignored issues", () => {
     const issue = makeIssue({ id: 99, title: "Should be hidden" });
     viewStore.ignoreItem({
-      id: "99",
+      id: 99,
       type: "issue",
       repo: issue.repoFullName,
       title: issue.title,
@@ -299,7 +299,7 @@ describe("IssuesTab", () => {
   it("IgnoreBadge renders in the toolbar", () => {
     const issue = makeIssue({ id: 77, title: "To ignore" });
     viewStore.ignoreItem({
-      id: "77",
+      id: 77,
       type: "issue",
       repo: issue.repoFullName,
       title: issue.title,

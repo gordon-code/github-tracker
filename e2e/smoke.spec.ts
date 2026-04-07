@@ -188,3 +188,74 @@ test("unknown path redirects to dashboard when authenticated", async ({ page }) 
   // catch-all → Navigate "/" → RootRedirect → validateToken() succeeds → Navigate "/dashboard"
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
 });
+
+// ── Tracked items ─────────────────────────────────────────────────────────────
+
+test("tracked items tab appears when enabled", async ({ page }) => {
+  // setupAuth FIRST — registers catch-all and default GraphQL handler
+  await setupAuth(page, { enableTracking: true });
+  // Override GraphQL AFTER setupAuth — Playwright matches routes LIFO, so this wins
+  await page.route("https://api.github.com/graphql", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        data: {
+          issues: {
+            issueCount: 1,
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              __typename: "Issue",
+              databaseId: 1001,
+              number: 42,
+              title: "Test tracked issue",
+              state: "OPEN",
+              url: "https://github.com/testorg/testrepo/issues/42",
+              createdAt: "2026-01-01T00:00:00Z",
+              updatedAt: "2026-01-02T00:00:00Z",
+              author: { login: "testuser" },
+              labels: { nodes: [] },
+              assignees: { nodes: [] },
+              comments: { totalCount: 0 },
+              repository: { nameWithOwner: "testorg/testrepo", stargazerCount: 5 },
+            }],
+          },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: "2099-01-01T00:00:00Z" },
+        },
+      },
+    })
+  );
+  await page.goto("/dashboard");
+
+  // Verify Tracked tab is visible
+  await expect(page.getByRole("tab", { name: /tracked/i })).toBeVisible();
+
+  // Wait for issue data to render, then expand the repo group
+  await page.getByText("testorg/testrepo").click();
+  await expect(page.getByText("Test tracked issue")).toBeVisible();
+
+  // Hover the row's group container to reveal the pin button (opacity-0 → group-hover:opacity-100)
+  const row = page.locator(".group").filter({ hasText: "Test tracked issue" });
+  await row.hover();
+  const pinBtn = page.getByRole("button", { name: /^Pin #42/i });
+  await expect(pinBtn).toBeVisible();
+  await pinBtn.click();
+
+  // Switch to Tracked tab
+  await page.getByRole("tab", { name: /tracked/i }).click();
+
+  // Verify the pinned item appears in the Tracked tab
+  await expect(page.getByText("Test tracked issue")).toBeVisible();
+});
+
+test("tracked items tab hidden when disabled", async ({ page }) => {
+  await setupAuth(page);
+  await page.goto("/dashboard");
+
+  // Verify Tracked tab is NOT visible
+  await expect(page.getByRole("tab", { name: /tracked/i })).toHaveCount(0);
+
+  // Verify no pin buttons exist
+  await expect(page.locator("[aria-label^='Pin']")).toHaveCount(0);
+});

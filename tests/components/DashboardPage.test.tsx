@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import type { DashboardData } from "../../src/app/services/poll";
@@ -70,9 +70,11 @@ let capturedOnHotData: ((
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
 let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
+let _resetHasFetchedFresh: typeof import("../../src/app/components/dashboard/DashboardPage")._resetHasFetchedFresh;
 let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 let viewStore: typeof import("../../src/app/stores/view");
+let configStore: typeof import("../../src/app/stores/config");
 
 beforeEach(async () => {
   // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
@@ -121,9 +123,11 @@ beforeEach(async () => {
   // Re-import with fresh module instances
   const dashboardModule = await import("../../src/app/components/dashboard/DashboardPage");
   DashboardPage = dashboardModule.default;
+  _resetHasFetchedFresh = dashboardModule._resetHasFetchedFresh;
   pollService = await import("../../src/app/services/poll");
   authStore = await import("../../src/app/stores/auth");
   viewStore = await import("../../src/app/stores/view");
+  configStore = await import("../../src/app/stores/config");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -138,7 +142,9 @@ beforeEach(async () => {
   });
   // Reset view store to defaults
   viewStore.resetViewState();
-});
+  // Reset config store to defaults — prevents enableTracking, selectedRepos, etc. from leaking between tests
+  configStore.resetConfig();
+}, 30_000);
 
 describe("DashboardPage — tab switching", () => {
   it("renders IssuesTab by default", () => {
@@ -265,13 +271,13 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one item — badge should decrement to 1
-    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 1, type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Un-ignore — badge should increment back to 2
-    viewStore.unignoreItem("1");
+    viewStore.unignoreItem(1);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -295,7 +301,7 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one real issue — badge should drop to 1
-    viewStore.ignoreItem({ id: "1", type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 1, type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
@@ -318,13 +324,13 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
 
-    viewStore.ignoreItem({ id: "10", type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 10, type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
 
     // Un-ignore — badge should increment back to 3
-    viewStore.unignoreItem("10");
+    viewStore.unignoreItem(10);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Pull Requests/ }).textContent?.replace(/\D+/g, "")).toBe("3");
     });
@@ -346,13 +352,13 @@ describe("DashboardPage — tab badge counts", () => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
 
-    viewStore.ignoreItem({ id: "20", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 20, type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
 
     // Un-ignore — badge should increment back to 2
-    viewStore.unignoreItem("20");
+    viewStore.unignoreItem(20);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -420,7 +426,7 @@ describe("DashboardPage — tab badge counts", () => {
     });
 
     // Ignore one PR-triggered run — badge should drop to 2
-    viewStore.ignoreItem({ id: "21", type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
+    viewStore.ignoreItem({ id: 21, type: "workflowRun", repo: "owner/repo", title: "CI", ignoredAt: Date.now() });
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Actions/ }).textContent?.replace(/\D+/g, "")).toBe("2");
     });
@@ -593,6 +599,43 @@ describe("DashboardPage — data flow", () => {
     await capturedFetchAll?.();
     // Data still present (collapsed repo group summary persists)
     screen.getByText("1 issue");
+  });
+
+  it("auto-prune runs after first non-skipped poll even if a skipped poll occurred first", async () => {
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 555,
+        number: 55,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Will be pruned after non-skipped poll",
+        addedAt: Date.now(),
+      }],
+    });
+
+    // First call: skipped — hasFetchedFresh must stay false, no pruning
+    vi.mocked(pollService.fetchAllData)
+      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true })
+      // Second call: real data with empty issues — item 555 absent means closed
+      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [] });
+
+    render(() => <DashboardPage />);
+
+    // After the first (skipped) fetch, tracked item must NOT be pruned yet
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+    });
+
+    // Trigger a second fetch — non-skipped, sets hasFetchedFresh=true, triggers prune
+    await capturedFetchAll?.();
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
   });
 });
 
@@ -810,5 +853,196 @@ describe("DashboardPage — onHotData integration", () => {
     // callback executed without error. The PR test above fully validates
     // the produce() mechanism; this confirms the run path is wired.
     expect(screen.getByText(/1 workflow/)).toBeTruthy();
+  });
+});
+
+describe("DashboardPage — tracked tab", () => {
+  it("renders Tracked tab when enableTracking is true", () => {
+    configStore.updateConfig({ enableTracking: true });
+    render(() => <DashboardPage />);
+    expect(screen.getByText("Tracked")).toBeTruthy();
+  });
+
+  it("does not render Tracked tab when enableTracking is false", () => {
+    configStore.updateConfig({ enableTracking: false });
+    render(() => <DashboardPage />);
+    expect(screen.queryByText("Tracked")).toBeNull();
+  });
+
+  it("Tracked tab badge shows count equal to trackedItems length", async () => {
+    configStore.updateConfig({ enableTracking: true });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 42,
+        number: 7,
+        type: "issue" as const,
+        repoFullName: "owner/repo",
+        title: "Tracked issue",
+        addedAt: Date.now(),
+      }],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Tracked/ }).textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("auto-prunes tracked items absent from open poll data", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 999,
+        number: 99,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Will be pruned",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    // Trigger poll with empty issues — item 999 absent means it was closed
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
+  });
+
+  it("preserves tracked items from deselected repos", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "other-repo", fullName: "org/other-repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 888,
+        number: 88,
+        type: "issue" as const,
+        repoFullName: "org/deselected-repo",
+        title: "Should be kept",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    // Item from deselected repo should NOT be pruned
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+      expect(viewStore.viewState.trackedItems[0].id).toBe(888);
+    });
+  });
+
+  it("does not prune tracked items when hasFetchedFresh is false (cold start)", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 777,
+        number: 77,
+        type: "issue" as const,
+        repoFullName: "org/repo",
+        title: "Should survive cold start",
+        addedAt: Date.now(),
+      }],
+    });
+    // hasFetchedFresh stays false (its initial state) — do NOT call _resetHasFetchedFresh(true)
+    // Do NOT trigger a poll (which would set hasFetchedFresh=true internally).
+    // The prune effect should not fire against stale cached data.
+
+    // Allow reactive effects to settle
+    await waitFor(() => {
+      // Item should NOT be pruned — hasFetchedFresh is false
+      expect(viewStore.viewState.trackedItems.length).toBe(1);
+      expect(viewStore.viewState.trackedItems[0].id).toBe(777);
+    });
+  });
+
+  it("prunes tracked items from upstream repos", async () => {
+    render(() => <DashboardPage />);
+    configStore.updateConfig({
+      enableTracking: true,
+      selectedRepos: [],
+      upstreamRepos: [{ owner: "ext", name: "upstream", fullName: "ext/upstream" }],
+    });
+    viewStore.updateViewState({
+      trackedItems: [{
+        id: 666,
+        number: 66,
+        type: "issue" as const,
+        repoFullName: "ext/upstream",
+        title: "Upstream item closed",
+        addedAt: Date.now(),
+      }],
+    });
+    _resetHasFetchedFresh(true);
+
+    if (capturedFetchAll) {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll();
+    }
+
+    await waitFor(() => {
+      expect(viewStore.viewState.trackedItems.length).toBe(0);
+    });
+  });
+
+  it("resolveInitialTab falls back to issues when tracked tab disabled", () => {
+    viewStore.updateViewState({ lastActiveTab: "tracked" });
+    configStore.updateConfig({ rememberLastTab: true, enableTracking: false });
+    render(() => <DashboardPage />);
+    // Should show Issues content, not Tracked content
+    expect(screen.queryByText("No tracked items")).toBeNull();
+  });
+
+  it("redirects away from tracked tab when tracking disabled at runtime", async () => {
+    configStore.updateConfig({ enableTracking: true });
+    render(() => <DashboardPage />);
+
+    // Switch to tracked tab
+    const trackedTab = screen.getByText("Tracked");
+    fireEvent.click(trackedTab);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("tracked");
+    });
+
+    // Disable tracking — should redirect to issues
+    configStore.updateConfig({ enableTracking: false });
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("issues");
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
-import { makeIssue } from "../../helpers/index";
+import userEvent from "@testing-library/user-event";
+import { makeIssue, makeTrackedItem } from "../../helpers/index";
 
 // ── localStorage mock ─────────────────────────────────────────────────────────
 
@@ -29,7 +30,8 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
-import { viewState, setTabFilter, setAllExpanded, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
+import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorageMock.clear();
   resetViewState();
+  resetConfig();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -604,5 +607,84 @@ describe("IssuesTab — scope toggle visibility", () => {
     ));
 
     expect(viewState.tabFilters.issues.scope).toBe("involves_me");
+  });
+});
+
+// ── IssuesTab — pin button wiring ─────────────────────────────────────────────
+
+describe("IssuesTab — pin button wiring", () => {
+  it("pin button not rendered when enableTracking is false", () => {
+    updateConfig({ enableTracking: false });
+    const issue = makeIssue({ id: 1, title: "Pin test issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={[issue]} userLogin="me" />
+    ));
+
+    expect(screen.queryByLabelText(/^Pin #/)).toBeNull();
+    expect(screen.queryByLabelText(/^Unpin #/)).toBeNull();
+  });
+
+  it("pin button rendered when enableTracking is true", async () => {
+    updateConfig({ enableTracking: true });
+    const issue = makeIssue({ id: 1, title: "Pin test issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={[issue]} userLogin="me" />
+    ));
+
+    expect(screen.getByLabelText(/^Pin #/)).not.toBeNull();
+  });
+
+  it("clicking pin button on untracked issue tracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const issue = makeIssue({ id: 50, title: "My issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={[issue]} userLogin="me" />
+    ));
+
+    const pinBtn = screen.getByLabelText(/^Pin #/);
+    await user.click(pinBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 50 && t.type === "issue")).toBe(true);
+  });
+
+  it("clicking pin button on tracked issue untracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const issue = makeIssue({ id: 51, title: "Already tracked", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    updateViewState({ trackedItems: [makeTrackedItem({ id: 51, type: "issue", repoFullName: "owner/repo", title: "Already tracked" })] });
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={[issue]} userLogin="me" />
+    ));
+
+    const unpinBtn = screen.getByLabelText(/^Unpin #/);
+    await user.click(unpinBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 51 && t.type === "issue")).toBe(false);
+  });
+
+  it("ignoring an issue also untracks it", async () => {
+    const user = userEvent.setup();
+    updateConfig({ enableTracking: true });
+    const issue = makeIssue({ id: 52, title: "Tracked and ignored", repoFullName: "owner/repo", surfacedBy: ["me"] });
+    updateViewState({ trackedItems: [makeTrackedItem({ id: 52, type: "issue", repoFullName: "owner/repo", title: "Tracked and ignored" })] });
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={[issue]} userLogin="me" />
+    ));
+
+    const ignoreBtn = screen.getByLabelText(/Ignore #/);
+    await user.click(ignoreBtn);
+
+    expect(viewState.trackedItems.some(t => t.id === 52 && t.type === "issue")).toBe(false);
   });
 });

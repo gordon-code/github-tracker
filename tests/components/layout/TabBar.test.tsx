@@ -99,4 +99,48 @@ describe("TabBar", () => {
     // PR and Actions counts should not appear
     expect(screen.queryByText("0")).toBeNull();
   });
+
+  it("does not render Tracked tab when enableTracking is false", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableTracking={false} />
+    ));
+    expect(screen.queryByRole("tab", { name: /Tracked/i })).toBeNull();
+  });
+
+  it("does not render Tracked tab when enableTracking is undefined", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} />
+    ));
+    expect(screen.queryByRole("tab", { name: /Tracked/i })).toBeNull();
+  });
+
+  it("renders Tracked tab when enableTracking is true", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableTracking={true} />
+    ));
+    screen.getByRole("tab", { name: /Tracked/i });
+  });
+
+  it("shows tracked count badge when enableTracking is true and count provided", () => {
+    const onTabChange = vi.fn();
+    const counts: TabCounts = { tracked: 4 };
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableTracking={true} counts={counts} />
+    ));
+    screen.getByText("4");
+  });
+
+  it("calls onTabChange with 'tracked' when Tracked tab clicked", async () => {
+    const user = userEvent.setup();
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableTracking={true} />
+    ));
+    const trackedTab = screen.getByRole("tab", { name: /Tracked/i });
+    await user.click(trackedTab);
+    expect(onTabChange).toHaveBeenCalledWith("tracked");
+  });
 });

@@ -6,7 +6,7 @@ import type { IgnoredItem } from "../../src/app/stores/view";
 
 function makeIgnoredItem(overrides: Partial<IgnoredItem> = {}): IgnoredItem {
   return {
-    id: String(Math.floor(Math.random() * 100000)),
+    id: Math.floor(Math.random() * 100000),
     type: "issue",
     repo: "owner/repo",
     title: "Test item",
@@ -67,8 +67,8 @@ describe("IgnoreBadge", () => {
   it("popover shows each ignored item with repo and title", async () => {
     const user = userEvent.setup();
     const items = [
-      makeIgnoredItem({ id: "1", repo: "owner/repo-a", title: "Issue Alpha" }),
-      makeIgnoredItem({ id: "2", repo: "owner/repo-b", title: "Issue Beta" }),
+      makeIgnoredItem({ id: 1, repo: "owner/repo-a", title: "Issue Alpha" }),
+      makeIgnoredItem({ id: 2, repo: "owner/repo-b", title: "Issue Beta" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
     await user.click(getTrigger(2));
@@ -83,7 +83,7 @@ describe("IgnoreBadge", () => {
     const user = userEvent.setup();
     const onUnignore = vi.fn();
     const items = [
-      makeIgnoredItem({ id: "abc-123", title: "My Issue" }),
+      makeIgnoredItem({ id: 123, title: "My Issue" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
     await user.click(getTrigger(1));
@@ -91,16 +91,16 @@ describe("IgnoreBadge", () => {
     const unignoreBtn = screen.getByText("Unignore");
     await user.click(unignoreBtn);
 
-    expect(onUnignore).toHaveBeenCalledWith("abc-123");
+    expect(onUnignore).toHaveBeenCalledWith(123);
   });
 
   it("'Unignore All' calls onUnignore for every item", async () => {
     const user = userEvent.setup();
     const onUnignore = vi.fn();
     const items = [
-      makeIgnoredItem({ id: "1" }),
-      makeIgnoredItem({ id: "2" }),
-      makeIgnoredItem({ id: "3" }),
+      makeIgnoredItem({ id: 1 }),
+      makeIgnoredItem({ id: 2 }),
+      makeIgnoredItem({ id: 3 }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
     await user.click(getTrigger(3));
@@ -109,9 +109,9 @@ describe("IgnoreBadge", () => {
     await user.click(unignoreAllBtn);
 
     expect(onUnignore).toHaveBeenCalledTimes(3);
-    expect(onUnignore).toHaveBeenCalledWith("1");
-    expect(onUnignore).toHaveBeenCalledWith("2");
-    expect(onUnignore).toHaveBeenCalledWith("3");
+    expect(onUnignore).toHaveBeenCalledWith(1);
+    expect(onUnignore).toHaveBeenCalledWith(2);
+    expect(onUnignore).toHaveBeenCalledWith(3);
   });
 
   it("clicking backdrop closes popover", async () => {

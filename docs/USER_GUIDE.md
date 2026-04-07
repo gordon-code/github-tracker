@@ -32,6 +32,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
 - [Upstream Repos](#upstream-repos)
 - [Refresh and Polling](#refresh-and-polling)
 - [Notifications](#notifications)
+- [Tracked Items](#tracked-items)
 - [Repo Pinning](#repo-pinning)
 - [Settings Reference](#settings-reference)
 - [Troubleshooting](#troubleshooting)
@@ -71,13 +72,14 @@ OAuth sign-in uses your existing GitHub org memberships. If a private organizati
 
 ### Tab Structure
 
-The dashboard has three tabs:
+The dashboard has three tabs by default, with an optional fourth:
 
 | Tab | Contents |
 |-----|----------|
 | **Issues** | Open issues across your selected repos where you are the author, assignee, or mentioned |
 | **Pull Requests** | Open PRs where you are the author, reviewer, or assignee |
 | **Actions** | Recent workflow runs for your selected repos |
+| **Tracked** | Manually pinned issues and PRs (opt-in via Settings) |
 
 The active tab is remembered across page loads by default. You can set a fixed default tab in Settings.
 
@@ -325,6 +327,24 @@ Per-type toggles (all default to on when notifications are enabled):
 
 ---
 
+## Tracked Items
+
+The Tracked tab lets you pin issues and PRs into a personal TODO list that you can manually reorder by priority.
+
+**Enabling:** Go to **Settings > Tabs** and toggle **Enable tracked items**. A fourth **Tracked** tab appears on the dashboard.
+
+**Pinning items:** On the Issues and Pull Requests tabs, hover over any row to reveal a bookmark icon. Click it to pin the item to your tracked list. Click it again to unpin. The bookmark appears filled and highlighted on tracked items.
+
+**Tracked tab:** Shows your pinned items in a flat list (not grouped by repo). Each item displays a type badge (Issue or PR) and uses live data from the poll cycle — statuses, check results, and labels stay current. Items whose repo is no longer being polled show a minimal fallback row with stored metadata.
+
+**Reordering:** Use the chevron buttons on the left side of each row to move items up or down. Items slide smoothly into their new position.
+
+**Auto-removal:** When a tracked issue is closed or a tracked PR is merged, it is automatically removed from the list. Closure is detected by absence from the `is:open` poll results. For PRs detected as closed by the hot poll, removal happens within seconds.
+
+**Relationship to other features:** The Tracked tab bypasses the org/repo filter — it always shows all your pinned items regardless of which repo filter is active. Ignoring an item from the Issues or Pull Requests tab also removes it from the tracked list. The tracked list is preserved when tracking is disabled and restored when re-enabled.
+
+---
+
 ## Repo Pinning
 
 Each repo group header has a pin (lock) control, visible on hover on desktop and always visible on mobile. Pinning a repo keeps it at the top of the list within its tab regardless of sort order or how recently it was updated.
@@ -358,6 +378,7 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 | Items per page | 25 | Number of items per page in each tab. Options: 10, 25, 50, 100. |
 | Default tab | Issues | Tab shown when opening the dashboard fresh (without remembered last tab). |
 | Remember last tab | On | Return to the last active tab on revisit. |
+| Enable tracked items | Off | Show the Tracked tab for pinning issues and PRs to a personal TODO list. |
 
 ### View State Settings
 
@@ -371,6 +392,7 @@ These are UI preferences that persist across sessions but are not included in th
 | Hide Dependency Dashboard | On | Whether to hide the Renovate Dependency Dashboard issue. |
 | Sort preferences | Updated (desc) | Sort field and direction per tab, remembered across sessions. |
 | Pinned repos | (none) | Repos pinned to the top of each tab's list. |
+| Tracked items | (none) | Issues and PRs pinned to the Tracked tab (max 200). |
 
 ---
 

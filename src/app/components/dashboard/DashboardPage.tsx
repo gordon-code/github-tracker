@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -6,9 +6,10 @@ import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
+import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -93,9 +94,13 @@ function resetDashboardData(): void {
   localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
 }
 
+const [hasFetchedFresh, setHasFetchedFresh] = createSignal(false);
+export function _resetHasFetchedFresh(value = false) { setHasFetchedFresh(value); }
+
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
+  setHasFetchedFresh(false);
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
@@ -138,6 +143,7 @@ async function pollFetch(): Promise<DashboardData> {
     });
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
+      setHasFetchedFresh(true);
       const now = new Date();
 
       if (phaseOneFired) {
@@ -243,14 +249,13 @@ export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
 
-  const initialTab = createMemo<TabId>(() => {
-    if (config.rememberLastTab) {
-      return viewState.lastActiveTab;
-    }
-    return config.defaultTab;
-  });
+  function resolveInitialTab(): TabId {
+    const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
+    if (tab === "tracked" && !config.enableTracking) return "issues";
+    return tab;
+  }
 
-  const [activeTab, setActiveTab] = createSignal<TabId>(initialTab());
+  const [activeTab, setActiveTab] = createSignal<TabId>(resolveInitialTab());
 
   function handleTabChange(tab: TabId) {
     setActiveTab(tab);
@@ -258,6 +263,37 @@ export default function DashboardPage() {
   }
 
   const [clockTick, setClockTick] = createSignal(0);
+
+  // Redirect away from tracked tab when tracking is disabled at runtime
+  createEffect(() => {
+    if (!config.enableTracking && activeTab() === "tracked") {
+      handleTabChange("issues");
+    }
+  });
+
+  // Auto-prune tracked items that are closed/merged (absent from is:open results)
+  createEffect(() => {
+    // IMPORTANT: Access reactive store fields BEFORE early-return guards
+    // so SolidJS registers them as dependencies even when the guard short-circuits
+    const issues = dashboardData.issues;
+    const prs = dashboardData.pullRequests;
+    if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh()) return;
+
+    const polledRepos = new Set([
+      ...config.selectedRepos.map((r) => r.fullName),
+      ...config.upstreamRepos.map((r) => r.fullName),
+    ]);
+    const liveIssueIds = new Set(issues.map((i) => i.id));
+    const livePrIds = new Set(prs.map((p) => p.id));
+
+    const pruneKeys = new Set<string>();
+    for (const item of viewState.trackedItems) {
+      if (!polledRepos.has(item.repoFullName)) continue; // repo deselected — keep item
+      const isLive = item.type === "issue" ? liveIssueIds.has(item.id) : livePrIds.has(item.id);
+      if (!isLive) pruneKeys.add(`${item.type}:${item.id}`);
+    }
+    if (pruneKeys.size > 0) pruneClosedTrackedItems(pruneKeys);
+  });
 
   onMount(() => {
     if (!_coordinator()) {
@@ -292,6 +328,22 @@ export default function DashboardPage() {
               run.completedAt = update.completedAt;
             }
           }));
+          // Prune tracked PRs that became closed/merged via hot poll.
+          // The auto-prune createEffect only fires when the pullRequests array
+          // reference changes (full refresh). Hot poll mutates nested pr.state
+          // in-place via produce(), leaving the array ref unchanged.
+          if (config.enableTracking && viewState.trackedItems.length > 0 && prUpdates.size > 0) {
+            const pruneKeys = new Set<string>();
+            for (const [prId, update] of prUpdates) {
+              const stateVal = update.state?.toUpperCase();
+              if (stateVal === "CLOSED" || stateVal === "MERGED") {
+                if (viewState.trackedItems.some(t => t.type === "pullRequest" && t.id === prId)) {
+                  pruneKeys.add(`pullRequest:${prId}`);
+                }
+              }
+            }
+            if (pruneKeys.size > 0) pruneClosedTrackedItems(pruneKeys);
+          }
         },
         {
           onStart: (prDbIds, runIds) => {
@@ -353,25 +405,26 @@ export default function DashboardPage() {
 
     return {
       issues: dashboardData.issues.filter((i) => {
-        if (ignoredIssues.has(String(i.id))) return false;
+        if (ignoredIssues.has(i.id)) return false;
         if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") return false;
         if (repo && i.repoFullName !== repo) return false;
         if (org && !i.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
       pullRequests: dashboardData.pullRequests.filter((p) => {
-        if (ignoredPRs.has(String(p.id))) return false;
+        if (ignoredPRs.has(p.id)) return false;
         if (repo && p.repoFullName !== repo) return false;
         if (org && !p.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
       actions: dashboardData.workflowRuns.filter((w) => {
-        if (ignoredRuns.has(String(w.id))) return false;
+        if (ignoredRuns.has(w.id)) return false;
         if (!viewState.showPrRuns && w.isPrRun) return false;
         if (repo && w.repoFullName !== repo) return false;
         if (org && !w.repoFullName.startsWith(org + "/")) return false;
         return true;
       }).length,
+      ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
     };
   });
 
@@ -404,6 +457,7 @@ export default function DashboardPage() {
               activeTab={activeTab()}
               onTabChange={handleTabChange}
               counts={tabCounts()}
+              enableTracking={config.enableTracking}
             />
 
             <FilterBar
@@ -439,6 +493,13 @@ export default function DashboardPage() {
                   trackedUsers={config.trackedUsers}
                   hotPollingPRIds={hotPollingPRIds()}
                   monitoredRepos={config.monitoredRepos}
+                  refreshTick={refreshTick()}
+                />
+              </Match>
+              <Match when={activeTab() === "tracked"}>
+                <TrackedTab
+                  issues={dashboardData.issues}
+                  pullRequests={dashboardData.pullRequests}
                   refreshTick={refreshTick()}
                 />
               </Match>

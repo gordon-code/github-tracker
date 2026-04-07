@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -190,7 +190,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
-      if (ignored.has(String(pr.id))) return false;
+      if (ignored.has(pr.id)) return false;
       if (filter.repo && pr.repoFullName !== filter.repo) return false;
       if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
 
@@ -326,6 +326,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
   });
 
+  const trackedPrIds = createMemo(() =>
+    config.enableTracking
+      ? new Set(viewState.trackedItems.filter(t => t.type === "pullRequest").map(t => t.id))
+      : new Set<number>()
+  );
+
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos.pullRequests,
@@ -335,12 +341,21 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   function handleIgnore(pr: PullRequest) {
     ignoreItem({
-      id: String(pr.id),
+      id: pr.id,
       type: "pullRequest",
       repo: pr.repoFullName,
       title: pr.title,
       ignoredAt: Date.now(),
     });
+    if (config.enableTracking) untrackItem(pr.id, "pullRequest");
+  }
+
+  function handleTrack(pr: PullRequest) {
+    if (trackedPrIds().has(pr.id)) {
+      untrackItem(pr.id, "pullRequest");
+    } else {
+      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
+    }
   }
 
   return (
@@ -553,6 +568,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 labels={pr.labels}
                                 commentCount={pr.enriched !== false ? pr.comments + pr.reviewThreads : undefined}
                                 onIgnore={() => handleIgnore(pr)}
+                                onTrack={config.enableTracking ? () => handleTrack(pr) : undefined}
+                                isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
                                 density={config.viewDensity}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0

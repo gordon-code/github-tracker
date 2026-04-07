@@ -1,18 +1,20 @@
 import { Tabs } from "@kobalte/core/tabs";
 import { Show } from "solid-js";
 
-export type TabId = "issues" | "pullRequests" | "actions";
+export type TabId = "issues" | "pullRequests" | "actions" | "tracked";
 
 export interface TabCounts {
   issues?: number;
   pullRequests?: number;
   actions?: number;
+  tracked?: number;
 }
 
 interface TabBarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
   counts?: TabCounts;
+  enableTracking?: boolean;
 }
 
 export default function TabBar(props: TabBarProps) {
@@ -39,6 +41,14 @@ export default function TabBar(props: TabBarProps) {
                 <span class="badge badge-sm badge-neutral ml-1">{props.counts?.actions}</span>
               </Show>
             </Tabs.Trigger>
+            <Show when={props.enableTracking}>
+              <Tabs.Trigger value="tracked" class="tab data-[selected]:tab-active">
+                Tracked
+                <Show when={props.counts?.tracked !== undefined}>
+                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.tracked}</span>
+                </Show>
+              </Tabs.Trigger>
+            </Show>
           </Tabs.List>
         </div>
       </div>

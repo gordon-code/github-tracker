@@ -16,8 +16,12 @@ import {
   toggleExpandedRepo,
   setAllExpanded,
   pruneExpandedRepos,
+  trackItem,
+  untrackItem,
+  moveTrackedItem,
+  pruneClosedTrackedItems,
 } from "../../src/app/stores/view";
-import type { IgnoredItem } from "../../src/app/stores/view";
+import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
 
 // view.ts uses createStore — setters work outside reactive context.
 // We use createRoot only for initViewPersistence (which calls createEffect).
@@ -106,14 +110,14 @@ describe("setSortPreference", () => {
 
 describe("ignoreItem / unignoreItem", () => {
   const item1: IgnoredItem = {
-    id: "issue-1",
+    id: 1,
     type: "issue",
     repo: "owner/repo",
     title: "Bug fix",
     ignoredAt: 1711000000000,
   };
   const item2: IgnoredItem = {
-    id: "pr-42",
+    id: 42,
     type: "pullRequest",
     repo: "owner/repo",
     title: "Add feature",
@@ -123,7 +127,7 @@ describe("ignoreItem / unignoreItem", () => {
   it("ignoreItem adds an item to ignoredItems", () => {
     ignoreItem(item1);
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("issue-1");
+    expect(viewState.ignoredItems[0].id).toBe(1);
   });
 
   it("ignoreItem does not add duplicates", () => {
@@ -141,29 +145,29 @@ describe("ignoreItem / unignoreItem", () => {
   it("unignoreItem removes the item with the given id", () => {
     ignoreItem(item1);
     ignoreItem(item2);
-    unignoreItem("issue-1");
+    unignoreItem(1);
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("pr-42");
+    expect(viewState.ignoredItems[0].id).toBe(42);
   });
 
   it("unignoreItem is a no-op for an unknown id", () => {
     ignoreItem(item1);
-    unignoreItem("does-not-exist");
+    unignoreItem(9999);
     expect(viewState.ignoredItems).toHaveLength(1);
   });
 
   it("evicts oldest item when at 500 cap (FIFO)", () => {
     // Fill to 500
     for (let i = 0; i < 500; i++) {
-      ignoreItem({ id: `item-${i}`, type: "issue", repo: "o/r", title: `T${i}`, ignoredAt: 1000 + i });
+      ignoreItem({ id: i, type: "issue", repo: "o/r", title: `T${i}`, ignoredAt: 1000 + i });
     }
     expect(viewState.ignoredItems).toHaveLength(500);
 
     // Adding 501st should evict item-0 (oldest)
-    ignoreItem({ id: "item-new", type: "issue", repo: "o/r", title: "New", ignoredAt: 2000 });
+    ignoreItem({ id: 9999, type: "issue", repo: "o/r", title: "New", ignoredAt: 2000 });
     expect(viewState.ignoredItems).toHaveLength(500);
-    expect(viewState.ignoredItems[0].id).toBe("item-1"); // item-0 evicted
-    expect(viewState.ignoredItems[499].id).toBe("item-new");
+    expect(viewState.ignoredItems[0].id).toBe(1); // item-0 evicted
+    expect(viewState.ignoredItems[499].id).toBe(9999);
   });
 });
 
@@ -173,13 +177,13 @@ describe("pruneStaleIgnoredItems", () => {
     const old = now - 31 * 24 * 60 * 60 * 1000;
     const recent = now - 1 * 24 * 60 * 60 * 1000;
 
-    ignoreItem({ id: "old-1", type: "issue", repo: "o/r", title: "Old", ignoredAt: old });
-    ignoreItem({ id: "recent-1", type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
+    ignoreItem({ id: 1, type: "issue", repo: "o/r", title: "Old", ignoredAt: old });
+    ignoreItem({ id: 2, type: "pullRequest", repo: "o/r", title: "Recent", ignoredAt: recent });
     expect(viewState.ignoredItems).toHaveLength(2);
 
     pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
-    expect(viewState.ignoredItems[0].id).toBe("recent-1");
+    expect(viewState.ignoredItems[0].id).toBe(2);
   });
 
   it("is a no-op when ignoredItems is empty", () => {
@@ -191,7 +195,7 @@ describe("pruneStaleIgnoredItems", () => {
     const now = Date.now();
     const exactly30 = now - 30 * 24 * 60 * 60 * 1000 + 1000;
 
-    ignoreItem({ id: "boundary", type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
+    ignoreItem({ id: 1, type: "issue", repo: "o/r", title: "Edge", ignoredAt: exactly30 });
     pruneStaleIgnoredItems();
     expect(viewState.ignoredItems).toHaveLength(1);
   });
@@ -404,5 +408,194 @@ describe("resetAllTabFilters — scope reset", () => {
     updateViewState({ hideDepDashboard: false });
     resetViewState();
     expect(viewState.hideDepDashboard).toBe(true);
+  });
+});
+
+describe("tracked items", () => {
+  const item1: TrackedItem = {
+    id: 1001,
+    number: 101,
+    type: "issue",
+    repoFullName: "owner/repo",
+    title: "Bug fix",
+    addedAt: 1711000000000,
+  };
+  const item2: TrackedItem = {
+    id: 2002,
+    number: 202,
+    type: "pullRequest",
+    repoFullName: "owner/repo",
+    title: "Add feature",
+    addedAt: 1711000001000,
+  };
+  const item3: TrackedItem = {
+    id: 3003,
+    number: 303,
+    type: "issue",
+    repoFullName: "owner/other",
+    title: "Another issue",
+    addedAt: 1711000002000,
+  };
+
+  describe("trackItem", () => {
+    it("adds an item to trackedItems", () => {
+      trackItem(item1);
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].id).toBe(1001);
+    });
+
+    it("does not add duplicate (same id+type)", () => {
+      trackItem(item1);
+      trackItem(item1);
+      expect(viewState.trackedItems).toHaveLength(1);
+    });
+
+    it("allows same id with different type", () => {
+      trackItem(item1); // id:1001, type:issue
+      trackItem({ ...item1, type: "pullRequest" }); // id:1001, type:pullRequest
+      expect(viewState.trackedItems).toHaveLength(2);
+    });
+
+    it("can add multiple distinct items", () => {
+      trackItem(item1);
+      trackItem(item2);
+      expect(viewState.trackedItems).toHaveLength(2);
+    });
+
+    it("evicts oldest item when at 200 cap (FIFO)", () => {
+      // Fill to 200
+      for (let i = 0; i < 200; i++) {
+        trackItem({ id: i, number: i, type: "issue", repoFullName: "o/r", title: `T${i}`, addedAt: 1000 + i });
+      }
+      expect(viewState.trackedItems).toHaveLength(200);
+
+      // Adding 201st should evict item with id:0 (oldest)
+      trackItem({ id: 9999, number: 9999, type: "issue", repoFullName: "o/r", title: "New", addedAt: 2000 });
+      expect(viewState.trackedItems).toHaveLength(200);
+      expect(viewState.trackedItems[0].id).toBe(1); // id:0 evicted
+      expect(viewState.trackedItems[199].id).toBe(9999);
+    });
+  });
+
+  describe("untrackItem", () => {
+    it("removes the item with the given id+type", () => {
+      trackItem(item1);
+      trackItem(item2);
+      untrackItem(1001, "issue");
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].id).toBe(2002);
+    });
+
+    it("is a no-op for unknown id+type", () => {
+      trackItem(item1);
+      untrackItem(9999, "issue");
+      expect(viewState.trackedItems).toHaveLength(1);
+    });
+
+    it("does not remove item if type does not match", () => {
+      trackItem(item1); // id:1001, type:issue
+      untrackItem(1001, "pullRequest"); // different type
+      expect(viewState.trackedItems).toHaveLength(1);
+    });
+  });
+
+  describe("moveTrackedItem", () => {
+    it("moves item up by swapping with predecessor", () => {
+      trackItem(item1);
+      trackItem(item2);
+      trackItem(item3);
+      // Order: item1, item2, item3 → move item2 up → item2, item1, item3
+      moveTrackedItem(2002, "pullRequest", "up");
+      expect(viewState.trackedItems[0].id).toBe(2002);
+      expect(viewState.trackedItems[1].id).toBe(1001);
+      expect(viewState.trackedItems[2].id).toBe(3003);
+    });
+
+    it("moves item down by swapping with successor", () => {
+      trackItem(item1);
+      trackItem(item2);
+      trackItem(item3);
+      // Order: item1, item2, item3 → move item2 down → item1, item3, item2
+      moveTrackedItem(2002, "pullRequest", "down");
+      expect(viewState.trackedItems[0].id).toBe(1001);
+      expect(viewState.trackedItems[1].id).toBe(3003);
+      expect(viewState.trackedItems[2].id).toBe(2002);
+    });
+
+    it("is a no-op when moving first item up", () => {
+      trackItem(item1);
+      trackItem(item2);
+      moveTrackedItem(1001, "issue", "up");
+      expect(viewState.trackedItems[0].id).toBe(1001);
+      expect(viewState.trackedItems[1].id).toBe(2002);
+    });
+
+    it("is a no-op when moving last item down", () => {
+      trackItem(item1);
+      trackItem(item2);
+      moveTrackedItem(2002, "pullRequest", "down");
+      expect(viewState.trackedItems[0].id).toBe(1001);
+      expect(viewState.trackedItems[1].id).toBe(2002);
+    });
+
+    it("is a no-op for unknown id+type", () => {
+      trackItem(item1);
+      moveTrackedItem(9999, "issue", "up");
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].id).toBe(1001);
+    });
+  });
+
+  describe("pruneClosedTrackedItems", () => {
+    it("removes items whose type:id key is in pruneKeys", () => {
+      trackItem(item1); // issue:1001
+      trackItem(item2); // pullRequest:2002
+      trackItem(item3); // issue:3003
+      pruneClosedTrackedItems(new Set(["issue:1001", "issue:3003"]));
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].id).toBe(2002);
+    });
+
+    it("is a no-op when pruneKeys is empty", () => {
+      trackItem(item1);
+      trackItem(item2);
+      pruneClosedTrackedItems(new Set());
+      expect(viewState.trackedItems).toHaveLength(2);
+    });
+
+    it("is a no-op when no tracked items match pruneKeys", () => {
+      trackItem(item1);
+      pruneClosedTrackedItems(new Set(["pullRequest:9999"]));
+      expect(viewState.trackedItems).toHaveLength(1);
+    });
+
+    it("removes all items when all keys match", () => {
+      trackItem(item1);
+      trackItem(item2);
+      pruneClosedTrackedItems(new Set(["issue:1001", "pullRequest:2002"]));
+      expect(viewState.trackedItems).toHaveLength(0);
+    });
+  });
+
+  describe("resetViewState clears trackedItems", () => {
+    it("resets trackedItems to empty array", () => {
+      trackItem(item1);
+      trackItem(item2);
+      expect(viewState.trackedItems).toHaveLength(2);
+      resetViewState();
+      expect(viewState.trackedItems).toHaveLength(0);
+    });
+  });
+
+  describe("ViewStateSchema — trackedItems", () => {
+    it("defaults trackedItems to empty array", () => {
+      const result = ViewStateSchema.parse({});
+      expect(result.trackedItems).toEqual([]);
+    });
+
+    it("accepts lastActiveTab value 'tracked'", () => {
+      const result = ViewStateSchema.parse({ lastActiveTab: "tracked" });
+      expect(result.lastActiveTab).toBe("tracked");
+    });
   });
 });
