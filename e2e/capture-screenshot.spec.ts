@@ -461,15 +461,39 @@ test("capture dashboard screenshot", async ({ page }) => {
   await page.getByRole("tab", { name: /pull requests/i }).click();
   await page.getByRole("tab", { name: /pull requests/i, selected: true }).waitFor();
 
-  // Wait for repo group headers to render (visible even when collapsed)
-  await page.getByText("acme-corp/web-platform").first().waitFor();
+  // Expand several repo groups for a richer screenshot
+  const reposToExpand = ["acme-corp/web-platform", "openstack/nova", "acme-corp/api-gateway"];
 
-  // Expand a repo group by clicking its header button (scoped to avoid notification bell)
-  const repoGroupBtn = page.getByRole("button", { expanded: false }).filter({ hasText: "acme-corp/web-platform" });
-  if (await repoGroupBtn.isVisible()) {
-    await repoGroupBtn.click();
-    await page.getByRole("button", { expanded: true }).filter({ hasText: "acme-corp/web-platform" }).waitFor();
+  await page.getByText("acme-corp/web-platform").first().waitFor();
+  for (const repo of reposToExpand) {
+    const btn = page.getByRole("button", { expanded: false }).filter({ hasText: repo });
+    if (await btn.isVisible()) {
+      await btn.click();
+      await page.getByRole("button", { expanded: true }).filter({ hasText: repo }).waitFor();
+    }
   }
 
   await page.screenshot({ path: "docs/dashboard-screenshot.png" });
+
+  // Switch to compact density via settings UI (client-side nav to preserve store state)
+  await page.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("button", { name: /view density: compact/i }).waitFor();
+  await page.getByRole("button", { name: /view density: compact/i }).click();
+  await page.getByRole("button", { name: /view density: compact/i, pressed: true }).waitFor();
+
+  // Navigate back to dashboard (client-side, no full reload)
+  await page.getByRole("link", { name: "Back to dashboard" }).click();
+  await page.getByRole("tablist").waitFor();
+  await page.getByRole("tab", { name: /pull requests/i }).click();
+  await page.getByRole("tab", { name: /pull requests/i, selected: true }).waitFor();
+  await page.getByText("acme-corp/web-platform").first().waitFor();
+  for (const repo of reposToExpand) {
+    const btn = page.getByRole("button", { expanded: false }).filter({ hasText: repo });
+    if (await btn.isVisible()) {
+      await btn.click();
+      await page.getByRole("button", { expanded: true }).filter({ hasText: repo }).waitFor();
+    }
+  }
+
+  await page.screenshot({ path: "docs/dashboard-screenshot-compact.png" });
 });
