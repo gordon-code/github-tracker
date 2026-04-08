@@ -124,7 +124,10 @@ CI publishes via npm OIDC trusted publishing — no tokens or secrets needed.
 
 ```bash
 cd mcp
-pnpm version patch   # or minor / major
+pnpm version patch  # or minor|major, or manually bump version in package.json
+git add package.json
+git commit -m "chore(mcp): bump version to X.Y.Z"
+git tag github-tracker-mcp@X.Y.Z  # The tag _must_ match the github-tracker-mcp@X.Y.Z pattern.
 git push upstream main --follow-tags
 ```
 
