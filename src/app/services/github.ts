@@ -15,7 +15,7 @@ const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
 
 type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
-interface RateLimitInfo {
+export interface RateLimitInfo {
   limit: number;
   remaining: number;
   resetAt: Date;
@@ -58,6 +58,25 @@ export function updateRateLimitFromHeaders(headers: Record<string, string>): voi
       resetAt: new Date(parseInt(reset, 10) * 1000),
     });
   }
+}
+
+// ── API request tracking callback ────────────────────────────────────────────
+
+export interface ApiRequestInfo {
+  url: string;
+  method: string;
+  status: number;
+  isGraphql: boolean;
+  /** Custom label from caller (e.g., "heavyBackfill"), passed via octokit options */
+  apiSource?: string;
+  /** x-ratelimit-reset converted to ms, or null if unavailable */
+  resetEpochMs: number | null;
+}
+
+const _requestCallbacks: Array<(info: ApiRequestInfo) => void> = [];
+
+export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
+  _requestCallbacks.push(cb);
 }
 
 // ── Client factory ───────────────────────────────────────────────────────────
@@ -110,6 +129,57 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
   });
 
+  // Track every API request for usage analytics + update rate limit display
+  client.hook.wrap("request", async (request, options) => {
+    const isGraphql = options.url === "/graphql";
+    const method = (options.method ?? "GET").toUpperCase();
+    // GraphQL: apiSource is passed via `request: { apiSource }` because @octokit/graphql
+    // treats unknown top-level keys as GraphQL variables. The `request` key is in
+    // NON_VARIABLE_OPTIONS so it's preserved in the parsed request options.
+    const reqMeta = (options as Record<string, unknown>).request as Record<string, unknown> | undefined;
+    const apiSource = reqMeta?.apiSource as string | undefined;
+
+    let response;
+    let status = 0;
+    try {
+      response = await request(options);
+      status = response.status;
+    } catch (err) {
+      if (typeof err === "object" && err !== null && "status" in err) {
+        status = (err as { status: number }).status;
+      }
+      // Fire callbacks even on errors — these are real API calls.
+      // Octokit's RequestError includes response.headers for HTTP errors (403, 404, etc.)
+      // so we can still extract x-ratelimit-reset when available.
+      if (status > 0) {
+        let resetEpochMs: number | null = null;
+        const errResponse = (err as { response?: { headers?: Record<string, string> } }).response;
+        const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
+        if (errResetHeader) resetEpochMs = parseInt(errResetHeader, 10) * 1000;
+        const info: ApiRequestInfo = {
+          url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+        };
+        for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
+      }
+      throw err;
+    }
+
+    // Success path — fire callbacks (api-usage.ts registers at module scope) and update RL display
+    const headers = (response.headers ?? {}) as Record<string, string>;
+    const resetHeader = headers["x-ratelimit-reset"];
+    const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
+    const info: ApiRequestInfo = {
+      url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+    };
+    for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
+
+    if (response.headers) {
+      updateRateLimitFromHeaders(response.headers as Record<string, string>);
+    }
+
+    return response;
+  });
+
   return client;
 }
 
@@ -140,7 +210,8 @@ export async function cachedRequest(
       const response = await octokit.request(route, requestParams);
       const headers = response.headers as Record<string, string>;
 
-      updateRateLimitFromHeaders(headers);
+      // NOTE: updateRateLimitFromHeaders is handled by the hook.wrap on the
+      // Octokit client — no need to call it here.
 
       return {
         data: response.data as unknown,
@@ -203,4 +274,48 @@ export function initClientWatcher(): void {
       _clientToken = null;
     }
   });
+}
+
+// ── Rate limit detail fetch ──────────────────────────────────────────────────
+
+let _lastFetchTime = 0;
+let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = null;
+
+/**
+ * Fetches current rate limit details for both core and GraphQL pools.
+ * Caches results for 5 seconds to avoid thrashing on rapid hovers.
+ * GET /rate_limit is free — not counted against rate limits by GitHub.
+ * Returns null if client unavailable or request fails.
+ */
+export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
+  // Return cached result within 5-second staleness window
+  if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
+    return { ..._lastFetchResult };
+  }
+
+  const client = getClient();
+  if (!client) return null;
+
+  try {
+    const response = await client.request("GET /rate_limit");
+    const { core, graphql } = response.data.resources;
+    if (!graphql) return null;
+    const result = {
+      core: {
+        limit: core.limit,
+        remaining: core.remaining,
+        resetAt: new Date(core.reset * 1000),
+      },
+      graphql: {
+        limit: graphql.limit,
+        remaining: graphql.remaining,
+        resetAt: new Date(graphql.reset * 1000),
+      },
+    };
+    _lastFetchTime = Date.now();
+    _lastFetchResult = result;
+    return { ...result };
+  } catch {
+    return null;
+  }
 }

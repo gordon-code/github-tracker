@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 // Mock github client — factory must not reference hoisted consts
 vi.mock("../../src/app/services/github", () => ({
   getClient: vi.fn(),
+  onApiRequest: vi.fn(),
 }));
 
 // Mock config store
@@ -376,13 +377,16 @@ describe("fetchAllData — resetPollState via onAuthCleared", () => {
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
 
-    // Import poll.ts — this triggers onAuthCleared(resetPollState) at module scope
+    // Import poll.ts — this triggers onAuthCleared(resetPollState) at module scope.
+    // api-usage.ts also registers clearUsageData, so onAuthCleared is called multiple times.
     const { fetchAllData } = await import("../../src/app/services/poll");
 
-    // onAuthCleared mock must have been called with the resetPollState callback
-    expect(vi.mocked(onAuthCleared)).toHaveBeenCalledOnce();
-    const capturedAuthClearedCb = vi.mocked(onAuthCleared).mock.calls[0][0] as () => void;
-    expect(typeof capturedAuthClearedCb).toBe("function");
+    // onAuthCleared mock must have been called (multiple registrations expected now).
+    // Collect all callbacks and invoke them all — mirrors real clearAuth() behavior,
+    // which fires every registered callback. This avoids fragile positional indexing.
+    expect(vi.mocked(onAuthCleared)).toHaveBeenCalled();
+    const allAuthClearedCallbacks = vi.mocked(onAuthCleared).mock.calls.map((c) => c[0] as () => void);
+    const capturedAuthClearedCb = () => { for (const cb of allAuthClearedCallbacks) cb(); };
 
     // First call — sets _lastSuccessfulFetch
     await fetchAllData();

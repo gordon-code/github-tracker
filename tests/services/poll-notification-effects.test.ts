@@ -15,6 +15,7 @@ const { mockResetNotifState } = vi.hoisted(() => ({
 // Mock github client
 vi.mock("../../src/app/services/github", () => ({
   getClient: vi.fn(),
+  onApiRequest: vi.fn(),
 }));
 
 // Mock auth store — onAuthCleared is called at poll.ts module scope

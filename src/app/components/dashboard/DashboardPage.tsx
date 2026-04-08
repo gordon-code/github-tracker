@@ -24,7 +24,7 @@ import {
 } from "../../services/poll";
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { pushNotification } from "../../lib/errors";
-import { getClient, getGraphqlRateLimit } from "../../services/github";
+import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
@@ -266,6 +266,22 @@ const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void
 export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
+  const [rlDetail, setRlDetail] = createSignal<string>("Loading...");
+
+  function fetchAndSetRlDetail(): void {
+    void fetchRateLimitDetails().then((detail) => {
+      if (!detail) {
+        setRlDetail("Failed to load");
+        return;
+      }
+      const resetTime = detail.graphql.resetAt.toLocaleTimeString();
+      setRlDetail(
+        `Core:    ${detail.core.remaining.toLocaleString()}/${detail.core.limit.toLocaleString()} remaining\n` +
+        `GraphQL: ${detail.graphql.remaining.toLocaleString()}/${detail.graphql.limit.toLocaleString()} remaining\n` +
+        `Resets:  ${resetTime}`
+      );
+    });
+  }
 
   if (import.meta.env.DEV) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -587,11 +603,13 @@ export default function DashboardPage() {
             <div class="flex justify-end">
               <Show when={getGraphqlRateLimit()}>
                 {(rl) => (
-                  <Tooltip content={`GraphQL API Rate Limits — resets at ${rl().resetAt.toLocaleTimeString()}`} placement="left" focusable>
-                    <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
-                      API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
-                    </span>
-                  </Tooltip>
+                  <div onPointerEnter={fetchAndSetRlDetail} onFocusIn={fetchAndSetRlDetail}>
+                    <Tooltip content={rlDetail()} placement="left" focusable contentClass="whitespace-pre font-mono text-xs">
+                      <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
+                        API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
+                      </span>
+                    </Tooltip>
+                  </div>
                 )}
               </Show>
             </div>

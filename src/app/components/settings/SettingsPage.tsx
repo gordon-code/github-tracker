@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, onCleanup } from "solid-js";
+import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
@@ -8,8 +8,10 @@ import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl } from "../../lib/oauth";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
+import { relativeTime } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
+import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpired, SOURCE_LABELS } from "../../services/api-usage";
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
@@ -52,6 +54,9 @@ export default function SettingsPage() {
       window.removeEventListener("focus", pendingFocusHandler);
     }
   });
+
+  onMount(() => checkAndResetIfExpired());
+  const usageSnapshot = createMemo(() => getUsageSnapshot());
 
   // Local copies for org/repo editing (committed on blur/change)
   const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
@@ -400,7 +405,72 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 4: GitHub Actions */}
+        {/* Section 4: API Usage */}
+        <Section title="API Usage">
+          <div class="px-4 py-3 flex flex-col gap-3">
+            <Show
+              when={usageSnapshot().length > 0}
+              fallback={<p class="p-4 text-base-content/50">No API calls tracked yet.</p>}
+            >
+              <div class="overflow-x-auto">
+                <table class="table table-xs">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Pool</th>
+                      <th>Calls</th>
+                      <th>Last Called</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={usageSnapshot()}>
+                      {(record) => (
+                        <tr>
+                          <td>{SOURCE_LABELS[record.source] ?? record.source}</td>
+                          <td>
+                            <Show
+                              when={record.pool === "graphql"}
+                              fallback={<span class="badge badge-xs badge-outline">core</span>}
+                            >
+                              <span class="badge badge-xs badge-ghost">graphql</span>
+                            </Show>
+                          </td>
+                          <td class="tabular-nums">{record.count.toLocaleString()}</td>
+                          <td>{relativeTime(new Date(record.lastCalledAt).toISOString())}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={2} class="font-medium">Total</td>
+                      <td class="tabular-nums font-medium">
+                        {usageSnapshot().reduce((sum, r) => sum + r.count, 0).toLocaleString()}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Show>
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <Show when={getUsageResetAt() != null}>
+                <p class="text-xs text-base-content/60">
+                  Window resets at {new Date(getUsageResetAt()!).toLocaleTimeString()}
+                </p>
+              </Show>
+              <button
+                type="button"
+                onClick={() => resetUsageData()}
+                class="btn btn-xs btn-ghost"
+              >
+                Reset counts
+              </button>
+            </div>
+          </div>
+        </Section>
+
+        {/* Section 5: GitHub Actions */}
         <Section title="GitHub Actions">
           <SettingRow
             label="Max workflows per repo"

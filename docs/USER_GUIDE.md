@@ -291,6 +291,8 @@ While the hot poll is active, a subtle shimmer animation appears on affected PR 
 
 The hot poll pauses automatically when the browser tab is hidden (since visual feedback has no value in a background tab).
 
+Hover the rate limit display in the dashboard footer to see detailed remaining counts for the Core and GraphQL API pools, plus the reset time.
+
 ### Tab Visibility Behavior
 
 When the tab is hidden:
@@ -379,6 +381,7 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 | Default tab | Issues | Tab shown when opening the dashboard fresh (without remembered last tab). |
 | Remember last tab | On | Return to the last active tab on revisit. |
 | Enable tracked items | Off | Show the Tracked tab for pinning issues and PRs to a personal TODO list. |
+| API Usage | — | Displays per-source API call counts, pool labels (Core/GraphQL), and last-called timestamps for the current rate limit window. Counts auto-reset when the rate limit window expires. Use "Reset counts" to clear manually. |
 
 ### View State Settings
 
@@ -411,6 +414,8 @@ The tracker uses GitHub's GraphQL and REST APIs. Each poll cycle consumes some o
 
 OAuth tokens and classic PATs use the notifications gate (304 shortcut), which significantly reduces per-cycle cost when nothing has changed. Fine-grained PATs do not support this optimization.
 
+For detailed per-source API call counts, see Settings > API Usage.
+
 **PAT vs OAuth: what is the difference?**
 
 OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features including the notifications background-poll optimization. Classic PATs with the correct scopes (`repo`, `read:org`, `notifications`) behave identically to OAuth.
@@ -428,4 +433,4 @@ Go to **Settings > Repositories > Manage Repositories**, find the repo, and dese
 **How do I sign out or reset everything?**
 
 - **Sign out**: Settings > Data > Sign out. This clears your auth token and returns you to the login page. Your config is preserved.
-- **Reset all**: Settings > Data > Reset all. This clears all settings, cache, auth tokens, and reloads the page. All configuration is lost.
+- **Reset all**: Settings > Data > Reset all. This clears all settings, cache, auth tokens, API usage data, and reloads the page. All configuration is lost.

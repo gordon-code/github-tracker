@@ -198,11 +198,11 @@ describe("expireToken", () => {
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
   });
 
-  it("does NOT invoke onAuthCleared callbacks", () => {
+  it("invokes onAuthCleared callbacks (cross-user isolation on token expiry)", () => {
     const cb = vi.fn();
     mod.onAuthCleared(cb);
     mod.expireToken();
-    expect(cb).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledOnce();
   });
 });
 

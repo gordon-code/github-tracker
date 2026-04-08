@@ -12,6 +12,7 @@ vi.mock("../../../src/app/services/github", () => ({
 vi.mock("../../../src/app/stores/auth", () => ({
   user: () => ({ login: "testuser", name: "Test User", avatar_url: "" }),
   token: () => "fake-token",
+  onAuthCleared: vi.fn(),
 }));
 
 // Mock api module functions

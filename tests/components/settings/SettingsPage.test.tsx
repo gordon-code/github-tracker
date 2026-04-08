@@ -26,6 +26,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", name: "Test User" }),
+  onAuthCleared: vi.fn(),
 }));
 
 vi.mock("../../../src/app/stores/cache", () => ({
@@ -34,6 +35,7 @@ vi.mock("../../../src/app/stores/cache", () => ({
 
 vi.mock("../../../src/app/services/github", () => ({
   getClient: vi.fn(() => ({})),
+  onApiRequest: vi.fn(),
 }));
 
 vi.mock("../../../src/app/services/api", () => ({
