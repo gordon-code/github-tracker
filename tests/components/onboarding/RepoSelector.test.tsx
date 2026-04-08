@@ -1492,9 +1492,9 @@ describe("RepoSelector — org accordion", () => {
 });
 
 // ── Frozen org order (C5) ─────────────────────────────────────────────────────
-// S4 (initial sort order) is covered by the existing test at line 238, which verifies orgs appear
-// in sorted order after all fetchRepos calls complete. S1 and S2 below cover post-sort stability
-// (frozen order unchanged after repo retry and checkbox toggle respectively).
+// Initial sort order is covered by the existing "shows personal org first" test (line 238).
+// S1 and S2 below cover post-sort stability (frozen order unchanged after repo retry and
+// checkbox toggle respectively).
 // S5 (frozen order in accordion mode with pre-loaded entries) is deferred pending accordion merge.
 
 describe("RepoSelector — frozen org order", () => {
@@ -1683,18 +1683,14 @@ describe("RepoSelector — frozen org order", () => {
     });
 
     // Verify initial sorted order via accordion trigger buttons
-    const getAccordionOrder = (orgNames: string[]) => {
-      return orgNames
-        .map((name) => screen.getByRole("button", { name: new RegExp(name) }))
+    const getAccordionOrder = (orgNames: string[]) =>
+      orgNames
+        .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name) }) }))
         .sort((a, b) => {
-          const pos = a.compareDocumentPosition(b);
+          const pos = a.btn.compareDocumentPosition(b.btn);
           return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
         })
-        .map((btn) => {
-          const match = btn.textContent?.match(/^(alice|acme-corp|charlie-co|delta-inc|echo-labs|foxtrot-io|beta-org)/);
-          return match ? match[1] : "";
-        });
-    };
+        .map(({ name }) => name);
 
     const initialOrder = getAccordionOrder(startOrgs);
     expect(initialOrder).toEqual(["alice", "acme-corp", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);

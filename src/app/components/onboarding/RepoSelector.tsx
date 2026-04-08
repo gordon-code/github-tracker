@@ -342,7 +342,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
     new Set((props.monitoredRepos ?? []).map((r) => r.fullName))
   );
 
-  // Plain lets (not signals) — memoization cache inside createMemo; signals would cause reactive cycles.
+  // Plain let variables, not signals — writing to a signal from inside createMemo is a
+  // side effect that triggers re-evaluation, causing an infinite loop.
   let frozenOrder: string[] | null = null;
   let frozenOrgsKey = "";
 
@@ -376,6 +377,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
 
     // Guard against stale orgStates: the memo runs synchronously when selectedOrgs changes,
     // but createEffect resets orgStates asynchronously, so stale entries may still be present.
+    // Return the stale list (not []) to avoid a flash-to-empty before the effect resets state.
     const selectedOrgSet = new Set(props.selectedOrgs);
     if (states.some((s) => !selectedOrgSet.has(s.org))) return states;
 
