@@ -201,8 +201,8 @@ export default function TrackedTab(props: TrackedTabProps) {
                               }
                             >
                               {(prData) => {
-                                const roles = () => deriveInvolvementRoles(props.userLogin, prData().userLogin, prData().assigneeLogins, prData().reviewerLogins);
-                                const sizeCategory = () => prSizeCategory(prData().additions, prData().deletions);
+                                const roles = createMemo(() => deriveInvolvementRoles(props.userLogin, prData().userLogin, prData().assigneeLogins, prData().reviewerLogins));
+                                const sizeCategory = createMemo(() => prSizeCategory(prData().additions, prData().deletions));
 
                                 return (
                                   <Show
