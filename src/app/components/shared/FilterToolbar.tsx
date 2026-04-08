@@ -27,7 +27,7 @@ export default function FilterToolbar(props: FilterToolbarProps) {
   );
 
   return (
-    <div class="flex items-center gap-2 flex-wrap">
+    <div class="flex items-center flex-wrap gap-2 compact:gap-1">
       <Show when={showScope()}>
         <ScopeToggle
           value={props.values["scope"] ?? scopeFilterGroup.defaultValue ?? "all"}

@@ -397,10 +397,13 @@ export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
 
 export function initViewPersistence(): void {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingJson: string | undefined;
   createEffect(() => {
     const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
+    pendingJson = json;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      pendingJson = undefined;
       try {
         localStorage.setItem(VIEW_STORAGE_KEY, json);
       } catch {
@@ -409,6 +412,11 @@ export function initViewPersistence(): void {
     }, 200);
     onCleanup(() => {
       clearTimeout(debounceTimer);
+      // Flush pending write synchronously so HMR doesn't lose state
+      if (pendingJson !== undefined) {
+        try { localStorage.setItem(VIEW_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
+        pendingJson = undefined;
+      }
     });
   });
 }

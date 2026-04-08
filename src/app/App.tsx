@@ -147,6 +147,10 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", resolveTheme(config.theme));
   });
 
+  createEffect(() => {
+    document.documentElement.dataset.density = config.viewDensity;
+  });
+
   onMount(() => {
     // Listen for system theme changes so "auto" reacts immediately
     const mq = window.matchMedia("(prefers-color-scheme: dark)");

@@ -335,11 +335,11 @@ The Tracked tab lets you pin issues and PRs into a personal TODO list that you c
 
 **Pinning items:** On the Issues and Pull Requests tabs, hover over any row to reveal a bookmark icon. Click it to pin the item to your tracked list. Click it again to unpin. The bookmark appears filled and highlighted on tracked items.
 
-**Tracked tab:** Shows your pinned items in a flat list (not grouped by repo). Each item displays a type badge (Issue or PR) and uses live data from the poll cycle — statuses, check results, and labels stay current. Items whose repo is no longer being polled show a minimal fallback row with stored metadata.
+**Tracked tab:** Shows your pinned items in a flat list (not grouped by repo). Each item shows a repo badge, a type badge (Issue or PR), and uses live data from the poll cycle — labels, comments, and timestamps stay current. Tracked PRs display the same metadata as the Pull Requests tab: review status, size badge, check status dot, draft indicator, and role badge. Tracked issues show a role badge (author/assignee). In compact density, the repo badge abbreviates to just the repo name (hover for the full owner/repo). Items whose repo is no longer being polled show a minimal fallback row with stored metadata. PRs being hot-polled show a shimmer animation and a spinner in the left margin.
 
 **Reordering:** Use the chevron buttons on the left side of each row to move items up or down. Items slide smoothly into their new position.
 
-**Auto-removal:** When a tracked issue is closed or a tracked PR is merged, it is automatically removed from the list. Closure is detected by absence from the `is:open` poll results. For PRs detected as closed by the hot poll, removal happens within seconds.
+**Auto-removal:** When a tracked issue is closed or a tracked PR is merged, it is automatically removed from the list. Closure is detected by absence from the `is:open` poll results. For PRs detected as closed by the hot poll, removal happens within seconds. Auto-removal is suspended when the API returns errors (e.g., rate limiting) to prevent false pruning.
 
 **Relationship to other features:** The Tracked tab bypasses the org/repo filter — it always shows all your pinned items regardless of which repo filter is active. Ignoring an item from the Issues or Pull Requests tab also removes it from the tracked list. The tracked list is preserved when tracking is disabled and restored when re-enabled.
 

@@ -43,7 +43,7 @@ beforeEach(() => {
 
 describe("TrackedTab — empty state", () => {
   it("renders empty state when no items tracked", () => {
-    render(() => <TrackedTab issues={[]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
     expect(screen.getByText(/No tracked items/)).toBeTruthy();
   });
 });
@@ -54,7 +54,7 @@ describe("TrackedTab — type badges", () => {
     const tracked = makeTrackedItem({ id: 1, type: "issue", title: "My issue" });
     updateViewState({ trackedItems: [tracked] });
 
-    render(() => <TrackedTab issues={[issue]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue]} pullRequests={[]} userLogin="testuser" />);
 
     const badges = screen.getAllByText("Issue");
     expect(badges.length).toBeGreaterThan(0);
@@ -65,7 +65,7 @@ describe("TrackedTab — type badges", () => {
     const tracked = makeTrackedItem({ id: 2, type: "pullRequest", title: "My PR" });
     updateViewState({ trackedItems: [tracked] });
 
-    render(() => <TrackedTab issues={[]} pullRequests={[pr]} />);
+    render(() => <TrackedTab issues={[]} pullRequests={[pr]} userLogin="testuser" />);
 
     const badges = screen.getAllByText("PR");
     expect(badges.length).toBeGreaterThan(0);
@@ -86,7 +86,7 @@ describe("TrackedTab — ordering", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue1, issue2, issue3]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue1, issue2, issue3]} pullRequests={[]} userLogin="testuser" />);
 
     // The items should appear in tracked order: Zebra, Apple, Mango
     const zebra = screen.getByText("Zebra Issue");
@@ -109,7 +109,7 @@ describe("TrackedTab — fallback row", () => {
     updateViewState({ trackedItems: [tracked] });
 
     // Don't pass the issue with id 999 in props — simulating it's not in current data
-    render(() => <TrackedTab issues={[]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
 
     expect(screen.getByText(/not in current data/)).toBeTruthy();
     expect(screen.getByText("Missing Issue")).toBeTruthy();
@@ -119,7 +119,7 @@ describe("TrackedTab — fallback row", () => {
     const tracked = makeTrackedItem({ id: 888, type: "issue", title: "Stale Item" });
     updateViewState({ trackedItems: [tracked] });
 
-    render(() => <TrackedTab issues={[]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
 
     const unpinBtn = screen.getByLabelText("Unpin #888 Stale Item");
     fireEvent.click(unpinBtn);
@@ -140,7 +140,7 @@ describe("TrackedTab — move button disabled states", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} userLogin="testuser" />);
 
     const upButtons = screen.getAllByLabelText(/^Move up:/);
     expect((upButtons[0] as HTMLButtonElement).disabled).toBe(true);
@@ -158,7 +158,7 @@ describe("TrackedTab — move button disabled states", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} userLogin="testuser" />);
 
     const downButtons = screen.getAllByLabelText(/^Move down:/);
     expect((downButtons[0] as HTMLButtonElement).disabled).toBe(false);
@@ -178,7 +178,7 @@ describe("TrackedTab — reordering", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} userLogin="testuser" />);
 
     const upButtons = screen.getAllByLabelText(/^Move up:/);
     // Click move up on second item
@@ -200,7 +200,7 @@ describe("TrackedTab — reordering", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue1, issue2]} pullRequests={[]} userLogin="testuser" />);
 
     const downButtons = screen.getAllByLabelText(/^Move down:/);
     // Click move down on first item
@@ -224,7 +224,7 @@ describe("TrackedTab — mixed types", () => {
       ],
     });
 
-    render(() => <TrackedTab issues={[issue]} pullRequests={[pr]} />);
+    render(() => <TrackedTab issues={[issue]} pullRequests={[pr]} userLogin="testuser" />);
 
     expect(screen.getByText("Mixed Issue")).toBeTruthy();
     expect(screen.getByText("Mixed PR")).toBeTruthy();
@@ -242,7 +242,7 @@ describe("TrackedTab — pin button", () => {
     const tracked = makeTrackedItem({ id: 60, type: "issue", title: "Tracked Issue" });
     updateViewState({ trackedItems: [tracked] });
 
-    render(() => <TrackedTab issues={[issue]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue]} pullRequests={[]} userLogin="testuser" />);
 
     // Find the Unpin button (pin button in TrackedTab always has isTracked=true)
     const unpinBtn = screen.getByLabelText(`Unpin #${issue.number} ${issue.title}`);
@@ -258,7 +258,7 @@ describe("TrackedTab — no ignore action", () => {
     const tracked = makeTrackedItem({ id: 70, type: "issue", title: "Ignorable Issue" });
     updateViewState({ trackedItems: [tracked] });
 
-    render(() => <TrackedTab issues={[issue]} pullRequests={[]} />);
+    render(() => <TrackedTab issues={[issue]} pullRequests={[]} userLogin="testuser" />);
 
     // Ignore button should NOT be present — TrackedTab only allows untracking
     expect(screen.queryByLabelText(`Ignore #${issue.number} ${issue.title}`)).toBeNull();

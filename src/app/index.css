@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant compact (&:is([data-density="compact"] *));
+
 @plugin "daisyui" {
   themes: corporate --default, cupcake, light, nord, dim, dracula, dark, forest;
   exclude: chat, mask, mockup;
@@ -25,9 +27,9 @@
 }
 
 @utility animate-shimmer {
-  background: linear-gradient(90deg, transparent 25%, oklch(from var(--color-base-content) l c h / 0.15) 50%, transparent 75%);
+  background: linear-gradient(90deg, transparent 30%, oklch(from var(--color-base-content) l c h / 0.06) 50%, transparent 70%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
+  animation: shimmer 2.5s linear infinite;
 }
 
 /* ── Value-change flash animation ────────────────────────────────────────── */

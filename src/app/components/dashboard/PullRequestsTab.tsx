@@ -361,8 +361,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter toolbar */}
-      <div class="flex items-start gap-3 px-4 py-2 border-b border-base-300 bg-base-100">
-        <div class="flex flex-wrap items-center gap-3 min-w-0 flex-1">
+      <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
             values={viewState.tabFilters.pullRequests}
@@ -461,7 +461,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       <button
                         onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
                         aria-expanded={isExpanded()}
-                        class="flex-1 flex items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-base-content"
+                        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
                       >
                         <ChevronIcon size="md" rotated={!isExpanded()} />
                         {repoGroup.repoFullName}
@@ -570,7 +570,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 onIgnore={() => handleIgnore(pr)}
                                 onTrack={config.enableTracking ? () => handleTrack(pr) : undefined}
                                 isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
-                                density={config.viewDensity}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
@@ -582,38 +581,70 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 isPolling={props.hotPollingPRIds?.has(pr.id)}
                                 isFlashing={flashingPRIds().has(pr.id)}
                               >
-                                <div class="flex items-center gap-2 flex-wrap">
-                                  <Show when={pr.enriched !== false}>
-                                    <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
-                                  </Show>
-                                  <ReviewBadge decision={pr.reviewDecision} />
-                                  <Show when={pr.enriched !== false}>
-                                    <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
+                                <Show
+                                  when={config.viewDensity === "compact"}
+                                  fallback={
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                      <Show when={pr.enriched !== false}>
+                                        <RoleBadge roles={prMeta().get(pr.id)?.roles ?? []} />
+                                      </Show>
+                                      <ReviewBadge decision={pr.reviewDecision} />
+                                      <Show when={pr.enriched !== false}>
+                                        <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
+                                        <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
+                                        <Show when={pr.checkStatus === "conflict"}>
+                                          <span class="badge badge-warning badge-sm gap-1">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                            </svg>
+                                            Merge conflict
+                                          </span>
+                                        </Show>
+                                      </Show>
+                                      <Show when={pr.draft}>
+                                        <span class="badge badge-ghost badge-sm italic text-base-content/50">
+                                          Draft
+                                        </span>
+                                      </Show>
+                                      <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
+                                        <Tooltip content={pr.reviewerLogins.join(", ")} focusable>
+                                          <span class="text-xs text-base-content/60">
+                                            Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
+                                            {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
+                                            {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
+                                          </span>
+                                        </Tooltip>
+                                      </Show>
+                                    </div>
+                                  }
+                                >
+                                  {/* Compact: key badges inline + hidden metadata in tooltip */}
+                                  <div class="flex items-center gap-1">
                                     <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
+                                    <ReviewBadge decision={pr.reviewDecision} />
+                                    <Show when={pr.enriched !== false}>
+                                      <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
+                                    </Show>
                                     <Show when={pr.checkStatus === "conflict"}>
-                                      <span class="badge badge-warning badge-sm gap-1">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                      <Tooltip content="Merge conflict">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
                                           <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
                                         </svg>
-                                        Merge conflict
-                                      </span>
+                                      </Tooltip>
                                     </Show>
-                                  </Show>
-                                  <Show when={pr.draft}>
-                                    <span class="badge badge-ghost badge-sm italic text-base-content/50">
-                                      Draft
-                                    </span>
-                                  </Show>
-                                  <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
-                                    <Tooltip content={pr.reviewerLogins.join(", ")} focusable>
-                                      <span class="text-xs text-base-content/60">
-                                        Reviewers: {pr.reviewerLogins.slice(0, 5).join(", ")}
-                                        {pr.reviewerLogins.length > 5 && ` +${pr.reviewerLogins.length - 5} more`}
-                                        {pr.totalReviewCount > pr.reviewerLogins.length && ` (${pr.totalReviewCount} total)`}
-                                      </span>
-                                    </Tooltip>
-                                  </Show>
-                                </div>
+                                    <Show when={pr.draft}>
+                                      <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
+                                    </Show>
+                                    <Show when={pr.enriched !== false && (pr.reviewerLogins.length > 0 || (prMeta().get(pr.id)?.roles ?? []).length > 0)}>
+                                      <Tooltip content={[
+                                        (prMeta().get(pr.id)?.roles ?? []).length > 0 ? `Role: ${(prMeta().get(pr.id)?.roles ?? []).join(", ")}` : false,
+                                        pr.reviewerLogins.length > 0 ? `Reviewers: ${pr.reviewerLogins.join(", ")}` : false,
+                                      ].filter(Boolean).join(" | ")} placement="top">
+                                        <span class="text-base-content/40 text-xs cursor-default">···</span>
+                                      </Tooltip>
+                                    </Show>
+                                  </div>
+                                </Show>
                               </ItemRow>
                             </div>
                           )}

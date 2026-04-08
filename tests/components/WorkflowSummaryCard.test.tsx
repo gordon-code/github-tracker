@@ -14,7 +14,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     screen.getByText("My Workflow");
@@ -34,7 +34,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     // 2 successes shown as success-colored count
@@ -58,7 +58,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     // Only success count visible, no error or warning elements
@@ -79,7 +79,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     expect(screen.queryByText("run-unique-title")).toBeNull();
@@ -97,7 +97,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={true}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     screen.getByText("run-alpha");
@@ -115,7 +115,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={onToggle}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     const card = container.firstElementChild as HTMLElement;
@@ -132,7 +132,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     const card = container.firstElementChild as HTMLElement;
@@ -151,7 +151,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     const card = container.firstElementChild as HTMLElement;
@@ -169,7 +169,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={false}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
       />
     ));
     const card = container.firstElementChild as HTMLElement;
@@ -189,7 +189,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={true}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
         hotPollingRunIds={hotPollingRunIds}
       />
     ));
@@ -213,7 +213,7 @@ describe("WorkflowSummaryCard", () => {
         expanded={true}
         onToggle={() => {}}
         onIgnoreRun={() => {}}
-        density="comfortable"
+
         flashingRunIds={flashingRunIds}
       />
     ));

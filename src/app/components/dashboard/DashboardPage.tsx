@@ -98,6 +98,8 @@ function resetDashboardData(): void {
 const [hasFetchedFresh, setHasFetchedFresh] = createSignal(false);
 export function _resetHasFetchedFresh(value = false) { setHasFetchedFresh(value); }
 
+const [lastFetchHadErrors, setLastFetchHadErrors] = createSignal(false);
+
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
@@ -144,6 +146,17 @@ async function pollFetch(): Promise<DashboardData> {
     });
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
+      const hasErrors = data.errors.length > 0;
+      setLastFetchHadErrors(hasErrors);
+
+      // When the fetch had errors and returned no data, keep stale dashboard
+      // visible rather than wiping it to empty. This prevents the summary strip,
+      // tab counts, and tracked items from vanishing during rate limiting.
+      if (hasErrors && data.issues.length === 0 && data.pullRequests.length === 0 && data.workflowRuns.length === 0) {
+        setDashboardData("loading", false);
+        return data;
+      }
+
       setHasFetchedFresh(true);
       const now = new Date();
 
@@ -254,6 +267,22 @@ export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
 
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__debug = {
+      forceHotPoll: () => {
+        const allPrIds = new Set<number>(dashboardData.pullRequests.map(pr => pr.id));
+        setHotPollingPRIds(allPrIds);
+        console.info(`[debug] Shimmer ON for ${allPrIds.size} PRs. Call __debug.clearHotPoll() to stop.`);
+      },
+      clearHotPoll: () => {
+        setHotPollingPRIds(new Set<number>());
+        setHotPollingRunIds(new Set<number>());
+        console.info("[debug] Shimmer OFF");
+      },
+    };
+  }
+
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
@@ -283,6 +312,9 @@ export default function DashboardPage() {
     const issues = dashboardData.issues;
     const prs = dashboardData.pullRequests;
     if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh()) return;
+    // Never prune when the last fetch had errors (rate limit, network failure, etc.)
+    // — the missing items are likely just unfetched, not closed/merged.
+    if (lastFetchHadErrors()) return;
 
     const polledRepos = new Set([
       ...config.selectedRepos.map((r) => r.fullName),
@@ -506,6 +538,8 @@ export default function DashboardPage() {
                   issues={dashboardData.issues}
                   pullRequests={dashboardData.pullRequests}
                   refreshTick={refreshTick()}
+                  userLogin={userLogin()}
+                  hotPollingPRIds={hotPollingPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>

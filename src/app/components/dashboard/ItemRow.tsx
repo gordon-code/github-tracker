@@ -1,4 +1,5 @@
 import { createMemo, For, JSX, Show } from "solid-js";
+import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
 import { expandEmoji } from "../../lib/emoji";
@@ -19,7 +20,6 @@ export interface ItemRowProps {
   onIgnore?: () => void;
   onTrack?: () => void;
   isTracked?: boolean;
-  density: "compact" | "comfortable";
   commentCount?: number;
   hideRepo?: boolean;
   surfacedByBadge?: JSX.Element;
@@ -28,7 +28,7 @@ export interface ItemRowProps {
 }
 
 export default function ItemRow(props: ItemRowProps) {
-  const isCompact = () => props.density === "compact";
+  const isCompact = createMemo(() => config.viewDensity === "compact");
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
 
   // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
@@ -58,14 +58,35 @@ export default function ItemRow(props: ItemRowProps) {
     return created !== "" && updated !== "" && created !== updated;
   });
 
+  const compactLabelTooltip = createMemo(() => {
+    const parts: string[] = [];
+    if (props.labels.length > 0) {
+      parts.push(`Labels: ${props.labels.map((l) => expandEmoji(l.name)).join(", ")}`);
+    }
+    if ((props.commentCount ?? 0) > 0) {
+      parts.push(`${props.commentCount} comment${props.commentCount === 1 ? "" : "s"}`);
+    }
+    return parts.join(" | ");
+  });
+  const hasCompactTooltip = createMemo(() => isCompact() && compactLabelTooltip() !== "");
+  const hasLabels = createMemo(() => props.labels.length > 0);
+  const repoShortName = createMemo(() => {
+    const slash = props.repo.indexOf("/");
+    return slash >= 0 ? props.repo.slice(slash + 1) : props.repo;
+  });
+
   return (
     <div
-      class={`group relative flex items-start gap-3
+      class={`group relative flex pl-6 pr-4 py-3 items-start gap-3 compact:pl-6 compact:pr-3 compact:py-1 compact:items-center compact:gap-2
         hover:bg-base-200
         transition-colors
-        ${isCompact() ? "px-4 py-2" : "px-4 py-3"}
         ${props.isFlashing ? "animate-flash" : props.isPolling ? "animate-shimmer" : ""}`}
     >
+      {/* Poll spinner — absolute so it never causes reflow */}
+      <Show when={props.isPolling}>
+        <span class="absolute left-1 top-1/2 -translate-y-1/2 loading loading-spinner loading-xs text-base-content/40" />
+      </Show>
+
       {/* Overlay link — covers entire row; interactive children use relative z-10 */}
       <Show when={safeUrl()}>
         {(url) => (
@@ -79,102 +100,168 @@ export default function ItemRow(props: ItemRowProps) {
         )}
       </Show>
 
-      {/* Repo badge */}
+      {/* Repo badge — compact: short name + tooltip; comfortable: full name, no tooltip */}
       <Show when={!props.hideRepo}>
-        <Tooltip content={props.repo} class="shrink-0 relative z-10">
-          <span
-            class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium
-              bg-primary/10 text-primary
-              ${isCompact() ? "text-xs px-2 py-0.5" : "text-xs px-2.5 py-1"}`}
-          >
-            {props.repo}
-          </span>
-        </Tooltip>
-      </Show>
-
-      {/* Main content */}
-      <div class="flex-1 min-w-0">
-        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
-          <span class="text-base-content/60 shrink-0">
-            #{props.number}
-          </span>
-          <span class="font-medium text-base-content truncate">
-            {props.title}
-          </span>
-        </div>
-
-        {/* Labels row */}
-        <Show when={props.labels.length > 0}>
-          <div class={`flex flex-wrap gap-1 ${isCompact() ? "mt-0.5" : "mt-1"}`}>
-            <For each={props.labels}>
-              {(label) => (
-                <span
-                  class={`inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium ${labelColorClass(label.color)}`}
-                >
-                  {expandEmoji(label.name)}
-                </span>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        {/* Additional children slot — z-10 to sit above stretched link */}
-        <Show when={props.children !== undefined}>
-          <div class={`relative z-10 ${isCompact() ? "mt-0.5" : "mt-1"}`}>{props.children}</div>
-        </Show>
-      </div>
-
-      {/* Author + time + comment count */}
-      <div class={`shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 ${isCompact() ? "" : "pt-0.5"}`}>
-        <span>{props.author}</span>
-        <Show when={props.surfacedByBadge !== undefined}>
-          <div class="relative z-10">{props.surfacedByBadge}</div>
-        </Show>
-        <span class="inline-flex items-center gap-1 whitespace-nowrap">
-          <Tooltip content={staticDateInfo().createdTitle} class="relative z-10">
-            <time
-              datetime={props.createdAt}
-              aria-label={dateDisplay().createdLabel}
+        <Show
+          when={isCompact()}
+          fallback={
+            <span
+              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
+                bg-primary/10 text-primary text-xs px-2.5 py-1"
             >
-              {dateDisplay().created}
-            </time>
-          </Tooltip>
-          <Show when={shouldShowUpdated()}>
-            <span aria-hidden="true">{"\u00B7"}</span>
-            <Tooltip content={staticDateInfo().updatedTitle} class="relative z-10">
-              <time
-                datetime={props.updatedAt}
-                aria-label={dateDisplay().updatedLabel}
-              >
-                {dateDisplay().updated}
-              </time>
-            </Tooltip>
-          </Show>
-        </span>
-        <Show when={props.isPolling}>
-          <span class="loading loading-spinner loading-xs text-base-content/40" />
-        </Show>
-        <Show when={(props.commentCount ?? 0) > 0}>
-          <Tooltip content={`${props.commentCount} total ${props.commentCount === 1 ? "comment" : "comments"}`} focusable class="relative z-10">
-            <span class="flex items-center gap-0.5">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-3 w-3"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  fill-rule="evenodd"
-                  d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
-                  clip-rule="evenodd"
-                />
-              </svg>
-              {formatCount(props.commentCount!)}
+              {props.repo}
+            </span>
+          }
+        >
+          <Tooltip content={props.repo} class="shrink-0 relative z-10">
+            <span
+              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
+                bg-primary/10 text-primary text-xs px-2 py-0.5"
+            >
+              {repoShortName()}
             </span>
           </Tooltip>
         </Show>
-      </div>
+      </Show>
+
+      {/* ── COMPACT LAYOUT: everything on one line ── */}
+      <Show when={isCompact()}>
+        {/* Number */}
+        <span class="text-xs text-base-content/50 shrink-0">#{props.number}</span>
+
+        {/* Title — truncated, fills available space */}
+        <span class="font-medium text-sm truncate flex-1 min-w-0">
+          {props.title}
+        </span>
+
+        {/* Children (badges) inline */}
+        <Show when={props.children !== undefined}>
+          <div class="relative z-10 shrink-0 flex items-center gap-1">{props.children}</div>
+        </Show>
+
+        {/* Label + comment count indicator via tooltip */}
+        <Show when={hasCompactTooltip()}>
+          <Tooltip content={compactLabelTooltip()} placement="top" focusable>
+            <span class="relative z-10 inline-flex items-center gap-0.5 text-xs text-base-content/40 cursor-default select-none">
+              <Show when={hasLabels()}>
+                <span class="inline-flex items-center gap-0.5">
+                  <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M17.707 9.293a1 1 0 010 1.414l-7 7a1 1 0 01-1.414 0l-7-7A.997.997 0 012 10V5a3 3 0 013-3h5c.256 0 .512.098.707.293l7 7zM5 6a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                  </svg>
+                  {props.labels.length}
+                </span>
+              </Show>
+              <Show when={(props.commentCount ?? 0) > 0}>
+                <span class="inline-flex items-center gap-0.5">
+                  <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7z" clip-rule="evenodd" />
+                  </svg>
+                  {formatCount(props.commentCount!)}
+                </span>
+              </Show>
+            </span>
+          </Tooltip>
+        </Show>
+
+        {/* surfacedByBadge */}
+        <Show when={props.surfacedByBadge !== undefined}>
+          <div class="relative z-10 shrink-0">{props.surfacedByBadge}</div>
+        </Show>
+
+        {/* Author + time — compact, inline */}
+        <span class="shrink-0 text-xs text-base-content/50 whitespace-nowrap">
+          {props.author}
+          {" · "}
+          <time datetime={props.updatedAt} title={staticDateInfo().updatedTitle} aria-label={dateDisplay().updatedLabel}>
+            {dateDisplay().updated || dateDisplay().created}
+          </time>
+        </span>
+
+      </Show>
+
+      {/* ── COMFORTABLE LAYOUT: multi-line original ── */}
+      <Show when={!isCompact()}>
+        {/* Main content */}
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+            <span class="text-base-content/60 shrink-0">
+              #{props.number}
+            </span>
+            <span class="font-medium text-base-content truncate">
+              {props.title}
+            </span>
+          </div>
+
+          {/* Labels row */}
+          <Show when={props.labels.length > 0}>
+            <div class="flex flex-wrap gap-1 mt-1">
+              <For each={props.labels}>
+                {(label) => (
+                  <span
+                    class={`inline-flex items-center rounded-full text-xs px-2 py-0.5 font-medium ${labelColorClass(label.color)}`}
+                  >
+                    {expandEmoji(label.name)}
+                  </span>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          {/* Additional children slot — z-10 to sit above stretched link */}
+          <Show when={props.children !== undefined}>
+            <div class="relative z-10 mt-1">{props.children}</div>
+          </Show>
+        </div>
+
+        {/* Author + time + comment count */}
+        <div class="shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 pt-0.5">
+          <span>{props.author}</span>
+          <Show when={props.surfacedByBadge !== undefined}>
+            <div class="relative z-10">{props.surfacedByBadge}</div>
+          </Show>
+          <span class="inline-flex items-center gap-1 whitespace-nowrap">
+            <Tooltip content={staticDateInfo().createdTitle} class="relative z-10">
+              <time
+                datetime={props.createdAt}
+                aria-label={dateDisplay().createdLabel}
+              >
+                {dateDisplay().created}
+              </time>
+            </Tooltip>
+            <Show when={shouldShowUpdated()}>
+              <span aria-hidden="true">{"\u00B7"}</span>
+              <Tooltip content={staticDateInfo().updatedTitle} class="relative z-10">
+                <time
+                  datetime={props.updatedAt}
+                  aria-label={dateDisplay().updatedLabel}
+                >
+                  {dateDisplay().updated}
+                </time>
+              </Tooltip>
+            </Show>
+          </span>
+          <Show when={(props.commentCount ?? 0) > 0}>
+            <Tooltip content={`${props.commentCount} total ${props.commentCount === 1 ? "comment" : "comments"}`} focusable class="relative z-10">
+              <span class="flex items-center gap-0.5">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-3 w-3"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                {formatCount(props.commentCount!)}
+              </span>
+            </Tooltip>
+          </Show>
+        </div>
+      </Show>
 
       {/* Pin button — visible on hover, always visible when tracked */}
       <Show when={props.onTrack !== undefined}>
@@ -219,7 +306,7 @@ export default function ItemRow(props: ItemRowProps) {
             {/* Eye-slash icon */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              class={isCompact() ? "h-3.5 w-3.5" : "h-4 w-4"}
+              class="h-4 w-4 compact:h-3.5 compact:w-3.5"
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden="true"

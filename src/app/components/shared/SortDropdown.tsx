@@ -61,7 +61,7 @@ export default function SortDropdown(props: SortDropdownProps) {
     >
       <Select.Trigger
         aria-label="Sort by"
-        class="btn btn-sm btn-outline w-auto min-w-[180px] justify-between"
+        class="btn btn-outline btn-sm compact:btn-xs w-auto min-w-[180px] justify-between"
       >
         <Select.Value<FlatOption>>{(state) => state.selectedOption()?.label ?? "Sort by"}</Select.Value>
         <Select.Icon class="ml-2">▾</Select.Icon>

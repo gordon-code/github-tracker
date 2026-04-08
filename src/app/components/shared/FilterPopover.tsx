@@ -29,7 +29,7 @@ export default function FilterPopover(props: FilterPopoverProps) {
         as="button"
         type="button"
         aria-label={`Filter by ${props.group.label}`}
-        class={`btn btn-sm ${isDefault() ? "btn-ghost" : "btn-primary"}`}
+        class={`btn btn-sm compact:btn-xs ${isDefault() ? "btn-ghost" : "btn-primary"}`}
       >
         <Show when={isDefault()} fallback={<>{props.group.label}: {activeLabel()}</>}>
           {props.group.label}

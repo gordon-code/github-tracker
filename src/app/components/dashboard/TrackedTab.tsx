@@ -3,7 +3,13 @@ import { config } from "../../stores/config";
 import { viewState, untrackItem, moveTrackedItem } from "../../stores/view";
 import type { TrackedItem } from "../../stores/view";
 import type { Issue, PullRequest } from "../../services/api";
+import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { isSafeGitHubUrl } from "../../lib/url";
 import ItemRow from "./ItemRow";
+import StatusDot from "../shared/StatusDot";
+import ReviewBadge from "../shared/ReviewBadge";
+import SizeBadge from "../shared/SizeBadge";
+import RoleBadge from "../shared/RoleBadge";
 import { Tooltip } from "../shared/Tooltip";
 
 function TypeBadge(props: { type: TrackedItem["type"] }) {
@@ -59,6 +65,8 @@ export interface TrackedTabProps {
   issues: Issue[];
   pullRequests: PullRequest[];
   refreshTick?: number;
+  userLogin: string;
+  hotPollingPRIds?: ReadonlySet<number>;
 }
 
 export default function TrackedTab(props: TrackedTabProps) {
@@ -98,30 +106,30 @@ export default function TrackedTab(props: TrackedTabProps) {
 
               return (
                 <div
-                  class="flex items-center gap-1"
+                  class="flex items-center gap-1 compact:gap-0"
                   ref={(el) => { itemRefs.set(itemKey, el); }}
                 >
                   {/* Reorder buttons */}
-                  <div class="flex flex-col shrink-0 pl-2">
+                  <div class="flex flex-col shrink-0 pl-2 compact:pl-1">
                     <button
-                      class="btn btn-ghost btn-xs"
+                      class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isFirst()}
                       aria-label={`Move up: ${item.title}`}
                       onClick={() => handleMove(item.id, item.type, "up")}
                     >
                       {/* Heroicons 20px solid: chevron-up */}
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                         <path fill-rule="evenodd" d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832 6.29 12.77a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z" clip-rule="evenodd" />
                       </svg>
                     </button>
                     <button
-                      class="btn btn-ghost btn-xs"
+                      class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isLast()}
                       aria-label={`Move down: ${item.title}`}
                       onClick={() => handleMove(item.id, item.type, "down")}
                     >
                       {/* Heroicons 20px solid: chevron-down */}
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                       </svg>
                     </button>
@@ -133,15 +141,15 @@ export default function TrackedTab(props: TrackedTabProps) {
                       when={liveData()}
                       fallback={
                         /* Fallback row when live data not found */
-                        <div class="flex items-center gap-3 px-4 py-3 hover:bg-base-200 transition-colors">
+                        <div class="flex items-center gap-3 px-4 py-3 compact:gap-2 compact:px-3 compact:py-1 hover:bg-base-200 transition-colors">
                           <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 flex-wrap">
-                              <span class="font-medium text-sm text-base-content truncate">
+                            <div class="flex items-center gap-2 compact:gap-1 flex-wrap">
+                              <span class="font-medium text-sm compact:text-xs text-base-content truncate">
                                 {item.title}
                               </span>
                               <TypeBadge type={item.type} />
                             </div>
-                            <div class="text-xs text-base-content/60 mt-0.5">
+                            <div class="text-xs text-base-content/60 mt-0.5 compact:mt-0">
                               {item.repoFullName}{" "}
                               <span class="text-base-content/40">(not in current data)</span>
                             </div>
@@ -159,25 +167,96 @@ export default function TrackedTab(props: TrackedTabProps) {
                         </div>
                       }
                     >
-                      {(live) => (
-                        <ItemRow
-                          hideRepo={false}
-                          repo={live().repoFullName}
-                          number={live().number}
-                          title={live().title}
-                          author={live().userLogin}
-                          createdAt={live().createdAt}
-                          updatedAt={live().updatedAt}
-                          refreshTick={props.refreshTick}
-                          url={live().htmlUrl}
-                          labels={live().labels}
-                          onTrack={() => untrackItem(item.id, item.type)}
-                          isTracked={true}
-                          density={config.viewDensity}
-                        >
-                          <TypeBadge type={item.type} />
-                        </ItemRow>
-                      )}
+                      {(live) => {
+                        const pr = createMemo(() => item.type === "pullRequest" ? live() as PullRequest : undefined);
+                        const commentCount = createMemo(() =>
+                          item.type === "pullRequest"
+                            ? (pr()!.enriched !== false ? pr()!.comments + pr()!.reviewThreads : undefined)
+                            : (live() as Issue).comments);
+
+                        return (
+                          <ItemRow
+                            hideRepo={false}
+                            repo={live().repoFullName}
+                            number={live().number}
+                            title={live().title}
+                            author={live().userLogin}
+                            createdAt={live().createdAt}
+                            updatedAt={live().updatedAt}
+                            refreshTick={props.refreshTick}
+                            url={live().htmlUrl}
+                            labels={live().labels}
+                            commentCount={commentCount()}
+                            onTrack={() => untrackItem(item.id, item.type)}
+                            isTracked={true}
+                            isPolling={item.type === "pullRequest" && props.hotPollingPRIds?.has(item.id)}
+                          >
+                            <Show
+                              when={pr()}
+                              fallback={
+                                <div class="flex items-center gap-1">
+                                  <TypeBadge type="issue" />
+                                  <RoleBadge roles={deriveInvolvementRoles(props.userLogin, live().userLogin, (live() as Issue).assigneeLogins, [])} />
+                                </div>
+                              }
+                            >
+                              {(prData) => {
+                                const roles = createMemo(() => deriveInvolvementRoles(props.userLogin, prData().userLogin, prData().assigneeLogins, prData().reviewerLogins));
+                                const sizeCategory = createMemo(() => prSizeCategory(prData().additions, prData().deletions));
+
+                                return (
+                                  <Show
+                                    when={config.viewDensity === "compact"}
+                                    fallback={
+                                      <div class="flex items-center gap-2 flex-wrap">
+                                        <TypeBadge type="pullRequest" />
+                                        <Show when={prData().enriched !== false}>
+                                          <RoleBadge roles={roles()} />
+                                        </Show>
+                                        <ReviewBadge decision={prData().reviewDecision} />
+                                        <Show when={prData().enriched !== false}>
+                                          <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
+                                          <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
+                                          <Show when={prData().checkStatus === "conflict"}>
+                                            <Tooltip content="Merge conflict">
+                                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
+                                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                              </svg>
+                                            </Tooltip>
+                                          </Show>
+                                        </Show>
+                                        <Show when={prData().draft}>
+                                          <span class="badge badge-ghost badge-sm italic text-base-content/50">Draft</span>
+                                        </Show>
+                                      </div>
+                                    }
+                                  >
+                                    {/* Compact: key badges inline */}
+                                    <div class="flex items-center gap-1">
+                                      <TypeBadge type="pullRequest" />
+                                      <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
+                                      <ReviewBadge decision={prData().reviewDecision} />
+                                      <Show when={prData().enriched !== false}>
+                                        <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
+                                      </Show>
+                                      <Show when={prData().checkStatus === "conflict"}>
+                                        <Tooltip content="Merge conflict">
+                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
+                                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                          </svg>
+                                        </Tooltip>
+                                      </Show>
+                                      <Show when={prData().draft}>
+                                        <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
+                                      </Show>
+                                    </div>
+                                  </Show>
+                                );
+                              }}
+                            </Show>
+                          </ItemRow>
+                        );
+                      }}
                     </Show>
                   </div>
                 </div>
