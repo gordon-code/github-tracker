@@ -65,7 +65,7 @@ pnpm test -- tests/path/to/test.ts
 
 ## Testing
 
-Tests live in `tests/` and mirror the `src/` directory structure. Test files end in `.test.ts` or `.test.tsx`.
+Tests live in `tests/` and mirror the `src/` directory structure. Test files end in `.test.ts` or `.test.tsx`. BDD step definitions end in `.steps.tsx` and are also picked up by Vitest automatically.
 
 Factory helpers in `tests/helpers/index.tsx` (`makeIssue`, `makePullRequest`, `makeWorkflowRun`) give you typed test fixtures — use them instead of hand-rolling objects.
 
