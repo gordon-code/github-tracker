@@ -45,7 +45,6 @@ const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
 const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
 const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
 
-
 // ── Helper: create one repo per org ──────────────────────────────────────────
 function makeOrgRepos(org: string): RepoEntry[] {
   return [
@@ -252,21 +251,17 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
     Given(
       'the RepoSelector is displayed with 4 orgs "charlie", "acme-corp", "beta-org", "delta-inc" where "charlie" is the personal org',
       async () => {
-        // Override the auth mock so charlie is the authenticated user
         vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
           Promise.resolve(makeOrgRepos(org as string))
         );
 
-        // charlie is type "user" (personal org), the rest are "org"
-        const charlieAsPersonal = { login: "charlie", avatarUrl: "", type: "user" as const };
-        const acme = { login: "acme-corp", avatarUrl: "", type: "org" as const };
-        const beta = { login: "beta-org", avatarUrl: "", type: "org" as const };
-        const delta = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+        // charlie has type "user" — sort puts it first (personal org)
+        const charlieEntry = { login: "charlie", avatarUrl: "", type: "user" as const };
 
         render(() => (
           <RepoSelector
             selectedOrgs={["charlie", "acme-corp", "beta-org", "delta-inc"]}
-            orgEntries={[charlieAsPersonal, acme, beta, delta]}
+            orgEntries={[charlieEntry, acmeEntry, betaEntry, deltaEntry]}
             selected={[]}
             onChange={vi.fn()}
           />
