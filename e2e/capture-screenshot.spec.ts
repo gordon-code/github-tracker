@@ -473,10 +473,25 @@ test("capture dashboard screenshot", async ({ page }) => {
 
   await page.screenshot({ path: "docs/dashboard-screenshot.png" });
 
-  // Switch to compact density and capture a second screenshot
-  await page.evaluate(() => {
-    document.documentElement.dataset.density = "compact";
-  });
+  // Switch to compact density: update the config in localStorage and reload
+  // so SolidJS reactive state (isCompact memos, <Show> guards) picks it up.
+  // Switch to compact density via the settings UI (client-side nav to preserve store state)
+  await page.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("button", { name: /view density: compact/i }).waitFor();
+  await page.getByRole("button", { name: /view density: compact/i }).click();
+  await page.getByRole("button", { name: /view density: compact/i, pressed: true }).waitFor();
+
+  // Navigate back to dashboard via the back link (client-side, no full reload)
+  await page.getByRole("link", { name: "Back to dashboard" }).click();
+  await page.getByRole("tablist").waitFor();
+  await page.getByRole("tab", { name: /pull requests/i }).click();
+  await page.getByRole("tab", { name: /pull requests/i, selected: true }).waitFor();
+  await page.getByText("acme-corp/web-platform").first().waitFor();
+  const compactRepoBtn = page.getByRole("button", { expanded: false }).filter({ hasText: "acme-corp/web-platform" });
+  if (await compactRepoBtn.isVisible()) {
+    await compactRepoBtn.click();
+    await page.getByRole("button", { expanded: true }).filter({ hasText: "acme-corp/web-platform" }).waitFor();
+  }
 
   await page.screenshot({ path: "docs/dashboard-screenshot-compact.png" });
 });
