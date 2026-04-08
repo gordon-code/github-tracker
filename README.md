@@ -151,75 +151,7 @@ See [DEPLOY.md](./DEPLOY.md) for Cloudflare, OAuth App, and CI/CD setup.
 
 ## MCP Server
 
-The MCP (Model Context Protocol) server exposes curated dashboard data to AI clients like Claude Code and Cursor, letting them query your GitHub activity without leaving the editor.
-
-### Quick start (published package)
-
-```bash
-GITHUB_TOKEN=ghp_... npx github-tracker-mcp
-```
-
-### Quick start (local dev)
-
-```bash
-GITHUB_TOKEN=ghp_... pnpm mcp:serve
-```
-
-### Available tools
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_dashboard_summary` | Aggregated counts of open PRs, issues, failing CI, PRs needing review, approved but unmerged | `scope?` (involves_me\|all, default: involves_me) |
-| `get_open_prs` | Open PRs with check status and review decision | `repo?`, `status?` (all\|needs_review\|failing\|approved\|draft) |
-| `get_open_issues` | Open issues across tracked repos | `repo?` |
-| `get_failing_actions` | In-progress or recently failed workflow runs | `repo?` |
-| `get_pr_details` | Detailed info about a specific PR | `repo`, `number` |
-| `get_rate_limit` | Current GitHub API rate limit status | — |
-
-`repo` parameters use `owner/repo` format (e.g., `octocat/hello-world`).
-
-### Resources
-
-- `tracker://config` — current dashboard configuration (selected repos, tracked users)
-- `tracker://repos` — list of tracked repositories
-
-### WebSocket relay
-
-Enable the WebSocket relay in Settings to let the MCP server receive live data directly from the dashboard without making extra API calls. When the relay is active, the MCP server uses dashboard data first and falls back to direct GitHub API calls.
-
-### Claude Code integration
-
-**Option A: Published package (recommended)**
-
-Add to `~/.claude.json` (global) or `.claude/settings.json` (project):
-
-```json
-{
-  "mcpServers": {
-    "github-tracker": {
-      "command": "npx",
-      "args": ["-y", "github-tracker-mcp"],
-      "env": { "GITHUB_TOKEN": "ghp_..." }
-    }
-  }
-}
-```
-
-**Option B: Local development**
-
-```json
-{
-  "mcpServers": {
-    "github-tracker": {
-      "command": "pnpm",
-      "args": ["--prefix", "/path/to/github-tracker", "mcp:serve"],
-      "env": { "GITHUB_TOKEN": "ghp_..." }
-    }
-  }
-}
-```
-
-> **Security:** Don't commit `GITHUB_TOKEN` to source control. Classic PATs with `repo` and `read:org` scopes are recommended for full functionality. Fine-grained PATs also work (Actions, Contents, Issues, Metadata, Pull requests — all read) but skip scope validation at startup.
+An optional MCP (Model Context Protocol) server lets AI clients like Claude Code and Cursor query your dashboard data — open PRs, issues, failing CI — without leaving the editor. See the [MCP server README](mcp/README.md) for setup, available tools, and configuration.
 
 ## Contributing
 

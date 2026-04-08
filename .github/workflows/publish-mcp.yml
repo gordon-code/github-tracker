@@ -1,12 +1,13 @@
 name: Publish MCP Server
 on:
   push:
-    tags: ["mcp@*"]
+    tags: ["github-tracker-mcp@*"]
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
@@ -19,8 +20,6 @@ jobs:
       - run: pnpm --filter github-tracker-mcp run build
       - run: pnpm --filter github-tracker-mcp test
       - run: cd mcp && pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create-release:
     runs-on: ubuntu-latest
@@ -29,14 +28,11 @@ jobs:
       contents: write
     steps:
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "MCP Server ${{ github.ref_name }}"
-          body: |
-            ## Install
-            ```bash
-            npx github-tracker-mcp
-            ```
-            See [npm package](https://www.npmjs.com/package/github-tracker-mcp) for full documentation.
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "MCP Server ${{ github.ref_name }}" \
+            --generate-notes \
+            --notes $'## Install\n```bash\nnpx github-tracker-mcp@latest\n```\nSee [npm package](https://www.npmjs.com/package/github-tracker-mcp) for full documentation.'

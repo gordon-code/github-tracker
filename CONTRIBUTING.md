@@ -21,7 +21,7 @@ To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:
 GITHUB_TOKEN=ghp_... pnpm mcp:serve
 ```
 
-Fine-grained PATs need Actions (read), Contents (read), Issues (read), Metadata (read), and Pull requests (read) permissions.
+Fine-grained PATs need Actions (read), Contents (read), Issues (read), and Pull requests (read) permissions.
 
 ## Running checks
 
@@ -92,6 +92,43 @@ type(scope): description
 ```
 
 Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
+
+## Releasing the MCP server
+
+The MCP server (`mcp/` package) is published to npm and GitHub Releases via CI.
+
+### First publish (manual)
+
+The very first publish must be done locally — OIDC trusted publishing can only be configured for packages that already exist on npm.
+
+1. Create an npm account at [npmjs.com](https://www.npmjs.com/signup) if you don't have one
+2. Log in locally: `npm login`
+3. Build and publish:
+   ```bash
+   cd mcp
+   pnpm run build
+   pnpm publish --access public
+   ```
+
+### Trusted publishing setup (one-time, after first publish)
+
+CI publishes via npm OIDC trusted publishing — no tokens or secrets needed.
+
+1. Go to **npmjs.com > github-tracker-mcp > Settings > Trusted Publishers**
+2. Add a trusted publisher:
+   - **Owner:** `gordon-code`
+   - **Repository:** `github-tracker`
+   - **Workflow filename:** `publish-mcp.yml`
+
+### Cutting a release
+
+```bash
+cd mcp
+pnpm version patch   # or minor / major
+git push upstream main --follow-tags
+```
+
+`pnpm version` bumps `mcp/package.json`, commits, and creates a `github-tracker-mcp@X.Y.Z` tag. Pushing that tag to upstream triggers CI, which typechecks, builds, tests, publishes to npm, and creates a GitHub release.
 
 ## Pull requests
 

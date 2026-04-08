@@ -55,7 +55,7 @@ If you prefer not to use OAuth, you can sign in with a GitHub Personal Access To
 Two token formats are accepted:
 
 - **Classic tokens** (starts with `ghp_`) — recommended. Works across all organizations you belong to. Required scopes: `repo`, `read:org` (under admin:org), `notifications`.
-- **Fine-grained tokens** (starts with `github_pat_`) — also work, but have limitations: they only access one organization at a time, do not support the `notifications` scope, and therefore cannot use the background-poll optimization. Required permissions: Actions (read), Contents (read), Issues (read), Metadata (read), Pull requests (read).
+- **Fine-grained tokens** (starts with `github_pat_`) — also work, but have limitations: they only access one organization at a time, do not support the `notifications` scope, and therefore cannot use the background-poll optimization. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
@@ -363,6 +363,8 @@ Pin state is per-tab — a repo can be pinned on the Issues tab but not the Pull
 ## MCP Server Integration
 
 The MCP (Model Context Protocol) server lets AI clients like Claude Code and Cursor query your dashboard data — open PRs, issues, failing CI — without leaving the editor.
+
+MCP access is fully opt-in. Nothing is exposed unless you explicitly run the standalone server or enable the WebSocket relay in Settings.
 
 ### Standalone mode
 

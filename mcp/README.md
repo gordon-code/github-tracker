@@ -16,28 +16,18 @@ npm install -g github-tracker-mcp
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GITHUB_TOKEN` | Yes* | — | Classic PAT with `repo` and `read:org` scopes (recommended), or fine-grained PAT with Actions (read), Contents (read), Issues (read), Metadata (read), and Pull requests (read) permissions. Fine-grained PATs skip scope validation at startup. |
+| `GITHUB_TOKEN` | No | — | Classic PAT with `repo` and `read:org` scopes (recommended), or fine-grained PAT with Actions (read), Contents (read), Issues (read), and Pull requests (read) permissions. Fine-grained PATs skip scope validation at startup. |
 | `MCP_WS_PORT` | No | `9876` | WebSocket relay port for receiving live data from the dashboard SPA. |
 
-*`GITHUB_TOKEN` is required for direct API mode. If the dashboard's WebSocket relay is connected, the server can serve data without it.
+`GITHUB_TOKEN` is required for standalone (direct API) mode. In relay mode the server receives data from the dashboard and works without a token. If you set `GITHUB_TOKEN` alongside the relay, the server uses it as a fallback when the relay disconnects.
 
 ## Claude Code setup
 
-Add to `~/.claude.json` (global) or `.claude/settings.json` (project):
-
-```json
-{
-  "mcpServers": {
-    "github-tracker": {
-      "command": "npx",
-      "args": ["-y", "github-tracker-mcp"],
-      "env": { "GITHUB_TOKEN": "ghp_..." }
-    }
-  }
-}
+```bash
+claude mcp add --transport stdio --env GITHUB_TOKEN=ghp_... github-tracker -- npx -y github-tracker-mcp@latest
 ```
 
-> Don't commit `GITHUB_TOKEN` to source control. Use environment variables or a secrets manager.
+Or add `--scope project` to store in `.mcp.json` (shared with git — don't include real tokens in committed files).
 
 ## Available tools
 
