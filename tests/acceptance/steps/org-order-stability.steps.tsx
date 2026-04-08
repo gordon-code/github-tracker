@@ -1,13 +1,13 @@
 import { vi, expect } from "vitest";
 
-// Prevent @solidjs/testing-library from auto-cleaning the DOM between steps.
-// vitest-cucumber maps each Given/When/Then to a separate test(), so the DOM
-// must persist across steps within a scenario. Cleanup is done manually in
-// AfterEachScenario instead.
+// vitest-cucumber maps each Given/When/Then to a separate test(). The DOM must
+// persist across steps within a scenario, but @solidjs/testing-library registers
+// afterEach(cleanup) at import time — vi.hoisted ensures the env var is set
+// BEFORE that import evaluates. Manual cleanup in AfterEachScenario replaces it.
 vi.hoisted(() => {
   process.env.STL_SKIP_AUTO_CLEANUP = "true";
 });
-import type { RepoEntry } from "../../../src/app/services/api";
+import type { RepoEntry, OrgEntry } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
 const mockRequest = vi.fn().mockResolvedValue({ data: {} });
@@ -75,14 +75,12 @@ function getAccordionOrder(orgNames: string[]): string[] {
 }
 
 // ── State shared across steps within a scenario ───────────────────────────────
-type OrgEntry = { login: string; avatarUrl: string; type: "user" | "org" };
-let setSelectedOrgs: (orgs: string[]) => void;
-let setOrgEntries: (entries: OrgEntry[]) => void;
+let setSelectedOrgs: (orgs: string[]) => void = () => {};
+let setOrgEntries: (entries: OrgEntry[]) => void = () => {};
 
 describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachScenario }) => {
   BeforeEachScenario(() => {
     vi.clearAllMocks();
-    vi.restoreAllMocks();
     mockRequest.mockResolvedValue({ data: {} });
     vi.mocked(api.fetchOrgs).mockResolvedValue([]);
     vi.mocked(api.discoverUpstreamRepos).mockResolvedValue([]);
