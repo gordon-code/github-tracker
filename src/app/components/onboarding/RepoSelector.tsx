@@ -342,21 +342,52 @@ export default function RepoSelector(props: RepoSelectorProps) {
     new Set((props.monitoredRepos ?? []).map((r) => r.fullName))
   );
 
+  // Plain lets (not signals) — memoization cache inside createMemo; signals would cause reactive cycles.
+  let frozenOrder: string[] | null = null;
+  let frozenOrgsKey = "";
+
   const sortedOrgStates = createMemo(() => {
     const states = orgStates();
-    // Defer sorting until all orgs have loaded: prevents layout shift during
-    // trickle-in, and ensures each org's type ("user" vs "org") is resolved
-    // from fetchOrgs before we sort on it. loadedCount is not reset by retryOrg,
-    // so sorting stays active during retries.
+
+    // Invalidate frozen order when org membership changes (key is order-independent).
+    const currentKey = [...props.selectedOrgs].sort().join(",");
+    if (currentKey !== frozenOrgsKey) {
+      frozenOrder = null;
+      frozenOrgsKey = currentKey;
+    }
+
+    // Replay frozen order if available, appending any orgs not yet in the list.
+    if (frozenOrder !== null) {
+      const stateMap = new Map(states.map((s) => [s.org, s]));
+      const result: OrgRepoState[] = [];
+      for (const org of frozenOrder) {
+        const s = stateMap.get(org);
+        if (s) {
+          result.push(s);
+          stateMap.delete(org);
+        }
+      }
+      for (const s of stateMap.values()) result.push(s);
+      return result;
+    }
+
+    // Defer sorting until all orgs have loaded (prevents layout shift during trickle-in).
     if (loadedCount() < props.selectedOrgs.length) return states;
-    // Order: personal org first, then remaining orgs alphabetically.
-    // Repos within each org retain their existing recency order from fetchRepos.
-    return [...states].sort((a, b) => {
+
+    // Guard against stale orgStates: the memo runs synchronously when selectedOrgs changes,
+    // but createEffect resets orgStates asynchronously, so stale entries may still be present.
+    const selectedOrgSet = new Set(props.selectedOrgs);
+    if (states.some((s) => !selectedOrgSet.has(s.org))) return states;
+
+    // Sort: personal org first, then alphabetically. Capture order to freeze it.
+    const sorted = [...states].sort((a, b) => {
       const aIsUser = a.type === "user" ? 0 : 1;
       const bIsUser = b.type === "user" ? 0 : 1;
       if (aIsUser !== bIsUser) return aIsUser - bIsUser;
       return a.org.localeCompare(b.org, "en");
     });
+    frozenOrder = sorted.map((s) => s.org);
+    return sorted;
   });
 
   function toRepoRef(entry: RepoEntry): RepoRef {

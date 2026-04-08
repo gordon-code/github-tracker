@@ -1490,3 +1490,332 @@ describe("RepoSelector — org accordion", () => {
     });
   });
 });
+
+// ── Frozen org order (C5) ─────────────────────────────────────────────────────
+// S4 (initial sort order) is covered by the existing test at line 238, which verifies orgs appear
+// in sorted order after all fetchRepos calls complete. S1 and S2 below cover post-sort stability
+// (frozen order unchanged after repo retry and checkbox toggle respectively).
+// S5 (frozen order in accordion mode with pre-loaded entries) is deferred pending accordion merge.
+
+describe("RepoSelector — frozen org order", () => {
+  function makeOrgRepos(org: string): RepoEntry[] {
+    return [{ owner: org, name: `${org}-repo`, fullName: `${org}/${org}-repo`, pushedAt: "2026-03-20T10:00:00Z" }];
+  }
+
+  // Flat (non-accordion) mode only: org names appear as plain text nodes in headers.
+  // In accordion mode, org names are inside button triggers — use different query selectors (see S6).
+  function getOrgHeaderOrder(orgNames: string[]): string[] {
+    const pattern = new RegExp(`^(${orgNames.join("|")})$`);
+    return screen.getAllByText(pattern).map((el) => el.textContent!);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  // S1: Org order remains stable after repo retry
+  it("org order remains stable after repo retry for a failed org", async () => {
+    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
+
+    vi.mocked(api.fetchRepos)
+      .mockImplementation((_client, org) => {
+        if (org === "beta-org") return Promise.reject(new Error("beta load failed"));
+        return Promise.resolve(makeOrgRepos(org as string));
+      });
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["alice", "acme-corp", "beta-org"]}
+        orgEntries={[aliceEntry, acmeEntry, betaEntry]}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    // Wait for alice and acme-corp to succeed and beta-org to fail (Retry visible)
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("acme-corp-repo");
+      screen.getByText("Retry");
+    });
+
+    // Verify initial sorted order: alice (user first), acme-corp, beta-org
+    const initialOrder = getOrgHeaderOrder(["alice", "acme-corp", "beta-org"]);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "beta-org"]);
+
+    // Set up retry to succeed for all
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      screen.getByText("beta-org-repo");
+    });
+
+    // Order must be unchanged after retry
+    const orderAfterRetry = getOrgHeaderOrder(["alice", "acme-corp", "beta-org"]);
+    expect(orderAfterRetry).toEqual(["alice", "acme-corp", "beta-org"]);
+  });
+
+  // S2: Org order remains stable when toggling a repo checkbox
+  it("org order remains stable when toggling a repo checkbox", async () => {
+    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["alice", "acme-corp", "beta-org"]}
+        orgEntries={[aliceEntry, acmeEntry, betaEntry]}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("acme-corp-repo");
+      screen.getByText("beta-org-repo");
+    });
+
+    // Verify initial order
+    const initialOrder = getOrgHeaderOrder(["alice", "acme-corp", "beta-org"]);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "beta-org"]);
+
+    // Toggle a checkbox under acme-corp
+    const acmeCheckbox = screen.getAllByRole("checkbox").find((cb) => {
+      const label = cb.closest("label");
+      return label?.textContent?.includes("acme-corp-repo");
+    });
+    expect(acmeCheckbox).not.toBeUndefined();
+    fireEvent.click(acmeCheckbox!);
+
+    // Order must be unchanged after toggle
+    const orderAfterToggle = getOrgHeaderOrder(["alice", "acme-corp", "beta-org"]);
+    expect(orderAfterToggle).toEqual(["alice", "acme-corp", "beta-org"]);
+  });
+
+  // S3: Frozen order invalidated when a new org is added
+  it("frozen order is invalidated and re-sorted when a new org is added", async () => {
+    const { createSignal } = await import("solid-js");
+
+    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "delta-inc"]);
+    const [orgEntries, setOrgEntries] = createSignal([aliceEntry, deltaEntry]);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("delta-inc-repo");
+    });
+
+    // Verify initial frozen order: alice (user first), delta-inc
+    const initialOrder = getOrgHeaderOrder(["alice", "delta-inc"]);
+    expect(initialOrder).toEqual(["alice", "delta-inc"]);
+
+    // Add acme-corp — this should invalidate the frozen order
+    setSelectedOrgs(["alice", "delta-inc", "acme-corp"]);
+    setOrgEntries([aliceEntry, deltaEntry, acmeEntry]);
+
+    await waitFor(() => {
+      screen.getByText("acme-corp-repo");
+    });
+
+    // New order should be re-sorted: alice (user), acme-corp, delta-inc
+    const orderAfterAdd = getOrgHeaderOrder(["alice", "acme-corp", "delta-inc"]);
+    expect(orderAfterAdd).toEqual(["alice", "acme-corp", "delta-inc"]);
+  });
+
+  // S6: New org appears in correct sorted position with 6+ orgs (accordion mode)
+  it("new org appears in correct sorted position with 6+ orgs in accordion mode", async () => {
+    const { createSignal } = await import("solid-js");
+
+    const startOrgs = ["alice", "acme-corp", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"];
+    const startEntries = startOrgs.map((login) => ({
+      login,
+      avatarUrl: "",
+      type: login === "alice" ? ("user" as const) : ("org" as const),
+    }));
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(startOrgs);
+    const [orgEntries, setOrgEntries] = createSignal(startEntries);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    // Wait for accordion mode to render (first org expanded by default)
+    await waitFor(() => {
+      screen.getByRole("button", { name: /alice/ });
+    });
+
+    // Verify initial sorted order via accordion trigger buttons
+    const getAccordionOrder = (orgNames: string[]) => {
+      return orgNames
+        .map((name) => screen.getByRole("button", { name: new RegExp(name) }))
+        .sort((a, b) => {
+          const pos = a.compareDocumentPosition(b);
+          return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+        })
+        .map((btn) => {
+          const match = btn.textContent?.match(/^(alice|acme-corp|charlie-co|delta-inc|echo-labs|foxtrot-io|beta-org)/);
+          return match ? match[1] : "";
+        });
+    };
+
+    const initialOrder = getAccordionOrder(startOrgs);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
+
+    // Add beta-org (7 total)
+    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
+    const newOrgs = ["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"];
+    setSelectedOrgs(newOrgs);
+    setOrgEntries([...startEntries, betaEntry]);
+
+    await waitFor(() => {
+      screen.getByRole("button", { name: /beta-org/ });
+    });
+
+    // Verify new order with beta-org inserted between acme-corp and charlie-co
+    expect(getAccordionOrder(newOrgs)).toEqual(["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
+  });
+
+  // S7: Frozen order invalidated on simultaneous add and remove
+  // Uses aaa-org (sorts BEFORE acme-corp alphabetically) to expose the stale-freeze bug:
+  // if the freeze is not invalidated, aaa-org would be appended at the end instead
+  // of appearing before acme-corp in sorted order.
+  it("frozen order is invalidated when orgs are simultaneously added and removed", async () => {
+    const { createSignal } = await import("solid-js");
+
+    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+    const aaaEntry = { login: "aaa-org", avatarUrl: "", type: "org" as const };
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp", "delta-inc"]);
+    const [orgEntries, setOrgEntries] = createSignal([aliceEntry, acmeEntry, deltaEntry]);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("acme-corp-repo");
+      screen.getByText("delta-inc-repo");
+    });
+
+    // Verify initial frozen order
+    const initialOrder = getOrgHeaderOrder(["alice", "acme-corp", "delta-inc"]);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "delta-inc"]);
+
+    // Simultaneously remove delta-inc and add aaa-org (same count, different membership)
+    // aaa-org sorts alphabetically BEFORE acme-corp, so correct order is: alice, aaa-org, acme-corp
+    // If the stale-freeze bug is present, aaa-org would be appended at end: alice, acme-corp, aaa-org
+    setSelectedOrgs(["alice", "acme-corp", "aaa-org"]);
+    setOrgEntries([aliceEntry, acmeEntry, aaaEntry]);
+
+    await waitFor(() => {
+      screen.getByText("aaa-org-repo");
+    });
+
+    // delta-inc should be gone
+    expect(screen.queryByText("delta-inc")).toBeNull();
+
+    // New order should be re-sorted: alice (user first), aaa-org, acme-corp (alpha sort)
+    const orderAfterSwap = getOrgHeaderOrder(["alice", "aaa-org", "acme-corp"]);
+    expect(orderAfterSwap).toEqual(["alice", "aaa-org", "acme-corp"]);
+  });
+
+  // QA-012: Pure org-removal invalidates frozen order and re-sorts correctly
+  it("removing an org invalidates frozen order and re-sorts correctly", async () => {
+    const { createSignal } = await import("solid-js");
+
+    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp", "delta-inc"]);
+    const [orgEntries, setOrgEntries] = createSignal([aliceEntry, acmeEntry, deltaEntry]);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("acme-corp-repo");
+      screen.getByText("delta-inc-repo");
+    });
+
+    // Verify initial frozen order: alice (user first), acme-corp, delta-inc
+    const initialOrder = getOrgHeaderOrder(["alice", "acme-corp", "delta-inc"]);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "delta-inc"]);
+
+    // Remove delta-inc (3 orgs → 2 orgs)
+    setSelectedOrgs(["alice", "acme-corp"]);
+    setOrgEntries([aliceEntry, acmeEntry]);
+
+    await waitFor(() => {
+      expect(screen.queryByText("delta-inc")).toBeNull();
+    });
+
+    // Verify only 2 orgs remain in correct sorted order
+    const orderAfterRemoval = getOrgHeaderOrder(["alice", "acme-corp"]);
+    expect(orderAfterRemoval).toEqual(["alice", "acme-corp"]);
+
+    // delta-inc repo content should also be gone from the display
+    expect(screen.queryByText("delta-inc-repo")).toBeNull();
+  });
+});
