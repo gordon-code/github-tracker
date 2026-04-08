@@ -1503,10 +1503,22 @@ describe("RepoSelector — frozen org order", () => {
   }
 
   // Flat (non-accordion) mode only: org names appear as plain text nodes in headers.
-  // In accordion mode, org names are inside button triggers — use different query selectors (see S6).
+  // In accordion mode, org names are inside button triggers — use getAccordionOrder below.
   function getOrgHeaderOrder(orgNames: string[]): string[] {
-    const pattern = new RegExp(`^(${orgNames.join("|")})$`);
+    const escaped = orgNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const pattern = new RegExp(`^(${escaped.join("|")})$`);
     return screen.getAllByText(pattern).map((el) => el.textContent!);
+  }
+
+  // Accordion mode: org names are inside button triggers — sort by DOM position.
+  function getAccordionOrder(orgNames: string[]): string[] {
+    return orgNames
+      .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }) }))
+      .sort((a, b) => {
+        const pos = a.btn.compareDocumentPosition(b.btn);
+        return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      })
+      .map(({ name }) => name);
   }
 
   beforeEach(() => {
@@ -1514,12 +1526,14 @@ describe("RepoSelector — frozen org order", () => {
     vi.restoreAllMocks();
   });
 
+  const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
+  const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
+  const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
+  const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+  const aaaEntry = { login: "aaa-org", avatarUrl: "", type: "org" as const };
+
   // S1: Org order remains stable after repo retry
   it("org order remains stable after repo retry for a failed org", async () => {
-    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
-    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
-    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
-
     vi.mocked(api.fetchRepos)
       .mockImplementation((_client, org) => {
         if (org === "beta-org") return Promise.reject(new Error("beta load failed"));
@@ -1564,10 +1578,6 @@ describe("RepoSelector — frozen org order", () => {
 
   // S2: Org order remains stable when toggling a repo checkbox
   it("org order remains stable when toggling a repo checkbox", async () => {
-    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
-    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
-    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
-
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
       Promise.resolve(makeOrgRepos(org as string))
     );
@@ -1607,10 +1617,6 @@ describe("RepoSelector — frozen org order", () => {
   // S3: Frozen order invalidated when a new org is added
   it("frozen order is invalidated and re-sorted when a new org is added", async () => {
     const { createSignal } = await import("solid-js");
-
-    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
-    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
-    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
       Promise.resolve(makeOrgRepos(org as string))
@@ -1683,20 +1689,10 @@ describe("RepoSelector — frozen org order", () => {
     });
 
     // Verify initial sorted order via accordion trigger buttons
-    const getAccordionOrder = (orgNames: string[]) =>
-      orgNames
-        .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name) }) }))
-        .sort((a, b) => {
-          const pos = a.btn.compareDocumentPosition(b.btn);
-          return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-        })
-        .map(({ name }) => name);
-
     const initialOrder = getAccordionOrder(startOrgs);
     expect(initialOrder).toEqual(["alice", "acme-corp", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
 
     // Add beta-org (7 total)
-    const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
     const newOrgs = ["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"];
     setSelectedOrgs(newOrgs);
     setOrgEntries([...startEntries, betaEntry]);
@@ -1747,15 +1743,6 @@ describe("RepoSelector — frozen org order", () => {
     });
 
     // Verify initial sorted order via accordion trigger buttons
-    const getAccordionOrder = (orgNames: string[]) =>
-      orgNames
-        .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name) }) }))
-        .sort((a, b) => {
-          const pos = a.btn.compareDocumentPosition(b.btn);
-          return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-        })
-        .map(({ name }) => name);
-
     const initialOrder = getAccordionOrder(sevenOrgs);
     expect(initialOrder).toEqual(["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
 
@@ -1785,11 +1772,6 @@ describe("RepoSelector — frozen org order", () => {
   // of appearing before acme-corp in sorted order.
   it("frozen order is invalidated when orgs are simultaneously added and removed", async () => {
     const { createSignal } = await import("solid-js");
-
-    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
-    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
-    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
-    const aaaEntry = { login: "aaa-org", avatarUrl: "", type: "org" as const };
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
       Promise.resolve(makeOrgRepos(org as string))
@@ -1839,10 +1821,6 @@ describe("RepoSelector — frozen org order", () => {
   it("removing an org invalidates frozen order and re-sorts correctly", async () => {
     const { createSignal } = await import("solid-js");
 
-    const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
-    const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
-    const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
-
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
       Promise.resolve(makeOrgRepos(org as string))
     );
@@ -1883,5 +1861,68 @@ describe("RepoSelector — frozen org order", () => {
 
     // delta-inc repo content should also be gone from the display
     expect(screen.queryByText("delta-inc-repo")).toBeNull();
+  });
+
+  // S8: Adding 2+ orgs simultaneously with staggered loading produces correct final sort
+  // Verifies the invalidation→loadedCount guard interaction during trickle-in:
+  // after frozenOrder is nulled (key changed), sorting is deferred until all new orgs settle.
+  it("adding 2+ orgs simultaneously with staggered loading produces correct final sorted order", async () => {
+    const { createSignal } = await import("solid-js");
+
+    let resolveEcho!: (repos: RepoEntry[]) => void;
+    let resolveFoxtrot!: (repos: RepoEntry[]) => void;
+    const echoPending = new Promise<RepoEntry[]>((res) => { resolveEcho = res; });
+    const foxtrotPending = new Promise<RepoEntry[]>((res) => { resolveFoxtrot = res; });
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "echo-labs") return echoPending;
+      if (org === "foxtrot-io") return foxtrotPending;
+      return Promise.resolve(makeOrgRepos(org as string));
+    });
+
+    const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp"]);
+    const [orgEntries, setOrgEntries] = createSignal([aliceEntry, acmeEntry]);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={selectedOrgs()}
+        orgEntries={orgEntries()}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    // Wait for initial 2 orgs to load and freeze
+    await waitFor(() => {
+      screen.getByText("alice-repo");
+      screen.getByText("acme-corp-repo");
+    });
+
+    const initialOrder = getOrgHeaderOrder(["alice", "acme-corp"]);
+    expect(initialOrder).toEqual(["alice", "acme-corp"]);
+
+    // Simultaneously add echo-labs and foxtrot-io (both slow)
+    const echoEntry = { login: "echo-labs", avatarUrl: "", type: "org" as const };
+    const foxtrotEntry = { login: "foxtrot-io", avatarUrl: "", type: "org" as const };
+    setSelectedOrgs(["alice", "acme-corp", "echo-labs", "foxtrot-io"]);
+    setOrgEntries([aliceEntry, acmeEntry, echoEntry, foxtrotEntry]);
+
+    // Resolve echo-labs first — foxtrot-io is still loading.
+    // loadedCount (3 settled out of 4) < selectedOrgs.length (4),
+    // so the loadedCount guard should prevent a premature sort.
+    resolveEcho(makeOrgRepos("echo-labs"));
+    await waitFor(() => {
+      screen.getByText("echo-labs-repo");
+    });
+
+    // Now resolve foxtrot-io — all 4 orgs settled, sort should fire and freeze.
+    resolveFoxtrot(makeOrgRepos("foxtrot-io"));
+    await waitFor(() => {
+      screen.getByText("foxtrot-io-repo");
+    });
+
+    // Final order: alice (user first), then alphabetical: acme-corp, echo-labs, foxtrot-io
+    const finalOrder = getOrgHeaderOrder(["alice", "acme-corp", "echo-labs", "foxtrot-io"]);
+    expect(finalOrder).toEqual(["alice", "acme-corp", "echo-labs", "foxtrot-io"]);
   });
 });

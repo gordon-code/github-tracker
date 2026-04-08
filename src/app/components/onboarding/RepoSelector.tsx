@@ -342,8 +342,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     new Set((props.monitoredRepos ?? []).map((r) => r.fullName))
   );
 
-  // Plain let variables, not signals — writing to a signal from inside createMemo is a
-  // side effect that triggers re-evaluation, causing an infinite loop.
+  // Plain let — not signals; mutating a signal inside createMemo causes infinite re-evaluation.
   let frozenOrder: string[] | null = null;
   let frozenOrgsKey = "";
 

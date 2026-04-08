@@ -66,7 +66,7 @@ function makeOrgRepos(org: string): RepoEntry[] {
 }
 
 // ── Helper: flat (non-accordion) org header order ────────────────────────────
-// Org names follow GitHub's [A-Za-z0-9-] pattern — no regex escaping needed.
+// Org names follow GitHub's [A-Za-z0-9-] pattern — escaping is defensive.
 function getOrgHeaderOrder(orgNames: string[]): string[] {
   const escaped = orgNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const pattern = new RegExp(`^(${escaped.join("|")})$`);
