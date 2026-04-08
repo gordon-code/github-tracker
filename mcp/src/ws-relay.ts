@@ -3,7 +3,7 @@
 // Uses JSON-RPC 2.0 for request/response and notification dispatch.
 //
 // Security controls:
-//   - Origin validation (SEC-005, SEC-007)
+//   - Origin validation
 //   - maxPayload: 10 MiB
 //   - try/catch around JSON.parse
 
@@ -24,7 +24,7 @@ let _wss: WebSocketServer | null = null;
 let _client: WebSocket | null = null;
 let _isAlive = false;
 let _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-// PERF-005: Track the pong-timeout handle so we can clear it on disconnect/stop.
+// Store handle so stopHeartbeat() can cancel a pending pong-timeout
 let _pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let _idCounter = 0;
 
@@ -58,7 +58,7 @@ function buildAllowedOrigins(): Set<string> {
   return combined;
 }
 
-// PERF-004: Compute allowed origins once at module scope rather than per connection.
+// Computed once at module scope — origins don't change at runtime
 const ALLOWED_ORIGINS = buildAllowedOrigins();
 
 function isOriginAllowed(origin: string | undefined): boolean {
@@ -93,7 +93,6 @@ function startHeartbeat(): void {
     _isAlive = false;
     client.ping();
 
-    // PERF-005: Store the pong-timeout handle so stopHeartbeat() can clear it.
     if (_pongTimeoutTimer !== null) clearTimeout(_pongTimeoutTimer);
     _pongTimeoutTimer = setTimeout(() => {
       _pongTimeoutTimer = null;
@@ -110,7 +109,6 @@ function stopHeartbeat(): void {
     clearInterval(_heartbeatTimer);
     _heartbeatTimer = null;
   }
-  // PERF-005: Also clear any pending pong-timeout timer.
   if (_pongTimeoutTimer !== null) {
     clearTimeout(_pongTimeoutTimer);
     _pongTimeoutTimer = null;

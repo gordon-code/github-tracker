@@ -23,6 +23,17 @@ import { makeIssue, makePullRequest, makeWorkflowRun } from "../../tests/helpers
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+function waitForEvent(
+  emitter: { once: (event: string, cb: (...args: unknown[]) => void) => void },
+  event: string,
+  timeout = 3000
+): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`Timeout waiting for '${event}'`)), timeout);
+    emitter.once(event, (...args: unknown[]) => { clearTimeout(t); resolve(args); });
+  });
+}
+
 function waitForListening(wss: WebSocketServer): Promise<number> {
   return new Promise((resolve, reject) => {
     const addr = wss.address();
@@ -45,6 +56,46 @@ function waitForOpen(ws: WebSocket): Promise<void> {
     ws.on("open", () => { clearTimeout(t); resolve(); });
     ws.on("error", (e) => { clearTimeout(t); reject(e); });
   });
+}
+
+function waitForClose(ws: WebSocket, timeout = 3000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (ws.readyState === WebSocket.CLOSED) return resolve();
+    const t = setTimeout(() => reject(new Error("Timeout waiting for close")), timeout);
+    ws.once("close", () => { clearTimeout(t); resolve(); });
+  });
+}
+
+function waitForMessage(ws: WebSocket, timeout = 3000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("Timeout waiting for message")), timeout);
+    ws.once("message", (data) => { clearTimeout(t); resolve(data.toString()); });
+  });
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  timeout = 2000,
+  interval = 10
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("Timeout waiting for condition");
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
+/**
+ * Round-trip sentinel: sends a relay request from the server to the connected
+ * client and waits for the client to respond.  By the time this resolves, the
+ * server has processed every message that arrived before the sentinel.
+ */
+async function roundTripSentinel(ws: WebSocket): Promise<void> {
+  const sentinelPromise = sendRelayRequest("__sentinel__", {});
+  const raw = await waitForMessage(ws);
+  const msg = JSON.parse(raw) as { id: number };
+  ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }));
+  await sentinelPromise;
 }
 
 // ── Test setup ──────────────────────────────────────────────────────────────────
@@ -88,8 +139,8 @@ describe("Integration: WebSocket relay data flow", () => {
       }
     });
 
-    // Wait for connection to register
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for the server's connection handler to register the client
+    await waitForCondition(() => isRelayConnected());
     expect(isRelayConnected()).toBe(true);
 
     // Send a request through the relay
@@ -105,7 +156,12 @@ describe("Integration: WebSocket relay data flow", () => {
     await waitForOpen(client);
 
     const received = vi.fn();
-    onNotification(NOTIFICATIONS.CONFIG_UPDATE, received);
+    const notificationReceived = new Promise<void>((resolve) => {
+      onNotification(NOTIFICATIONS.CONFIG_UPDATE, (params) => {
+        received(params);
+        resolve();
+      });
+    });
 
     // Client sends a config_update notification (no id = notification)
     client.send(JSON.stringify({
@@ -119,7 +175,8 @@ describe("Integration: WebSocket relay data flow", () => {
       },
     }));
 
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for the notification handler to be invoked
+    await notificationReceived;
     expect(received).toHaveBeenCalledOnce();
     const params = received.mock.calls[0][0] as { selectedRepos: unknown[] };
     expect(params.selectedRepos).toHaveLength(1);
@@ -130,7 +187,7 @@ describe("Integration: WebSocket relay data flow", () => {
     const port = await waitForListening(wss);
     client = new WebSocket(`ws://127.0.0.1:${port}`);
     await waitForOpen(client);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
 
     // Send a request but don't respond — then disconnect
     const promise = sendRelayRequest(METHODS.GET_OPEN_PRS, {});
@@ -184,7 +241,7 @@ describe("Integration: WebSocketDataSource through relay", () => {
       }
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
     const prs = await wsDs.getOpenPRs();
     expect(prs).toHaveLength(1);
     expect(prs[0].title).toBe("Fix auth bug");
@@ -212,7 +269,7 @@ describe("Integration: WebSocketDataSource through relay", () => {
       }
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
     const config = await wsDs.getConfig();
     expect(config).toBeDefined();
     expect((config as { selectedRepos: unknown[] }).selectedRepos).toHaveLength(1);
@@ -275,7 +332,7 @@ describe("Integration: CompositeDataSource fallback", () => {
       }
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
 
     const mockFallback: DataSource = {
       getDashboardSummary: vi.fn(),
@@ -345,7 +402,7 @@ describe("Integration: Edge cases (with server)", () => {
 
     const client1 = new WebSocket(`ws://127.0.0.1:${port}`);
     await waitForOpen(client1);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
     expect(isRelayConnected()).toBe(true);
 
     const client2 = new WebSocket(`ws://127.0.0.1:${port}`);
@@ -364,13 +421,14 @@ describe("Integration: Edge cases (with server)", () => {
 
     const client = new WebSocket(`ws://127.0.0.1:${port}`);
     await waitForOpen(client);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => isRelayConnected());
 
     client.send("not valid json {{{");
     client.send("");
     client.send(JSON.stringify({ foo: "bar" }));
 
-    await new Promise((r) => setTimeout(r, 200));
+    // Round-trip sentinel: proves server processed all malformed messages and is still alive
+    await roundTripSentinel(client);
     expect(isRelayConnected()).toBe(true);
     client.close();
   });
@@ -389,7 +447,9 @@ describe("Integration: Edge cases (with server)", () => {
     const client = new WebSocket(`ws://127.0.0.1:${port}`);
     await waitForOpen(client);
     client.close();
-    await new Promise((r) => setTimeout(r, 200));
+    await waitForClose(client);
+    // Wait for the server's close handler to clear the connection state
+    await waitForCondition(() => !isRelayConnected());
 
     const wsDs = new WebSocketDataSource();
     const mockFallback: DataSource = {
@@ -421,7 +481,8 @@ describe("Integration: Port conflict", () => {
     vi.stubEnv("MCP_WS_PORT", String(port));
     const wss = startWebSocketServer();
 
-    await new Promise((r) => setTimeout(r, 200));
+    // The EADDRINUSE error fires asynchronously; wait for the error event on wss
+    if (wss) await waitForEvent(wss, "error");
     expect(isRelayConnected()).toBe(false);
 
     await closeWebSocketServer();

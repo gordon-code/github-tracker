@@ -482,22 +482,19 @@ export default function DashboardPage() {
     };
   });
 
-  // Push dashboard data into the MCP relay snapshot when relay is enabled.
-  // Reads through the store proxy first to establish reactive tracking,
-  // then uses unwrap() for a plain JS copy (avoids proxy overhead in the snapshot).
+  // Push dashboard data into the MCP relay snapshot on each full refresh.
+  // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
+  // Hot poll updates are intentionally excluded — relay reflects full-refresh data only.
   createEffect(() => {
     if (!config.mcpRelayEnabled) return;
-    const issues = dashboardData.issues;
-    const prs = dashboardData.pullRequests;
-    const runs = dashboardData.workflowRuns;
-    if (issues.length || prs.length || runs.length) {
-      updateRelaySnapshot({
-        issues: unwrap(dashboardData).issues,
-        pullRequests: unwrap(dashboardData).pullRequests,
-        workflowRuns: unwrap(dashboardData).workflowRuns,
-        lastUpdatedAt: Date.now(),
-      });
-    }
+    if (!dashboardData.lastRefreshedAt) return;
+    const d = unwrap(dashboardData);
+    updateRelaySnapshot({
+      issues: d.issues,
+      pullRequests: d.pullRequests,
+      workflowRuns: d.workflowRuns,
+      lastUpdatedAt: Date.now(),
+    });
   });
 
   const userLogin = createMemo(() => user()?.login ?? "");

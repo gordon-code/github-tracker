@@ -1,4 +1,3 @@
-// FIX-008: All imports are at the top of the file.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -25,7 +24,6 @@ const server = new McpServer({
 });
 
 // ── Config update validation schemas ──────────────────────────────────────────
-// SEC-001: Validate config_update payloads with Zod
 
 const MAX_REPOS = 200;
 const MAX_TRACKED_USERS = 10;
@@ -44,7 +42,7 @@ async function main() {
   // Start WebSocket relay before MCP transport
   const wss = startWebSocketServer();
 
-  // Wire config_update notification with Zod validation (SEC-001)
+  // Wire config_update notification with Zod validation
   onNotification(NOTIFICATIONS.CONFIG_UPDATE, (params) => {
     const result = ConfigUpdatePayloadSchema.safeParse(params);
     if (!result.success) {
@@ -117,7 +115,7 @@ function createUnavailableDataSource(): DataSource {
     getFailingActions: (): Promise<WorkflowRun[]> => err(),
     getPRDetails: (): Promise<PullRequest | null> => err(),
     getRateLimit: (): Promise<RateLimitInfo> => err(),
-    getConfig: (): Promise<object | null> => Promise.resolve(null),
+    getConfig: () => Promise.resolve(null),
     getRepos: (): Promise<RepoRef[]> => Promise.resolve([]),
   };
 }

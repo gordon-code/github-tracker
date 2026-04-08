@@ -92,6 +92,7 @@ Conditional requests using `If-None-Match` headers — GitHub doesn't count 304 
 
 ```
 src/
+  shared/           # Browser-agnostic types, schemas, format utils shared with MCP server
   app/
     components/
       dashboard/    # DashboardPage, IssuesTab, PullRequestsTab, ActionsTab,
@@ -105,9 +106,9 @@ src/
                     # LoadingSpinner, SkeletonRows, ToastContainer, NotificationDrawer,
                     # RepoLockControls, UserAvatarBadge, ExpandCollapseButtons,
                     # RepoGitHubLink, ChevronIcon, ExternalLinkIcon, Tooltip/InfoTooltip
-    lib/            # 14 modules: format, errors, notifications, oauth, pat, url,
+    lib/            # 15 modules: format, errors, notifications, oauth, pat, url,
                     # flashDetection, grouping, reorderHighlight, collections,
-                    # emoji, label-colors, sentry, github-emoji-map.json
+                    # emoji, label-colors, sentry, mcp-relay, github-emoji-map.json
     pages/          # LoginPage, OAuthCallback, PrivacyPage
     services/
       api.ts        # GitHub API methods — issues, PRs, workflow runs, user validation,
@@ -121,8 +122,11 @@ src/
       view.ts       # View state (tabs, sorting, filters, ignored items, locked repos)
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
-tests/              # unit/component tests across 70 test files
-e2e/                # 15 E2E tests across 3 spec files
+mcp/
+  src/              # MCP server: tools, resources, WebSocket relay, Octokit fallback
+  tests/            # MCP server unit + integration tests
+tests/              # SPA unit/component tests
+e2e/                # Playwright E2E tests
 ```
 
 ## Development
@@ -165,12 +169,14 @@ GITHUB_TOKEN=ghp_... pnpm mcp:serve
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `get_dashboard_summary` | Aggregated counts of open PRs, issues, failing CI | `scope` (involves_me\|all) |
+| `get_dashboard_summary` | Aggregated counts of open PRs, issues, failing CI, PRs needing review, approved but unmerged | `scope?` (involves_me\|all, default: involves_me) |
 | `get_open_prs` | Open PRs with check status and review decision | `repo?`, `status?` (all\|needs_review\|failing\|approved\|draft) |
 | `get_open_issues` | Open issues across tracked repos | `repo?` |
 | `get_failing_actions` | In-progress or recently failed workflow runs | `repo?` |
 | `get_pr_details` | Detailed info about a specific PR | `repo`, `number` |
 | `get_rate_limit` | Current GitHub API rate limit status | — |
+
+`repo` parameters use `owner/repo` format (e.g., `octocat/hello-world`).
 
 ### Resources
 
@@ -213,7 +219,7 @@ Add to `~/.claude.json` (global) or `.claude/settings.json` (project):
 }
 ```
 
-> **Security:** Don't commit `GITHUB_TOKEN` to source control. Fine-grained PATs with Contents (read) and Metadata (read) permissions are recommended for tighter security.
+> **Security:** Don't commit `GITHUB_TOKEN` to source control. Classic PATs with `repo` and `read:org` scopes are recommended for full functionality. Fine-grained PATs also work (Actions, Contents, Issues, Metadata, Pull requests — all read) but skip scope validation at startup.
 
 ## Contributing
 

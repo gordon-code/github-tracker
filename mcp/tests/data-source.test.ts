@@ -8,6 +8,7 @@ import {
   WebSocketDataSource,
   CompositeDataSource,
   setCachedConfig,
+  clearCachedConfig,
 } from "../src/data-source.js";
 import type { DataSource } from "../src/data-source.js";
 
@@ -215,15 +216,13 @@ describe("OctokitDataSource", () => {
       expect(prs).toEqual([]);
     });
 
-    it("describes no-config error when _cachedConfig is null (resolveRepos logic)", () => {
-      // Verify the error message from resolveRepos when called with no config.
-      // We can test this by clearing config to a state where _cachedConfig would be null.
-      // Since setCachedConfig doesn't allow null, we test the validation logic via explicit param.
-      // The "no config" throw path is tested in data-source module tests via fresh import.
-      // This test confirms the correct error string.
-      const errorMsg = "No repository configuration available";
-      // Just assert the string exists in the source — verified by reading data-source.ts
-      expect(errorMsg).toBeTruthy();
+    it("throws descriptive error when _cachedConfig is null and no explicit repo", async () => {
+      clearCachedConfig();
+      const octokit = makeMockOctokit(new Map([["GET /user", makeUserResponse()]]));
+      const ds = new OctokitDataSource(octokit);
+      await expect(ds.getOpenPRs()).rejects.toThrow(
+        "No repository configuration available"
+      );
     });
 
     it("rejects invalid repo format", async () => {
@@ -282,6 +281,73 @@ describe("OctokitDataSource", () => {
       const ds = new OctokitDataSource(octokit);
       // reviewDecision is null from REST search, so "approved" filter returns empty
       const prs = await ds.getOpenPRs(undefined, "approved");
+      expect(prs).toHaveLength(0);
+    });
+
+    it("status=needs_review uses review-requested: qualifier and returns results", async () => {
+      const prItem = {
+        id: 1,
+        number: 7,
+        title: "Review me",
+        state: "open",
+        draft: false,
+        html_url: "https://github.com/owner/repo/pull/7",
+        created_at: "2024-01-10T08:00:00Z",
+        updated_at: "2024-01-12T14:30:00Z",
+        user: { login: "alice", avatar_url: "" },
+        repository_url: "https://api.github.com/repos/owner/repo",
+        labels: [],
+        assignees: [],
+        pull_request: { merged_at: null },
+      };
+
+      const responses = new Map([
+        ["GET /user", makeUserResponse()],
+        ["GET /search/issues", makeSearchResponse([prItem])],
+      ]);
+      const octokit = makeMockOctokit(responses);
+      const ds = new OctokitDataSource(octokit);
+      const prs = await ds.getOpenPRs(undefined, "needs_review");
+
+      // The search query must use review-requested: — not involves:
+      expect(octokit.request).toHaveBeenCalledWith("GET /search/issues", expect.objectContaining({
+        q: expect.stringContaining("review-requested:testuser"),
+      }));
+      expect(octokit.request).toHaveBeenCalledWith("GET /search/issues", expect.not.objectContaining({
+        q: expect.stringContaining("involves:testuser"),
+      }));
+
+      // Results are returned as-is — no post-filter for needs_review
+      expect(prs).toHaveLength(1);
+      expect(prs[0].number).toBe(7);
+      expect(prs[0].title).toBe("Review me");
+    });
+
+    it("status=failing returns empty (REST search lacks checkStatus data)", async () => {
+      const prItem = {
+        id: 1,
+        number: 3,
+        title: "Failing checks",
+        state: "open",
+        draft: false,
+        html_url: "https://github.com/owner/repo/pull/3",
+        created_at: "2024-01-10T08:00:00Z",
+        updated_at: "2024-01-12T14:30:00Z",
+        user: { login: "alice", avatar_url: "" },
+        repository_url: "https://api.github.com/repos/owner/repo",
+        labels: [],
+        assignees: [],
+        pull_request: { merged_at: null },
+      };
+
+      const responses = new Map([
+        ["GET /user", makeUserResponse()],
+        ["GET /search/issues", makeSearchResponse([prItem])],
+      ]);
+      const octokit = makeMockOctokit(responses);
+      const ds = new OctokitDataSource(octokit);
+      // checkStatus is null from REST search, so "failing" post-filter returns empty
+      const prs = await ds.getOpenPRs(undefined, "failing");
       expect(prs).toHaveLength(0);
     });
   });
@@ -507,13 +573,59 @@ describe("OctokitDataSource", () => {
     });
 
     it("returns null when no config is set", async () => {
-      // Reset config to simulate null state by setting empty arrays
-      // setCachedConfig always sets a value, so use a workaround:
-      // We can't directly set to null, so just test the normal behavior
+      clearCachedConfig();
       const ds = new OctokitDataSource({ request: vi.fn() });
       const result = await ds.getConfig();
-      // Will be an object (the last set config) — just check it's not null since we set it in beforeEach
-      expect(result).toBeDefined();
+      expect(result).toBeNull();
+    });
+  });
+});
+
+// ── WebSocketDataSource tests ──────────────────────────────────────────────────
+
+describe("WebSocketDataSource", () => {
+  beforeEach(() => {
+    _mockIsConnected = true;
+    _mockSendRequest = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    _mockIsConnected = false;
+  });
+
+  describe("getRateLimit", () => {
+    it("unwraps nested { core: { limit, remaining, resetAt } } shape", async () => {
+      const resetAt = new Date("2024-01-12T15:00:00Z").toISOString();
+      _mockSendRequest = vi.fn().mockResolvedValue({
+        core: { limit: 5000, remaining: 3200, resetAt },
+        graphql: { limit: 1000, remaining: 950, resetAt },
+      });
+
+      const ds = new WebSocketDataSource();
+      const rl = await ds.getRateLimit();
+
+      expect(rl.limit).toBe(5000);
+      expect(rl.remaining).toBe(3200);
+      expect(rl.resetAt).toBeInstanceOf(Date);
+      expect(rl.resetAt.toISOString()).toBe(resetAt);
+    });
+
+    it("falls back to flat { limit, remaining, resetAt } shape when core is absent", async () => {
+      const resetAt = new Date("2024-01-12T16:00:00Z").toISOString();
+      _mockSendRequest = vi.fn().mockResolvedValue({
+        limit: 5000,
+        remaining: 4800,
+        resetAt,
+      });
+
+      const ds = new WebSocketDataSource();
+      const rl = await ds.getRateLimit();
+
+      expect(rl.limit).toBe(5000);
+      expect(rl.remaining).toBe(4800);
+      expect(rl.resetAt).toBeInstanceOf(Date);
+      expect(rl.resetAt.toISOString()).toBe(resetAt);
     });
   });
 });

@@ -17,12 +17,10 @@ import { isRelayConnected } from "./ws-relay.js";
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
 function stalenessLine(): string {
-  // FIX-009: When relay is connected, ideally we'd show "Data as of X ago." using
-  // lastUpdatedAt from the SPA snapshot. However, lastUpdatedAt lives in the SPA's
-  // RelaySnapshot (mcp-relay.ts) and is not currently forwarded to the MCP server.
-  // Exposing it would require a new relay request or pushing it via a notification.
-  // For now, keep the hint-based approach: relay mode = no staleness note (data is live),
-  // Octokit mode = note that data comes from the GitHub API directly.
+  // Relay mode has no staleness annotation (data is live from SPA dashboard).
+  // Octokit mode notes that data comes via the GitHub API directly.
+  // Ideally relay mode would show "Data as of X ago" using lastUpdatedAt, but that
+  // field lives in the SPA's RelaySnapshot and isn't forwarded to the MCP server.
   return isRelayConnected()
     ? ""
     : "\n_(data via GitHub API — connect SPA for live dashboard data)_";

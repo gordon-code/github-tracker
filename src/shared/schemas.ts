@@ -4,6 +4,7 @@
 // intentionally kept in src/app/stores/config.ts (they use window.matchMedia).
 
 import { z } from "zod";
+import { VALID_TRACKED_LOGIN } from "./validation.js";
 
 export const THEME_OPTIONS = ["auto", "corporate", "cupcake", "light", "nord", "dim", "dracula", "dark", "forest"] as const;
 export type ThemeId = (typeof THEME_OPTIONS)[number];
@@ -17,7 +18,7 @@ export const RepoRefSchema = z.object({
 });
 
 export const TrackedUserSchema = z.object({
-  login: z.string(),
+  login: z.string().regex(VALID_TRACKED_LOGIN),
   avatarUrl: z.string().url().refine(
     (u) => u.startsWith("https://avatars.githubusercontent.com/"),
     "Avatar URL must be from GitHub CDN"

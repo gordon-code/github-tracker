@@ -398,7 +398,7 @@ describe("GET_PR_DETAILS handler", () => {
     expect(parsed.result.number).toBe(42);
   });
 
-  it("returns -32002 error when PR not found", () => {
+  it("returns result: null when PR not found", () => {
     mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
@@ -414,9 +414,231 @@ describe("GET_PR_DETAILS handler", () => {
     }));
 
     const response = responses.find((r) => (JSON.parse(r) as { id?: number }).id === 31);
-    const parsed = JSON.parse(response!) as { error: { code: number; message: string } };
-    expect(parsed.error.code).toBe(-32002);
-    expect(parsed.error.message).toContain("not found");
+    const parsed = JSON.parse(response!) as { result: unknown; error?: unknown };
+    expect(parsed.result).toBeNull();
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it("returns PR by numeric id", () => {
+    const pr = makePullRequest({ state: "open" });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+
+    ws._triggerMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 32,
+      method: "get_pr_details",
+      params: { id: pr.id },
+    }));
+
+    const response = responses.find((r) => (JSON.parse(r) as { id?: number }).id === 32);
+    const parsed = JSON.parse(response!) as { result: { id: number } };
+    expect(parsed.result.id).toBe(pr.id);
+  });
+});
+
+describe("GET_OPEN_PRS status filter", () => {
+  let mod: typeof import("../../../src/app/lib/mcp-relay");
+  let ws: MockWs;
+
+  beforeEach(async () => {
+    const mock = makeSingleInstanceMock();
+    ws = mock.ws;
+    mod = await loadModule(mock.Constructor);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function setupAndConnect(prs: ReturnType<typeof makePullRequest>[]) {
+    mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], lastUpdatedAt: Date.now() });
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    return responses;
+  }
+
+  it("filters by status=draft", () => {
+    const prs = [
+      makePullRequest({ state: "open", draft: true }),
+      makePullRequest({ state: "open", draft: false }),
+    ];
+    const responses = setupAndConnect(prs);
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 90, method: "get_open_prs", params: { status: "draft" } }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 90)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
+  });
+
+  it("filters by status=needs_review (non-draft, REVIEW_REQUIRED)", () => {
+    const prs = [
+      makePullRequest({ state: "open", draft: false, reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "open", draft: true, reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "open", draft: false, reviewDecision: "APPROVED" }),
+    ];
+    const responses = setupAndConnect(prs);
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 91, method: "get_open_prs", params: { status: "needs_review" } }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 91)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
+  });
+
+  it("filters by status=failing", () => {
+    const prs = [
+      makePullRequest({ state: "open", checkStatus: "failure" }),
+      makePullRequest({ state: "open", checkStatus: "success" }),
+    ];
+    const responses = setupAndConnect(prs);
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 92, method: "get_open_prs", params: { status: "failing" } }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 92)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
+  });
+
+  it("filters by status=approved", () => {
+    const prs = [
+      makePullRequest({ state: "open", reviewDecision: "APPROVED" }),
+      makePullRequest({ state: "open", reviewDecision: "REVIEW_REQUIRED" }),
+    ];
+    const responses = setupAndConnect(prs);
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 93, method: "get_open_prs", params: { status: "approved" } }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 93)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
+  });
+});
+
+describe("GET_OPEN_ISSUES handler", () => {
+  let mod: typeof import("../../../src/app/lib/mcp-relay");
+  let ws: MockWs;
+
+  beforeEach(async () => {
+    const mock = makeSingleInstanceMock();
+    ws = mock.ws;
+    mod = await loadModule(mock.Constructor);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns open issues", () => {
+    const issues = [makeIssue({ state: "open" }), makeIssue({ state: "open" }), makeIssue({ state: "closed" })];
+    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 50, method: "get_open_issues", params: {} }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 50)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(2);
+  });
+
+  it("filters by repo", () => {
+    const issues = [makeIssue({ state: "open", repoFullName: "owner/a" }), makeIssue({ state: "open", repoFullName: "owner/b" })];
+    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 51, method: "get_open_issues", params: { repo: "owner/a" } }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 51)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
+  });
+});
+
+describe("GET_FAILING_ACTIONS handler", () => {
+  let mod: typeof import("../../../src/app/lib/mcp-relay");
+  let ws: MockWs;
+
+  beforeEach(async () => {
+    const mock = makeSingleInstanceMock();
+    ws = mock.ws;
+    mod = await loadModule(mock.Constructor);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns failing and in-progress runs", () => {
+    const runs = [
+      makeWorkflowRun({ status: "in_progress", conclusion: null }),
+      makeWorkflowRun({ status: "completed", conclusion: "failure" }),
+      makeWorkflowRun({ status: "completed", conclusion: "timed_out" }),
+      makeWorkflowRun({ status: "completed", conclusion: "success" }),
+    ];
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: runs, lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 60, method: "get_failing_actions", params: {} }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 60)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(3);
+  });
+});
+
+describe("GET_CONFIG handler", () => {
+  let mod: typeof import("../../../src/app/lib/mcp-relay");
+  let ws: MockWs;
+
+  beforeEach(async () => {
+    const mock = makeSingleInstanceMock();
+    ws = mock.ws;
+    mod = await loadModule(mock.Constructor);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns config fields without requiring snapshot", () => {
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 70, method: "get_config", params: {} }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 70)!) as {
+      result: { selectedRepos: unknown[]; trackedUsers: unknown[]; upstreamRepos: unknown[]; monitoredRepos: unknown[] };
+    };
+    expect(parsed.result.selectedRepos).toBeDefined();
+    expect(parsed.result.trackedUsers).toBeDefined();
+  });
+});
+
+describe("GET_REPOS handler", () => {
+  let mod: typeof import("../../../src/app/lib/mcp-relay");
+  let ws: MockWs;
+
+  beforeEach(async () => {
+    const mock = makeSingleInstanceMock();
+    ws = mock.ws;
+    mod = await loadModule(mock.Constructor);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns selectedRepos without requiring snapshot", () => {
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 80, method: "get_repos", params: {} }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 80)!) as { result: unknown[] };
+    expect(parsed.result).toHaveLength(1);
   });
 });
 
@@ -508,7 +730,7 @@ describe("connectRelay — config update on connect", () => {
     expect(sentMessages.length).toBeGreaterThan(0);
     const configMsg = sentMessages.find((m) => (JSON.parse(m) as { method?: string }).method === "config_update");
     expect(configMsg).toBeDefined();
-    // BUG-001 fix: params are flat (no config: wrapper) to match ConfigUpdatePayloadSchema.
+    // Params are flat (no config: wrapper) to match ConfigUpdatePayloadSchema.
     const parsed = JSON.parse(configMsg!) as { params: { selectedRepos: unknown[] } };
     expect(parsed.params.selectedRepos).toBeDefined();
   });

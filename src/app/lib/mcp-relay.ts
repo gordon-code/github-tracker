@@ -62,8 +62,6 @@ function getRelaySnapshot(): RelaySnapshot | null {
   return _snapshot;
 }
 
-// PERF-006: Hoist snapshot-dependent methods to a module-level Set to avoid
-// rebuilding the array on every request.
 const SNAPSHOT_METHODS: Set<string> = new Set([
   METHODS.GET_DASHBOARD_SUMMARY,
   METHODS.GET_OPEN_PRS,
@@ -83,8 +81,7 @@ function clearBackoffTimer(): void {
 
 function sendConfigUpdate(ws: WebSocket): void {
   if (ws.readyState !== WebSocket.OPEN) return;
-  // BUG-001: Send fields directly in params (not nested under config:)
-  // to match ConfigUpdatePayloadSchema on the MCP server side.
+  // Send fields directly in params (not nested under config:) to match ConfigUpdatePayloadSchema.
   const notification = {
     jsonrpc: "2.0",
     method: NOTIFICATIONS.CONFIG_UPDATE,
@@ -119,11 +116,8 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
   switch (req.method) {
     case METHODS.GET_DASHBOARD_SUMMARY: {
-      // BUG-005: The relay snapshot is inherently scoped to the user's items because
-      // the SPA's GraphQL search uses `involves:{user}`. The `scope` param is intentionally
-      // ignored here — the relay always reflects the user's current dashboard view.
-      // When scope is "all", relay mode still only returns the user's items (known limitation
-      // vs the Octokit fallback path which uses the scope param in the search query).
+      // Relay snapshot is inherently scoped to the user's items (SPA uses `involves:{user}`).
+      // The `scope` param is intentionally ignored — relay always reflects the user's dashboard.
       const s = snapshot!;
       const openPRs = s.pullRequests.filter((p) => p.state === "open");
       const result = {
@@ -146,7 +140,6 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
         prs = prs.filter((p) => p.repoFullName === params["repo"]);
       }
       if (typeof params["status"] === "string" && params["status"]) {
-        // BUG-003: Map semantic status values to PR fields (same logic as OctokitDataSource).
         const status = params["status"];
         switch (status) {
           case "draft":
@@ -180,7 +173,6 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
     case METHODS.GET_FAILING_ACTIONS: {
       const params = req.params ?? {};
-      // BUG-004: Include in_progress runs alongside failed/timed_out.
       let runs = snapshot!.workflowRuns.filter(
         (r) => r.status === "in_progress" || r.conclusion === "failure" || r.conclusion === "timed_out"
       );
@@ -205,11 +197,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
         );
       }
       if (!pr) {
-        sendResponse(ws, {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32002, message: "PR not found" },
-        });
+        sendResponse(ws, { jsonrpc: "2.0", id, result: null });
       } else {
         sendResponse(ws, { jsonrpc: "2.0", id, result: pr });
       }
@@ -383,16 +371,11 @@ export function initMcpRelay(): void {
 
   // Send config_update whenever relevant config fields change while connected
   createEffect(() => {
-    // Track the fields we care about
-    const _selectedRepos = config.selectedRepos;
-    const _trackedUsers = config.trackedUsers;
-    const _upstreamRepos = config.upstreamRepos;
-    const _monitoredRepos = config.monitoredRepos;
-    // Suppress lint warning — these reads establish reactive tracking
-    void _selectedRepos;
-    void _trackedUsers;
-    void _upstreamRepos;
-    void _monitoredRepos;
+    // Read reactive fields to establish tracking subscriptions
+    void config.selectedRepos;
+    void config.trackedUsers;
+    void config.upstreamRepos;
+    void config.monitoredRepos;
 
     if (_ws && _ws.readyState === WebSocket.OPEN) {
       sendConfigUpdate(_ws);

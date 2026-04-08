@@ -106,25 +106,35 @@ export async function validateTokenScopes(): Promise<boolean> {
 
   try {
     const response = await client.request("GET /user");
-    const scopeHeader = (response.headers as Record<string, string | undefined>)["x-oauth-scopes"] ?? "";
-    const grantedScopes = scopeHeader
-      .split(",")
-      .map((s: string) => s.trim())
-      .filter(Boolean);
+    const login = String((response.data as { login?: string }).login ?? "unknown");
+    const rawScopeHeader = (response.headers as Record<string, string | undefined>)["x-oauth-scopes"];
 
-    const missingScopes = REQUIRED_SCOPES.filter(
-      (required) => !grantedScopes.includes(required)
-    );
-
-    if (missingScopes.length > 0) {
+    if (rawScopeHeader === undefined) {
+      // Fine-grained PAT — x-oauth-scopes header is not returned
       console.error(
-        `[mcp] Warning: token is missing required scopes: ${missingScopes.join(", ")}. ` +
-          `Granted: ${grantedScopes.join(", ") || "(none)"}`
+        `[mcp] Token validated (fine-grained PAT). User: ${login}. ` +
+          `Scope validation skipped — fine-grained PATs use repository/organization permissions instead of OAuth scopes.`
       );
     } else {
-      console.error(
-        `[mcp] Token validated. User: ${String((response.data as { login?: string }).login ?? "unknown")}, Scopes: ${grantedScopes.join(", ")}`
+      const grantedScopes = rawScopeHeader
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+
+      const missingScopes = REQUIRED_SCOPES.filter(
+        (required) => !grantedScopes.includes(required)
       );
+
+      if (missingScopes.length > 0) {
+        console.error(
+          `[mcp] Warning: token is missing required scopes: ${missingScopes.join(", ")}. ` +
+            `Granted: ${grantedScopes.join(", ") || "(none)"}`
+        );
+      } else {
+        console.error(
+          `[mcp] Token validated. User: ${login}, Scopes: ${grantedScopes.join(", ")}`
+        );
+      }
     }
 
     return true;

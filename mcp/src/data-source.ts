@@ -15,10 +15,11 @@ import type {
   DashboardSummary,
 } from "../../src/shared/types.js";
 import type { TrackedUser } from "../../src/shared/schemas.js";
+import { sendRelayRequest, isRelayConnected } from "./ws-relay.js";
 
 // ── Cached config (populated by config_update notification) ───────────────────
 
-interface CachedConfig {
+export interface CachedConfig {
   selectedRepos: RepoRef[];
   trackedUsers: TrackedUser[];
   upstreamRepos: RepoRef[];
@@ -31,6 +32,10 @@ export function setCachedConfig(c: CachedConfig): void {
   _cachedConfig = c;
 }
 
+export function clearCachedConfig(): void {
+  _cachedConfig = null;
+}
+
 // ── DataSource interface ──────────────────────────────────────────────────────
 
 export interface DataSource {
@@ -40,7 +45,7 @@ export interface DataSource {
   getFailingActions(repo?: string): Promise<WorkflowRun[]>;
   getPRDetails(repo: string, number: number): Promise<PullRequest | null>;
   getRateLimit(): Promise<RateLimitInfo>;
-  getConfig(): Promise<object | null>;
+  getConfig(): Promise<CachedConfig | null>;
   getRepos(): Promise<RepoRef[]>;
 }
 
@@ -79,6 +84,28 @@ function resolveRepos(repo?: string): RepoRef[] {
     );
   }
   return _cachedConfig.selectedRepos;
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function repoFullNameFromUrl(repositoryUrl: string): string {
+  try {
+    const url = new URL(repositoryUrl);
+    const match = url.pathname.match(/^\/repos\/(.+)$/);
+    if (match) return match[1];
+  } catch {
+    // invalid URL — fall through
+  }
+  const prefix = "/repos/";
+  const idx = repositoryUrl.indexOf(prefix);
+  if (idx !== -1) return repositoryUrl.slice(idx + prefix.length);
+  return repositoryUrl;
 }
 
 // ── REST search result → PullRequest mapper ───────────────────────────────────
@@ -163,7 +190,6 @@ interface WorkflowRunRaw {
   created_at: string;
   updated_at: string;
   run_started_at: string;
-  // BUG-007: completed_at is present in GitHub API response but was missing from the interface.
   completed_at: string | null;
   run_attempt: number;
   display_title: string;
@@ -209,9 +235,9 @@ export class OctokitDataSource implements DataSource {
 
   private async getLogin(): Promise<string> {
     if (this._login) return this._login;
-    // BUG-006: Throw if login cannot be determined to prevent empty `involves:` query strings.
     const { data } = await this.octokit.request("GET /user");
     const login = (data as { login: string }).login;
+    // Must throw — an empty login produces a broken "involves:" query string
     if (!login) throw new Error("Could not determine authenticated user login from GET /user");
     this._login = login;
     return this._login;
@@ -222,25 +248,25 @@ export class OctokitDataSource implements DataSource {
     const repos = resolveRepos(repo);
     const results: PullRequest[] = [];
 
-    // PERF-001: Batch repos into groups of 20 to avoid N+1 REST calls.
-    // GitHub search supports multiple repo: qualifiers in a single query.
-    const BATCH_SIZE = 20;
-    const batches: RepoRef[][] = [];
-    for (let i = 0; i < repos.length; i += BATCH_SIZE) {
-      batches.push(repos.slice(i, i + BATCH_SIZE));
-    }
+    // For needs_review, use review-requested: qualifier — REST search lacks reviewDecision data,
+    // so post-filtering on reviewDecision would always return empty.
+    const userQualifier = status === "needs_review"
+      ? `review-requested:${login}`
+      : `involves:${login}`;
+
+    // Batch repos to avoid N+1 REST calls — GitHub search supports multiple repo: qualifiers.
+    const batches = chunkArray(repos, 20);
 
     const batchResults = await Promise.allSettled(
       batches.map((batch) => {
         const repoFilter = batch.map((r) => `repo:${r.owner}/${r.name}`).join("+");
-        const q = `is:pr+is:open+involves:${login}+${repoFilter}`;
+        const q = `is:pr+is:open+${userQualifier}+${repoFilter}`;
         return this.octokit.request("GET /search/issues", { q, per_page: 100 }).then(({ data }) => {
           const items = (data as { items: SearchItem[] }).items ?? [];
           const prs: PullRequest[] = [];
           for (const item of items) {
             if (item.pull_request !== undefined) {
-              // Derive repo from repository_url (last two segments: owner/name)
-              const repoFullName = item.repository_url.replace("https://api.github.com/repos/", "");
+              const repoFullName = repoFullNameFromUrl(item.repository_url);
               prs.push(mapSearchItemToPR(item, repoFullName));
             }
           }
@@ -258,10 +284,12 @@ export class OctokitDataSource implements DataSource {
     }
 
     if (status && status !== "all") {
+      // needs_review is handled by the search qualifier above — no post-filter needed.
+      if (status === "needs_review") return results;
       return results.filter((pr) => {
         switch (status) {
           case "draft": return pr.draft;
-          case "needs_review": return pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === null;
+          // REST search lacks checkStatus data — failing filter returns empty on Octokit path
           case "failing": return pr.checkStatus === "failure";
           case "approved": return pr.reviewDecision === "APPROVED";
           default: return true;
@@ -277,12 +305,8 @@ export class OctokitDataSource implements DataSource {
     const repos = resolveRepos(repo);
     const results: Issue[] = [];
 
-    // PERF-002: Batch repos into groups of 20 to avoid N+1 REST calls.
-    const BATCH_SIZE = 20;
-    const batches: RepoRef[][] = [];
-    for (let i = 0; i < repos.length; i += BATCH_SIZE) {
-      batches.push(repos.slice(i, i + BATCH_SIZE));
-    }
+    // Batch repos to avoid N+1 REST calls.
+    const batches = chunkArray(repos, 20);
 
     const batchResults = await Promise.allSettled(
       batches.map((batch) => {
@@ -294,7 +318,7 @@ export class OctokitDataSource implements DataSource {
           for (const item of items) {
             // Filter out PRs from issue search
             if (item.pull_request === undefined) {
-              const repoFullName = item.repository_url.replace("https://api.github.com/repos/", "");
+              const repoFullName = repoFullNameFromUrl(item.repository_url);
               issues.push(mapSearchItemToIssue(item, repoFullName));
             }
           }
@@ -317,7 +341,6 @@ export class OctokitDataSource implements DataSource {
   async getFailingActions(repo?: string): Promise<WorkflowRun[]> {
     const repos = resolveRepos(repo);
 
-    // PERF-003: Collect all {repo, status} pairs and run them in parallel.
     const pairs = repos.flatMap((r) =>
       (["in_progress", "failure"] as const).map((status) => ({ r, status }))
     );
@@ -436,35 +459,32 @@ export class OctokitDataSource implements DataSource {
     let openPRCount = 0;
     let openIssueCount = 0;
     let needsReviewCount = 0;
-    let approvedUnmergedCount = 0;
+    // REST search lacks reviewDecision data — approved count requires GraphQL (relay path only)
+    const approvedUnmergedCount = 0;
     let failingRunCount = 0;
 
-    try {
-      const prQuery = `is:pr+is:open${involvesPart}+${repoFilter}`;
-      const { data: prData } = await this.octokit.request("GET /search/issues", { q: prQuery, per_page: 1 });
-      openPRCount = (prData as { total_count: number }).total_count;
-    } catch (err) {
-      console.error("[mcp] getDashboardSummary PR count error:", err instanceof Error ? err.message : String(err));
+    const [prResult, issueResult, reviewResult] = await Promise.allSettled([
+      this.octokit.request("GET /search/issues", { q: `is:pr+is:open${involvesPart}+${repoFilter}`, per_page: 1 }),
+      this.octokit.request("GET /search/issues", { q: `is:issue+is:open${involvesPart}+${repoFilter}`, per_page: 1 }),
+      this.octokit.request("GET /search/issues", { q: `is:pr+is:open+review-requested:${login}+${repoFilter}`, per_page: 1 }),
+    ]);
+
+    if (prResult.status === "fulfilled") {
+      openPRCount = (prResult.value.data as { total_count: number }).total_count;
+    } else {
+      console.error("[mcp] getDashboardSummary PR count error:", prResult.reason instanceof Error ? prResult.reason.message : String(prResult.reason));
+    }
+    if (issueResult.status === "fulfilled") {
+      openIssueCount = (issueResult.value.data as { total_count: number }).total_count;
+    } else {
+      console.error("[mcp] getDashboardSummary issue count error:", issueResult.reason instanceof Error ? issueResult.reason.message : String(issueResult.reason));
+    }
+    if (reviewResult.status === "fulfilled") {
+      needsReviewCount = (reviewResult.value.data as { total_count: number }).total_count;
+    } else {
+      console.error("[mcp] getDashboardSummary review count error:", reviewResult.reason instanceof Error ? reviewResult.reason.message : String(reviewResult.reason));
     }
 
-    try {
-      const issueQuery = `is:issue+is:open${involvesPart}+${repoFilter}`;
-      const { data: issueData } = await this.octokit.request("GET /search/issues", { q: issueQuery, per_page: 1 });
-      openIssueCount = (issueData as { total_count: number }).total_count;
-    } catch (err) {
-      console.error("[mcp] getDashboardSummary issue count error:", err instanceof Error ? err.message : String(err));
-    }
-
-    try {
-      const reviewQuery = `is:pr+is:open+review-requested:${login}+${repoFilter}`;
-      const { data: reviewData } = await this.octokit.request("GET /search/issues", { q: reviewQuery, per_page: 1 });
-      needsReviewCount = (reviewData as { total_count: number }).total_count;
-    } catch (err) {
-      console.error("[mcp] getDashboardSummary review count error:", err instanceof Error ? err.message : String(err));
-    }
-
-    // Failing runs: count across all repos (BUG-008: use total_count, not repo presence).
-    // Run in parallel with Promise.allSettled for performance (PERF-003).
     const failingRunResults = await Promise.allSettled(
       repos.map((r) =>
         this.octokit.request(
@@ -482,7 +502,7 @@ export class OctokitDataSource implements DataSource {
     return { openPRCount, openIssueCount, failingRunCount, needsReviewCount, approvedUnmergedCount };
   }
 
-  async getConfig(): Promise<object | null> {
+  async getConfig(): Promise<CachedConfig | null> {
     return _cachedConfig;
   }
 
@@ -493,8 +513,6 @@ export class OctokitDataSource implements DataSource {
 
 // ── WebSocketDataSource ───────────────────────────────────────────────────────
 // Forwards all calls to the SPA via JSON-RPC over WebSocket relay.
-
-import { sendRelayRequest } from "./ws-relay.js";
 
 export class WebSocketDataSource implements DataSource {
   async getDashboardSummary(scope: string): Promise<DashboardSummary> {
@@ -518,7 +536,7 @@ export class WebSocketDataSource implements DataSource {
   }
 
   async getRateLimit(): Promise<RateLimitInfo> {
-    // BUG-002: SPA relay returns { core: {...}, graphql: {...} } — unwrap the core property.
+    // SPA relay returns { core: {...}, graphql: {...} } — unwrap the core property.
     const raw = await sendRelayRequest(METHODS.GET_RATE_LIMIT, {}) as {
       core?: { limit: number; remaining: number; resetAt: string };
       limit?: number;
@@ -533,8 +551,8 @@ export class WebSocketDataSource implements DataSource {
     };
   }
 
-  async getConfig(): Promise<object | null> {
-    return sendRelayRequest(METHODS.GET_CONFIG, {}) as Promise<object | null>;
+  async getConfig(): Promise<CachedConfig | null> {
+    return sendRelayRequest(METHODS.GET_CONFIG, {}) as Promise<CachedConfig | null>;
   }
 
   async getRepos(): Promise<RepoRef[]> {
@@ -544,8 +562,6 @@ export class WebSocketDataSource implements DataSource {
 
 // ── CompositeDataSource ───────────────────────────────────────────────────────
 // Tries WebSocket relay first; falls back to Octokit when relay is unavailable.
-
-import { isRelayConnected } from "./ws-relay.js";
 
 type DataSourceName = "relay" | "octokit";
 
@@ -623,7 +639,7 @@ export class CompositeDataSource implements DataSource {
     );
   }
 
-  async getConfig(): Promise<object | null> {
+  async getConfig(): Promise<CachedConfig | null> {
     return this.tryBoth(
       () => this.ws.getConfig(),
       () => this.octokit.getConfig()

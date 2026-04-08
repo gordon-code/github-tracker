@@ -21,7 +21,7 @@ To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:
 GITHUB_TOKEN=ghp_... pnpm mcp:serve
 ```
 
-Fine-grained PATs with Contents (read) and Metadata (read) are sufficient for most tools.
+Fine-grained PATs need Actions (read), Contents (read), Issues (read), Metadata (read), and Pull requests (read) permissions.
 
 ## Running checks
 

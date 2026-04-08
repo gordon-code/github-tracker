@@ -2,6 +2,7 @@ node_modules/
 dist/
 mcp/dist/
 dist/shared/
+*.tsbuildinfo
 .wrangler/
 .dev.vars
 *.local

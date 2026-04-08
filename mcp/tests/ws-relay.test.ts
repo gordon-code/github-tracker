@@ -68,6 +68,32 @@ function sendJsonRpc(ws: WebSocket, msg: object): void {
   ws.send(JSON.stringify(msg));
 }
 
+async function waitForCondition(
+  condition: () => boolean,
+  timeout = 2000,
+  interval = 10
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("Timeout waiting for condition");
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
+/**
+ * Round-trip sentinel: sends a relay request from the server to the client and
+ * waits for the client to respond.  By the time this resolves, the server has
+ * processed every message that was sent before the sentinel was issued.
+ */
+async function roundTripSentinel(ws: WebSocket): Promise<void> {
+  const sentinelPromise = sendRelayRequest("__sentinel__", {});
+  const raw = await waitForMessage(ws);
+  const msg = JSON.parse(raw) as { id: number };
+  // Respond so the pending request resolves cleanly
+  ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }));
+  await sentinelPromise;
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("WebSocket relay server — connection", () => {
@@ -139,8 +165,8 @@ describe("WebSocket relay server — connection", () => {
     ws.close();
     await waitForClose(ws);
 
-    // Give the server a moment to process the close event
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the server's close handler to set _client = null
+    await waitForCondition(() => !isRelayConnected());
     expect(isRelayConnected()).toBe(false);
   });
 
@@ -152,8 +178,8 @@ describe("WebSocket relay server — connection", () => {
     // Send garbage — server should ignore it gracefully
     ws.send("this is not valid json{{{{");
 
-    // Server should still be up; send a valid message after
-    await new Promise((r) => setTimeout(r, 50));
+    // Round-trip sentinel: proves server processed the malformed message and is still alive
+    await roundTripSentinel(ws);
     expect(ws.readyState).toBe(WebSocket.OPEN);
     expect(isRelayConnected()).toBe(true);
   });
@@ -166,7 +192,8 @@ describe("WebSocket relay server — connection", () => {
     // Valid JSON but wrong jsonrpc version
     ws.send(JSON.stringify({ jsonrpc: "1.0", id: 1, method: "test" }));
 
-    await new Promise((r) => setTimeout(r, 50));
+    // Round-trip sentinel: proves server processed the invalid message and is still alive
+    await roundTripSentinel(ws);
     expect(ws.readyState).toBe(WebSocket.OPEN);
   });
 });
@@ -237,8 +264,8 @@ describe("WebSocket relay server — JSON-RPC request/response", () => {
     client.close();
     await waitForClose(client);
 
-    // Give the server close handler time to run
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for the server's close handler to reject pending requests and clear _client
+    await waitForCondition(() => !isRelayConnected());
 
     await expect(requestPromise).rejects.toThrow(/relay disconnected|disconnected/i);
   });
@@ -310,7 +337,12 @@ describe("WebSocket relay server — notifications", () => {
 
   it("dispatches notifications to registered handlers", async () => {
     const handler = vi.fn();
-    onNotification("test_notification", handler);
+    const handlerCalled = new Promise<void>((resolve) => {
+      onNotification("test_notification", (params) => {
+        handler(params);
+        resolve();
+      });
+    });
 
     // Client sends a notification (no id field)
     sendJsonRpc(client, {
@@ -319,8 +351,8 @@ describe("WebSocket relay server — notifications", () => {
       params: { key: "value" },
     });
 
-    // Wait for handler to be called
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for the notification handler to be invoked
+    await handlerCalled;
     expect(handler).toHaveBeenCalledWith({ key: "value" });
   });
 
@@ -334,7 +366,8 @@ describe("WebSocket relay server — notifications", () => {
       params: {},
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    // Round-trip sentinel: proves server processed the unrecognized message and is still alive
+    await roundTripSentinel(client);
     // No error — server still alive
     expect(isRelayConnected()).toBe(true);
   });
