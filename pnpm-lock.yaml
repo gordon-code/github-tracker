@@ -41,7 +41,7 @@ importers:
     devDependencies:
       '@amiceli/vitest-cucumber':
         specifier: 6.3.0
-        version: 6.3.0(vitest@4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)))
+        version: 6.3.0(vitest@4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.5(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)))
       '@cloudflare/vite-plugin':
         specifier: 1.30.1
         version: 1.30.1(vite@8.0.5(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0))(workerd@1.20260317.1)(wrangler@4.77.0)
@@ -2464,13 +2464,13 @@ packages:
 
 snapshots:
 
-  '@amiceli/vitest-cucumber@6.3.0(vitest@4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)))':
+  '@amiceli/vitest-cucumber@6.3.0(vitest@4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.5(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)))':
     dependencies:
       callsites: 4.2.0
       minimist: 1.2.8
       parsecurrency: 1.1.1
       ts-morph: 27.0.2
-      vitest: 4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.1(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0))
+      vitest: 4.1.1(@types/node@25.5.0)(happy-dom@20.8.9)(vite@8.0.5(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0))
 
   '@babel/code-frame@7.29.0':
     dependencies:
