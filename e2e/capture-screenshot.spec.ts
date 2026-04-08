@@ -472,4 +472,11 @@ test("capture dashboard screenshot", async ({ page }) => {
   }
 
   await page.screenshot({ path: "docs/dashboard-screenshot.png" });
+
+  // Switch to compact density and capture a second screenshot
+  await page.evaluate(() => {
+    document.documentElement.dataset.density = "compact";
+  });
+
+  await page.screenshot({ path: "docs/dashboard-screenshot-compact.png" });
 });

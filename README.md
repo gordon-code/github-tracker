@@ -8,7 +8,16 @@ A dashboard for tracking GitHub issues, PRs, and Actions workflow runs across ma
 
 **Live demo:** https://gh.gordoncode.dev
 
-![Dashboard](docs/dashboard-screenshot.png)
+<table>
+<tr>
+<td align="center"><strong>Comfortable</strong></td>
+<td align="center"><strong>Compact</strong></td>
+</tr>
+<tr>
+<td><img src="docs/dashboard-screenshot.png" alt="Dashboard — comfortable view"></td>
+<td><img src="docs/dashboard-screenshot-compact.png" alt="Dashboard — compact view"></td>
+</tr>
+</table>
 
 ## Documentation
 
