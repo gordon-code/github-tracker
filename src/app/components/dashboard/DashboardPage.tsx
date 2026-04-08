@@ -1,5 +1,5 @@
 import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
@@ -23,6 +23,7 @@ import {
   type DashboardData,
 } from "../../services/poll";
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { formatCount } from "../../lib/format";
@@ -479,6 +480,21 @@ export default function DashboardPage() {
       }).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
     };
+  });
+
+  // Push dashboard data into the MCP relay snapshot on each full refresh.
+  // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
+  // Hot poll updates are intentionally excluded — relay reflects full-refresh data only.
+  createEffect(() => {
+    if (!config.mcpRelayEnabled) return;
+    if (!dashboardData.lastRefreshedAt) return;
+    const d = unwrap(dashboardData);
+    updateRelaySnapshot({
+      issues: d.issues,
+      pullRequests: d.pullRequests,
+      workflowRuns: d.workflowRuns,
+      lastUpdatedAt: Date.now(),
+    });
   });
 
   const userLogin = createMemo(() => user()?.login ?? "");

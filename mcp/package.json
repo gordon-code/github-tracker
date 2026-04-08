@@ -1,0 +1,44 @@
+{
+  "name": "github-tracker-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for GitHub Tracker — serves dashboard data to AI clients",
+  "type": "module",
+  "bin": {
+    "github-tracker-mcp": "./dist/index.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --build",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": ["mcp", "github", "dashboard", "model-context-protocol"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gordon-code/github-tracker.git",
+    "directory": "mcp"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.17.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@octokit/core": "7.0.6",
+    "@octokit/plugin-paginate-rest": "14.0.0",
+    "@octokit/plugin-retry": "8.1.0",
+    "@octokit/plugin-throttling": "11.0.3",
+    "@types/ws": "^8.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "5.9.3",
+    "vitest": "^4.0.0"
+  }
+}

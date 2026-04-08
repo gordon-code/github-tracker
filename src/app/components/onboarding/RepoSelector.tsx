@@ -12,14 +12,12 @@ import { getClient } from "../../services/github";
 import { user } from "../../stores/auth";
 import type { TrackedUser } from "../../stores/config";
 import { relativeTime } from "../../lib/format";
+import { VALID_REPO_NAME } from "../../../shared/validation";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 import { Tooltip, InfoTooltip } from "../shared/Tooltip";
 import ChevronIcon from "../shared/ChevronIcon";
 import { Accordion } from "@kobalte/core";
-
-// Validates owner/repo format (both segments must be non-empty, no spaces)
-const VALID_REPO_NAME = /^[a-zA-Z0-9._-]{1,100}\/[a-zA-Z0-9._-]{1,100}$/;
 
 interface RepoSelectorProps {
   selectedOrgs: string[];

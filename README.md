@@ -92,6 +92,7 @@ Conditional requests using `If-None-Match` headers — GitHub doesn't count 304 
 
 ```
 src/
+  shared/           # Browser-agnostic types, schemas, format utils shared with MCP server
   app/
     components/
       dashboard/    # DashboardPage, IssuesTab, PullRequestsTab, ActionsTab,
@@ -105,9 +106,9 @@ src/
                     # LoadingSpinner, SkeletonRows, ToastContainer, NotificationDrawer,
                     # RepoLockControls, UserAvatarBadge, ExpandCollapseButtons,
                     # RepoGitHubLink, ChevronIcon, ExternalLinkIcon, Tooltip/InfoTooltip
-    lib/            # 14 modules: format, errors, notifications, oauth, pat, url,
+    lib/            # 15 modules: format, errors, notifications, oauth, pat, url,
                     # flashDetection, grouping, reorderHighlight, collections,
-                    # emoji, label-colors, sentry, github-emoji-map.json
+                    # emoji, label-colors, sentry, mcp-relay, github-emoji-map.json
     pages/          # LoginPage, OAuthCallback, PrivacyPage
     services/
       api.ts        # GitHub API methods — issues, PRs, workflow runs, user validation,
@@ -121,8 +122,11 @@ src/
       view.ts       # View state (tabs, sorting, filters, ignored items, locked repos)
   worker/
     index.ts        # OAuth token exchange endpoint, CORS, security headers
-tests/              # unit/component tests across 70 test files
-e2e/                # 15 E2E tests across 3 spec files
+mcp/
+  src/              # MCP server: tools, resources, WebSocket relay, Octokit fallback
+  tests/            # MCP server unit + integration tests
+tests/              # SPA unit/component tests
+e2e/                # Playwright E2E tests
 ```
 
 ## Development
@@ -144,6 +148,10 @@ OAuth tokens are stored in `localStorage` under an app-specific key — this is 
 ## Deployment
 
 See [DEPLOY.md](./DEPLOY.md) for Cloudflare, OAuth App, and CI/CD setup.
+
+## MCP Server
+
+An optional MCP (Model Context Protocol) server lets AI clients like Claude Code and Cursor query your dashboard data — open PRs, issues, failing CI — without leaving the editor. See the [MCP server README](mcp/README.md) for setup, available tools, and configuration.
 
 ## Contributing
 

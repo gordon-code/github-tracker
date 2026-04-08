@@ -1,4 +1,5 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
@@ -687,7 +688,62 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 8: Data */}
+        {/* Section 8: MCP Server Relay */}
+        <Section
+          title="MCP Server Relay"
+          description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
+        >
+          <SettingRow label="Enable relay">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.mcpRelayEnabled}
+              aria-label="Enable MCP relay"
+              class="toggle toggle-primary"
+              checked={config.mcpRelayEnabled}
+              onChange={(e) => saveWithFeedback({ mcpRelayEnabled: e.currentTarget.checked })}
+            />
+          </SettingRow>
+          <Show when={config.mcpRelayEnabled}>
+            <SettingRow label="Relay status">
+              <span
+                class={
+                  getRelayStatus() === "connected"
+                    ? "text-sm text-success"
+                    : getRelayStatus() === "connecting"
+                      ? "text-sm text-warning"
+                      : "text-sm text-base-content/60"
+                }
+              >
+                {getRelayStatus() === "connected"
+                  ? "Connected"
+                  : getRelayStatus() === "connecting"
+                    ? "Connecting..."
+                    : "Not connected"}
+              </span>
+            </SettingRow>
+            <SettingRow label="Port">
+              <input
+                type="number"
+                aria-label="MCP relay port"
+                class="input input-sm w-24"
+                value={config.mcpRelayPort}
+                min={1024}
+                max={65535}
+                onBlur={(e) => {
+                  const port = parseInt(e.currentTarget.value, 10);
+                  if (port >= 1024 && port <= 65535) {
+                    saveWithFeedback({ mcpRelayPort: port });
+                  } else {
+                    e.currentTarget.value = String(config.mcpRelayPort);
+                  }
+                }}
+              />
+            </SettingRow>
+          </Show>
+        </Section>
+
+        {/* Section 9: Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow

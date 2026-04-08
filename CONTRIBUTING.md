@@ -13,13 +13,30 @@ pnpm run dev
 
 The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app client ID in `.env` (copy `.env.example` and fill in your value).
 
+The repo uses a pnpm workspace: the root package is the SolidJS SPA; `mcp/` is a separate package (`github-tracker-mcp`) built with tsup. Running `pnpm install` at the root installs both.
+
+To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:
+
+```bash
+GITHUB_TOKEN=ghp_... pnpm mcp:serve
+```
+
+Fine-grained PATs need Actions (read), Contents (read), Issues (read), and Pull requests (read) permissions.
+
 ## Running checks
 
 ```bash
-pnpm test           # unit tests (Vitest)
+pnpm test           # unit tests (Vitest — root + mcp/)
 pnpm test:e2e       # Playwright E2E tests (chromium)
-pnpm run typecheck  # TypeScript validation
+pnpm run typecheck  # TypeScript validation (root + mcp/)
 pnpm run screenshot # Capture dashboard screenshot (saves to docs/)
+pnpm mcp:serve      # Start the MCP server (requires GITHUB_TOKEN)
+```
+
+To test MCP tools interactively, use the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector tsx mcp/src/index.ts
 ```
 
 CI runs typecheck, unit tests, and E2E tests on every PR. Make sure they pass locally before pushing.
@@ -75,6 +92,43 @@ type(scope): description
 ```
 
 Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
+
+## Releasing the MCP server
+
+The MCP server (`mcp/` package) is published to npm and GitHub Releases via CI.
+
+### First publish (manual)
+
+The very first publish must be done locally — OIDC trusted publishing can only be configured for packages that already exist on npm.
+
+1. Create an npm account at [npmjs.com](https://www.npmjs.com/signup) if you don't have one
+2. Log in locally: `npm login`
+3. Build and publish:
+   ```bash
+   cd mcp
+   pnpm run build
+   pnpm publish --access public
+   ```
+
+### Trusted publishing setup (one-time, after first publish)
+
+CI publishes via npm OIDC trusted publishing — no tokens or secrets needed.
+
+1. Go to **npmjs.com > github-tracker-mcp > Settings > Trusted Publishers**
+2. Add a trusted publisher:
+   - **Owner:** `gordon-code`
+   - **Repository:** `github-tracker`
+   - **Workflow filename:** `publish-mcp.yml`
+
+### Cutting a release
+
+```bash
+cd mcp
+pnpm version patch   # or minor / major
+git push upstream main --follow-tags
+```
+
+`pnpm version` bumps `mcp/package.json`, commits, and creates a `github-tracker-mcp@X.Y.Z` tag. Pushing that tag to upstream triggers CI, which typechecks, builds, tests, publishes to npm, and creates a GitHub release.
 
 ## Pull requests
 

@@ -34,6 +34,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
 - [Notifications](#notifications)
 - [Tracked Items](#tracked-items)
 - [Repo Pinning](#repo-pinning)
+- [MCP Server Integration](#mcp-server-integration)
 - [Settings Reference](#settings-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -359,6 +360,47 @@ Pin state is per-tab — a repo can be pinned on the Issues tab but not the Pull
 
 ---
 
+## MCP Server Integration
+
+The MCP (Model Context Protocol) server lets AI clients like Claude Code and Cursor query your dashboard data — open PRs, issues, failing CI — without leaving the editor.
+
+MCP access is fully opt-in. Nothing is exposed unless you explicitly run the standalone server or enable the WebSocket relay in Settings.
+
+### Standalone mode
+
+Run the MCP server with a GitHub token for direct API access:
+
+```bash
+GITHUB_TOKEN=ghp_... npx github-tracker-mcp
+```
+
+This works without the dashboard open. The server fetches data directly from GitHub using the token. See the [MCP server README](https://github.com/gordon-code/github-tracker/tree/main/mcp) for Claude Code configuration and the full tool reference.
+
+### WebSocket relay mode
+
+For richer data without extra API calls, connect the MCP server to the running dashboard:
+
+1. Open **Settings > MCP Server Relay**
+2. Toggle **Enable relay** on
+3. The status indicator shows "Connected" when the MCP server is running and linked
+
+When connected, the MCP server receives live dashboard data over a local WebSocket connection (`ws://127.0.0.1:9876`). This provides the same enriched data you see in the dashboard — GraphQL-sourced review decisions, check statuses, and reviewer lists — without consuming additional API quota.
+
+The relay falls back to direct GitHub API calls automatically when the dashboard is closed. Set `GITHUB_TOKEN` even when using the relay as a safety net — without it, all tool calls fail if the relay disconnects.
+
+### Available tools
+
+| Tool | What it returns |
+|------|----------------|
+| `get_dashboard_summary` | Counts: open PRs, open issues, failing CI, PRs needing review, approved but unmerged |
+| `get_open_prs` | Open PRs with CI status, review decision, size, reviewers |
+| `get_open_issues` | Open issues across tracked repos |
+| `get_failing_actions` | In-progress or recently failed workflow runs |
+| `get_pr_details` | Full details for a specific PR |
+| `get_rate_limit` | Current GitHub API quota |
+
+---
+
 ## Settings Reference
 
 Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**.
@@ -382,6 +424,8 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 | Remember last tab | On | Return to the last active tab on revisit. |
 | Enable tracked items | Off | Show the Tracked tab for pinning issues and PRs to a personal TODO list. |
 | API Usage | — | Displays per-source API call counts, pool labels (Core/GraphQL), and last-called timestamps for the current rate limit window. Counts auto-reset when the rate limit window expires. Use "Reset counts" to clear manually. |
+| MCP relay enabled | Off | Allow a local MCP server to receive live dashboard data over WebSocket. |
+| MCP relay port | 9876 | Port for the WebSocket relay connection. Must match the MCP server's `MCP_WS_PORT`. |
 
 ### View State Settings
 
@@ -429,6 +473,18 @@ When a tab has been hidden for more than 2 minutes, a catch-up fetch fires autom
 **I want to stop tracking a repository.**
 
 Go to **Settings > Repositories > Manage Repositories**, find the repo, and deselect it. If it was in the monitored list, it will be removed from monitoring automatically.
+
+**MCP relay shows "Connecting..." but never connects.**
+
+- Verify the MCP server is running (`GITHUB_TOKEN=ghp_... npx github-tracker-mcp` or `pnpm mcp:serve`)
+- Check that the port in Settings matches the MCP server's port (default: 9876)
+- The MCP server binds to `127.0.0.1` only — it must run on the same machine as your browser
+
+**MCP tools return empty or stale data.**
+
+- If the dashboard is open with the relay enabled, the MCP server uses live dashboard data. Navigate to the Dashboard tab to trigger a data load.
+- If the dashboard is closed, the MCP server falls back to direct API calls using `GITHUB_TOKEN`. REST search lacks check status and review decision data, so PR filters like `failing` and `approved` may return empty results. Use the relay for full filter accuracy.
+- The relay snapshot updates on each full refresh (every 5 minutes by default). Hot poll updates are not forwarded to the relay.
 
 **How do I sign out or reset everything?**
 
