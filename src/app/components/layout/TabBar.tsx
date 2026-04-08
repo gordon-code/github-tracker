@@ -42,7 +42,7 @@ export default function TabBar(props: TabBarProps) {
               </Show>
             </Tabs.Trigger>
             <Show when={props.enableTracking}>
-              <Tabs.Trigger value="tracked" class="tab data-[selected]:tab-active">
+              <Tabs.Trigger value="tracked" class="tab compact:tab-sm data-[selected]:tab-active">
                 Tracked
                 <Show when={props.counts?.tracked !== undefined}>
                   <span class="badge badge-sm badge-neutral ml-1">{props.counts?.tracked}</span>

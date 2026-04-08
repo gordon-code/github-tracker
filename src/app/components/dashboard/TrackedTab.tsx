@@ -168,11 +168,11 @@ export default function TrackedTab(props: TrackedTabProps) {
                       }
                     >
                       {(live) => {
-                        const pr = () => item.type === "pullRequest" ? live() as PullRequest : undefined;
-                        const commentCount = () =>
+                        const pr = createMemo(() => item.type === "pullRequest" ? live() as PullRequest : undefined);
+                        const commentCount = createMemo(() =>
                           item.type === "pullRequest"
                             ? (pr()!.enriched !== false ? pr()!.comments + pr()!.reviewThreads : undefined)
-                            : (live() as Issue).comments;
+                            : (live() as Issue).comments);
 
                         return (
                           <ItemRow
