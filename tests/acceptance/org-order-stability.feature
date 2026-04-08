@@ -32,13 +32,11 @@ Feature: Freeze org display order in RepoSelector after initial sort
     When all orgs finish loading
     Then the org header order is "charlie", "acme-corp", "beta-org", "delta-inc"
 
-  # S5 DEFERRED until accordion layout merges from worktree-ux-improvements.
-  # Without accordion, S5 duplicates S1's code path with more orgs.
-  # Scenario: S5 - Org order stable in accordion layout after retry
-  #   Given the RepoSelector displays 7 orgs in accordion layout with "alice" first and "echo-labs" showing a Retry button
-  #   When the user clicks Retry on "echo-labs" and its repos load successfully
-  #   Then the org header order remains "alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"
-  #   And the currently expanded accordion panel remains expanded
+  Scenario: S5 - Org order stable in accordion layout after retry
+    Given the RepoSelector displays 7 orgs in accordion layout with "alice" first and "echo-labs" showing a Retry button
+    When the user clicks Retry on "echo-labs" and its repos load successfully
+    Then the org header order remains "alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"
+    And the currently expanded accordion panel remains expanded
 
   Scenario: S6 - New org appears in correct sorted position with 6+ orgs
     Given the RepoSelector displays 6 orgs all loaded and sorted with "alice" as the personal org

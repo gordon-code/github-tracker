@@ -1,4 +1,4 @@
-import { vi, expect } from "vitest";
+import { vi, expect, afterAll } from "vitest";
 
 // vitest-cucumber maps each Given/When/Then to a separate test(). The DOM must
 // persist across steps within a scenario, but @solidjs/testing-library registers
@@ -39,6 +39,13 @@ import { render, screen, waitFor, fireEvent, cleanup } from "@solidjs/testing-li
 
 const feature = await loadFeature("../org-order-stability.feature");
 
+// STL_SKIP_AUTO_CLEANUP is file-scoped (Vitest isolates each file in its own
+// module context), but clean it up explicitly so the env doesn't leak if
+// Vitest's isolation model changes in future versions.
+afterAll(() => {
+  delete process.env.STL_SKIP_AUTO_CLEANUP;
+});
+
 // ── Org entry fixtures ────────────────────────────────────────────────────────
 const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
 const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
@@ -58,8 +65,10 @@ function makeOrgRepos(org: string): RepoEntry[] {
 }
 
 // ── Helper: flat (non-accordion) org header order ────────────────────────────
+// Org names follow GitHub's [A-Za-z0-9-] pattern — no regex escaping needed.
 function getOrgHeaderOrder(orgNames: string[]): string[] {
-  const pattern = new RegExp(`^(${orgNames.join("|")})$`);
+  const escaped = orgNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`^(${escaped.join("|")})$`);
   return screen.getAllByText(pattern).map((el) => el.textContent!);
 }
 
@@ -284,6 +293,79 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
       }
     );
   });
+
+  // ── S5: Org order stable in accordion layout after retry ────────────────
+  Scenario(
+    "S5 - Org order stable in accordion layout after retry",
+    ({ Given, When, Then, And }) => {
+      const sevenOrgs = ["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"];
+
+      Given(
+        'the RepoSelector displays 7 orgs in accordion layout with "alice" first and "echo-labs" showing a Retry button',
+        async () => {
+          vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+            if (org === "echo-labs") return Promise.reject(new Error("echo load failed"));
+            return Promise.resolve(makeOrgRepos(org as string));
+          });
+
+          const sevenEntries = sevenOrgs.map((login) => ({
+            login,
+            avatarUrl: "",
+            type: login === "alice" ? ("user" as const) : ("org" as const),
+          }));
+
+          render(() => (
+            <RepoSelector
+              selectedOrgs={sevenOrgs}
+              orgEntries={sevenEntries}
+              selected={[]}
+              onChange={vi.fn()}
+            />
+          ));
+
+          // Wait for accordion mode to render, expand echo-labs to show Retry
+          await waitFor(() => {
+            screen.getByRole("button", { name: /alice/ });
+          });
+
+          const echoBtn = screen.getByRole("button", { name: /echo-labs/ });
+          fireEvent.click(echoBtn);
+
+          await waitFor(() => {
+            screen.getByText("Retry");
+          });
+        }
+      );
+
+      When(
+        'the user clicks Retry on "echo-labs" and its repos load successfully',
+        async () => {
+          vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+            Promise.resolve(makeOrgRepos(org as string))
+          );
+
+          fireEvent.click(screen.getByText("Retry"));
+
+          await waitFor(() => {
+            screen.getByText("echo-labs-repo");
+          });
+        }
+      );
+
+      Then(
+        'the org header order remains "alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"',
+        () => {
+          const order = getAccordionOrder(sevenOrgs);
+          expect(order).toEqual(sevenOrgs);
+        }
+      );
+
+      And("the currently expanded accordion panel remains expanded", () => {
+        const echoBtn = screen.getByRole("button", { name: /echo-labs/ });
+        expect(echoBtn.getAttribute("aria-expanded")).toBe("true");
+      });
+    }
+  );
 
   // ── S6: New org appears in correct sorted position with 6+ orgs ──────────
   Scenario(
