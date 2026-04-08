@@ -1,4 +1,12 @@
 import { vi, expect } from "vitest";
+
+// Prevent @solidjs/testing-library from auto-cleaning the DOM between steps.
+// vitest-cucumber maps each Given/When/Then to a separate test(), so the DOM
+// must persist across steps within a scenario. Cleanup is done manually in
+// AfterEachScenario instead.
+vi.hoisted(() => {
+  process.env.STL_SKIP_AUTO_CLEANUP = "true";
+});
 import type { RepoEntry } from "../../../src/app/services/api";
 
 // Mock getClient before importing component
@@ -27,7 +35,7 @@ import * as api from "../../../src/app/services/api";
 import RepoSelector from "../../../src/app/components/onboarding/RepoSelector";
 
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
-import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent, cleanup } from "@solidjs/testing-library";
 
 const feature = await loadFeature("../org-order-stability.feature");
 
@@ -72,7 +80,7 @@ type OrgEntry = { login: string; avatarUrl: string; type: "user" | "org" };
 let setSelectedOrgs: (orgs: string[]) => void;
 let setOrgEntries: (entries: OrgEntry[]) => void;
 
-describeFeature(feature, ({ Scenario, Background, BeforeEachScenario }) => {
+describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachScenario }) => {
   BeforeEachScenario(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
@@ -81,6 +89,10 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario }) => {
     vi.mocked(api.discoverUpstreamRepos).mockResolvedValue([]);
     setSelectedOrgs = () => {};
     setOrgEntries = () => {};
+  });
+
+  AfterEachScenario(() => {
+    cleanup();
   });
 
   // Background is handled by module-level vi.mock for auth store.
