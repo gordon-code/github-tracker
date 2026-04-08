@@ -1495,7 +1495,7 @@ describe("RepoSelector — org accordion", () => {
 // Initial sort order is covered by the existing "shows personal org first" test (line 238).
 // S1 and S2 below cover post-sort stability (frozen order unchanged after repo retry and
 // checkbox toggle respectively).
-// S5 (frozen order in accordion mode with pre-loaded entries) is deferred pending accordion merge.
+// S5 below covers retry stability in accordion mode (aria-expanded preservation after retry).
 
 describe("RepoSelector — frozen org order", () => {
   function makeOrgRepos(org: string): RepoEntry[] {
@@ -1707,6 +1707,76 @@ describe("RepoSelector — frozen org order", () => {
 
     // Verify new order with beta-org inserted between acme-corp and charlie-co
     expect(getAccordionOrder(newOrgs)).toEqual(["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
+  });
+
+  // S5: Org order stable with 7 orgs after retry in accordion mode
+  it("org order stable with 7 orgs after retry in accordion mode (S5)", async () => {
+    const sevenOrgs = ["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"];
+    const sevenEntries = sevenOrgs.map((login) => ({
+      login,
+      avatarUrl: "",
+      type: login === "alice" ? ("user" as const) : ("org" as const),
+    }));
+
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "echo-labs") return Promise.reject(new Error("echo load failed"));
+      return Promise.resolve(makeOrgRepos(org as string));
+    });
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={sevenOrgs}
+        orgEntries={sevenEntries}
+        selected={[]}
+        onChange={vi.fn()}
+      />
+    ));
+
+    // Wait for accordion mode to render
+    await waitFor(() => {
+      screen.getByRole("button", { name: /alice/ });
+    });
+
+    // Expand echo-labs to reveal its error state and Retry button
+    const echoBtn = screen.getByRole("button", { name: /echo-labs/ });
+    fireEvent.click(echoBtn);
+    expect(echoBtn.getAttribute("aria-expanded")).toBe("true");
+
+    await waitFor(() => {
+      screen.getByText("Retry");
+    });
+
+    // Verify initial sorted order via accordion trigger buttons
+    const getAccordionOrder = (orgNames: string[]) =>
+      orgNames
+        .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name) }) }))
+        .sort((a, b) => {
+          const pos = a.btn.compareDocumentPosition(b.btn);
+          return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+        })
+        .map(({ name }) => name);
+
+    const initialOrder = getAccordionOrder(sevenOrgs);
+    expect(initialOrder).toEqual(["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
+
+    // Set up retry to succeed
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
+      Promise.resolve(makeOrgRepos(org as string))
+    );
+
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      screen.getByText("echo-labs-repo");
+    });
+
+    // Order must be unchanged after retry
+    const orderAfterRetry = getAccordionOrder(sevenOrgs);
+    expect(orderAfterRetry).toEqual(["alice", "acme-corp", "beta-org", "charlie-co", "delta-inc", "echo-labs", "foxtrot-io"]);
+
+    // The expanded panel (echo-labs) must remain expanded
+    const echoBtnAfter = screen.getByRole("button", { name: /echo-labs/ });
+    expect(echoBtnAfter.getAttribute("aria-expanded")).toBe("true");
   });
 
   // S7: Frozen order invalidated on simultaneous add and remove
