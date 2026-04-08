@@ -45,6 +45,6 @@ Feature: Freeze org display order in RepoSelector after initial sort
 
   Scenario: S7 - Frozen order invalidated on simultaneous add and remove
     Given the RepoSelector displays 3 orgs sorted as "alice", "acme-corp", "delta-inc" with order frozen
-    When the user's org access changes so that "delta-inc" is removed and "beta-org" is added and beta-org finishes loading
-    Then the org header order becomes "alice", "acme-corp", "beta-org"
+    When the user's org access changes so that "delta-inc" is removed and "aaa-org" is added and aaa-org finishes loading
+    Then the org header order becomes "alice", "aaa-org", "acme-corp"
     And "delta-inc" no longer appears in the list

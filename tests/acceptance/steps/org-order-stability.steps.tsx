@@ -51,6 +51,7 @@ const aliceEntry = { login: "alice", avatarUrl: "", type: "user" as const };
 const acmeEntry = { login: "acme-corp", avatarUrl: "", type: "org" as const };
 const betaEntry = { login: "beta-org", avatarUrl: "", type: "org" as const };
 const deltaEntry = { login: "delta-inc", avatarUrl: "", type: "org" as const };
+const aaaEntry = { login: "aaa-org", avatarUrl: "", type: "org" as const };
 
 // ── Helper: create one repo per org ──────────────────────────────────────────
 function makeOrgRepos(org: string): RepoEntry[] {
@@ -75,7 +76,7 @@ function getOrgHeaderOrder(orgNames: string[]): string[] {
 // ── Helper: accordion (6+ orgs) org header order ─────────────────────────────
 function getAccordionOrder(orgNames: string[]): string[] {
   return orgNames
-    .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name) }) }))
+    .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }) }))
     .sort((a, b) => {
       const pos = a.btn.compareDocumentPosition(b.btn);
       return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
@@ -491,20 +492,23 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
       );
 
       When(
-        'the user\'s org access changes so that "delta-inc" is removed and "beta-org" is added and beta-org finishes loading',
+        'the user\'s org access changes so that "delta-inc" is removed and "aaa-org" is added and aaa-org finishes loading',
         async () => {
-          setSelectedOrgs(["alice", "acme-corp", "beta-org"]);
-          setOrgEntries([aliceEntry, acmeEntry, betaEntry]);
+          // aaa-org sorts BEFORE acme-corp alphabetically. If the frozen order
+          // is NOT invalidated, the replay logic appends aaa-org at the end
+          // (alice, acme-corp, aaa-org) instead of re-sorting (alice, aaa-org, acme-corp).
+          setSelectedOrgs(["alice", "acme-corp", "aaa-org"]);
+          setOrgEntries([aliceEntry, acmeEntry, aaaEntry]);
 
           await waitFor(() => {
-            screen.getByText("beta-org-repo");
+            screen.getByText("aaa-org-repo");
           });
         }
       );
 
-      Then('the org header order becomes "alice", "acme-corp", "beta-org"', () => {
-        const order = getOrgHeaderOrder(["alice", "acme-corp", "beta-org"]);
-        expect(order).toEqual(["alice", "acme-corp", "beta-org"]);
+      Then('the org header order becomes "alice", "aaa-org", "acme-corp"', () => {
+        const order = getOrgHeaderOrder(["alice", "aaa-org", "acme-corp"]);
+        expect(order).toEqual(["alice", "aaa-org", "acme-corp"]);
       });
 
       And('"delta-inc" no longer appears in the list', () => {
