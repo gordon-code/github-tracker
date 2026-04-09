@@ -187,7 +187,7 @@ function validateAndGuardProxyRoute(request: Request, env: Env): Response | null
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "gitlab-pat"]);
 
-async function handleProxySeal(request: Request, env: Env): Promise<Response> {
+async function handleProxySeal(request: Request, env: Env, sessionId: string): Promise<Response> {
   if (request.method !== "POST") {
     return errorResponse("method_not_allowed", 405);
   }
@@ -248,8 +248,9 @@ async function handleProxySeal(request: Request, env: Env): Promise<Response> {
     return errorResponse("seal_failed", 500);
   }
 
-  // SC-11: log seal operations
+  // SC-11: log seal operations (sessionId for correlation)
   log("info", "token_sealed", {
+    sessionId,
     purpose,
     token_length: token.length,
   }, request);
@@ -718,7 +719,7 @@ export default {
 
       // Step 5: Sealed-token endpoint
       if (url.pathname === "/api/proxy/seal") {
-        const sealResponse = await handleProxySeal(request, env);
+        const sealResponse = await handleProxySeal(request, env, sessionId);
         if (setCookie) {
           const headers = new Headers(sealResponse.headers);
           headers.set("Set-Cookie", setCookie);
