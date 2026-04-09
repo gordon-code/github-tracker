@@ -251,7 +251,7 @@ Normally, the dashboard shows only issues and PRs that involve you (or a tracked
 
 **How to enable:** In **Settings > Repositories**, expand the repo panel. Each repo has an eye icon toggle. Enabling it adds the repo to the monitored list (maximum 10 monitored repos).
 
-**Effect on display:** Repo groups for monitored repos show a **Monitoring all** badge in their header. Items from monitored repos are always visible even when the Scope filter is set to "Involves me", and they bypass the User filter.
+**Effect on display:** Repo groups for monitored repos show a **Monitoring all** badge in their header. In "Involves me" scope, monitored repo items are shown when you are the author, assignee, or reviewer; switch to "All activity" to see all monitored repo items. Monitored repo items bypass the User filter.
 
 Upstream repos cannot be monitored (only selected repos are eligible).
 
