@@ -111,7 +111,7 @@ When a group is collapsed, a brief preview of any status change detected by the 
 The **Scope** filter chip appears on the Issues and Pull Requests tabs when you have tracked users configured or monitor-all repos enabled. It has two options:
 
 - **Involves me** (default) — shows items where you or any of your tracked users are involved (author, assignee, reviewer, or mentioned). For monitored repos, only items where you are the author, assignee, or reviewer are shown.
-- **All activity** — shows every open item across your selected repos. Items involving you or your tracked users are highlighted with a blue left border.
+- **All activity** — shows every open item across your selected repos. Items involving you or your tracked users are highlighted with a colored left border.
 
 The scope filter is hidden (and always set to "Involves me") when you have no tracked users and no monitor-all repos, because in that configuration all fetched data already involves you.
 
