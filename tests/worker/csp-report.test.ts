@@ -8,6 +8,10 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     GITHUB_CLIENT_SECRET: "test_client_secret",
     ALLOWED_ORIGIN: "https://gh.gordoncode.dev",
     SENTRY_DSN: "https://abc123@o123456.ingest.sentry.io/7890123",
+    SESSION_KEY: "dGVzdC1zZXNzaW9uLWtleQ==",
+    SEAL_KEY: "dGVzdC1zZWFsLWtleQ==",
+    TURNSTILE_SECRET_KEY: "test-turnstile-secret",
+    PROXY_RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
     ...overrides,
   };
 }

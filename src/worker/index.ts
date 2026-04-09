@@ -1,10 +1,20 @@
-export interface Env {
+import { CryptoEnv, deriveKey, sealToken, SEAL_SALT } from "./crypto";
+import { SessionEnv, ensureSession } from "./session";
+import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
+import { validateProxyRequest } from "./validation";
+
+interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   ALLOWED_ORIGIN: string;
   SENTRY_DSN?: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
   SENTRY_SECURITY_TOKEN?: string; // Optional: Sentry security token for Allowed Domains validation
+  PROXY_RATE_LIMITER: RateLimiter; // Workers Rate Limiting Binding
 }
 
 // Predefined error strings only (SDR-006)
@@ -12,7 +22,14 @@ type ErrorCode =
   | "token_exchange_failed"
   | "invalid_request"
   | "method_not_allowed"
-  | "not_found";
+  | "not_found"
+  | "origin_mismatch"
+  | "cross_site_request"
+  | "missing_csrf_header"
+  | "invalid_content_type"
+  | "turnstile_failed"
+  | "rate_limited"
+  | "seal_failed";
 
 // Structured logging — Cloudflare auto-indexes JSON fields for querying.
 // NEVER log secrets: codes, tokens, client_secret, cookie values.
@@ -41,7 +58,7 @@ function log(
 function errorResponse(
   code: ErrorCode,
   status: number,
-  corsHeaders: Record<string, string>
+  corsHeaders: Record<string, string> = {}
 ): Response {
   return new Response(JSON.stringify({ error: code }), {
     status,
@@ -106,6 +123,138 @@ function getCorsHeaders(
     };
   }
   return {};
+}
+
+// ── Proxy CORS headers ─────────────────────────────────────────────────────
+// SC-7: Must check requestOrigin === allowedOrigin before reflecting.
+// Returns empty object if no match — never reflects untrusted origins.
+function getProxyCorsHeaders(
+  requestOrigin: string | null,
+  allowedOrigin: string
+): Record<string, string> {
+  if (requestOrigin !== allowedOrigin) return {};
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "POST, GET",
+    "Access-Control-Allow-Headers": "Content-Type, X-Requested-With, cf-turnstile-response",
+    "Vary": "Origin",
+  };
+}
+
+// ── Proxy route patterns ─────────────────────────────────────────────────────
+function isProxyPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/proxy/") ||
+    pathname.startsWith("/api/jira/") ||
+    pathname.startsWith("/api/gitlab/")
+  );
+}
+
+// ── Validation gate for proxy routes ─────────────────────────────────────────
+// Returns a Response if rejected, null if validation passes.
+function validateAndGuardProxyRoute(request: Request, env: Env): Response | null {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+
+  if (!isProxyPath(pathname)) return null;
+
+  const origin = request.headers.get("Origin");
+
+  // Handle OPTIONS preflight for proxy routes explicitly.
+  // Legitimate SPA requests are same-origin and don't trigger preflight,
+  // so this handler exists only to explicitly reject cross-origin preflights.
+  if (request.method === "OPTIONS") {
+    const corsHeaders = getProxyCorsHeaders(origin, env.ALLOWED_ORIGIN);
+    if (Object.keys(corsHeaders).length === 0) {
+      return new Response(null, { status: 403, headers: SECURITY_HEADERS });
+    }
+    return new Response(null, {
+      status: 204,
+      headers: { ...corsHeaders, "Access-Control-Max-Age": "86400", ...SECURITY_HEADERS },
+    });
+  }
+
+  const result = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!result.ok) {
+    log("warn", "proxy_validation_failed", { code: result.code, pathname }, request);
+    return errorResponse(result.code as ErrorCode, result.status);
+  }
+
+  return null;
+}
+
+// ── Sealed-token endpoint ────────────────────────────────────────────────────
+async function handleProxySeal(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405);
+  }
+
+  // Session + rate limiting (done by caller, sessionId passed in)
+  // Extract Turnstile token and verify (Step 6)
+  const turnstileToken = extractTurnstileToken(request);
+  if (!turnstileToken) {
+    log("warn", "seal_turnstile_missing", {}, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+
+  const ip = request.headers.get("CF-Connecting-IP");
+  const turnstileResult = await verifyTurnstile(turnstileToken, ip, env);
+  if (!turnstileResult.success) {
+    log("warn", "seal_turnstile_failed", { error_codes: turnstileResult.errorCodes }, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400);
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return errorResponse("invalid_request", 400);
+  }
+
+  const token = (body as Record<string, unknown>)["token"];
+  const purpose = (body as Record<string, unknown>)["purpose"];
+
+  if (typeof token !== "string") {
+    return errorResponse("invalid_request", 400);
+  }
+  if (token.length > 2048) {
+    return errorResponse("invalid_request", 400);
+  }
+  // SC-8: purpose field required for token audience binding
+  if (typeof purpose !== "string" || purpose.length === 0) {
+    return errorResponse("invalid_request", 400);
+  }
+
+  let sealed: string;
+  try {
+    // SC-8: derive key with purpose-scoped info string
+    const key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
+    sealed = await sealToken(token, key);
+  } catch (err) {
+    // SC-9: log error server-side but DO NOT include crypto error in response
+    log("error", "seal_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    return errorResponse("seal_failed", 500);
+  }
+
+  // SC-11: log seal operations
+  log("info", "token_sealed", {
+    purpose,
+    token_length: token.length,
+  }, request);
+
+  return new Response(JSON.stringify({ sealed }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      ...SECURITY_HEADERS,
+    },
+  });
 }
 
 // ── Sentry tunnel ─────────────────────────────────────────────────────────
@@ -220,6 +369,7 @@ async function handleSentryTunnel(
       method: "POST",
       headers: sentryHeaders,
       body,
+      redirect: "error",
     });
 
     log("info", "sentry_tunnel_forwarded", {
@@ -329,6 +479,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
           ...(env.SENTRY_SECURITY_TOKEN ? { "X-Sentry-Token": env.SENTRY_SECURITY_TOKEN } : {}),
         },
         body: JSON.stringify(payload),
+        redirect: "error",
       }).catch(() => null)
     )
   );
@@ -432,6 +583,7 @@ async function handleTokenExchange(
           client_secret: env.GITHUB_CLIENT_SECRET,
           code,
         }),
+        redirect: "error",
       }
     );
     githubStatus = githubResp.status;
@@ -532,6 +684,47 @@ export default {
       return new Response("OK", {
         headers: SECURITY_HEADERS,
       });
+    }
+
+    // ── Proxy routes: validation, session, and rate limiting ─────────────────
+    // Applies to /api/proxy/*, /api/jira/*, /api/gitlab/*
+    // validateAndGuardProxyRoute handles OPTIONS preflight for proxy routes.
+    const guardResponse = validateAndGuardProxyRoute(request, env);
+    if (guardResponse !== null) return guardResponse;
+
+    if (isProxyPath(url.pathname)) {
+      // Step 3: Session middleware — ensureSession never throws (SDR-003)
+      const { sessionId, setCookie } = await ensureSession(request, env);
+
+      // Step 4: Rate limiting using session ID as key
+      const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
+      if (!success) {
+        log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
+        const rateLimitResponse = errorResponse("rate_limited", 429);
+        const headers = new Headers(rateLimitResponse.headers);
+        headers.set("Retry-After", "60");
+        if (setCookie) headers.set("Set-Cookie", setCookie);
+        return new Response(rateLimitResponse.body, {
+          status: 429,
+          headers,
+        });
+      }
+
+      // Step 5: Sealed-token endpoint
+      if (url.pathname === "/api/proxy/seal") {
+        const sealResponse = await handleProxySeal(request, env);
+        if (setCookie) {
+          const headers = new Headers(sealResponse.headers);
+          headers.set("Set-Cookie", setCookie);
+          return new Response(sealResponse.body, {
+            status: sealResponse.status,
+            headers,
+          });
+        }
+        return sealResponse;
+      }
+
+      // Other proxy routes not yet implemented — fall through to 404
     }
 
     if (url.pathname.startsWith("/api/")) {
