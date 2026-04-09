@@ -118,7 +118,7 @@ export async function sealApiToken(token: string, purpose: string): Promise<stri
     let message = "unknown_error";
     try {
       const body = (await res.json()) as { code?: string; error?: string };
-      message = body.code ?? body.error ?? message;
+      message = body.error ?? message;
     } catch {
       // ignore parse errors — keep default message
     }

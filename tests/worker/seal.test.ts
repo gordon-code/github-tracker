@@ -171,6 +171,21 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.headers.get("Retry-After")).toBe("60");
   });
 
+  it("request proceeds when rate limiter throws (fail-open)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+
+    const rateLimiter = { limit: vi.fn().mockRejectedValue(new Error("binding unavailable")) };
+    const req = makeSealRequest();
+    const res = await worker.fetch(req, makeEnv({ PROXY_RATE_LIMITER: rateLimiter }));
+
+    // Should NOT be 429 or 500 — rate limiter failure is fail-open
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["sealed"]).toBeDefined();
+  });
+
   // ── Input validation ──────────────────────────────────────────────────────
 
   it("request with token exceeding 2048 chars returns 400 with invalid_request", async () => {

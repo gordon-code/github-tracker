@@ -289,20 +289,6 @@ describe("sealApiToken", () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: "turnstile_failed" }), { status: 403 }),
-    );
-    vi.stubGlobal("fetch", mockFetch);
-
-    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
-      status: 403,
-      message: "turnstile_failed",
-    });
-  });
-
-  it("throws { status, message } on 403 response using error field", async () => {
-    setupMockedTurnstile("turnstile-tok");
-
-    const mockFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: "turnstile_failed" }), { status: 403 }),
     );
     vi.stubGlobal("fetch", mockFetch);
@@ -317,7 +303,7 @@ describe("sealApiToken", () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: "rate_limited" }), { status: 429 }),
+      new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }),
     );
     vi.stubGlobal("fetch", mockFetch);
 
@@ -331,7 +317,7 @@ describe("sealApiToken", () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: "seal_failed" }), { status: 500 }),
+      new Response(JSON.stringify({ error: "seal_failed" }), { status: 500 }),
     );
     vi.stubGlobal("fetch", mockFetch);
 
