@@ -155,6 +155,15 @@ describe("sealToken / unsealToken", () => {
   });
 });
 
+describe("sealToken cross-purpose isolation", () => {
+  it("cannot unseal a token sealed with a different purpose (F-003)", async () => {
+    const sealKey = await deriveKey(KEY_A, "sealed-token-v1", "aes-gcm-key:jira-api-token", "encrypt");
+    const unsealKey = await deriveKey(KEY_A, "sealed-token-v1", "aes-gcm-key:gitlab-pat", "encrypt");
+    const sealed = await sealToken("secret-token", sealKey);
+    expect(await unsealToken(sealed, unsealKey)).toBeNull();
+  });
+});
+
 describe("unsealTokenWithRotation", () => {
   it("unseals with current key", async () => {
     const keyA = await deriveKey(KEY_A, "sealed-token-v1", "aes-gcm-key", "encrypt");

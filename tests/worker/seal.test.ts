@@ -32,7 +32,7 @@ function makeSealRequest(options: {
   method?: string;
 } = {}): Request {
   const {
-    body = { token: "ghp_test_token_123", purpose: "jira-api" },
+    body = { token: "ghp_test_token_123", purpose: "jira-api-token" },
     origin = ALLOWED_ORIGIN,
     addXRequestedWith = true,
     addContentType = true,
@@ -118,7 +118,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     const req = new Request("https://gh.gordoncode.dev/api/proxy/seal", {
       method: "POST",
       headers,
-      body: JSON.stringify({ token: "test", purpose: "jira-api" }),
+      body: JSON.stringify({ token: "test", purpose: "jira-api-token" }),
     });
     const res = await worker.fetch(req, makeEnv());
 
@@ -179,7 +179,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     );
 
     const longToken = "a".repeat(2049);
-    const req = makeSealRequest({ body: { token: longToken, purpose: "jira-api" } });
+    const req = makeSealRequest({ body: { token: longToken, purpose: "jira-api-token" } });
     const res = await worker.fetch(req, makeEnv());
 
     expect(res.status).toBe(400);
@@ -193,7 +193,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     );
 
     const maxToken = "a".repeat(2048);
-    const req = makeSealRequest({ body: { token: maxToken, purpose: "jira-api" } });
+    const req = makeSealRequest({ body: { token: maxToken, purpose: "jira-api-token" } });
     const res = await worker.fetch(req, makeEnv());
 
     expect(res.status).toBe(200);
@@ -232,7 +232,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
 
-    const req = makeSealRequest({ body: { purpose: "jira-api" } });
+    const req = makeSealRequest({ body: { purpose: "jira-api-token" } });
     const res = await worker.fetch(req, makeEnv());
 
     expect(res.status).toBe(400);
@@ -341,7 +341,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
 
-    const req = makeSealRequest({ body: { token: "ghp_abc123", purpose: "test-purpose" } });
+    const req = makeSealRequest({ body: { token: "ghp_abc123", purpose: "jira-api-token" } });
     await worker.fetch(req, makeEnv());
 
     const allLogs: Array<Record<string, unknown>> = [];
@@ -356,7 +356,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     }
     const sealLog = allLogs.find((l) => l["event"] === "token_sealed");
     expect(sealLog).toBeDefined();
-    expect(sealLog!["purpose"]).toBe("test-purpose");
+    expect(sealLog!["purpose"]).toBe("jira-api-token");
     expect(sealLog!["token_length"]).toBe(10); // "ghp_abc123".length
     // Must NOT log the actual token value
     const allLogText = allLogs.map((l) => JSON.stringify(l)).join("\n");

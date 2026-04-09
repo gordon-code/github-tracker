@@ -177,13 +177,16 @@ function validateAndGuardProxyRoute(request: Request, env: Env): Response | null
   const result = validateProxyRequest(request, env.ALLOWED_ORIGIN);
   if (!result.ok) {
     log("warn", "proxy_validation_failed", { code: result.code, pathname }, request);
-    return errorResponse(result.code as ErrorCode, result.status);
+    const corsHeaders = getProxyCorsHeaders(origin, env.ALLOWED_ORIGIN);
+    return errorResponse(result.code as ErrorCode, result.status, corsHeaders);
   }
 
   return null;
 }
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
+const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "gitlab-pat"]);
+
 async function handleProxySeal(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") {
     return errorResponse("method_not_allowed", 405);
@@ -226,6 +229,9 @@ async function handleProxySeal(request: Request, env: Env): Promise<Response> {
   }
   // SC-8: purpose field required for token audience binding
   if (typeof purpose !== "string" || purpose.length === 0) {
+    return errorResponse("invalid_request", 400);
+  }
+  if (purpose.length > 64 || !VALID_PURPOSES.has(purpose)) {
     return errorResponse("invalid_request", 400);
   }
 

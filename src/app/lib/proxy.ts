@@ -102,7 +102,7 @@ export async function proxyFetch(
   });
 }
 
-export async function sealApiToken(token: string): Promise<string> {
+export async function sealApiToken(token: string, purpose: string): Promise<string> {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
   const turnstileToken = await acquireTurnstileToken(siteKey ?? "");
 
@@ -111,7 +111,7 @@ export async function sealApiToken(token: string): Promise<string> {
     headers: {
       "cf-turnstile-response": turnstileToken,
     },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, purpose }),
   });
 
   if (!res.ok) {

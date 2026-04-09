@@ -12,7 +12,7 @@
 import {
   deriveKey,
   signSession,
-  verifySessionWithRotation,
+  verifySession,
 } from "./crypto";
 
 export interface SessionEnv {
@@ -31,6 +31,25 @@ const SESSION_HMAC_SALT = "github-tracker-session-v1";
 const SESSION_HMAC_INFO = "session-hmac";
 const SESSION_MAX_AGE = 28800; // 8 hours in seconds
 
+// Module-level cache for derived session HMAC keys.
+// SESSION_KEY is a deployment constant — safe to cache per-isolate (follows _dsnCache pattern).
+let _sessionKeyCache: { raw: string; key: CryptoKey } | undefined;
+let _sessionKeyPrevCache: { raw: string; key: CryptoKey } | undefined;
+
+async function getSessionHmacKey(raw: string): Promise<CryptoKey> {
+  if (_sessionKeyCache?.raw === raw) return _sessionKeyCache.key;
+  const key = await deriveKey(raw, SESSION_HMAC_SALT, SESSION_HMAC_INFO, "sign");
+  _sessionKeyCache = { raw, key };
+  return key;
+}
+
+async function getSessionHmacPrevKey(raw: string): Promise<CryptoKey> {
+  if (_sessionKeyPrevCache?.raw === raw) return _sessionKeyPrevCache.key;
+  const key = await deriveKey(raw, SESSION_HMAC_SALT, SESSION_HMAC_INFO, "sign");
+  _sessionKeyPrevCache = { raw, key };
+  return key;
+}
+
 /**
  * Issues a new signed session cookie.
  * Returns the Set-Cookie header value and the sessionId for rate-limiting.
@@ -46,12 +65,7 @@ export async function issueSession(
   };
 
   const json = JSON.stringify(payload);
-  const hmacKey = await deriveKey(
-    env.SESSION_KEY,
-    SESSION_HMAC_SALT,
-    SESSION_HMAC_INFO,
-    "sign"
-  );
+  const hmacKey = await getSessionHmacKey(env.SESSION_KEY);
   const signature = await signSession(json, hmacKey);
 
   // base64url(JSON(payload)).base64url(HMAC-SHA256(JSON(payload)))
@@ -98,15 +112,13 @@ export async function parseSession(
     const json = atob(paddedPayload + "=".repeat(padding));
     const payload = JSON.parse(json) as SessionPayload;
 
-    // Verify HMAC signature (rotation-aware)
-    const valid = await verifySessionWithRotation(
-      json,
-      signature,
-      env.SESSION_KEY,
-      env.SESSION_KEY_PREV,
-      SESSION_HMAC_SALT,
-      SESSION_HMAC_INFO
-    );
+    // Verify HMAC signature (rotation-aware, using cached derived keys)
+    const currentKey = await getSessionHmacKey(env.SESSION_KEY);
+    let valid = await verifySession(json, signature, currentKey);
+    if (!valid && env.SESSION_KEY_PREV !== undefined) {
+      const prevKey = await getSessionHmacPrevKey(env.SESSION_KEY_PREV);
+      valid = await verifySession(json, signature, prevKey);
+    }
     if (!valid) return null;
 
     // Check expiry
@@ -141,8 +153,13 @@ export async function ensureSession(
     return { sessionId: existing.sid };
   }
 
-  const { cookie, sessionId } = await issueSession(env);
-  return { sessionId, setCookie: cookie };
+  try {
+    const { cookie, sessionId } = await issueSession(env);
+    return { sessionId, setCookie: cookie };
+  } catch (error) {
+    console.error("session_issue_failed", error);
+    return { sessionId: crypto.randomUUID() };
+  }
 }
 
 export { SESSION_HMAC_SALT, SESSION_HMAC_INFO };

@@ -30,14 +30,22 @@ export async function verifyTurnstile(
   body.append("idempotency_key", crypto.randomUUID());
 
   let resp: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
     resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       body,
       redirect: "error",
+      signal: controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return { success: false, errorCodes: ["timeout"] };
+    }
     return { success: false, errorCodes: ["network-error"] };
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   let data: TurnstileResponse;

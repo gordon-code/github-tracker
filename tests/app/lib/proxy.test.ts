@@ -281,7 +281,7 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    const result = await mod.sealApiToken("my-raw-api-token");
+    const result = await mod.sealApiToken("my-raw-api-token", "jira-api-token");
     expect(result).toBe("enc:abc123");
   });
 
@@ -293,7 +293,21 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token")).rejects.toMatchObject({
+    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
+      status: 403,
+      message: "turnstile_failed",
+    });
+  });
+
+  it("throws { status, message } on 403 response using error field", async () => {
+    setupMockedTurnstile("turnstile-tok");
+
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "turnstile_failed" }), { status: 403 }),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
       status: 403,
       message: "turnstile_failed",
     });
@@ -307,7 +321,7 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token")).rejects.toMatchObject({
+    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
       status: 429,
       message: "rate_limited",
     });
@@ -321,7 +335,7 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token")).rejects.toMatchObject({
+    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
       status: 500,
       message: "seal_failed",
     });
@@ -333,7 +347,7 @@ describe("sealApiToken", () => {
     const mockFetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token")).rejects.toThrow("Failed to fetch");
+    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toThrow("Failed to fetch");
   });
 
   it("includes cf-turnstile-response header in POST body", async () => {
@@ -344,7 +358,7 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await mod.sealApiToken("raw-token");
+    await mod.sealApiToken("raw-token", "jira-api-token");
 
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
@@ -359,14 +373,14 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await mod.sealApiToken("raw-token");
+    await mod.sealApiToken("raw-token", "jira-api-token");
 
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/proxy/seal");
     expect(init.method).toBe("POST");
   });
 
-  it("sends token in the request body as JSON", async () => {
+  it("sends token and purpose in the request body as JSON", async () => {
     setupMockedTurnstile("tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
@@ -374,11 +388,12 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await mod.sealApiToken("my-raw-token");
+    await mod.sealApiToken("my-raw-token", "jira-api-token");
 
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as { token: string };
+    const body = JSON.parse(init.body as string) as { token: string; purpose: string };
     expect(body.token).toBe("my-raw-token");
+    expect(body.purpose).toBe("jira-api-token");
   });
 
   it("throws immediately when VITE_TURNSTILE_SITE_KEY is not set", async () => {
@@ -386,7 +401,7 @@ describe("sealApiToken", () => {
     vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "");
 
     const freshMod = await loadModule();
-    await expect(freshMod.sealApiToken("raw-token")).rejects.toThrow(
+    await expect(freshMod.sealApiToken("raw-token", "jira-api-token")).rejects.toThrow(
       "VITE_TURNSTILE_SITE_KEY not configured",
     );
   });
