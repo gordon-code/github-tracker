@@ -75,6 +75,7 @@ wrangler secret put ALLOWED_ORIGIN
 |----------|--------|---------|
 | `/api/oauth/token` | POST | Exchange OAuth authorization code for permanent access token. |
 | `/api/health` | GET | Health check. Returns `OK`. |
+| `/api/proxy/seal` | POST | Encrypt an API token for client-side storage. Requires Turnstile + session. |
 
 ### Token Storage Security
 
