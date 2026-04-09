@@ -132,9 +132,10 @@ describe("sealToken / unsealToken", () => {
   it("returns null for tampered ciphertext (GCM auth tag fails)", async () => {
     const key = await deriveKey(KEY_A, "sealed-token-v1", "aes-gcm-key", "encrypt");
     const sealed = await sealToken("secret", key);
-    // Flip the last character to tamper with the ciphertext/tag
-    const tampered = sealed.slice(0, -1) + (sealed.endsWith("a") ? "b" : "a");
-    expect(await unsealToken(tampered, key)).toBeNull();
+    // Flip a byte in the ciphertext portion (byte 14+) to fail GCM auth tag
+    const bytes = fromBase64Url(sealed);
+    bytes[14] ^= 0xff; // XOR to guarantee a change
+    expect(await unsealToken(toBase64Url(bytes), key)).toBeNull();
   });
 
   it("returns null for wrong version byte", async () => {
