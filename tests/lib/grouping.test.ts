@@ -67,8 +67,12 @@ describe("isUserInvolved", () => {
     expect(isUserInvolved({ ...base, surfacedBy: ["me"] }, "me", monitored)).toBe(true);
   });
 
-  it("returns false when surfacedBy excludes user", () => {
-    expect(isUserInvolved({ ...base, surfacedBy: ["other"] }, "me", monitored)).toBe(false);
+  it("returns true when surfacedBy contains only a tracked user (not the main user)", () => {
+    expect(isUserInvolved({ ...base, surfacedBy: ["tracked-bot[bot]"] }, "me", monitored)).toBe(true);
+  });
+
+  it("returns true when surfacedBy contains multiple tracked users but not the main user", () => {
+    expect(isUserInvolved({ ...base, surfacedBy: ["bot1[bot]", "bot2"] }, "me", monitored)).toBe(true);
   });
 
   it("returns true for non-monitored item with no surfacedBy (fetched via involves:{user})", () => {

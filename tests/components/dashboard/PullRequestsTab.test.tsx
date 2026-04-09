@@ -272,10 +272,10 @@ describe("PullRequestsTab — monitored repos filter bypass", () => {
 // ── PullRequestsTab — scope filter ────────────────────────────────────────────
 
 describe("PullRequestsTab — scope filter", () => {
-  it("default scope shows only items involving the user (surfacedBy includes userLogin)", () => {
+  it("default scope shows items surfaced by tracked users (surfacedBy present)", () => {
     const prs = [
       makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),
-      makePullRequest({ id: 2, title: "Community PR", repoFullName: "org/repo", surfacedBy: ["other"] }),
+      makePullRequest({ id: 2, title: "Tracked User PR", repoFullName: "org/repo", surfacedBy: ["other"] }),
     ];
     setAllExpanded("pullRequests", ["org/repo"], true);
 
@@ -289,7 +289,7 @@ describe("PullRequestsTab — scope filter", () => {
     ));
 
     screen.getByText("My PR");
-    expect(screen.queryByText("Community PR")).toBeNull();
+    screen.getByText("Tracked User PR");
   });
 
   it("scope 'all' shows all PRs including community items", () => {
@@ -387,9 +387,9 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
     expect(listitem?.className).toContain("border-l-primary");
   });
 
-  it("does not add border-l-primary to community PRs in 'all' scope", () => {
+  it("does not add border-l-primary to untracked monitored repo PRs in 'all' scope", () => {
     const prs = [
-      makePullRequest({ id: 1, title: "Community PR", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [], reviewerLogins: [] }),
+      makePullRequest({ id: 1, title: "Community PR", repoFullName: "org/monitored", userLogin: "other", assigneeLogins: [], reviewerLogins: [] }),
     ];
     setTabFilter("pullRequests", "scope", "all");
     setAllExpanded("pullRequests", ["org/monitored"], true);
