@@ -704,8 +704,18 @@ export default {
       const { sessionId, setCookie } = await ensureSession(request, env);
 
       // Step 4: Rate limiting using session ID as key
-      const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
-      if (!success) {
+      let rateLimited = false;
+      try {
+        const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
+        rateLimited = !success;
+      } catch (err) {
+        log("error", "rate_limiter_failed", {
+          error: err instanceof Error ? err.message : "unknown",
+        }, request);
+        // Fail open — rate limiter misconfiguration should not block all proxy requests.
+        // Turnstile and session binding still protect the seal endpoint.
+      }
+      if (rateLimited) {
         log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
         const rateLimitResponse = errorResponse("rate_limited", 429);
         const headers = new Headers(rateLimitResponse.headers);

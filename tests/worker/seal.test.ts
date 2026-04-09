@@ -227,6 +227,19 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(json["error"]).toBe("invalid_request");
   });
 
+  it("request with invalid purpose (not in VALID_PURPOSES) returns 400", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+
+    const req = makeSealRequest({ body: { token: "ghp_test", purpose: "github-pat" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
   it("request with missing token returns 400 with invalid_request", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), { status: 200 })
