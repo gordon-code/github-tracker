@@ -152,10 +152,7 @@ function isProxyPath(pathname: string): boolean {
 
 // ── Validation gate for proxy routes ─────────────────────────────────────────
 // Returns a Response if rejected, null if validation passes.
-function validateAndGuardProxyRoute(request: Request, env: Env): Response | null {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
-
+function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string): Response | null {
   if (!isProxyPath(pathname)) return null;
 
   const origin = request.headers.get("Origin");
@@ -187,16 +184,24 @@ function validateAndGuardProxyRoute(request: Request, env: Env): Response | null
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "gitlab-pat"]);
 
+// Module-level cache for derived seal keys, keyed by "<raw>:<purpose>".
+// SEAL_KEY is a deployment constant — safe to cache per-isolate (follows _sessionKeyCache pattern).
+const _sealKeyCache = new Map<string, CryptoKey>();
+
 async function handleProxySeal(request: Request, env: Env, sessionId: string): Promise<Response> {
   if (request.method !== "POST") {
     return errorResponse("method_not_allowed", 405);
   }
 
   // Session + rate limiting (done by caller, sessionId passed in)
-  // Extract Turnstile token and verify (Step 6)
+  // Extract Turnstile token and verify
   const turnstileToken = extractTurnstileToken(request);
   if (!turnstileToken) {
     log("warn", "seal_turnstile_missing", {}, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+  if (turnstileToken.length > 2048) {
+    log("warn", "seal_turnstile_token_too_long", { token_length: turnstileToken.length }, request);
     return errorResponse("turnstile_failed", 403);
   }
 
@@ -237,8 +242,13 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
 
   let sealed: string;
   try {
-    // SC-8: derive key with purpose-scoped info string
-    const key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
+    // SC-8: derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
+    const cacheKey = env.SEAL_KEY + ":" + purpose;
+    let key = _sealKeyCache.get(cacheKey);
+    if (key === undefined) {
+      key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
+      _sealKeyCache.set(cacheKey, key);
+    }
     sealed = await sealToken(token, key);
   } catch (err) {
     // SC-9: log error server-side but DO NOT include crypto error in response
@@ -696,7 +706,7 @@ export default {
     // ── Proxy routes: validation, session, and rate limiting ─────────────────
     // Applies to /api/proxy/*, /api/jira/*, /api/gitlab/*
     // validateAndGuardProxyRoute handles OPTIONS preflight for proxy routes.
-    const guardResponse = validateAndGuardProxyRoute(request, env);
+    const guardResponse = validateAndGuardProxyRoute(request, env, url.pathname);
     if (guardResponse !== null) return guardResponse;
 
     if (isProxyPath(url.pathname)) {

@@ -65,8 +65,7 @@ const METHODS_REQUIRING_CONTENT_TYPE = new Set(["POST", "PUT", "PATCH"]);
  */
 export function validateProxyRequest(
   request: Request,
-  allowedOrigin: string,
-  options?: { expectedContentType?: string }
+  allowedOrigin: string
 ): ValidationResult {
   const originResult = validateOrigin(request, allowedOrigin);
   if (!originResult.ok) return originResult;
@@ -78,8 +77,7 @@ export function validateProxyRequest(
   if (!customHeaderResult.ok) return customHeaderResult;
 
   if (METHODS_REQUIRING_CONTENT_TYPE.has(request.method)) {
-    const expected = options?.expectedContentType ?? "application/json";
-    const contentTypeResult = validateContentType(request, expected);
+    const contentTypeResult = validateContentType(request, "application/json");
     if (!contentTypeResult.ok) return contentTypeResult;
   }
 

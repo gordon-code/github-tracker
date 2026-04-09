@@ -63,6 +63,14 @@ describe("verifyTurnstile", () => {
     expect(result).toEqual({ success: false, errorCodes: ["network-error"] });
   });
 
+  it("returns timeout errorCode when fetch is aborted (AbortError)", async () => {
+    const abortError = Object.assign(new Error("Aborted"), { name: "AbortError" });
+    mockFetch.mockRejectedValueOnce(abortError);
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV);
+    expect(result).toEqual({ success: false, errorCodes: ["timeout"] });
+  });
+
   it("returns network-error when response body is not valid JSON", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response("not-json", {

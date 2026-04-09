@@ -1,6 +1,6 @@
 export interface CryptoEnv {
-  SEAL_KEY: string; // base64-encoded 32-byte AES-256-GCM key
-  SEAL_KEY_PREV?: string; // previous key for rotation
+  SEAL_KEY: string; // base64-encoded HKDF input key material (32 bytes recommended)
+  SEAL_KEY_PREV?: string; // previous HKDF key material for rotation
 }
 
 // ── Base64url utilities ────────────────────────────────────────────────────

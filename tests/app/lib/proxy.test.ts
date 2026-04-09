@@ -22,16 +22,24 @@ interface MockTurnstile {
   _resolveToken(token: string): void;
   /** Trigger the error callback for the most-recently rendered widget. */
   _rejectWithError(code: string): void;
+  /** Trigger the expired-callback for the most-recently rendered widget. */
+  _triggerExpired(): void;
 }
 
 function makeMockTurnstile(): MockTurnstile {
   let _successCb: ((token: string) => void) | undefined;
   let _errorCb: ((code: string) => void) | undefined;
+  let _expiredCb: (() => void) | undefined;
 
   const mock: MockTurnstile = {
-    render: vi.fn((_container: HTMLElement, options: { callback?: (token: string) => void; "error-callback"?: (code: string) => void }) => {
+    render: vi.fn((_container: HTMLElement, options: {
+      callback?: (token: string) => void;
+      "error-callback"?: (code: string) => void;
+      "expired-callback"?: () => void;
+    }) => {
       _successCb = options.callback;
       _errorCb = options["error-callback"];
+      _expiredCb = options["expired-callback"];
       return "widget-id-1";
     }),
     execute: vi.fn(),
@@ -42,6 +50,9 @@ function makeMockTurnstile(): MockTurnstile {
     },
     _rejectWithError(code: string) {
       _errorCb?.(code);
+    },
+    _triggerExpired() {
+      _expiredCb?.();
     },
   };
 
@@ -113,6 +124,21 @@ describe("proxyFetch", () => {
     expect(headers["X-Requested-With"]).toBe("fetch");
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["cf-turnstile-response"]).toBe("tok123");
+  });
+
+  it("merges Headers instance caller headers without dropping defaults", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await mod.proxyFetch("/api/proxy/seal", {
+      headers: new Headers({ "cf-turnstile-response": "tok" }),
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Requested-With"]).toBe("fetch");
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["cf-turnstile-response"]).toBe("tok");
   });
 
   it("passes the path to fetch unchanged", async () => {
@@ -229,6 +255,47 @@ describe("acquireTurnstileToken", () => {
 
     await expect(tokenPromise).rejects.toThrow("Turnstile error: invalid-input-response");
   });
+
+  it("rejects when Turnstile fires expired-callback", async () => {
+    const mockTurnstile = makeMockTurnstile();
+    vi.stubGlobal("window", {
+      ...window,
+      turnstile: mockTurnstile,
+    });
+
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    mockTurnstile._triggerExpired();
+
+    await expect(tokenPromise).rejects.toThrow("Turnstile token expired before submission");
+  });
+
+  it("rejects when the Turnstile script fails to load (onerror)", async () => {
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onerror: (() => void) | null }).onerror?.();
+        return node;
+      }
+      return node;
+    });
+
+    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+      "Failed to load Turnstile script",
+    );
+  });
 });
 
 // ── sealApiToken tests ────────────────────────────────────────────────────────
@@ -306,10 +373,9 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
-      status: 429,
-      message: "rate_limited",
-    });
+    const err = await mod.sealApiToken("my-token", "jira-api-token").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(mod.SealError);
+    expect(err).toMatchObject({ status: 429, message: "rate_limited" });
   });
 
   it("throws SealError on 500 response", async () => {
@@ -320,10 +386,9 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
-      status: 500,
-      message: "seal_failed",
-    });
+    const err = await mod.sealApiToken("my-token", "jira-api-token").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(mod.SealError);
+    expect(err).toMatchObject({ status: 500, message: "seal_failed" });
   });
 
   it("rejects when fetch throws a network error", async () => {
@@ -333,6 +398,19 @@ describe("sealApiToken", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toThrow("Failed to fetch");
+  });
+
+  it("throws SealError with 'unknown_error' when error response body is non-JSON", async () => {
+    setupMockedTurnstile("turnstile-tok");
+
+    const mockFetch = vi.fn().mockResolvedValue(
+      new Response("Service Unavailable", { status: 503 }),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const err = await mod.sealApiToken("my-token", "jira-api-token").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(mod.SealError);
+    expect(err).toMatchObject({ status: 503, message: "unknown_error" });
   });
 
   it("includes cf-turnstile-response header in POST body", async () => {

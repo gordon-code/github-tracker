@@ -126,7 +126,6 @@ describe("parseSession", () => {
   it("returns null for expired session", async () => {
     const env = makeEnv();
     // Mock Date.now to issue a session in the past
-    const realNow = Date.now;
     const pastTime = Date.now() - 9 * 3600 * 1000; // 9 hours ago (> 8h SESSION_MAX_AGE)
     vi.spyOn(Date, "now").mockReturnValue(pastTime);
     const { cookie } = await issueSession(env);
@@ -138,7 +137,6 @@ describe("parseSession", () => {
       env
     );
     expect(result).toBeNull();
-    void realNow; // suppress unused warning
   });
 
   it("accepts a session issued 1 second ago (clock skew)", async () => {
@@ -261,5 +259,18 @@ describe("ensureSession", () => {
     );
     const result = await ensureSession(req, makeEnv());
     expect(result.setCookie).toBeDefined();
+  });
+
+  it("catch path: returns fallback sessionId (no setCookie) when issueSession throws", async () => {
+    // "!!bad!!" is not valid base64url — fromBase64Url → atob throws,
+    // which propagates through getSessionHmacKey → issueSession, exercising the catch block.
+    const env = makeEnv({ SESSION_KEY: "!!bad!!" });
+    const req = makeRequest();
+    const result = await ensureSession(req, env);
+    expect(result.sessionId).toBeTruthy();
+    expect(result.sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+    expect(result.setCookie).toBeUndefined();
   });
 });

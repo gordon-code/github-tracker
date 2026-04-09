@@ -191,13 +191,13 @@ openssl rand -base64 32  # Run once per key below
 ### Setting secrets
 
 ```bash
-wrangler secret put SESSION_KEY           # HMAC key for session cookies
-wrangler secret put SEAL_KEY              # AES-256-GCM key for sealed tokens
+wrangler secret put SESSION_KEY           # HKDF input key material for session cookies
+wrangler secret put SEAL_KEY              # HKDF input key material for sealed tokens
 wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
 ```
 
-- `SESSION_KEY`: HMAC-SHA256 key used to sign `__Host-session` cookies. Generate with `openssl rand -base64 32`.
-- `SEAL_KEY`: AES-256-GCM key used to encrypt Jira/GitLab API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
+- `SESSION_KEY`: HKDF input key material used to derive the HMAC-SHA256 key for signing `__Host-session` cookies. Generate with `openssl rand -base64 32`.
+- `SEAL_KEY`: HKDF input key material used to derive the AES-256-GCM key for encrypting API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
 - `TURNSTILE_SECRET_KEY`: From the Cloudflare Turnstile dashboard (Security → Turnstile → your widget → Secret key).
 - `VITE_TURNSTILE_SITE_KEY`: **Build-time env var (public)** — goes in `.env`, not a Worker secret. From the same Turnstile dashboard (Site key).
 

@@ -3,10 +3,10 @@ import worker, { type Env } from "../../src/worker/index";
 
 const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
 
-// Valid base64url-encoded 32-byte keys for testing
-// "test-session-key-32bytes-padding!" base64-encoded
+// Base64-encoded test keys for testing (HKDF accepts any length input key material)
+// "test-session-key" base64-encoded
 const TEST_SESSION_KEY = "dGVzdC1zZXNzaW9uLWtleQ==";
-// "test-seal-key-32bytes-padding!!!!" base64-encoded
+// "test-seal-key" base64-encoded
 const TEST_SEAL_KEY = "dGVzdC1zZWFsLWtleQ==";
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
@@ -56,12 +56,15 @@ function makeSealRequest(options: {
 
 describe("Worker /api/proxy/seal endpoint", () => {
   let originalFetch: typeof globalThis.fetch;
+  let consoleSpies: { info: ReturnType<typeof vi.spyOn>; warn: ReturnType<typeof vi.spyOn>; error: ReturnType<typeof vi.spyOn> };
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleSpies = {
+      info: vi.spyOn(console, "info").mockImplementation(() => {}),
+      warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+      error: vi.spyOn(console, "error").mockImplementation(() => {}),
+    };
   });
 
   afterEach(() => {
@@ -152,6 +155,30 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.status).toBe(403);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("turnstile_failed");
+  });
+
+  it("request with oversized Turnstile header (>2048 chars) returns 403 with turnstile_failed", async () => {
+    const oversizedToken = "a".repeat(2049);
+    const req = makeSealRequest({ turnstileToken: oversizedToken });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("turnstile_failed");
+  });
+
+  it("request with Turnstile header exactly 2048 chars is not rejected by length guard", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+
+    const maxToken = "a".repeat(2048);
+    const req = makeSealRequest({ turnstileToken: maxToken });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["sealed"]).toBe("string");
   });
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
@@ -305,6 +332,65 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
+  // ── Non-POST method rejection ─────────────────────────────────────────────
+
+  it("GET request to /api/proxy/seal returns 405 with method_not_allowed", async () => {
+    const req = makeSealRequest({ method: "GET" });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(405);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("method_not_allowed");
+  });
+
+  it("successful POST to /api/proxy/seal does not set Access-Control-Allow-Origin", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+
+    const req = makeSealRequest();
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  // ── Unimplemented proxy routes ────────────────────────────────────────────
+
+  it("valid POST to /api/jira/issues falls through to 404 with not_found", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/jira/issues", {
+      method: "POST",
+      headers: {
+        "Origin": ALLOWED_ORIGIN,
+        "X-Requested-With": "fetch",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(404);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("not_found");
+  });
+
+  it("valid POST to /api/gitlab/token falls through to 404 with not_found", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/gitlab/token", {
+      method: "POST",
+      headers: {
+        "Origin": ALLOWED_ORIGIN,
+        "X-Requested-With": "fetch",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(404);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("not_found");
+  });
+
   // ── Session cookie issuance ───────────────────────────────────────────────
 
   it("first request issues a session cookie in Set-Cookie", async () => {
@@ -360,11 +446,6 @@ describe("Worker /api/proxy/seal endpoint", () => {
   // ── SC-11: seal operation logging ─────────────────────────────────────────
 
   it("successful seal logs token_sealed event with purpose and token_length", async () => {
-    const consoleSpy = {
-      info: vi.spyOn(console, "info"),
-      warn: vi.spyOn(console, "warn"),
-      error: vi.spyOn(console, "error"),
-    };
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
@@ -373,7 +454,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     await worker.fetch(req, makeEnv());
 
     const allLogs: Array<Record<string, unknown>> = [];
-    for (const [, spy] of Object.entries(consoleSpy)) {
+    for (const [, spy] of Object.entries(consoleSpies)) {
       for (const call of spy.mock.calls) {
         try {
           allLogs.push(JSON.parse(call[0] as string) as Record<string, unknown>);

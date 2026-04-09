@@ -33,20 +33,14 @@ const SESSION_MAX_AGE = 28800; // 8 hours in seconds
 
 // Module-level cache for derived session HMAC keys.
 // SESSION_KEY is a deployment constant — safe to cache per-isolate (follows _dsnCache pattern).
-let _sessionKeyCache: { raw: string; key: CryptoKey } | undefined;
-let _sessionKeyPrevCache: { raw: string; key: CryptoKey } | undefined;
+// Keyed by raw secret string; supports both current and previous key without duplicate logic.
+const _sessionKeyCache = new Map<string, CryptoKey>();
 
 async function getSessionHmacKey(raw: string): Promise<CryptoKey> {
-  if (_sessionKeyCache?.raw === raw) return _sessionKeyCache.key;
+  const cached = _sessionKeyCache.get(raw);
+  if (cached !== undefined) return cached;
   const key = await deriveKey(raw, SESSION_HMAC_SALT, SESSION_HMAC_INFO, "sign");
-  _sessionKeyCache = { raw, key };
-  return key;
-}
-
-async function getSessionHmacPrevKey(raw: string): Promise<CryptoKey> {
-  if (_sessionKeyPrevCache?.raw === raw) return _sessionKeyPrevCache.key;
-  const key = await deriveKey(raw, SESSION_HMAC_SALT, SESSION_HMAC_INFO, "sign");
-  _sessionKeyPrevCache = { raw, key };
+  _sessionKeyCache.set(raw, key);
   return key;
 }
 
@@ -116,7 +110,7 @@ export async function parseSession(
     const currentKey = await getSessionHmacKey(env.SESSION_KEY);
     let valid = await verifySession(json, signature, currentKey);
     if (!valid && env.SESSION_KEY_PREV !== undefined) {
-      const prevKey = await getSessionHmacPrevKey(env.SESSION_KEY_PREV);
+      const prevKey = await getSessionHmacKey(env.SESSION_KEY_PREV);
       valid = await verifySession(json, signature, prevKey);
     }
     if (!valid) return null;
@@ -150,7 +144,11 @@ export async function ensureSession(
     const { cookie, sessionId } = await issueSession(env);
     return { sessionId, setCookie: cookie };
   } catch (error) {
-    console.error("session_issue_failed", error);
+    console.error(JSON.stringify({
+      worker: "github-tracker",
+      event: "session_issue_failed",
+      error: error instanceof Error ? error.message : "unknown",
+    }));
     return { sessionId: crypto.randomUUID() };
   }
 }

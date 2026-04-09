@@ -270,22 +270,6 @@ describe("validateProxyRequest", () => {
     expect(result).toEqual({ ok: false, code: "invalid_content_type", status: 415 });
   });
 
-  it("uses custom expectedContentType when provided", () => {
-    const req = makeRequest({
-      method: "POST",
-      headers: {
-        Origin: ALLOWED_ORIGIN,
-        "Sec-Fetch-Site": "same-origin",
-        "X-Requested-With": "fetch",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
-    const result = validateProxyRequest(req, ALLOWED_ORIGIN, {
-      expectedContentType: "application/x-www-form-urlencoded",
-    });
-    expect(result).toEqual({ ok: true });
-  });
-
   it("short-circuits on first failure (origin checked before fetch metadata)", () => {
     // Both Origin and Sec-Fetch-Site are wrong — should fail on origin_mismatch
     const req = makeRequest({
