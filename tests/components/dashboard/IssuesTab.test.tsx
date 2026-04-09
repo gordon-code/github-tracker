@@ -456,6 +456,25 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     expect(listitem?.className).not.toContain("border-l-primary");
   });
 
+  it("adds border-l-primary to tracked user issue in monitored repo in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Bot issue", repoFullName: "org/monitored", surfacedBy: ["tracked-bot[bot]"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-primary");
+  });
+
   it("does not add border-l-2 in default 'involves_me' scope", () => {
     const issues = [
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),

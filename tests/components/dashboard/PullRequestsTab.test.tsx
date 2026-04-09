@@ -406,6 +406,25 @@ describe("PullRequestsTab — left border accent in 'all' scope", () => {
     expect(listitem?.className).not.toContain("border-l-primary");
   });
 
+  it("adds border-l-primary to tracked user PR in monitored repo in 'all' scope", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Bot PR", repoFullName: "org/monitored", surfacedBy: ["tracked-bot[bot]"] }),
+    ];
+    setTabFilter("pullRequests", "scope", "all");
+    setAllExpanded("pullRequests", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-primary");
+  });
+
   it("does not add border-l-primary in default 'involves_me' scope", () => {
     const prs = [
       makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", surfacedBy: ["me"] }),

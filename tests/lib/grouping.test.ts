@@ -63,7 +63,7 @@ describe("isUserInvolved", () => {
   const base = { repoFullName: "org/repo", userLogin: "author", assigneeLogins: [] as string[] };
   const monitored = new Set(["org/monitored"]);
 
-  it("returns true when surfacedBy includes user", () => {
+  it("returns true when surfacedBy is non-empty (main user)", () => {
     expect(isUserInvolved({ ...base, surfacedBy: ["me"] }, "me", monitored)).toBe(true);
   });
 
@@ -73,6 +73,10 @@ describe("isUserInvolved", () => {
 
   it("returns true when surfacedBy contains multiple tracked users but not the main user", () => {
     expect(isUserInvolved({ ...base, surfacedBy: ["bot1[bot]", "bot2"] }, "me", monitored)).toBe(true);
+  });
+
+  it("returns true for monitored repo item with surfacedBy (tier 1 before tier 2)", () => {
+    expect(isUserInvolved({ ...base, repoFullName: "org/monitored", surfacedBy: ["tracked-bot[bot]"] }, "me", monitored)).toBe(true);
   });
 
   it("returns true for non-monitored item with no surfacedBy (fetched via involves:{user})", () => {
