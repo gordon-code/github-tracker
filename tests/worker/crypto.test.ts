@@ -8,7 +8,6 @@ import {
   unsealTokenWithRotation,
   signSession,
   verifySession,
-  verifySessionWithRotation,
 } from "../../src/worker/crypto";
 
 // Stable base64url-encoded 32-byte test keys (not real secrets)
@@ -248,51 +247,5 @@ describe("signSession / verifySession", () => {
   it("returns false for invalid base64 signature", async () => {
     const key = await deriveKey(KEY_A, "github-tracker-session-v1", "session-hmac", "sign");
     expect(await verifySession("payload", "!!!invalid!!!", key)).toBe(false);
-  });
-});
-
-describe("verifySessionWithRotation", () => {
-  it("verifies with current key", async () => {
-    const keyA = await deriveKey(KEY_A, "github-tracker-session-v1", "session-hmac", "sign");
-    const sig = await signSession("data", keyA);
-    const result = await verifySessionWithRotation(
-      "data",
-      sig,
-      KEY_A,
-      undefined,
-      "github-tracker-session-v1",
-      "session-hmac"
-    );
-    expect(result).toBe(true);
-  });
-
-  it("falls back to prevKey when current key fails", async () => {
-    const keyA = await deriveKey(KEY_A, "github-tracker-session-v1", "session-hmac", "sign");
-    const sig = await signSession("data", keyA);
-    // Signed with A, try currentKey=B, prevKey=A
-    const result = await verifySessionWithRotation(
-      "data",
-      sig,
-      KEY_B,
-      KEY_A,
-      "github-tracker-session-v1",
-      "session-hmac"
-    );
-    expect(result).toBe(true);
-  });
-
-  it("returns false when both keys fail", async () => {
-    const keyA = await deriveKey(KEY_A, "github-tracker-session-v1", "session-hmac", "sign");
-    const sig = await signSession("data", keyA);
-    const KEY_C = btoa("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC").replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-    const result = await verifySessionWithRotation(
-      "data",
-      sig,
-      KEY_B,
-      KEY_C,
-      "github-tracker-session-v1",
-      "session-hmac"
-    );
-    expect(result).toBe(false);
   });
 });

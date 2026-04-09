@@ -200,27 +200,4 @@ export async function verifySession(
   }
 }
 
-/**
- * Verifies a session signature, falling back to prevKey if currentKey fails.
- * Both salt and info must match the values used during signing (issueSession).
- */
-export async function verifySessionWithRotation(
-  payload: string,
-  signature: string,
-  currentKey: string,
-  prevKey: string | undefined,
-  salt: string,
-  info: string
-): Promise<boolean> {
-  const current = await deriveKey(currentKey, salt, info, "sign");
-  if (await verifySession(payload, signature, current)) return true;
-
-  if (prevKey !== undefined) {
-    const prev = await deriveKey(prevKey, salt, info, "sign");
-    return verifySession(payload, signature, prev);
-  }
-
-  return false;
-}
-
 export { SEAL_SALT };

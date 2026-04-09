@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from "vitest";
 import {
   issueSession,
   parseSession,
-  clearSession,
   ensureSession,
   type SessionEnv,
 } from "../../src/worker/session";
@@ -212,25 +211,6 @@ describe("parseSession", () => {
       makeEnv()
     );
     expect(result).toBeNull();
-  });
-});
-
-describe("clearSession", () => {
-  it("returns Max-Age=0", () => {
-    expect(clearSession()).toContain("Max-Age=0");
-  });
-
-  it("returns __Host-session= with empty value", () => {
-    const result = clearSession();
-    expect(result).toMatch(/^__Host-session=;/);
-  });
-
-  it("includes required security attributes", () => {
-    const result = clearSession();
-    expect(result).toContain("Path=/");
-    expect(result).toContain("Secure");
-    expect(result).toContain("HttpOnly");
-    expect(result).toContain("SameSite=Strict");
   });
 });
 

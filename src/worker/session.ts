@@ -131,13 +131,6 @@ export async function parseSession(
 }
 
 /**
- * Returns a Set-Cookie header value that clears the session cookie.
- */
-export function clearSession(): string {
-  return `${SESSION_COOKIE_NAME}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`;
-}
-
-/**
  * Returns the existing session ID if valid, or issues a new session.
  * Never throws — all error paths return a value.
  * Callers must attach setCookie to their response if present.
@@ -161,5 +154,3 @@ export async function ensureSession(
     return { sessionId: crypto.randomUUID() };
   }
 }
-
-export { SESSION_HMAC_SALT, SESSION_HMAC_INFO };

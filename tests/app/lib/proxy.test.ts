@@ -285,7 +285,7 @@ describe("sealApiToken", () => {
     expect(result).toBe("enc:abc123");
   });
 
-  it("throws { status, message } on 403 response", async () => {
+  it("throws SealError on 403 response", async () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
@@ -293,13 +293,12 @@ describe("sealApiToken", () => {
     );
     vi.stubGlobal("fetch", mockFetch);
 
-    await expect(mod.sealApiToken("my-token", "jira-api-token")).rejects.toMatchObject({
-      status: 403,
-      message: "turnstile_failed",
-    });
+    const err = await mod.sealApiToken("my-token", "jira-api-token").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(mod.SealError);
+    expect(err).toMatchObject({ status: 403, message: "turnstile_failed" });
   });
 
-  it("throws { status, message } on 429 response", async () => {
+  it("throws SealError on 429 response", async () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(
@@ -313,7 +312,7 @@ describe("sealApiToken", () => {
     });
   });
 
-  it("throws { status, message } on 500 response", async () => {
+  it("throws SealError on 500 response", async () => {
     setupMockedTurnstile("turnstile-tok");
 
     const mockFetch = vi.fn().mockResolvedValue(

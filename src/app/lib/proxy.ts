@@ -102,6 +102,16 @@ export async function proxyFetch(
   });
 }
 
+export class SealError extends Error {
+  readonly status: number;
+
+  constructor(status: number, code: string) {
+    super(code);
+    this.name = "SealError";
+    this.status = status;
+  }
+}
+
 export async function sealApiToken(token: string, purpose: string): Promise<string> {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
   const turnstileToken = await acquireTurnstileToken(siteKey ?? "");
@@ -115,14 +125,14 @@ export async function sealApiToken(token: string, purpose: string): Promise<stri
   });
 
   if (!res.ok) {
-    let message = "unknown_error";
+    let code = "unknown_error";
     try {
-      const body = (await res.json()) as { code?: string; error?: string };
-      message = body.error ?? message;
+      const body = (await res.json()) as { error?: string };
+      code = body.error ?? code;
     } catch {
-      // ignore parse errors — keep default message
+      // ignore parse errors — keep default code
     }
-    throw { status: res.status, message };
+    throw new SealError(res.status, code);
   }
 
   const data = (await res.json()) as { sealed: string };
