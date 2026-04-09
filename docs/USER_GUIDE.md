@@ -110,7 +110,7 @@ When a group is collapsed, a brief preview of any status change detected by the 
 
 The **Scope** filter chip appears on the Issues and Pull Requests tabs when you have tracked users configured or monitor-all repos enabled. It has two options:
 
-- **Involves me** (default) — shows only items where you (the signed-in user) are the author, assignee, reviewer, or mentioned. For monitored repos, all activity in that repo is always shown regardless of scope.
+- **Involves me** (default) — shows items where you or any of your tracked users are involved (author, assignee, reviewer, or mentioned). For monitored repos, all activity in that repo is always shown regardless of scope.
 - **All activity** — shows every open item across your selected repos. Items that involve you are highlighted with a blue left border.
 
 The scope filter is hidden (and always set to "Involves me") when you have no tracked users and no monitor-all repos, because in that configuration all fetched data already involves you.
@@ -447,7 +447,7 @@ These are UI preferences that persist across sessions but are not included in th
 
 **Items I expect to see are not showing up.**
 
-- Check that the Scope filter is set correctly. "Involves me" hides items where you have no direct involvement. Switch to "All activity" to see everything.
+- Check that the Scope filter is set correctly. "Involves me" shows items involving you or your tracked users; items from monitored repos where nobody you track is involved are hidden. Switch to "All activity" to see everything.
 - Verify the repo is in your selected repo list (Settings > Repositories).
 - Check if the item was accidentally ignored (toolbar Ignored badge).
 - If you recently added the repo, wait for the next full refresh or click the manual refresh button.
