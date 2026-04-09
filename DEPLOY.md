@@ -95,6 +95,20 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 
 Copy `.dev.vars.example` to `.dev.vars` and fill in your values. Wrangler picks up `.dev.vars` automatically for local `wrangler dev` runs.
 
+### HTTPS requirement for session cookies
+
+The `__Host-session` cookie uses the `__Host-` prefix, which browsers **silently reject over HTTP**. To test session cookies locally, use:
+
+```bash
+wrangler dev --local-protocol https
+```
+
+The self-signed certificate from `--local-protocol https` must be accepted in the browser on first use (click through the "Not Secure" warning or add a security exception).
+
+### Compatibility flags in local dev
+
+The `global_fetch_strictly_public` compatibility flag (which blocks Worker subrequests to private/internal IPs) has **no effect** in local `wrangler dev` — workerd ignores it. No local dev workaround is needed for this flag.
+
 ## Deploy Manually
 
 ```sh
@@ -114,3 +128,100 @@ If you previously deployed with the GitHub App model (HttpOnly cookie refresh to
 6. **Delete the old GitHub App** (optional): GitHub → Settings → Developer settings → GitHub Apps → your app → Advanced → Delete
 
 The old `POST /api/oauth/refresh` and `POST /api/oauth/logout` endpoints no longer exist and return 404.
+
+---
+
+## WAF Security Rules
+
+Configure these rules in the Cloudflare dashboard under **Security → WAF**.
+
+### Custom Rules
+
+**Rule name:** Block API requests without valid Origin
+**Where:** Security → WAF → Custom Rules
+**Expression:**
+```
+(http.request.uri.path starts_with "/api/") and
+not (any(http.request.headers["origin"][*] in {"https://gh.gordoncode.dev"})) and
+not (http.request.uri.path eq "/api/csp-report") and
+not (http.request.uri.path eq "/api/error-reporting")
+```
+**Action:** Block
+
+**Exemptions:**
+- `/api/csp-report` is exempted because browser-generated CSP violation reports (via the Reporting API) may not include an `Origin` header.
+- `/api/error-reporting` is exempted for consistency with the CSP tunnel — while the Sentry SDK does include `Origin` in its `fetch()` calls, the exemption keeps both tunnel endpoints treated identically. Both endpoints are low-risk (error reporting only, no sensitive data returned) and have their own validation (DSN check, payload format check).
+
+**Notes:**
+- This uses **1 of the 5 free WAF custom rules** available on all plans.
+- Blocks scanners, `curl` without `Origin`, and cross-site browser attacks before the Worker runs (never billed as a Worker request).
+
+### Rate Limiting Rules
+
+> **Conditional:** WAF rate limiting rules may require a **Pro plan** or above. If unavailable on your current Cloudflare plan (Free plan), skip this step. The Workers Rate Limiting Binding provides per-session rate limiting instead, and the WAF custom rule (above) still enforces the Origin check layer.
+
+**Rule name:** Rate limit API proxy endpoints
+**Where:** Security → WAF → Rate Limiting Rules
+**Matching expression:**
+```
+(http.request.uri.path starts_with "/api/") and
+(http.request.method ne "OPTIONS")
+```
+**Rate:** 60 requests per 10 seconds per IP
+**Action:** Block for 60 seconds
+
+**Notes:**
+- `OPTIONS` (CORS preflight) is excluded from counting to avoid blocking legitimate preflight requests.
+- Provides globally-consistent rate limiting that runs before the Worker (not per-location like Workers Rate Limiting Binding).
+
+---
+
+## Workers Secrets
+
+All secrets are set via the `wrangler` CLI and stored in the Cloudflare Worker runtime (never committed to source control).
+
+### Generating keys
+
+```bash
+# Generate cryptographically strong keys (base64-encoded 32-byte random values):
+openssl rand -base64 32  # Run once per key below
+```
+
+### Setting secrets
+
+```bash
+wrangler secret put SESSION_KEY           # HMAC key for session cookies
+wrangler secret put SEAL_KEY              # AES-256-GCM key for sealed tokens
+wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
+```
+
+- `SESSION_KEY`: HMAC-SHA256 key used to sign `__Host-session` cookies. Generate with `openssl rand -base64 32`.
+- `SEAL_KEY`: AES-256-GCM key used to encrypt Jira/GitLab API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
+- `TURNSTILE_SECRET_KEY`: From the Cloudflare Turnstile dashboard (Security → Turnstile → your widget → Secret key).
+- `VITE_TURNSTILE_SITE_KEY`: **Build-time env var (public)** — goes in `.env`, not a Worker secret. From the same Turnstile dashboard (Site key).
+
+### First deployment
+
+On initial deployment, set only `SESSION_KEY`, `SEAL_KEY`, and `TURNSTILE_SECRET_KEY`. Do **not** set `SESSION_KEY_PREV` or `SEAL_KEY_PREV` — these are only needed during key rotation after the initial keys are in use.
+
+### Key rotation
+
+To rotate a key without invalidating existing sessions/tokens:
+
+1. Set the `*_PREV` secret to the **current** key value:
+   ```bash
+   wrangler secret put SESSION_KEY_PREV  # Copy current SESSION_KEY value here first
+   wrangler secret put SEAL_KEY_PREV     # Copy current SEAL_KEY value here first
+   ```
+2. Generate a new key and update the main secret:
+   ```bash
+   openssl rand -base64 32  # generate new value
+   wrangler secret put SESSION_KEY       # update with new value
+   wrangler secret put SEAL_KEY          # update with new value
+   ```
+3. The Worker will accept tokens signed/sealed with either the current or previous key during the transition window.
+4. After all clients have cycled (sessions expire after 8 hours), optionally remove `*_PREV`:
+   ```bash
+   wrangler secret delete SESSION_KEY_PREV
+   wrangler secret delete SEAL_KEY_PREV
+   ```
