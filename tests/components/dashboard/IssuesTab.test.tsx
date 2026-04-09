@@ -322,10 +322,10 @@ describe("IssuesTab — monitored repos filter bypass", () => {
 // ── IssuesTab — scope filter ───────────────────────────────────────────────────
 
 describe("IssuesTab — scope filter", () => {
-  it("default scope shows only items involving the user (surfacedBy includes userLogin)", () => {
+  it("default scope shows items surfaced by tracked users (surfacedBy present)", () => {
     const issues = [
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
-      makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+      makeIssue({ id: 2, title: "Tracked User issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
     ];
     setAllExpanded("issues", ["org/repo"], true);
 
@@ -339,7 +339,7 @@ describe("IssuesTab — scope filter", () => {
     ));
 
     screen.getByText("My issue");
-    expect(screen.queryByText("Community issue")).toBeNull();
+    screen.getByText("Tracked User issue");
   });
 
   it("scope 'all' shows all items including community items", () => {
@@ -437,9 +437,9 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     expect(listitem?.className).toContain("border-l-primary");
   });
 
-  it("does not add border-l-2 to community items in 'all' scope", () => {
+  it("does not add border-l-2 to untracked monitored repo items in 'all' scope", () => {
     const issues = [
-      makeIssue({ id: 1, title: "Community issue", repoFullName: "org/monitored", surfacedBy: ["other"], userLogin: "other", assigneeLogins: [] }),
+      makeIssue({ id: 1, title: "Community issue", repoFullName: "org/monitored", userLogin: "other", assigneeLogins: [] }),
     ];
     setTabFilter("issues", "scope", "all");
     setAllExpanded("issues", ["org/monitored"], true);
@@ -454,6 +454,25 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
 
     const listitem = container.querySelector('[role="listitem"]');
     expect(listitem?.className).not.toContain("border-l-primary");
+  });
+
+  it("adds border-l-primary to tracked user issue in monitored repo in 'all' scope", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Bot issue", repoFullName: "org/monitored", surfacedBy: ["tracked-bot[bot]"] }),
+    ];
+    setTabFilter("issues", "scope", "all");
+    setAllExpanded("issues", ["org/monitored"], true);
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        monitoredRepos={[{ owner: "org", name: "monitored", fullName: "org/monitored" }]}
+      />
+    ));
+
+    const listitem = container.querySelector('[role="listitem"]');
+    expect(listitem?.className).toContain("border-l-primary");
   });
 
   it("does not add border-l-2 in default 'involves_me' scope", () => {

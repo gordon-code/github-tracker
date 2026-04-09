@@ -110,8 +110,8 @@ When a group is collapsed, a brief preview of any status change detected by the 
 
 The **Scope** filter chip appears on the Issues and Pull Requests tabs when you have tracked users configured or monitor-all repos enabled. It has two options:
 
-- **Involves me** (default) — shows only items where you (the signed-in user) are the author, assignee, reviewer, or mentioned. For monitored repos, all activity in that repo is always shown regardless of scope.
-- **All activity** — shows every open item across your selected repos. Items that involve you are highlighted with a blue left border.
+- **Involves me** (default) — shows items where you or any of your tracked users are involved (author, assignee, reviewer, or mentioned). For monitored repos, only items where you are the author, assignee, or reviewer are shown.
+- **All activity** — shows every open item across your selected repos. Items involving you or your tracked users are highlighted with a colored left border.
 
 The scope filter is hidden (and always set to "Involves me") when you have no tracked users and no monitor-all repos, because in that configuration all fetched data already involves you.
 
@@ -251,7 +251,7 @@ Normally, the dashboard shows only issues and PRs that involve you (or a tracked
 
 **How to enable:** In **Settings > Repositories**, expand the repo panel. Each repo has an eye icon toggle. Enabling it adds the repo to the monitored list (maximum 10 monitored repos).
 
-**Effect on display:** Repo groups for monitored repos show a **Monitoring all** badge in their header. Items from monitored repos are always visible even when the Scope filter is set to "Involves me", and they bypass the User filter.
+**Effect on display:** Repo groups for monitored repos show a **Monitoring all** badge in their header. In "Involves me" scope, monitored repo items are shown when you are the author, assignee, or reviewer; switch to "All activity" to see all monitored repo items. Monitored repo items bypass the User filter.
 
 Upstream repos cannot be monitored (only selected repos are eligible).
 
@@ -447,7 +447,7 @@ These are UI preferences that persist across sessions but are not included in th
 
 **Items I expect to see are not showing up.**
 
-- Check that the Scope filter is set correctly. "Involves me" hides items where you have no direct involvement. Switch to "All activity" to see everything.
+- Check that the Scope filter is set correctly. "Involves me" shows items involving you or your tracked users; items from monitored repos where you are not directly involved (author, assignee, or reviewer) are hidden. Switch to "All activity" to see everything.
 - Verify the repo is in your selected repo list (Settings > Repositories).
 - Check if the item was accidentally ignored (toolbar Ignored badge).
 - If you recently added the repo, wait for the next full refresh or click the manual refresh button.
