@@ -53,6 +53,13 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
       container.remove();
     };
 
+    timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Turnstile challenge timed out after 30 seconds"));
+    }, 30_000);
+
     window.turnstile.ready(() => {
       if (settled) return;
 
@@ -96,13 +103,6 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
         reject(err instanceof Error ? err : new Error("Turnstile render failed"));
       }
     });
-
-    timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error("Turnstile challenge timed out after 30 seconds"));
-    }, 30_000);
   });
 }
 
