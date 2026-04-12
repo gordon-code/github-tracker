@@ -35,6 +35,7 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     let settled = false;
     let currentWidgetId: string | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const container = document.createElement("div");
     container.style.cssText =
@@ -42,8 +43,12 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
     document.body.appendChild(container);
 
     const cleanup = () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
       if (currentWidgetId !== null) {
-        window.turnstile.remove(currentWidgetId);
+        try { window.turnstile.remove(currentWidgetId); } catch { /* widget already gone */ }
       }
       container.remove();
     };
@@ -51,9 +56,8 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
     window.turnstile.ready(() => {
       if (settled) return;
 
-      let widgetId: string;
       try {
-        widgetId = window.turnstile.render(container, {
+        const widgetId = window.turnstile.render(container, {
           sitekey: siteKey,
           size: "invisible",
           execution: "execute",
@@ -83,19 +87,17 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
             reject(new Error("Turnstile challenge timed out"));
           },
         });
+        currentWidgetId = widgetId;
+        window.turnstile.execute(widgetId);
       } catch (err) {
         if (settled) return;
         settled = true;
         cleanup();
         reject(err instanceof Error ? err : new Error("Turnstile render failed"));
-        return;
       }
-
-      currentWidgetId = widgetId;
-      window.turnstile.execute(widgetId);
     });
 
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       if (settled) return;
       settled = true;
       cleanup();

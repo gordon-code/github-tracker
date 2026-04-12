@@ -337,6 +337,30 @@ describe("acquireTurnstileToken", () => {
     await expect(tokenPromise).rejects.toThrow("Turnstile challenge timed out");
   });
 
+  it("rejects immediately when turnstile.render() throws", async () => {
+    const mockTurnstile = makeMockTurnstile();
+    mockTurnstile.render.mockImplementation(() => {
+      throw new Error("Invalid sitekey");
+    });
+    vi.stubGlobal("window", {
+      ...window,
+      turnstile: mockTurnstile,
+    });
+
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+
+    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+      "Invalid sitekey",
+    );
+  });
+
   it("rejects when the Turnstile script fails to load (onerror)", async () => {
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
