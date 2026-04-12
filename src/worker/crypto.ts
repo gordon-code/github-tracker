@@ -178,7 +178,12 @@ export async function signSession(
 }
 
 /**
- * Verifies an HMAC-SHA256 signature. Uses crypto.subtle.verify (timing-safe).
+ * Verifies an HMAC-SHA256 signature using crypto.subtle.timingSafeEqual
+ * (Cloudflare Workers extension) for an explicit constant-time guarantee.
+ *
+ * Both inputs are hashed to SHA-256 before comparison so timingSafeEqual
+ * always receives equal-length buffers — no early-return length guard needed.
+ * This follows Cloudflare's recommended pattern for timing-attack protection.
  */
 export async function verifySession(
   payload: string,
@@ -194,7 +199,16 @@ export async function verifySession(
 
   const payloadBytes = new TextEncoder().encode(payload);
   try {
-    return await crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, payloadBytes);
+    const expected = new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, payloadBytes)
+    );
+    // Hash both to fixed 32 bytes so timingSafeEqual never sees mismatched
+    // lengths and the comparison is unconditionally constant-time.
+    const [hashA, hashB] = await Promise.all([
+      crypto.subtle.digest("SHA-256", sigBytes.buffer as ArrayBuffer),
+      crypto.subtle.digest("SHA-256", expected.buffer as ArrayBuffer),
+    ]);
+    return crypto.subtle.timingSafeEqual(hashA, hashB);
   } catch {
     return false;
   }
