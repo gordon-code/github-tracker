@@ -34,47 +34,54 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
+    let currentWidgetId: string | null = null;
 
     const container = document.createElement("div");
     container.style.cssText =
       "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; min-width: 300px; min-height: 65px;";
     document.body.appendChild(container);
 
-    const cleanup = (widgetId: string) => {
-      window.turnstile.remove(widgetId);
+    const cleanup = () => {
+      if (currentWidgetId !== null) {
+        window.turnstile.remove(currentWidgetId);
+      }
       container.remove();
     };
 
-    const widgetId = window.turnstile.render(container, {
-      sitekey: siteKey,
-      size: "invisible",
-      execution: "execute",
-      callback: (token: string) => {
-        if (settled) return;
-        settled = true;
-        cleanup(widgetId);
-        resolve(token);
-      },
-      "error-callback": (errorCode: string) => {
-        if (settled) return;
-        settled = true;
-        cleanup(widgetId);
-        reject(new Error(`Turnstile error: ${errorCode}`));
-      },
-      "expired-callback": () => {
-        if (settled) return;
-        settled = true;
-        cleanup(widgetId);
-        reject(new Error("Turnstile token expired before submission"));
-      },
-    });
+    window.turnstile.ready(() => {
+      const widgetId = window.turnstile.render(container, {
+        sitekey: siteKey,
+        size: "invisible",
+        execution: "execute",
+        retry: "never",
+        callback: (token: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(token);
+        },
+        "error-callback": (errorCode: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(`Turnstile error: ${errorCode}`));
+        },
+        "expired-callback": () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("Turnstile token expired before submission"));
+        },
+      });
 
-    window.turnstile.execute(widgetId);
+      currentWidgetId = widgetId;
+      window.turnstile.execute(widgetId);
+    });
 
     setTimeout(() => {
       if (settled) return;
       settled = true;
-      cleanup(widgetId);
+      cleanup();
       reject(new Error("Turnstile challenge timed out after 30 seconds"));
     }, 30_000);
   });

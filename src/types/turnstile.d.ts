@@ -5,6 +5,7 @@ interface TurnstileRenderOptions {
   sitekey: string;
   size?: "normal" | "compact" | "invisible" | "flexible";
   execution?: "render" | "execute";
+  retry?: "auto" | "never";
   callback?: (token: string) => void;
   "error-callback"?: (errorCode: string) => void;
   "expired-callback"?: () => void;
@@ -12,6 +13,7 @@ interface TurnstileRenderOptions {
 }
 
 interface Turnstile {
+  ready(callback: () => void): void;
   render(container: HTMLElement | string, options: TurnstileRenderOptions): string;
   execute(widgetId: string): void;
   remove(widgetId: string): void;

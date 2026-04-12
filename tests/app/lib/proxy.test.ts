@@ -14,6 +14,7 @@ async function loadModule() {
 // ── Mock Turnstile factory ────────────────────────────────────────────────────
 
 interface MockTurnstile {
+  ready: ReturnType<typeof vi.fn>;
   render: ReturnType<typeof vi.fn>;
   execute: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
@@ -32,6 +33,7 @@ function makeMockTurnstile(): MockTurnstile {
   let _expiredCb: (() => void) | undefined;
 
   const mock: MockTurnstile = {
+    ready: vi.fn((cb: () => void) => cb()),
     render: vi.fn((_container: HTMLElement, options: {
       callback?: (token: string) => void;
       "error-callback"?: (code: string) => void;
