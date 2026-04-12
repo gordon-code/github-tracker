@@ -25,12 +25,15 @@ interface MockTurnstile {
   _rejectWithError(code: string): void;
   /** Trigger the expired-callback for the most-recently rendered widget. */
   _triggerExpired(): void;
+  /** Trigger the timeout-callback for the most-recently rendered widget. */
+  _triggerTimeout(): void;
 }
 
 function makeMockTurnstile(): MockTurnstile {
   let _successCb: ((token: string) => void) | undefined;
   let _errorCb: ((code: string) => void) | undefined;
   let _expiredCb: (() => void) | undefined;
+  let _timeoutCb: (() => void) | undefined;
 
   const mock: MockTurnstile = {
     ready: vi.fn((cb: () => void) => cb()),
@@ -38,10 +41,12 @@ function makeMockTurnstile(): MockTurnstile {
       callback?: (token: string) => void;
       "error-callback"?: (code: string) => void;
       "expired-callback"?: () => void;
+      "timeout-callback"?: () => void;
     }) => {
       _successCb = options.callback;
       _errorCb = options["error-callback"];
       _expiredCb = options["expired-callback"];
+      _timeoutCb = options["timeout-callback"];
       return "widget-id-1";
     }),
     execute: vi.fn(),
@@ -55,6 +60,9 @@ function makeMockTurnstile(): MockTurnstile {
     },
     _triggerExpired() {
       _expiredCb?.();
+    },
+    _triggerTimeout() {
+      _timeoutCb?.();
     },
   };
 
@@ -141,6 +149,19 @@ describe("proxyFetch", () => {
     expect(headers["X-Requested-With"]).toBe("fetch");
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["cf-turnstile-response"]).toBe("tok");
+  });
+
+  it("X-Requested-With cannot be overridden by callers", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await mod.proxyFetch("/api/proxy/seal", {
+      headers: { "X-Requested-With": "malicious" },
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Requested-With"]).toBe("fetch");
   });
 
   it("passes the path to fetch unchanged", async () => {
@@ -230,6 +251,12 @@ describe("acquireTurnstileToken", () => {
 
     const token = await tokenPromise;
     expect(token).toBe("test-token-abc");
+
+    expect(mockTurnstile.ready).toHaveBeenCalledOnce();
+    expect(mockTurnstile.render).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      expect.objectContaining({ retry: "never" }),
+    );
   });
 
   it("rejects when Turnstile fires error-callback", async () => {
@@ -282,6 +309,32 @@ describe("acquireTurnstileToken", () => {
     mockTurnstile._triggerExpired();
 
     await expect(tokenPromise).rejects.toThrow("Turnstile token expired before submission");
+  });
+
+  it("rejects when Turnstile fires timeout-callback", async () => {
+    const mockTurnstile = makeMockTurnstile();
+    vi.stubGlobal("window", {
+      ...window,
+      turnstile: mockTurnstile,
+    });
+
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    mockTurnstile._triggerTimeout();
+
+    await expect(tokenPromise).rejects.toThrow("Turnstile challenge timed out");
   });
 
   it("rejects when the Turnstile script fails to load (onerror)", async () => {

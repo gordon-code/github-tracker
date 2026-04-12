@@ -49,30 +49,47 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
     };
 
     window.turnstile.ready(() => {
-      const widgetId = window.turnstile.render(container, {
-        sitekey: siteKey,
-        size: "invisible",
-        execution: "execute",
-        retry: "never",
-        callback: (token: string) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolve(token);
-        },
-        "error-callback": (errorCode: string) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error(`Turnstile error: ${errorCode}`));
-        },
-        "expired-callback": () => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          reject(new Error("Turnstile token expired before submission"));
-        },
-      });
+      if (settled) return;
+
+      let widgetId: string;
+      try {
+        widgetId = window.turnstile.render(container, {
+          sitekey: siteKey,
+          size: "invisible",
+          execution: "execute",
+          retry: "never",
+          callback: (token: string) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(token);
+          },
+          "error-callback": (errorCode: string) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error(`Turnstile error: ${errorCode}`));
+          },
+          "expired-callback": () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Turnstile token expired before submission"));
+          },
+          "timeout-callback": () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Turnstile challenge timed out"));
+          },
+        });
+      } catch (err) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err instanceof Error ? err : new Error("Turnstile render failed"));
+        return;
+      }
 
       currentWidgetId = widgetId;
       window.turnstile.execute(widgetId);
@@ -101,7 +118,11 @@ export async function proxyFetch(
       ? Object.fromEntries(options.headers.entries())
       : (options?.headers as Record<string, string> | undefined) ?? {};
 
-  const mergedHeaders = { ...defaultHeaders, ...callerHeaders };
+  const mergedHeaders = {
+    ...defaultHeaders,
+    ...callerHeaders,
+    "X-Requested-With": "fetch",
+  };
 
   return fetch(path, {
     ...options,
