@@ -5,6 +5,8 @@ import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstil
 import { validateProxyRequest, validateOrigin } from "./validation";
 import { getWorkerSentryOptions } from "./sentry";
 
+// Local interface — project does not install @cloudflare/workers-types.
+// Matches the real Cloudflare ExecutionContext (waitUntil + passThroughOnException).
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;

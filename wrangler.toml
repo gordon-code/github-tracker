@@ -22,6 +22,7 @@ custom_domain = true
 [vars]
 # SENTRY_DSN is used by both the Sentry tunnel endpoint (DSN validation) and the
 # @sentry/cloudflare SDK for worker-side error capture. No additional secrets needed.
+# KEEP IN SYNC with SENTRY_DSN in src/app/lib/sentry.ts — mismatch causes 403 on tunnel.
 SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240"
 
 [[ratelimits]]
