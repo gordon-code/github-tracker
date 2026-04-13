@@ -471,11 +471,14 @@ async function handleSentryTunnel(
 // Receives browser CSP violation reports, scrubs OAuth params from URLs,
 // then forwards to Sentry's security ingest endpoint.
 const CSP_REPORT_MAX_BYTES = 64 * 1024;
-const CSP_OAUTH_PARAMS_RE = /([?&])(code|state|access_token)=[^&\s]*/g;
+const CSP_OAUTH_PARAMS_RE = /([?&])(code|state|access_token|client_secret)=[^&\s]*/gi;
+const CSP_TOKEN_PREFIX_RE = /\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g;
 
 function scrubReportUrl(url: unknown): string | undefined {
   if (typeof url !== "string") return undefined;
-  return url.replace(CSP_OAUTH_PARAMS_RE, "$1$2=[REDACTED]");
+  return url
+    .replace(CSP_OAUTH_PARAMS_RE, "$1$2=[REDACTED]")
+    .replace(CSP_TOKEN_PREFIX_RE, "$1[REDACTED]");
 }
 
 const CSP_FIELD_MAX_LENGTH = 2048;
