@@ -17,6 +17,11 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[poll]",
   "[dashboard]",
   "[settings]",
+  "[hot-poll]",
+  "[cache]",
+  "[github]",
+  "[mcp-relay]",
+  "[notifications]",
 ];
 
 const SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240";
@@ -32,9 +37,10 @@ export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
         ? scrubUrl(event.request.query_string)
         : "[REDACTED]";
   }
-  // Remove headers and cookies entirely
+  // Remove headers, cookies, and request body entirely
   delete event.request?.headers;
   delete event.request?.cookies;
+  delete event.request?.data;
   // Remove user identity — we never want to track users
   delete event.user;
   // Scrub URLs in stack trace frames

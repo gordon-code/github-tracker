@@ -85,17 +85,19 @@ describe("beforeSendHandler", () => {
     expect(result!.request!.query_string).toBe("[REDACTED]");
   });
 
-  it("deletes request headers and cookies", () => {
+  it("deletes request headers, cookies, and data", () => {
     const event = {
       request: {
         url: "https://gh.gordoncode.dev",
         headers: { Authorization: "Bearer ghu_token" },
         cookies: "session=abc",
+        data: '{"token":"ghu_secret"}',
       },
     };
     const result = beforeSendHandler(event as never);
     expect(result!.request!.headers).toBeUndefined();
     expect(result!.request!.cookies).toBeUndefined();
+    expect((result!.request as Record<string, unknown>).data).toBeUndefined();
   });
 
   it("deletes user identity", () => {
@@ -179,7 +181,10 @@ describe("beforeBreadcrumbHandler", () => {
   });
 
   it("keeps allowed console breadcrumbs", () => {
-    const prefixes = ["[app]", "[auth]", "[api]", "[poll]", "[dashboard]", "[settings]"];
+    const prefixes = [
+      "[app]", "[auth]", "[api]", "[poll]", "[dashboard]", "[settings]",
+      "[hot-poll]", "[cache]", "[github]", "[mcp-relay]", "[notifications]",
+    ];
     for (const prefix of prefixes) {
       const breadcrumb = {
         category: "console",

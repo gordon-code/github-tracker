@@ -1,4 +1,5 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
@@ -544,6 +545,7 @@ export async function fetchHotData(): Promise<{
   } catch (err) {
     hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
+    Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
     // Items stay in _hotPRs for retry next cycle
   }
 
@@ -558,6 +560,8 @@ export async function fetchHotData(): Promise<{
       runUpdates.set(result.value.id, result.value);
     } else {
       hadErrors = true;
+      console.warn("[hot-poll] Workflow run fetch failed:", result.reason);
+      Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
     }
   }
 
