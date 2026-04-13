@@ -15,7 +15,8 @@
     "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test",
     "test:waf": "bash scripts/waf-smoke-test.sh",
     "screenshot": "pnpm exec playwright test --config playwright.config.screenshot.ts",
-    "mcp:serve": "pnpm --filter github-tracker-mcp dev"
+    "mcp:serve": "pnpm --filter github-tracker-mcp dev",
+    "validate:deploy": "bash scripts/validate-deploy.sh"
   },
   "dependencies": {
     "@kobalte/core": "0.13.11",
