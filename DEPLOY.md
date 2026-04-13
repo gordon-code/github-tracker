@@ -90,7 +90,7 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 ### CORS
 
 - `Access-Control-Allow-Origin`: exact match against `ALLOWED_ORIGIN` (no wildcards)
-- No `Access-Control-Allow-Credentials` header (OAuth App uses no cookies)
+- No `Access-Control-Allow-Credentials` header (the `__Host-session` cookie is SameSite=Strict and is not relevant to cross-origin requests)
 
 ### Tunnel Endpoint Security
 
@@ -239,6 +239,7 @@ wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
 ```
 
 - `SESSION_KEY`: HKDF input key material used to derive the HMAC-SHA256 key for signing `__Host-session` cookies. Generate with `openssl rand -base64 32`.
+- `SENTRY_DSN` (configured in `wrangler.toml` `[vars]`, not a secret): used by both the Sentry tunnel endpoint for DSN validation and the `@sentry/cloudflare` SDK for direct worker-side error capture. Sentry DSNs are public keys — they authorize sending events, not reading them.
 - `SEAL_KEY`: HKDF input key material used to derive the AES-256-GCM key for encrypting API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
 - `TURNSTILE_SECRET_KEY`: From the Cloudflare Turnstile dashboard (Security → Turnstile → your widget → Secret key).
 - `VITE_TURNSTILE_SITE_KEY`: **Build-time env var (public)** — goes in `.env`, not a Worker secret. From the same Turnstile dashboard (Site key).

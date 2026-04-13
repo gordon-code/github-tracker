@@ -31,6 +31,7 @@ export default defineConfig({
         test: {
           name: "worker",
           globals: true,
+          setupFiles: ["tests/worker/setup.ts"],
           include: ["tests/worker/**/*.test.ts"],
         },
       }),

@@ -23,6 +23,7 @@
     "@octokit/plugin-paginate-rest": "14.0.0",
     "@octokit/plugin-retry": "8.1.0",
     "@octokit/plugin-throttling": "11.0.3",
+    "@sentry/cloudflare": "10.46.0",
     "@sentry/solid": "10.46.0",
     "@solidjs/router": "0.16.1",
     "idb": "8.0.3",

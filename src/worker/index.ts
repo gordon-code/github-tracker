@@ -1,7 +1,15 @@
+import { withSentry } from "@sentry/cloudflare";
+import * as Sentry from "@sentry/cloudflare";
 import { CryptoEnv, deriveKey, sealToken, SEAL_SALT } from "./crypto";
 import { SessionEnv, ensureSession } from "./session";
 import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
 import { validateProxyRequest, validateOrigin } from "./validation";
+import { getWorkerSentryOptions } from "./sentry";
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
 
 interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -284,6 +292,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
     log("error", "seal_failed", {
       error: err instanceof Error ? err.message : "unknown",
     }, request);
+    Sentry.captureException(err, { tags: { source: "worker-seal" } });
     return errorResponse("seal_failed", 500);
   }
 
@@ -452,6 +461,7 @@ async function handleSentryTunnel(
     log("error", "sentry_tunnel_fetch_failed", {
       error: err instanceof Error ? err.message : "unknown",
     }, request);
+    Sentry.captureException(err, { tags: { source: "worker-sentry-tunnel" } });
     return new Response(null, { status: 502, headers: SECURITY_HEADERS });
   }
 }
@@ -728,6 +738,7 @@ async function handleTokenExchange(
       error: err instanceof Error ? err.message : "unknown",
       error_name: err instanceof Error ? err.name : "unknown",
     }, request);
+    Sentry.captureException(err, { tags: { source: "worker-token-exchange" } });
     return errorResponse("token_exchange_failed", 400, cors);
   }
 
@@ -769,8 +780,10 @@ async function handleTokenExchange(
   });
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+export default withSentry(
+  (env: Env) => getWorkerSentryOptions(env),
+  {
+  async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
     const cors = getCorsHeaders(origin, env.ALLOWED_ORIGIN);
@@ -866,6 +879,7 @@ export default {
         log("error", "rate_limiter_failed", {
           error: err instanceof Error ? err.message : "unknown",
         }, request);
+        Sentry.captureException(err, { tags: { source: "worker-rate-limiter" } });
       }
       if (rateLimited) {
         log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
@@ -906,4 +920,5 @@ export default {
     // Forward non-API requests to static assets
     return env.ASSETS.fetch(request);
   },
-};
+  }
+);

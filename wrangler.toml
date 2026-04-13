@@ -1,7 +1,7 @@
 name = "github-tracker"
 main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
-compatibility_flags = ["global_fetch_strictly_public"]
+compatibility_flags = ["global_fetch_strictly_public", "nodejs_als"]
 workers_dev = false
 
 [assets]
@@ -16,6 +16,8 @@ pattern = "gh.gordoncode.dev"
 custom_domain = true
 
 [vars]
+# SENTRY_DSN is used by both the Sentry tunnel endpoint (DSN validation) and the
+# @sentry/cloudflare SDK for worker-side error capture. No additional secrets needed.
 SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240"
 
 [[ratelimits]]

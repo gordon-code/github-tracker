@@ -9,6 +9,7 @@
 // `wrangler dev --local-protocol https` to test session cookies locally.
 // See DEPLOY.md "## Local Development" for details.
 
+import * as Sentry from "@sentry/cloudflare";
 import {
   deriveKey,
   signSession,
@@ -149,6 +150,7 @@ export async function ensureSession(
       event: "session_issue_failed",
       error: error instanceof Error ? error.message : "unknown",
     }));
+    Sentry.captureException(error, { tags: { source: "worker-session-issue" } });
     return { sessionId: crypto.randomUUID() };
   }
 }
