@@ -710,6 +710,7 @@ describe("Worker OAuth endpoint", () => {
         headers: {
           "Origin": ALLOWED_ORIGIN,
           "Content-Type": "application/json",
+          "CF-Connecting-IP": `10.1.0.${++_requestCounter}`,
         },
         body: "not-valid-json{{{",
       });

@@ -370,6 +370,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
         "Origin": ALLOWED_ORIGIN,
         "X-Requested-With": "fetch",
         "Content-Type": "application/json",
+        "CF-Connecting-IP": `10.4.0.${++_requestCounter}`,
       },
       body: JSON.stringify({}),
     });

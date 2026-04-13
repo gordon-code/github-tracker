@@ -29,7 +29,8 @@ type ErrorCode =
   | "invalid_content_type"
   | "turnstile_failed"
   | "rate_limited"
-  | "seal_failed";
+  | "seal_failed"
+  | "internal_error";
 
 // Structured logging — Cloudflare auto-indexes JSON fields for querying.
 // NEVER log secrets: codes, tokens, client_secret, cookie values.
@@ -113,25 +114,12 @@ const sentryRateLimiter = createIpRateLimiter(15, 60_000);   // sentry tunnel: 1
 const cspRateLimiter = createIpRateLimiter(15, 60_000);      // csp report: 15/min
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000); // proxy pre-gate: complements CF binding
 
-// Extract client IP from CF-Connecting-IP header.
-// In production (behind Cloudflare proxy), this header is always present and trustworthy.
-// In local dev (wrangler dev), the header is absent — falls back to "unknown" so dev
-// works without a real IP. Logs a warning on first miss to flag production misconfiguration.
-let _ipMissingWarned = false;
-function getClientIp(request: Request): string {
-  const ip = request.headers.get("CF-Connecting-IP");
-  if (ip) return ip;
-  if (!_ipMissingWarned) {
-    _ipMissingWarned = true;
-    log("warn", "cf_connecting_ip_missing", {}, request);
-  }
-  return "unknown";
+// CF-Connecting-IP is set by Cloudflare's proxy layer in production and by
+// miniflare/workerd in local dev. Always present in any real request path.
+// Returns null only for malformed/synthetic requests — callers must reject.
+function getClientIp(request: Request): string | null {
+  return request.headers.get("CF-Connecting-IP");
 }
-
-// Consecutive failure counter for durable rate limiter — escalates log severity
-// when the CF binding is persistently misconfigured or unavailable.
-let _durableRateLimiterFailures = 0;
-const DURABLE_FAILURE_ESCALATION_THRESHOLD = 3;
 
 // Content-Length pre-check helper — optimization only, not a security boundary.
 // Absent, non-integer, or negative Content-Length passes through (post-read check is authoritative).
@@ -360,6 +348,9 @@ async function handleSentryTunnel(
   }
 
   const ip = getClientIp(request);
+  if (!ip) {
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
+  }
   if (!sentryRateLimiter.check(ip)) {
     log("warn", "sentry_tunnel_rate_limited", {}, request);
     return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
@@ -509,6 +500,9 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
   }
 
   const ip = getClientIp(request);
+  if (!ip) {
+    return new Response(null, { status: 400, headers: SECURITY_HEADERS });
+  }
   if (!cspRateLimiter.check(ip)) {
     log("warn", "csp_report_rate_limited", {}, request);
     return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
@@ -618,6 +612,9 @@ async function handleTokenExchange(
   }
 
   const ip = getClientIp(request);
+  if (!ip) {
+    return errorResponse("invalid_request", 400, cors);
+  }
   if (!tokenRateLimiter.check(ip)) {
     log("warn", "token_exchange_rate_limited", {}, request);
     return new Response(JSON.stringify({ error: "rate_limited" }), {
@@ -633,25 +630,30 @@ async function handleTokenExchange(
 
   // Durable rate limiting — enforces global cross-isolate limit via CF binding.
   // Keyed by "token:{ip}" to avoid collision with session-keyed proxy limits.
-  // Fail open — in-memory limiter already checked, this is defense-in-depth.
-  try {
-    const { success } = await env.PROXY_RATE_LIMITER.limit({ key: `token:${ip}` });
-    if (!success) {
-      log("warn", "token_exchange_rate_limited_durable", {}, request);
-      return new Response(JSON.stringify({ error: "rate_limited" }), {
-        status: 429,
-        headers: {
-          "Content-Type": "application/json",
-          "Retry-After": "60",
-          ...cors,
-          ...SECURITY_HEADERS,
-        },
-      });
+  // Missing binding = deployment bug → fail closed. Transient error → fail open.
+  if (typeof env.PROXY_RATE_LIMITER?.limit === "function") {
+    try {
+      const { success } = await env.PROXY_RATE_LIMITER.limit({ key: `token:${ip}` });
+      if (!success) {
+        log("warn", "token_exchange_rate_limited_durable", {}, request);
+        return new Response(JSON.stringify({ error: "rate_limited" }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "60",
+            ...cors,
+            ...SECURITY_HEADERS,
+          },
+        });
+      }
+    } catch (err) {
+      log("error", "token_rate_limiter_failed", {
+        error: err instanceof Error ? err.message : "unknown",
+      }, request);
     }
-  } catch (err) {
-    log("warn", "token_rate_limiter_failed", {
-      error: err instanceof Error ? err.message : "unknown",
-    }, request);
+  } else {
+    log("error", "rate_limiter_binding_missing", {}, request);
+    return errorResponse("internal_error", 503, cors);
   }
 
   log("info", "token_exchange_started", {}, request);
@@ -829,6 +831,12 @@ export default {
 
       // Step 2.5: IP pre-gate — rejects burst abuse before any crypto work (HKDF, HMAC)
       const proxyIp = getClientIp(request);
+      if (!proxyIp) {
+        return new Response(JSON.stringify({ error: "invalid_request" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
+        });
+      }
       if (!proxyPreGateLimiter.check(proxyIp)) {
         log("warn", "proxy_ip_rate_limited", { pathname: url.pathname }, request);
         return new Response(JSON.stringify({ error: "rate_limited" }), {
@@ -840,21 +848,24 @@ export default {
       // Step 3: Session middleware — ensureSession never throws (SDR-003)
       const { sessionId, setCookie } = await ensureSession(request, env);
 
-      // Step 4: Rate limiting using session ID as key
+      // Step 4: Durable rate limiting using session ID as key.
+      // Missing binding = deployment bug → fail closed (503).
+      // Transient .limit() error on existing binding → fail open (IP pre-gate still protects).
       let rateLimited = false;
+      if (typeof env.PROXY_RATE_LIMITER?.limit !== "function") {
+        log("error", "rate_limiter_binding_missing", {}, request);
+        const r503 = errorResponse("internal_error", 503);
+        const h503 = new Headers(r503.headers);
+        if (setCookie) h503.set("Set-Cookie", setCookie);
+        return new Response(r503.body, { status: 503, headers: h503 });
+      }
       try {
         const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
         rateLimited = !success;
-        _durableRateLimiterFailures = 0; // reset on success
       } catch (err) {
-        _durableRateLimiterFailures++;
-        const severity = _durableRateLimiterFailures >= DURABLE_FAILURE_ESCALATION_THRESHOLD ? "error" : "warn";
-        log(severity, "rate_limiter_failed", {
+        log("error", "rate_limiter_failed", {
           error: err instanceof Error ? err.message : "unknown",
-          consecutive_failures: _durableRateLimiterFailures,
         }, request);
-        // Fail open — IP pre-gate (60/min) and Turnstile still protect.
-        // Consecutive failures escalate log severity to surface persistent misconfiguration.
       }
       if (rateLimited) {
         log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
