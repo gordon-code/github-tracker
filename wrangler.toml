@@ -1,7 +1,11 @@
 name = "github-tracker"
 main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
-compatibility_flags = ["global_fetch_strictly_public", "nodejs_als"]
+compatibility_flags = [
+  "global_fetch_strictly_public",
+  # nodejs_als: required by @sentry/cloudflare for AsyncLocalStorage (request context propagation)
+  "nodejs_als",
+]
 workers_dev = false
 
 [assets]

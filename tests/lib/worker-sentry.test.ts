@@ -120,6 +120,18 @@ describe("workerBeforeSendHandler", () => {
     expect(frames[1].abs_path).toBe("https://example.com/lib.js");
   });
 
+  it("scrubs client_secret from request URL query parameter", () => {
+    const event = {
+      request: {
+        url: "https://github.com/login/oauth/access_token?client_id=abc&client_secret=secret123&code=xyz",
+      },
+    };
+    const result = workerBeforeSendHandler(event);
+    expect(result!.request!.url).not.toContain("secret123");
+    expect(result!.request!.url).toContain("client_secret=[REDACTED]");
+    expect(result!.request!.url).toContain("code=[REDACTED]");
+  });
+
   it("scrubs client_secret pattern from exception message", () => {
     const event = {
       request: { url: "https://example.com" },
@@ -182,11 +194,17 @@ describe("getWorkerSentryOptions", () => {
   it("disables PII and tracing", () => {
     const opts = getWorkerSentryOptions({});
     expect(opts.sendDefaultPii).toBe(false);
-    expect(opts.tracesSampleRate).toBe(0);
+    // tracesSampleRate is omitted so hasSpansEnabled() returns false (0 != null is true, undefined != null is false)
+    expect(opts.tracesSampleRate).toBeUndefined();
   });
 
   it("sets environment to production", () => {
     const opts = getWorkerSentryOptions({});
     expect(opts.environment).toBe("production");
+  });
+
+  it("disables default integrations to suppress console breadcrumb capture", () => {
+    const opts = getWorkerSentryOptions({});
+    expect(opts.defaultIntegrations).toBe(false);
   });
 });

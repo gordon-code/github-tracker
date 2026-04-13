@@ -783,142 +783,142 @@ async function handleTokenExchange(
 export default withSentry(
   (env: Env) => getWorkerSentryOptions(env),
   {
-  async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const origin = request.headers.get("Origin");
-    const cors = getCorsHeaders(origin, env.ALLOWED_ORIGIN);
-    const corsMatched = Object.keys(cors).length > 0;
+    async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
+      const url = new URL(request.url);
+      const origin = request.headers.get("Origin");
+      const cors = getCorsHeaders(origin, env.ALLOWED_ORIGIN);
+      const corsMatched = Object.keys(cors).length > 0;
 
-    // Log all API requests (skip static asset requests to reduce noise)
-    if (url.pathname.startsWith("/api/")) {
-      log("info", "api_request", {
-        method: request.method,
-        pathname: url.pathname,
-        cors_matched: corsMatched,
-      }, request);
-
-      if (!corsMatched && origin !== null) {
-        log("warn", "cors_origin_mismatch", {
-          request_origin: origin,
-          allowed_origin: env.ALLOWED_ORIGIN,
+      // Log all API requests (skip static asset requests to reduce noise)
+      if (url.pathname.startsWith("/api/")) {
+        log("info", "api_request", {
+          method: request.method,
+          pathname: url.pathname,
+          cors_matched: corsMatched,
         }, request);
+
+        if (!corsMatched && origin !== null) {
+          log("warn", "cors_origin_mismatch", {
+            request_origin: origin,
+            allowed_origin: env.ALLOWED_ORIGIN,
+          }, request);
+        }
       }
-    }
 
-    // CORS preflight for the token exchange endpoint only
-    if (request.method === "OPTIONS" && url.pathname === "/api/oauth/token") {
-      log("info", "cors_preflight", { cors_matched: corsMatched }, request);
-      return new Response(null, {
-        status: 204,
-        headers: { ...cors, "Access-Control-Max-Age": "86400", ...SECURITY_HEADERS },
-      });
-    }
-
-    // Sentry tunnel — same-origin proxy, no CORS needed (browser sends as first-party)
-    if (url.pathname === "/api/error-reporting") {
-      return handleSentryTunnel(request, env);
-    }
-
-    // CSP report tunnel — scrubs OAuth params before forwarding to Sentry
-    if (url.pathname === "/api/csp-report") {
-      return handleCspReport(request, env);
-    }
-
-    if (url.pathname === "/api/oauth/token") {
-      return handleTokenExchange(request, env, cors);
-    }
-
-    if (url.pathname === "/api/health" && request.method === "GET") {
-      return new Response("OK", {
-        headers: SECURITY_HEADERS,
-      });
-    }
-
-    // ── Proxy routes: validation, session, and rate limiting ─────────────────
-    // Applies to /api/proxy/*, /api/jira/*
-    // validateAndGuardProxyRoute handles OPTIONS preflight for proxy routes.
-    // Proxy routes assume SPA fetch() callers — browser navigation GETs do not send Origin.
-    if (isProxyPath(url.pathname)) {
-      const guardResponse = validateAndGuardProxyRoute(request, env, url.pathname);
-      if (guardResponse !== null) return guardResponse;
-
-      // Step 2.5: IP pre-gate — rejects burst abuse before any crypto work (HKDF, HMAC)
-      const proxyIp = getClientIp(request);
-      if (!proxyIp) {
-        return new Response(JSON.stringify({ error: "invalid_request" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
-        });
-      }
-      if (!proxyPreGateLimiter.check(proxyIp)) {
-        log("warn", "proxy_ip_rate_limited", { pathname: url.pathname }, request);
-        return new Response(JSON.stringify({ error: "rate_limited" }), {
-          status: 429,
-          headers: { "Content-Type": "application/json", "Retry-After": "60", ...SECURITY_HEADERS },
+      // CORS preflight for the token exchange endpoint only
+      if (request.method === "OPTIONS" && url.pathname === "/api/oauth/token") {
+        log("info", "cors_preflight", { cors_matched: corsMatched }, request);
+        return new Response(null, {
+          status: 204,
+          headers: { ...cors, "Access-Control-Max-Age": "86400", ...SECURITY_HEADERS },
         });
       }
 
-      // Step 3: Session middleware — ensureSession never throws (SDR-003)
-      const { sessionId, setCookie } = await ensureSession(request, env);
-
-      // Step 4: Durable rate limiting using session ID as key.
-      // Missing binding = deployment bug → fail closed (503).
-      // Transient .limit() error on existing binding → fail open (IP pre-gate still protects).
-      let rateLimited = false;
-      if (typeof env.PROXY_RATE_LIMITER?.limit !== "function") {
-        log("error", "rate_limiter_binding_missing", {}, request);
-        const r503 = errorResponse("internal_error", 503);
-        const h503 = new Headers(r503.headers);
-        if (setCookie) h503.set("Set-Cookie", setCookie);
-        return new Response(r503.body, { status: 503, headers: h503 });
-      }
-      try {
-        const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
-        rateLimited = !success;
-      } catch (err) {
-        log("error", "rate_limiter_failed", {
-          error: err instanceof Error ? err.message : "unknown",
-        }, request);
-        Sentry.captureException(err, { tags: { source: "worker-rate-limiter" } });
-      }
-      if (rateLimited) {
-        log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "Retry-After": "60",
-          ...SECURITY_HEADERS,
-        };
-        if (setCookie) headers["Set-Cookie"] = setCookie;
-        return new Response(JSON.stringify({ error: "rate_limited" }), { status: 429, headers });
+      // Sentry tunnel — same-origin proxy, no CORS needed (browser sends as first-party)
+      if (url.pathname === "/api/error-reporting") {
+        return handleSentryTunnel(request, env);
       }
 
-      // Step 5: Sealed-token endpoint
-      if (url.pathname === "/api/proxy/seal") {
-        const sealResponse = await handleProxySeal(request, env, sessionId);
-        if (setCookie) {
-          const headers = new Headers(sealResponse.headers);
-          headers.set("Set-Cookie", setCookie);
-          return new Response(sealResponse.body, {
-            status: sealResponse.status,
-            headers,
+      // CSP report tunnel — scrubs OAuth params before forwarding to Sentry
+      if (url.pathname === "/api/csp-report") {
+        return handleCspReport(request, env);
+      }
+
+      if (url.pathname === "/api/oauth/token") {
+        return handleTokenExchange(request, env, cors);
+      }
+
+      if (url.pathname === "/api/health" && request.method === "GET") {
+        return new Response("OK", {
+          headers: SECURITY_HEADERS,
+        });
+      }
+
+      // ── Proxy routes: validation, session, and rate limiting ─────────────────
+      // Applies to /api/proxy/*, /api/jira/*
+      // validateAndGuardProxyRoute handles OPTIONS preflight for proxy routes.
+      // Proxy routes assume SPA fetch() callers — browser navigation GETs do not send Origin.
+      if (isProxyPath(url.pathname)) {
+        const guardResponse = validateAndGuardProxyRoute(request, env, url.pathname);
+        if (guardResponse !== null) return guardResponse;
+
+        // Step 2.5: IP pre-gate — rejects burst abuse before any crypto work (HKDF, HMAC)
+        const proxyIp = getClientIp(request);
+        if (!proxyIp) {
+          return new Response(JSON.stringify({ error: "invalid_request" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
           });
         }
-        return sealResponse;
+        if (!proxyPreGateLimiter.check(proxyIp)) {
+          log("warn", "proxy_ip_rate_limited", { pathname: url.pathname }, request);
+          return new Response(JSON.stringify({ error: "rate_limited" }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "60", ...SECURITY_HEADERS },
+          });
+        }
+
+        // Step 3: Session middleware — ensureSession never throws (SDR-003)
+        const { sessionId, setCookie } = await ensureSession(request, env);
+
+        // Step 4: Durable rate limiting using session ID as key.
+        // Missing binding = deployment bug → fail closed (503).
+        // Transient .limit() error on existing binding → fail open (IP pre-gate still protects).
+        let rateLimited = false;
+        if (typeof env.PROXY_RATE_LIMITER?.limit !== "function") {
+          log("error", "rate_limiter_binding_missing", {}, request);
+          const r503 = errorResponse("internal_error", 503);
+          const h503 = new Headers(r503.headers);
+          if (setCookie) h503.set("Set-Cookie", setCookie);
+          return new Response(r503.body, { status: 503, headers: h503 });
+        }
+        try {
+          const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
+          rateLimited = !success;
+        } catch (err) {
+          log("error", "rate_limiter_failed", {
+            error: err instanceof Error ? err.message : "unknown",
+          }, request);
+          Sentry.captureException(err, { tags: { source: "worker-rate-limiter" } });
+        }
+        if (rateLimited) {
+          log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            "Retry-After": "60",
+            ...SECURITY_HEADERS,
+          };
+          if (setCookie) headers["Set-Cookie"] = setCookie;
+          return new Response(JSON.stringify({ error: "rate_limited" }), { status: 429, headers });
+        }
+
+        // Step 5: Sealed-token endpoint
+        if (url.pathname === "/api/proxy/seal") {
+          const sealResponse = await handleProxySeal(request, env, sessionId);
+          if (setCookie) {
+            const headers = new Headers(sealResponse.headers);
+            headers.set("Set-Cookie", setCookie);
+            return new Response(sealResponse.body, {
+              status: sealResponse.status,
+              headers,
+            });
+          }
+          return sealResponse;
+        }
+
+        // Other proxy routes not yet implemented — fall through to 404
       }
 
-      // Other proxy routes not yet implemented — fall through to 404
-    }
+      if (url.pathname.startsWith("/api/")) {
+        log("warn", "api_not_found", {
+          method: request.method,
+          pathname: url.pathname,
+        }, request);
+        return errorResponse("not_found", 404, cors);
+      }
 
-    if (url.pathname.startsWith("/api/")) {
-      log("warn", "api_not_found", {
-        method: request.method,
-        pathname: url.pathname,
-      }, request);
-      return errorResponse("not_found", 404, cors);
-    }
-
-    // Forward non-API requests to static assets
-    return env.ASSETS.fetch(request);
-  },
+      // Forward non-API requests to static assets
+      return env.ASSETS.fetch(request);
+    },
   }
 );

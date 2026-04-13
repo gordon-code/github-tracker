@@ -120,9 +120,9 @@ export default function PrivacyPage() {
             </li>
           </ul>
           <p>
-            <strong>What is not logged:</strong> IP addresses are not stored,
-            request or response bodies, API tokens, OAuth authorization codes, or
-            cookie values.
+            <strong>What is not logged:</strong> IP addresses, request or
+            response bodies, API tokens, OAuth authorization codes, and cookie
+            values are never stored.
           </p>
           <p>
             Logs are automatically deleted after 7 days (Cloudflare Workers Logs

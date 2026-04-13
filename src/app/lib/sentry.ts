@@ -1,12 +1,14 @@
 import * as Sentry from "@sentry/solid";
 import type { ErrorEvent, Breadcrumb } from "@sentry/solid";
 
-/** Strip OAuth credentials from any captured URL or query string. */
+/** Strip OAuth credentials and tokens from any captured URL or query string. */
 export function scrubUrl(url: string): string {
   return url
     .replace(/code=[^&\s]+/g, "code=[REDACTED]")
     .replace(/state=[^&\s]+/g, "state=[REDACTED]")
-    .replace(/access_token=[^&\s]+/g, "access_token=[REDACTED]");
+    .replace(/access_token=[^&\s]+/g, "access_token=[REDACTED]")
+    .replace(/client_secret=[^&\s"]+/gi, "client_secret=[FILTERED]")
+    .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[FILTERED]");
 }
 
 /** Allowed console breadcrumb prefixes — drop everything else. */
@@ -43,7 +45,7 @@ export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
   delete event.request?.data;
   // Remove user identity — we never want to track users
   delete event.user;
-  // Scrub URLs in stack trace frames
+  // Scrub URLs in stack trace frames and exception messages
   if (event.exception?.values) {
     for (const ex of event.exception.values) {
       if (ex.stacktrace?.frames) {
@@ -52,6 +54,10 @@ export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
             frame.abs_path = scrubUrl(frame.abs_path);
           }
         }
+      }
+      // Scrub exception message strings — defense-in-depth for token leakage
+      if (ex.value) {
+        ex.value = scrubUrl(ex.value);
       }
     }
   }
@@ -97,8 +103,7 @@ export function initSentry(): void {
     // ── Privacy: absolute minimum data ──────────────────────────
     sendDefaultPii: false,
 
-    // ── Disable everything except error tracking ────────────────
-    tracesSampleRate: 0,
+    // ── Disable performance tracing (tracesSampleRate omitted = undefined = no spans) ───
     profilesSampleRate: 0,
 
     // ── Only capture errors from our own code ───────────────────

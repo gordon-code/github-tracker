@@ -48,6 +48,21 @@ describe("scrubUrl", () => {
       "https://example.com?code=[REDACTED]",
     );
   });
+
+  it("strips client_secret= parameter", () => {
+    expect(scrubUrl("https://example.com?client_secret=supersecret")).toBe(
+      "https://example.com?client_secret=[FILTERED]",
+    );
+  });
+
+  it("strips GitHub token prefixes (ghu_, ghp_, gho_, github_pat_)", () => {
+    expect(scrubUrl("Error: token ghu_abc123 exposed")).toBe(
+      "Error: token ghu_[FILTERED] exposed",
+    );
+    expect(scrubUrl("token ghp_xyz789")).toBe("token ghp_[FILTERED]");
+    expect(scrubUrl("token gho_def456")).toBe("token gho_[FILTERED]");
+    expect(scrubUrl("token github_pat_abc123")).toBe("token github_pat_[FILTERED]");
+  });
 });
 
 describe("beforeSendHandler", () => {
@@ -137,6 +152,24 @@ describe("beforeSendHandler", () => {
     const event = {};
     const result = beforeSendHandler(event as never);
     expect(result).toBeDefined();
+  });
+
+  it("scrubs sensitive tokens from exception message strings", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Fetch failed: client_secret=supersecret ghu_abc123",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("supersecret");
+    expect(result!.exception!.values![0].value).not.toContain("ghu_abc123");
+    expect(result!.exception!.values![0].value).toContain("client_secret=[FILTERED]");
+    expect(result!.exception!.values![0].value).toContain("ghu_[FILTERED]");
   });
 });
 

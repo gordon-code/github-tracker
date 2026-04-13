@@ -86,10 +86,13 @@ export function getWorkerSentryOptions(env: SentryEnv): CloudflareOptions {
     dsn: env.SENTRY_DSN,
     environment: "production",
     sendDefaultPii: false,
-    tracesSampleRate: 0,
+    // tracesSampleRate omitted (undefined) — hasSpansEnabled() returns false, no span overhead
     // Cast: workerBeforeSendHandler uses a minimal local interface for testability
     // but is fully compatible with ErrorEvent at runtime.
     beforeSend: workerBeforeSendHandler as CloudflareOptions["beforeSend"],
+    // Disable all default integrations (which include consoleIntegration capturing
+    // structured JSON logs as breadcrumbs) and add only what we need explicitly.
+    defaultIntegrations: false,
     integrations: [
       requestDataIntegration({
         include: { headers: false, cookies: false, data: false },
