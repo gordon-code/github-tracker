@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
+import { collectLogs, findLog } from "./helpers";
 
 const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
 
@@ -441,22 +442,13 @@ describe("Worker /api/proxy/seal endpoint", () => {
     const req = makeSealRequest({ body: { token: "ghp_abc123", purpose: "jira-api-token" } });
     await worker.fetch(req, makeEnv());
 
-    const allLogs: Array<Record<string, unknown>> = [];
-    for (const [, spy] of Object.entries(consoleSpies)) {
-      for (const call of spy.mock.calls) {
-        try {
-          allLogs.push(JSON.parse(call[0] as string) as Record<string, unknown>);
-        } catch {
-          // ignore non-JSON
-        }
-      }
-    }
-    const sealLog = allLogs.find((l) => l["event"] === "token_sealed");
+    const allLogs = collectLogs(consoleSpies);
+    const sealLog = findLog(allLogs, "token_sealed");
     expect(sealLog).toBeDefined();
-    expect(sealLog!["purpose"]).toBe("jira-api-token");
-    expect(sealLog!["token_length"]).toBe(10); // "ghp_abc123".length
+    expect(sealLog!.entry["purpose"]).toBe("jira-api-token");
+    expect(sealLog!.entry["token_length"]).toBe(10); // "ghp_abc123".length
     // Must NOT log the actual token value
-    const allLogText = allLogs.map((l) => JSON.stringify(l)).join("\n");
+    const allLogText = allLogs.map((l) => JSON.stringify(l.entry)).join("\n");
     expect(allLogText).not.toContain("ghp_abc123");
   });
 

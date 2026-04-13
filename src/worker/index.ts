@@ -95,13 +95,14 @@ function createIpRateLimiter(limit: number, windowMs: number): { check(ip: strin
         return true;
       }
       entry.count++;
-      if (entry.count > limit) return false;
-      // Periodic cleanup to prevent unbounded map growth.
+      // Periodic cleanup — runs on both allowed and denied paths to prevent
+      // unbounded map growth during distributed attacks where all IPs are over-limit.
       if (map.size >= PRUNE_THRESHOLD) {
         for (const [k, e] of map) {
           if (now >= e.resetAt) map.delete(k);
         }
       }
+      if (entry.count > limit) return false;
       return true;
     },
   };
