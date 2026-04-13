@@ -154,7 +154,40 @@ describe("beforeSendHandler", () => {
     expect(result).toBeDefined();
   });
 
-  it("scrubs sensitive tokens from exception message strings", () => {
+  it("scrubs OAuth params from exception message values", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Request failed with code=abc123&state=xyz in URL",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("abc123");
+    expect(result!.exception!.values![0].value).toContain("code=[REDACTED]");
+    expect(result!.exception!.values![0].value).toContain("state=[REDACTED]");
+  });
+
+  it("scrubs GitHub token prefixes from exception message values", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Token ghp_secrettoken123 was used in request",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("secrettoken123");
+    expect(result!.exception!.values![0].value).toContain("ghp_[FILTERED]");
+  });
+
+  it("scrubs client_secret and tokens from exception message values", () => {
     const event = {
       request: { url: "https://gh.gordoncode.dev" },
       exception: {
