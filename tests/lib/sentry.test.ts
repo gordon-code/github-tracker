@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   scrubUrl,
   beforeSendHandler,
   beforeBreadcrumbHandler,
+  initSentry,
 } from "../../src/app/lib/sentry";
+
+vi.mock("@sentry/solid", () => ({
+  init: vi.fn(),
+}));
 
 describe("scrubUrl", () => {
   it("strips code= parameter", () => {
@@ -281,5 +286,59 @@ describe("beforeBreadcrumbHandler", () => {
   it("passes through non-console, non-navigation breadcrumbs unchanged", () => {
     const breadcrumb = { category: "ui.click", message: "button" };
     expect(beforeBreadcrumbHandler(breadcrumb as never)).toBe(breadcrumb);
+  });
+});
+
+describe("initSentry", () => {
+  // Import the mock so we can inspect calls
+  let mockInit: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const sentry = await import("@sentry/solid");
+    mockInit = sentry.init as ReturnType<typeof vi.fn>;
+    mockInit.mockClear();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("is a no-op when VITE_SENTRY_DSN is undefined", () => {
+    vi.stubEnv("VITE_SENTRY_DSN", "");
+    initSentry();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when VITE_SENTRY_DSN is empty string", () => {
+    vi.stubEnv("VITE_SENTRY_DSN", "");
+    initSentry();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it("calls Sentry.init with correct DSN when VITE_SENTRY_DSN is set", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
+    initSentry();
+    expect(mockInit).toHaveBeenCalledOnce();
+    expect(mockInit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dsn: "https://test-key@o1.ingest.us.sentry.io/1",
+      }),
+    );
+  });
+
+  it("sets allowUrls to window.location.origin", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
+    vi.stubGlobal("location", { ...window.location, origin: "https://test.example.com" });
+    initSentry();
+    expect(mockInit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowUrls: ["https://test.example.com"],
+      }),
+    );
   });
 });

@@ -26,10 +26,6 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[notifications]",
 ];
 
-// KEEP IN SYNC with SENTRY_DSN in wrangler.toml [vars] — the worker tunnel
-// validates envelope DSN against env.SENTRY_DSN and rejects mismatches (403).
-const SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240";
-
 export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
   // Strip OAuth params from captured URLs
   if (event.request?.url) {
@@ -95,10 +91,11 @@ export function beforeBreadcrumbHandler(
 }
 
 export function initSentry(): void {
-  if (import.meta.env.DEV || !SENTRY_DSN) return;
+  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+  if (import.meta.env.DEV || !dsn) return;
 
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
 
@@ -109,7 +106,7 @@ export function initSentry(): void {
     profilesSampleRate: 0,
 
     // ── Only capture errors from our own code ───────────────────
-    allowUrls: [/^https:\/\/gh\.gordoncode\.dev/],
+    allowUrls: [window.location.origin],
 
     // ── Scrub sensitive data before it leaves the browser ────────
     beforeSend: beforeSendHandler,
