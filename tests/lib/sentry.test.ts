@@ -51,17 +51,17 @@ describe("scrubUrl", () => {
 
   it("strips client_secret= parameter", () => {
     expect(scrubUrl("https://example.com?client_secret=supersecret")).toBe(
-      "https://example.com?client_secret=[FILTERED]",
+      "https://example.com?client_secret=[REDACTED]",
     );
   });
 
   it("strips GitHub token prefixes (ghu_, ghp_, gho_, github_pat_)", () => {
     expect(scrubUrl("Error: token ghu_abc123 exposed")).toBe(
-      "Error: token ghu_[FILTERED] exposed",
+      "Error: token ghu_[REDACTED] exposed",
     );
-    expect(scrubUrl("token ghp_xyz789")).toBe("token ghp_[FILTERED]");
-    expect(scrubUrl("token gho_def456")).toBe("token gho_[FILTERED]");
-    expect(scrubUrl("token github_pat_abc123")).toBe("token github_pat_[FILTERED]");
+    expect(scrubUrl("token ghp_xyz789")).toBe("token ghp_[REDACTED]");
+    expect(scrubUrl("token gho_def456")).toBe("token gho_[REDACTED]");
+    expect(scrubUrl("token github_pat_abc123")).toBe("token github_pat_[REDACTED]");
   });
 });
 
@@ -184,7 +184,7 @@ describe("beforeSendHandler", () => {
     };
     const result = beforeSendHandler(event as never);
     expect(result!.exception!.values![0].value).not.toContain("secrettoken123");
-    expect(result!.exception!.values![0].value).toContain("ghp_[FILTERED]");
+    expect(result!.exception!.values![0].value).toContain("ghp_[REDACTED]");
   });
 
   it("scrubs client_secret and tokens from exception message values", () => {
@@ -201,8 +201,8 @@ describe("beforeSendHandler", () => {
     const result = beforeSendHandler(event as never);
     expect(result!.exception!.values![0].value).not.toContain("supersecret");
     expect(result!.exception!.values![0].value).not.toContain("ghu_abc123");
-    expect(result!.exception!.values![0].value).toContain("client_secret=[FILTERED]");
-    expect(result!.exception!.values![0].value).toContain("ghu_[FILTERED]");
+    expect(result!.exception!.values![0].value).toContain("client_secret=[REDACTED]");
+    expect(result!.exception!.values![0].value).toContain("ghu_[REDACTED]");
   });
 });
 

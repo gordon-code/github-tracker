@@ -4,11 +4,11 @@ import type { ErrorEvent, Breadcrumb } from "@sentry/solid";
 /** Strip OAuth credentials and tokens from any captured URL or query string. */
 export function scrubUrl(url: string): string {
   return url
-    .replace(/code=[^&\s]+/g, "code=[REDACTED]")
-    .replace(/state=[^&\s]+/g, "state=[REDACTED]")
-    .replace(/access_token=[^&\s]+/g, "access_token=[REDACTED]")
-    .replace(/client_secret=[^&\s"]+/gi, "client_secret=[FILTERED]")
-    .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[FILTERED]");
+    .replace(/code=[^&\s"]+/g, "code=[REDACTED]")
+    .replace(/state=[^&\s"]+/g, "state=[REDACTED]")
+    .replace(/access_token=[^&\s"]+/g, "access_token=[REDACTED]")
+    .replace(/client_secret=[^&\s"]+/gi, "client_secret=[REDACTED]")
+    .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[REDACTED]");
 }
 
 /** Allowed console breadcrumb prefixes — drop everything else. */
