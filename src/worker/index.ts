@@ -522,8 +522,10 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
     return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
   }
 
+  // Same-origin CSP reports (report-uri /api/csp-report) always include Origin.
+  // Reject missing Origin — only non-browser clients (curl, scripts) omit it.
   const origin = request.headers.get("Origin");
-  if (origin !== null && origin !== env.ALLOWED_ORIGIN) {
+  if (origin !== env.ALLOWED_ORIGIN) {
     log("warn", "csp_report_origin_rejected", { origin }, request);
     return new Response(null, { status: 403, headers: SECURITY_HEADERS });
   }

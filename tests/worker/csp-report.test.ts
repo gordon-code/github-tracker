@@ -32,8 +32,11 @@ function makeCspRequest(
     // Unique IP per request to avoid hitting the in-memory rate limiter across tests
     "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
   };
-  if (options.origin !== undefined && options.origin !== null) {
-    headers["Origin"] = options.origin;
+  // Default to ALLOWED_ORIGIN (same-origin CSP reports always include it).
+  // Pass { origin: null } to explicitly test missing Origin.
+  const effectiveOrigin = options.origin === undefined ? ALLOWED_ORIGIN : options.origin;
+  if (effectiveOrigin !== null) {
+    headers["Origin"] = effectiveOrigin;
   }
   return new Request("https://gh.gordoncode.dev/api/csp-report", {
     method,
@@ -389,12 +392,11 @@ describe("Worker CSP report endpoint", () => {
     expect(resp.status).toBe(403);
   });
 
-  it("allows requests with missing Origin (soft check — browser CSP reports may lack it)", async () => {
+  it("rejects requests with missing Origin (same-origin CSP reports always include it)", async () => {
     const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
-    // No origin option means no Origin header in makeCspRequest
-    const req = makeCspRequest(body, "application/csp-report", "POST");
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: null });
     const resp = await worker.fetch(req, makeEnv());
-    expect(resp.status).toBe(204);
+    expect(resp.status).toBe(403);
   });
 
   it("rejects requests with Origin: null (string literal from sandboxed iframes) with 403", async () => {
@@ -444,13 +446,13 @@ describe("Worker CSP report endpoint", () => {
     for (let i = 0; i < 15; i++) {
       await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
         method: "POST",
-        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp },
+        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
         body,
       }), env);
     }
     const limited = await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
       method: "POST",
-      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp },
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
       body,
     }), env);
     expect(limited.status).toBe(429);
@@ -458,7 +460,7 @@ describe("Worker CSP report endpoint", () => {
     // Different IP should still succeed
     const otherResp = await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
       method: "POST",
-      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": "10.3.99.3" },
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": "10.3.99.3", "Origin": ALLOWED_ORIGIN },
       body,
     }), env);
     expect(otherResp.status).toBe(204);
@@ -472,6 +474,7 @@ describe("Worker CSP report endpoint", () => {
       headers: {
         "Content-Type": "application/csp-report",
         "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
+        "Origin": ALLOWED_ORIGIN,
         "Content-Length": String(64 * 1024 + 1),
       },
       body: "x",
