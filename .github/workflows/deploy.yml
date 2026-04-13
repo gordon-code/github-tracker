@@ -21,7 +21,8 @@ jobs:
       - name: Verify CSP inline script hash
         run: bash scripts/verify-csp-hash.sh
       - name: WAF smoke tests
-        run: pnpm test:waf
+        if: vars.DEPLOY_DOMAIN != ''
+        run: pnpm test:waf https://${{ vars.DEPLOY_DOMAIN }}
       - run: pnpm run build
         env:
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}

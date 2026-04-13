@@ -2,7 +2,8 @@
 # WAF Smoke Tests — validates Cloudflare WAF rules for gh.gordoncode.dev
 # Requires: GNU parallel (brew install parallel / apt install parallel)
 #
-# Usage: pnpm test:waf
+# Usage: pnpm test:waf [base_url]
+#   e.g. pnpm test:waf https://my-tracker.example.com
 #
 # Rules validated:
 #   1. Path Allowlist — blocks all paths except known SPA routes, /assets/*, /api/*
@@ -16,7 +17,7 @@ if ! command -v parallel &>/dev/null; then
   exit 1
 fi
 
-BASE="https://gh.gordoncode.dev"
+BASE="${1:-https://gh.gordoncode.dev}"
 
 # --- Test runner (exported for GNU parallel) ---
 run_test() {
