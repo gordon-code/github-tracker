@@ -158,6 +158,31 @@ describe("Worker OAuth endpoint", () => {
     }
   });
 
+  it("rejects token exchange when durable rate limiter returns failure", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "ghu_test", token_type: "bearer", scope: "repo" }), { status: 200 })
+    );
+    const env = makeEnv({ PROXY_RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: false }) } });
+    const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("continues token exchange when durable rate limiter throws (fail-open)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "ghu_test", token_type: "bearer", scope: "repo" }), { status: 200 })
+    );
+    const env = makeEnv({ PROXY_RATE_LIMITER: { limit: vi.fn().mockRejectedValue(new Error("binding error")) } });
+    const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(200);
+
+    const logs = collectLogs(consoleSpy);
+    const failLog = findLog(logs, "token_rate_limiter_failed");
+    expect(failLog).toBeDefined();
+  });
+
   // ── Token exchange ─────────────────────────────────────────────────────────
 
   it("POST /api/oauth/token with valid code returns access_token, token_type, scope", async () => {

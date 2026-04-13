@@ -113,6 +113,26 @@ const sentryRateLimiter = createIpRateLimiter(15, 60_000);   // sentry tunnel: 1
 const cspRateLimiter = createIpRateLimiter(15, 60_000);      // csp report: 15/min
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000); // proxy pre-gate: complements CF binding
 
+// Extract client IP from CF-Connecting-IP header.
+// In production (behind Cloudflare proxy), this header is always present and trustworthy.
+// In local dev (wrangler dev), the header is absent — falls back to "unknown" so dev
+// works without a real IP. Logs a warning on first miss to flag production misconfiguration.
+let _ipMissingWarned = false;
+function getClientIp(request: Request): string {
+  const ip = request.headers.get("CF-Connecting-IP");
+  if (ip) return ip;
+  if (!_ipMissingWarned) {
+    _ipMissingWarned = true;
+    log("warn", "cf_connecting_ip_missing", {}, request);
+  }
+  return "unknown";
+}
+
+// Consecutive failure counter for durable rate limiter — escalates log severity
+// when the CF binding is persistently misconfigured or unavailable.
+let _durableRateLimiterFailures = 0;
+const DURABLE_FAILURE_ESCALATION_THRESHOLD = 3;
+
 // Content-Length pre-check helper — optimization only, not a security boundary.
 // Absent, non-integer, or negative Content-Length passes through (post-read check is authoritative).
 function checkContentLength(request: Request, maxBytes: number): boolean {
@@ -197,8 +217,11 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
 
 // Module-level cache for derived seal keys, keyed by "<raw>:<purpose>".
-// SEAL_KEY is a deployment constant — safe to cache per-isolate (follows _sessionKeyCache pattern).
+// Seal key cache: keyed by purpose, invalidated when SEAL_KEY changes.
+// Tracks a fingerprint of the SEAL_KEY (first 8 chars) to detect rotation
+// without storing raw key material as a Map key.
 const _sealKeyCache = new Map<string, CryptoKey>();
+let _sealKeyFingerprint = "";
 
 async function handleProxySeal(request: Request, env: Env, sessionId: string): Promise<Response> {
   if (request.method !== "POST") {
@@ -255,11 +278,17 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   let sealed: string;
   try {
     // SC-8: derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
-    const cacheKey = env.SEAL_KEY + ":" + purpose;
-    let key = _sealKeyCache.get(cacheKey);
+    // Keyed by purpose only — avoids storing raw key material as a Map key string.
+    // Fingerprint detects SEAL_KEY rotation without retaining the full secret.
+    const fingerprint = env.SEAL_KEY.slice(0, 8);
+    if (fingerprint !== _sealKeyFingerprint) {
+      _sealKeyCache.clear();
+      _sealKeyFingerprint = fingerprint;
+    }
+    let key = _sealKeyCache.get(purpose);
     if (key === undefined) {
       key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
-      _sealKeyCache.set(cacheKey, key);
+      _sealKeyCache.set(purpose, key);
     }
     sealed = await sealToken(token, key);
   } catch (err) {
@@ -330,7 +359,7 @@ async function handleSentryTunnel(
     return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ip = getClientIp(request);
   if (!sentryRateLimiter.check(ip)) {
     log("warn", "sentry_tunnel_rate_limited", {}, request);
     return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
@@ -447,9 +476,23 @@ function scrubReportUrl(url: unknown): string | undefined {
   return url.replace(CSP_OAUTH_PARAMS_RE, "$1$2=[REDACTED]");
 }
 
+const CSP_FIELD_MAX_LENGTH = 2048;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+
+function sanitizeCspField(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  // Strip control characters and cap length to prevent log/SIEM injection via Sentry
+  return value.replace(CONTROL_CHARS_RE, "").slice(0, CSP_FIELD_MAX_LENGTH);
+}
+
 function scrubCspReportBody(body: Record<string, unknown>): Record<string, unknown> {
   const scrubbed = { ...body };
-  // Legacy report-uri format uses kebab-case keys
+  // Sanitize all string fields — attacker-controlled CSP report bodies are forwarded to Sentry
+  for (const key of Object.keys(scrubbed)) {
+    scrubbed[key] = sanitizeCspField(scrubbed[key]);
+  }
+  // Legacy report-uri format uses kebab-case keys — scrub OAuth params from URLs
   for (const key of ["document-uri", "blocked-uri", "source-file", "referrer"]) {
     if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
   }
@@ -465,7 +508,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
     return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ip = getClientIp(request);
   if (!cspRateLimiter.check(ip)) {
     log("warn", "csp_report_rate_limited", {}, request);
     return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
@@ -574,7 +617,7 @@ async function handleTokenExchange(
     return errorResponse("method_not_allowed", 405, cors);
   }
 
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const ip = getClientIp(request);
   if (!tokenRateLimiter.check(ip)) {
     log("warn", "token_exchange_rate_limited", {}, request);
     return new Response(JSON.stringify({ error: "rate_limited" }), {
@@ -586,6 +629,29 @@ async function handleTokenExchange(
         ...SECURITY_HEADERS,
       },
     });
+  }
+
+  // Durable rate limiting — enforces global cross-isolate limit via CF binding.
+  // Keyed by "token:{ip}" to avoid collision with session-keyed proxy limits.
+  // Fail open — in-memory limiter already checked, this is defense-in-depth.
+  try {
+    const { success } = await env.PROXY_RATE_LIMITER.limit({ key: `token:${ip}` });
+    if (!success) {
+      log("warn", "token_exchange_rate_limited_durable", {}, request);
+      return new Response(JSON.stringify({ error: "rate_limited" }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "60",
+          ...cors,
+          ...SECURITY_HEADERS,
+        },
+      });
+    }
+  } catch (err) {
+    log("warn", "token_rate_limiter_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
   }
 
   log("info", "token_exchange_started", {}, request);
@@ -762,7 +828,7 @@ export default {
       if (guardResponse !== null) return guardResponse;
 
       // Step 2.5: IP pre-gate — rejects burst abuse before any crypto work (HKDF, HMAC)
-      const proxyIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const proxyIp = getClientIp(request);
       if (!proxyPreGateLimiter.check(proxyIp)) {
         log("warn", "proxy_ip_rate_limited", { pathname: url.pathname }, request);
         return new Response(JSON.stringify({ error: "rate_limited" }), {
@@ -779,12 +845,16 @@ export default {
       try {
         const { success } = await env.PROXY_RATE_LIMITER.limit({ key: sessionId });
         rateLimited = !success;
+        _durableRateLimiterFailures = 0; // reset on success
       } catch (err) {
-        log("error", "rate_limiter_failed", {
+        _durableRateLimiterFailures++;
+        const severity = _durableRateLimiterFailures >= DURABLE_FAILURE_ESCALATION_THRESHOLD ? "error" : "warn";
+        log(severity, "rate_limiter_failed", {
           error: err instanceof Error ? err.message : "unknown",
+          consecutive_failures: _durableRateLimiterFailures,
         }, request);
-        // Fail open — rate limiter misconfiguration should not block all proxy requests.
-        // Turnstile and session binding still protect the seal endpoint.
+        // Fail open — IP pre-gate (60/min) and Turnstile still protect.
+        // Consecutive failures escalate log severity to surface persistent misconfiguration.
       }
       if (rateLimited) {
         log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);

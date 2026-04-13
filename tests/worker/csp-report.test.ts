@@ -335,6 +335,40 @@ describe("Worker CSP report endpoint", () => {
     expect(report["status-code"]).toBe(200);
   });
 
+  // ── Field sanitization ────────────────────────────────────────────────────
+
+  it("strips control characters from CSP report string fields", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/",
+        "violated-directive": "script-src\x00\x01\x7F injected",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv());
+
+    const sentryBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    const report = sentryBody["csp-report"];
+    expect(report["violated-directive"]).toBe("script-src injected");
+    expect(report["violated-directive"]).not.toContain("\x00");
+  });
+
+  it("truncates oversized CSP report string fields to 2048 chars", async () => {
+    const longValue = "x".repeat(3000);
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/",
+        "violated-directive": longValue,
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv());
+
+    const sentryBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    const report = sentryBody["csp-report"];
+    expect(report["violated-directive"].length).toBe(2048);
+  });
+
   // ── Soft origin check ─────────────────────────────────────────────────────
 
   it("rejects requests with wrong Origin with 403", async () => {
