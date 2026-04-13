@@ -150,20 +150,21 @@ describe("workerBeforeSendHandler", () => {
     );
   });
 
-  it("scrubs GitHub token prefixes (ghu_, ghp_, gho_) from exception message", () => {
+  it("scrubs GitHub token prefixes (ghu_, ghp_, gho_, github_pat_) from exception message", () => {
     const event = {
       request: { url: "https://example.com" },
       exception: {
         values: [
           {
-            value: "Token ghu_abc123 or ghp_xyz789 or gho_def456 exposed",
+            value:
+              "Token ghu_abc123 or ghp_xyz789 or gho_def456 or github_pat_11ABCDEF exposed",
           },
         ],
       },
     };
     const result = workerBeforeSendHandler(event);
     expect(result!.exception!.values![0].value).toBe(
-      "Token ghu_[REDACTED] or ghp_[REDACTED] or gho_[REDACTED] exposed"
+      "Token ghu_[REDACTED] or ghp_[REDACTED] or gho_[REDACTED] or github_pat_[REDACTED] exposed"
     );
   });
 

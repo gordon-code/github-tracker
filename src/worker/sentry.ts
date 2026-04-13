@@ -33,7 +33,7 @@ function scrubSensitive(s: string): string {
     .replace(/access_token=[^&\s"]+/g, "access_token=[REDACTED]")
     .replace(/client_secret=[^&\s"]+/g, "client_secret=[REDACTED]")
     .replace(/"client_secret":"[^"]+"/g, '"client_secret":"[REDACTED]"')
-    .replace(/\b(ghu_|ghp_|gho_)[A-Za-z0-9_]+/g, "$1[REDACTED]");
+    .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[REDACTED]");
 }
 
 export function workerBeforeSendHandler(
