@@ -22,7 +22,7 @@ jobs:
         run: bash scripts/verify-csp-hash.sh
       - name: WAF smoke tests
         if: vars.DEPLOY_DOMAIN != ''
-        run: pnpm test:waf https://${{ vars.DEPLOY_DOMAIN }}
+        run: pnpm test:waf "https://${{ vars.DEPLOY_DOMAIN }}"
       - name: Validate deploy configuration
         run: pnpm validate:deploy --ci
         env:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WAF Smoke Tests — validates Cloudflare WAF rules for gh.gordoncode.dev
+# WAF Smoke Tests — validates Cloudflare WAF rules for a deployment domain
 # Requires: GNU parallel (brew install parallel / apt install parallel)
 #
 # Usage: pnpm test:waf [base_url]

@@ -62,7 +62,7 @@ const ALLOWED_ORIGINS = buildAllowedOrigins();
 
 // Warn if only localhost origins are configured — production domains need MCP_RELAY_ALLOWED_ORIGINS
 if (!process.env.MCP_RELAY_ALLOWED_ORIGINS) {
-  console.error("[mcp/ws] Warning: No MCP_RELAY_ALLOWED_ORIGINS set — only localhost connections allowed. Set this to your production domain to allow WebSocket relay from the deployed SPA.");
+  console.warn("[mcp/ws] Warning: No MCP_RELAY_ALLOWED_ORIGINS set — only localhost connections allowed. Set this to your production domain to allow WebSocket relay from the deployed SPA.");
 }
 
 function isOriginAllowed(origin: string | undefined): boolean {

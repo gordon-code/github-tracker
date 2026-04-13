@@ -21,13 +21,13 @@ else
   if ! command -v wrangler &>/dev/null; then
     fail "wrangler CLI not found — install with: pnpm add -g wrangler"
   else
-    if ! SECRETS=$(wrangler secret list 2>&1); then
+    if ! SECRETS=$(wrangler secret list --json 2>&1); then
       fail "wrangler secret list failed — run: wrangler login"
     else
       for s in ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY; do
-        echo "$SECRETS" | grep -q "\"$s\"" || fail "CF Worker secret '$s' not set (run: wrangler secret put $s)"
+        echo "$SECRETS" | grep -q "\"name\":\"$s\"" || fail "CF Worker secret '$s' not set (run: wrangler secret put $s)"
       done
-      echo "$SECRETS" | grep -q '"SENTRY_DSN"' || warn "CF Worker secret 'SENTRY_DSN' not set — Sentry + CSP tunnels return 404"
+      echo "$SECRETS" | grep -q '"name":"SENTRY_DSN"' || warn "CF Worker secret 'SENTRY_DSN' not set — Sentry error tunnel returns 404"
     fi
   fi
 fi

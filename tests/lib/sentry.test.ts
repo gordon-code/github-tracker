@@ -307,7 +307,7 @@ describe("initSentry", () => {
   });
 
   it("is a no-op when VITE_SENTRY_DSN is undefined", () => {
-    vi.stubEnv("VITE_SENTRY_DSN", "");
+    // Do not stub VITE_SENTRY_DSN — beforeEach calls vi.unstubAllEnvs() so it is truly undefined
     initSentry();
     expect(mockInit).not.toHaveBeenCalled();
   });
