@@ -1,4 +1,3 @@
-import { withSentry } from "@sentry/cloudflare";
 import * as Sentry from "@sentry/cloudflare";
 import { CryptoEnv, deriveKey, sealToken, SEAL_SALT } from "./crypto";
 import { SessionEnv, ensureSession } from "./session";
@@ -780,7 +779,7 @@ async function handleTokenExchange(
   });
 }
 
-export default withSentry(
+export default Sentry.withSentry(
   (env: Env) => getWorkerSentryOptions(env),
   {
     async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
