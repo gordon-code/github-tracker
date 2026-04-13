@@ -183,6 +183,27 @@ describe("Worker OAuth endpoint", () => {
     expect(failLog).toBeDefined();
   });
 
+  it("rejects token exchange with 400 when CF-Connecting-IP is absent", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/oauth/token", {
+      method: "POST",
+      headers: { "Origin": ALLOWED_ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ code: VALID_CODE }),
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 503 when PROXY_RATE_LIMITER binding is missing", async () => {
+    const req = makeRequest("POST", "/api/oauth/token", { body: { code: VALID_CODE } });
+    const env = makeEnv({ PROXY_RATE_LIMITER: undefined as unknown as Env["PROXY_RATE_LIMITER"] });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(503);
+
+    const logs = collectLogs(consoleSpy);
+    const bindingLog = findLog(logs, "rate_limiter_binding_missing");
+    expect(bindingLog).toBeDefined();
+  });
+
   // ── Token exchange ─────────────────────────────────────────────────────────
 
   it("POST /api/oauth/token with valid code returns access_token, token_type, scope", async () => {

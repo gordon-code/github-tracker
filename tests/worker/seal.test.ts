@@ -453,6 +453,32 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(allLogText).not.toContain("ghp_abc123");
   });
 
+  // ── Missing CF-Connecting-IP and binding validation ────────────────────────
+
+  it("rejects proxy requests without CF-Connecting-IP with 400", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/proxy/seal", {
+      method: "POST",
+      headers: {
+        "Origin": ALLOWED_ORIGIN,
+        "X-Requested-With": "fetch",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ token: "ghp_test", purpose: "jira-api-token" }),
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 503 when PROXY_RATE_LIMITER binding is missing", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+    const req = makeSealRequest({ body: { token: "ghp_test", purpose: "jira-api-token" } });
+    const env = makeEnv({ PROXY_RATE_LIMITER: undefined as unknown as Env["PROXY_RATE_LIMITER"] });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(503);
+  });
+
   // ── Proxy IP pre-gate ─────────────────────────────────────────────────────
 
   describe("proxy IP pre-gate", () => {

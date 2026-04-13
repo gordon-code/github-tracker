@@ -111,13 +111,24 @@ Content-Length pre-check fires between origin check and DSN validation but is an
 
 Note: these counters are in-memory and do not survive isolate restarts. A fresh isolate gets a clean slate. CF isolates are short-lived, so this gates burst abuse within a single isolate lifetime — the intended use case.
 
+Token exchange also uses the durable CF rate limiter binding (`PROXY_RATE_LIMITER`) with key `token:{ip}`, enforcing the limit globally across isolates.
+
+**`CF-Connecting-IP` requirement:**
+All rate-limited endpoints require the `CF-Connecting-IP` header and return 400 if absent. Cloudflare's proxy layer sets this header on all production requests. Miniflare sets it to the connecting client's address in `wrangler dev`. There is no fallback — requests without this header are rejected outright.
+
+**`PROXY_RATE_LIMITER` binding validation:**
+The Worker validates that the `PROXY_RATE_LIMITER` binding exists (via `typeof env.PROXY_RATE_LIMITER?.limit === "function"`) before calling it. A missing binding indicates a deployment misconfiguration (missing `[[ratelimits]]` in `wrangler.toml`) and returns 503. Transient `.limit()` errors on an existing binding fail open — the in-memory IP pre-gate still protects.
+
 **Origin check behavior:**
 - Sentry tunnel (`/api/error-reporting`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. The Sentry SDK always includes `Origin` in its `fetch()` calls from our SPA.
 - CSP report tunnel (`/api/csp-report`): **soft** — allows absent Origin (browser CSP reports sent via the Reporting API may omit Origin), rejects only if Origin is present and does not match `ALLOWED_ORIGIN`.
 
 Note: Origin and Sec-Fetch-Site headers can be spoofed by programmatic clients (curl, scripts). IP rate limiting is the primary defense; origin checks are defense-in-depth.
 
-**Content-Length pre-check:**
+**CSP field sanitization:**
+All string fields in CSP report bodies are sanitized before forwarding to Sentry: control characters (`\x00`–`\x08`, `\x0B`, `\x0C`, `\x0E`–`\x1F`, `\x7F`) are stripped and fields are capped at 2048 characters. This prevents log/SIEM injection via attacker-crafted CSP report values. URL fields are additionally scrubbed of OAuth parameters (`code`, `state`, `access_token`).
+
+**Content-Length pre-check (Sentry: 256 KB, CSP: 64 KB):**
 Both tunnel endpoints check the `Content-Length` header before reading the request body as an optimization. If the declared size exceeds the per-endpoint maximum, the request is rejected with 413 without buffering the body. The post-read size check remains the authoritative guard — Content-Length can be absent (chunked transfer, passes through) or spoofed (attacker declares small size but sends large body, caught by the post-read check).
 
 **CSP report fan-out amplification:**

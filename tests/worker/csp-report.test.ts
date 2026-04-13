@@ -67,6 +67,17 @@ describe("Worker CSP report endpoint", () => {
     vi.restoreAllMocks();
   });
 
+  it("rejects requests without CF-Connecting-IP with 400", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report" },
+      body,
+    });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(400);
+  });
+
   it("rejects non-POST requests", async () => {
     const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
       method: "GET",

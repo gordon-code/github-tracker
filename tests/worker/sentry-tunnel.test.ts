@@ -67,6 +67,18 @@ describe("Sentry tunnel (/api/error-reporting)", () => {
     vi.restoreAllMocks();
   });
 
+  // ── Missing CF-Connecting-IP ───────────────────────────────────────────────
+
+  it("rejects requests without CF-Connecting-IP with 400", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/error-reporting", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-sentry-envelope", "Origin": ALLOWED_ORIGIN },
+      body: makeEnvelope(VALID_DSN),
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+  });
+
   // ── Migrated tests from oauth.test.ts ─────────────────────────────────────
 
   it("forwards valid envelope to Sentry and returns Sentry's status code", async () => {
