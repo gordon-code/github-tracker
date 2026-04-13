@@ -31,7 +31,7 @@ function scrubSensitive(s: string): string {
     .replace(/code=[^&\s"]+/g, "code=[REDACTED]")
     .replace(/state=[^&\s"]+/g, "state=[REDACTED]")
     .replace(/access_token=[^&\s"]+/g, "access_token=[REDACTED]")
-    .replace(/client_secret=[^&\s"]+/g, "client_secret=[REDACTED]")
+    .replace(/client_secret=[^&\s"]+/gi, "client_secret=[REDACTED]")
     .replace(/"client_secret":"[^"]+"/g, '"client_secret":"[REDACTED]"')
     .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[REDACTED]");
 }
@@ -88,10 +88,11 @@ export function getWorkerSentryOptions(env: SentryEnv): CloudflareOptions {
     // Cast: workerBeforeSendHandler uses a minimal local interface for testability
     // but is fully compatible with ErrorEvent at runtime.
     beforeSend: workerBeforeSendHandler as CloudflareOptions["beforeSend"],
-    // Disable all default integrations (which include consoleIntegration capturing
-    // structured JSON logs as breadcrumbs) and add only what we need explicitly.
-    defaultIntegrations: false,
-    integrations: [
+    // Filter out Console integration (captures structured JSON logs as noise
+    // breadcrumbs) but keep LinkedErrors, Dedupe, and other useful defaults.
+    // Replace RequestData with our hardened config (headers/cookies/data suppressed).
+    integrations: (defaults) => [
+      ...defaults.filter((i) => i.name !== "Console" && i.name !== "RequestData"),
       requestDataIntegration({
         include: { headers: false, cookies: false, data: false },
       }),

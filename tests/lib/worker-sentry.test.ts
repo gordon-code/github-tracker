@@ -180,7 +180,10 @@ describe("getWorkerSentryOptions", () => {
   it("returns correct requestDataIntegration config", async () => {
     const { requestDataIntegration } = await import("@sentry/cloudflare");
     const env = { SENTRY_DSN: "https://key@sentry.io/123" };
-    getWorkerSentryOptions(env);
+    const opts = getWorkerSentryOptions(env);
+    // integrations is now a filter function — invoke it to trigger requestDataIntegration call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (opts.integrations as (defaults: any[]) => any[])([]);
     expect(requestDataIntegration).toHaveBeenCalledWith({
       include: { headers: false, cookies: false, data: false },
     });
@@ -204,8 +207,20 @@ describe("getWorkerSentryOptions", () => {
     expect(opts.environment).toBe("production");
   });
 
-  it("disables default integrations to suppress console breadcrumb capture", () => {
+  it("uses integration filter function to remove Console and replace RequestData", () => {
     const opts = getWorkerSentryOptions({});
-    expect(opts.defaultIntegrations).toBe(false);
+    expect(typeof opts.integrations).toBe("function");
+    // Simulate the SDK passing default integrations
+    const fakeConsole = { name: "Console" };
+    const fakeLinkedErrors = { name: "LinkedErrors" };
+    const fakeRequestData = { name: "RequestData" };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const filterFn = opts.integrations as (defaults: any[]) => any[];
+    const filtered = filterFn([fakeConsole, fakeLinkedErrors, fakeRequestData]);
+    // Console and default RequestData should be removed
+    expect(filtered.find((i: { name: string }) => i.name === "Console")).toBeUndefined();
+    expect(filtered.find((i: { name: string }) => i.name === "RequestData")).toBeUndefined();
+    // LinkedErrors should be preserved
+    expect(filtered.find((i: { name: string }) => i.name === "LinkedErrors")).toBe(fakeLinkedErrors);
   });
 });
