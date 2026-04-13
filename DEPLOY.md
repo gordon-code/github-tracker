@@ -1,5 +1,86 @@
 # Deployment Guide
 
+## Fork Deployment Checklist
+
+If you're deploying your own instance of GitHub Tracker, update these values:
+
+### Required (deployment won't work without these)
+
+1. **Create a GitHub OAuth App** — [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers)
+   - Set the callback URL to `https://YOUR-DOMAIN/oauth/callback`
+2. **Update `wrangler.toml`** — Change `pattern = "gh.gordoncode.dev"` to your domain
+3. **Set GitHub Actions secrets and variables** — See sections below
+4. **Set Cloudflare Worker secrets** — See "Cloudflare Worker Secrets" section below. **Critical:** `ALLOWED_ORIGIN` must exactly match your deployment URL (e.g., `https://your-domain.example.com`). An incorrect value causes all API requests to fail with CORS errors.
+
+### Verify configuration
+
+Run `pnpm validate:deploy` locally to check that all required Cloudflare Worker secrets
+are set. In CI, the deploy workflow runs `pnpm validate:deploy --ci` automatically before
+building.
+
+### Optional
+
+5. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira/GitLab token sealing feature.
+6. **Sentry error reporting** — Set `VITE_SENTRY_DSN` (build-time, via GitHub Actions variable) and `SENTRY_DSN` (Worker secret, via `wrangler secret put`) to the **same** DSN value. The Worker tunnel (`/api/error-reporting`) validates the incoming envelope DSN against `env.SENTRY_DSN` — different values cause all Sentry events to silently return 403. Leave both empty to disable.
+7. **MCP relay** — Set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server
+8. **WAF smoke tests** — Set `DEPLOY_DOMAIN` as a GitHub Actions variable (e.g., `your-domain.example.com`). CI runs `pnpm test:waf https://$DEPLOY_DOMAIN` automatically. If `DEPLOY_DOMAIN` is not set, the WAF test is skipped. Run locally with: `pnpm test:waf https://YOUR-DOMAIN`.
+9. **Social metadata** — Update `og:image` and `og:url` in `index.html` to your domain
+10. **Security contact** — Update the email and scope domain in `SECURITY.md`
+11. **README** — Update the "Live demo" URL in `README.md`
+12. **User Guide** — Update the domain reference in `docs/USER_GUIDE.md`
+13. **App footer links** — Update "Source" and "Guide" URLs in `src/app/components/dashboard/DashboardPage.tsx` and `src/app/components/settings/SettingsPage.tsx` if you want them to point to your fork
+14. **Contributing guide** — Update the clone URL and PR target in `CONTRIBUTING.md`
+
+### Static-only deployment (no Cloudflare Worker)
+
+GitHub Tracker can run as a pure static site without the Cloudflare Worker backend.
+Use a Personal Access Token (PAT) instead of OAuth — the PAT flow validates directly
+against `api.github.com` with no server-side component.
+
+**Host the `dist/` build output on any static platform:** GitHub Pages, Netlify, Vercel,
+S3 + CloudFront, or any CDN that serves SPAs with `index.html` fallback for client-side
+routing.
+
+**What works without a backend:**
+- All dashboard features (Issues, PRs, Actions tabs)
+- PAT authentication (classic `ghp_` or fine-grained `github_pat_`)
+- All GitHub API calls (GraphQL + REST, direct to `api.github.com`)
+- Full poll + hot poll refresh cycles
+- Desktop notifications
+- Multi-user tracking, upstream repo discovery, monitor-all mode
+- Repo pinning/reordering, themes, ignore system
+- IndexedDB caching + ETag optimization
+- MCP server (separate Node.js process, independent of Worker)
+
+**What does NOT work without a backend:**
+- **OAuth login** — requires server-side `client_secret` exchange. Use a PAT instead.
+  The "Sign in with GitHub" button will still appear on the login page but will fail
+  if no `VITE_GITHUB_CLIENT_ID` is configured.
+- **Sentry error reporting** — do NOT set `VITE_SENTRY_DSN` on static-only deploys.
+  The Sentry SDK is configured with `tunnel: "/api/error-reporting"`, which doesn't
+  exist on a static host. Setting a DSN causes the SDK to silently lose all error
+  reports via 404s. Leave `VITE_SENTRY_DSN` empty to cleanly disable Sentry.
+- **CSP violation reporting** — reports silently dropped (no user impact). The
+  `report-uri /api/csp-report` directive in `public/_headers` will produce harmless
+  404 console errors on static hosts. Optionally remove the `report-uri` and
+  `report-to` directives if the noise is unwanted.
+- **Jira/GitLab token sealing** (planned) — requires server-side encryption
+
+**Security note:** The `public/_headers` file sets Content-Security-Policy and other
+security headers. Ensure your static host serves these headers — Cloudflare Pages,
+Netlify, and Vercel support `_headers` files natively. Other hosts may need manual
+header configuration.
+
+**Build for static deployment:**
+```sh
+pnpm install
+pnpm run build     # Output in dist/
+# Upload dist/ to your static host
+```
+No `VITE_GITHUB_CLIENT_ID` or `VITE_TURNSTILE_SITE_KEY` is needed for PAT-only
+deployments — leave them empty. OAuth login won't work without a client ID (use
+PAT instead), and Turnstile is only used by the planned Jira/GitLab integration.
+
 ## GitHub Actions Secrets and Variables
 
 ### Secrets (GitHub repo → Settings → Secrets and variables → Actions → Secrets)
@@ -29,8 +110,8 @@
 1. Go to GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
 2. Fill in the details:
    - **Application name**: your app name (e.g. `gh-tracker-yourname`)
-   - **Homepage URL**: `https://gh.gordoncode.dev`
-   - **Authorization callback URL**: `https://gh.gordoncode.dev/oauth/callback`
+   - **Homepage URL**: `https://YOUR-DOMAIN` (e.g. `https://gh.gordoncode.dev`)
+   - **Authorization callback URL**: `https://YOUR-DOMAIN/oauth/callback`
 3. Click **Register application**
 4. Note the **Client ID** — this is your `VITE_GITHUB_CLIENT_ID`
 5. Click **Generate a new client secret** and save it for the Worker secrets below
@@ -67,7 +148,7 @@ wrangler secret put ALLOWED_ORIGIN
 
 - `GITHUB_CLIENT_ID`: same value as `VITE_GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`: the Client Secret from your GitHub OAuth App
-- `ALLOWED_ORIGIN`: `https://gh.gordoncode.dev`
+- `ALLOWED_ORIGIN`: `https://YOUR-DOMAIN` (e.g. `https://gh.gordoncode.dev`)
 
 ## Worker API Endpoints
 
@@ -187,7 +268,7 @@ Configure these rules in the Cloudflare dashboard under **Security → WAF**.
 **Expression:**
 ```
 (http.request.uri.path starts_with "/api/") and
-not (any(http.request.headers["origin"][*] in {"https://gh.gordoncode.dev"})) and
+not (any(http.request.headers["origin"][*] in {"https://YOUR-DOMAIN"})) and
 not (http.request.uri.path eq "/api/csp-report") and
 not (http.request.uri.path eq "/api/error-reporting")
 ```
@@ -241,7 +322,7 @@ wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
 ```
 
 - `SESSION_KEY`: HKDF input key material used to derive the HMAC-SHA256 key for signing `__Host-session` cookies. Generate with `openssl rand -base64 32`.
-- `SENTRY_DSN` (configured in `wrangler.toml` `[vars]`, not a secret): used by both the Sentry tunnel endpoint for DSN validation and the `@sentry/cloudflare` SDK for direct worker-side error capture. Sentry DSNs are public keys — they authorize sending events, not reading them.
+- `SENTRY_DSN` (Worker secret, set via `wrangler secret put SENTRY_DSN`): used by both the Sentry tunnel endpoint for DSN validation and the `@sentry/cloudflare` SDK for direct worker-side error capture. Sentry DSNs are public keys — they authorize sending events, not reading them. Must match the `VITE_SENTRY_DSN` build-time env var; a mismatch causes tunnel requests to return 403.
 - `SEAL_KEY`: HKDF input key material used to derive the AES-256-GCM key for encrypting API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
 - `TURNSTILE_SECRET_KEY`: From the Cloudflare Turnstile dashboard (Security → Turnstile → your widget → Secret key).
 - `VITE_TURNSTILE_SITE_KEY`: **Build-time env var (public)** — goes in `.env`, not a Worker secret. From the same Turnstile dashboard (Site key).
