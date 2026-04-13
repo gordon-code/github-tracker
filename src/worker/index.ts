@@ -1,7 +1,7 @@
 import { CryptoEnv, deriveKey, sealToken, SEAL_SALT } from "./crypto";
 import { SessionEnv, ensureSession } from "./session";
 import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
-import { validateProxyRequest } from "./validation";
+import { validateProxyRequest, validateOrigin } from "./validation";
 
 interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -77,36 +77,49 @@ const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
 };
 
-// Simple in-memory rate limiter for token exchange endpoint.
+// Simple in-memory rate limiter factory.
 // Not durable across isolate restarts, but catches burst abuse.
 // Note: CF-Connecting-IP is set by Cloudflare's proxy layer; if the workers.dev
 // route is enabled, an attacker could spoof this header. Disable the workers.dev
 // route in the Cloudflare dashboard for production use.
-const TOKEN_RATE_LIMIT = 10; // max requests per window
-const TOKEN_RATE_WINDOW_MS = 60_000; // 1 minute
-const _tokenRateMap = new Map<string, { count: number; resetAt: number }>();
+const PRUNE_THRESHOLD = 100;
 
-function checkTokenRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = _tokenRateMap.get(ip);
-  if (!entry || now >= entry.resetAt) {
-    _tokenRateMap.set(ip, { count: 1, resetAt: now + TOKEN_RATE_WINDOW_MS });
-    return true;
-  }
-  entry.count++;
-  if (entry.count > TOKEN_RATE_LIMIT) return false;
-  return true;
+function createIpRateLimiter(limit: number, windowMs: number): { check(ip: string): boolean } {
+  const map = new Map<string, { count: number; resetAt: number }>();
+  return {
+    check(ip: string): boolean {
+      const now = Date.now();
+      const entry = map.get(ip);
+      if (!entry || now >= entry.resetAt) {
+        map.set(ip, { count: 1, resetAt: now + windowMs });
+        return true;
+      }
+      entry.count++;
+      if (entry.count > limit) return false;
+      // Periodic cleanup to prevent unbounded map growth.
+      if (map.size >= PRUNE_THRESHOLD) {
+        for (const [k, e] of map) {
+          if (now >= e.resetAt) map.delete(k);
+        }
+      }
+      return true;
+    },
+  };
 }
 
-// Periodic cleanup to prevent unbounded map growth.
-// Only runs when the map exceeds a threshold to avoid O(N) scan on every request.
-const PRUNE_THRESHOLD = 100;
-function pruneTokenRateMap(): void {
-  if (_tokenRateMap.size < PRUNE_THRESHOLD) return;
-  const now = Date.now();
-  for (const [ip, entry] of _tokenRateMap) {
-    if (now >= entry.resetAt) _tokenRateMap.delete(ip);
-  }
+const tokenRateLimiter = createIpRateLimiter(10, 60_000);    // token exchange: 10/min
+const sentryRateLimiter = createIpRateLimiter(15, 60_000);   // sentry tunnel: 15/min
+const cspRateLimiter = createIpRateLimiter(15, 60_000);      // csp report: 15/min
+const proxyPreGateLimiter = createIpRateLimiter(60, 60_000); // proxy pre-gate: complements CF binding
+
+// Content-Length pre-check helper — optimization only, not a security boundary.
+// Absent or unparseable Content-Length passes through (post-read check is authoritative).
+function checkContentLength(request: Request, maxBytes: number): boolean {
+  const cl = request.headers.get("Content-Length");
+  if (cl === null) return true;
+  const parsed = Number(cl);
+  if (!Number.isInteger(parsed) || parsed < 0) return true;
+  return parsed <= maxBytes;
 }
 
 // CORS: strict equality only (SDR-004)
@@ -145,16 +158,14 @@ function getProxyCorsHeaders(
 function isProxyPath(pathname: string): boolean {
   return (
     pathname.startsWith("/api/proxy/") ||
-    pathname.startsWith("/api/jira/") ||
-    pathname.startsWith("/api/gitlab/")
+    pathname.startsWith("/api/jira/")
   );
 }
 
 // ── Validation gate for proxy routes ─────────────────────────────────────────
 // Returns a Response if rejected, null if validation passes.
+// Caller must ensure pathname is a proxy path before calling.
 function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string): Response | null {
-  if (!isProxyPath(pathname)) return null;
-
   const origin = request.headers.get("Origin");
 
   // Handle OPTIONS preflight for proxy routes explicitly.
@@ -182,7 +193,7 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 }
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
-const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "gitlab-pat"]);
+const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
 
 // Module-level cache for derived seal keys, keyed by "<raw>:<purpose>".
 // SEAL_KEY is a deployment constant — safe to cache per-isolate (follows _sessionKeyCache pattern).
@@ -318,6 +329,25 @@ async function handleSentryTunnel(
     return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (!sentryRateLimiter.check(ip)) {
+    log("warn", "sentry_tunnel_rate_limited", {}, request);
+    return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
+  }
+
+  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
+  if (!originResult.ok) {
+    log("warn", "sentry_tunnel_origin_rejected", { origin: request.headers.get("Origin") }, request);
+    return new Response(null, { status: 403, headers: SECURITY_HEADERS });
+  }
+
+  if (!checkContentLength(request, SENTRY_ENVELOPE_MAX_BYTES)) {
+    log("warn", "sentry_tunnel_content_length_exceeded", {
+      content_length: request.headers.get("Content-Length"),
+    }, request);
+    return new Response(null, { status: 413, headers: SECURITY_HEADERS });
+  }
+
   const allowedDsn = getOrCacheDsn(env);
   if (!allowedDsn) {
     log("warn", "sentry_tunnel_not_configured", {}, request);
@@ -434,6 +464,25 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
     return new Response(null, { status: 405, headers: SECURITY_HEADERS });
   }
 
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (!cspRateLimiter.check(ip)) {
+    log("warn", "csp_report_rate_limited", {}, request);
+    return new Response(null, { status: 429, headers: { "Retry-After": "60", ...SECURITY_HEADERS } });
+  }
+
+  const origin = request.headers.get("Origin");
+  if (origin !== null && origin !== env.ALLOWED_ORIGIN) {
+    log("warn", "csp_report_origin_rejected", { origin }, request);
+    return new Response(null, { status: 403, headers: SECURITY_HEADERS });
+  }
+
+  if (!checkContentLength(request, CSP_REPORT_MAX_BYTES)) {
+    log("warn", "csp_report_content_length_exceeded", {
+      content_length: request.headers.get("Content-Length"),
+    }, request);
+    return new Response(null, { status: 413, headers: SECURITY_HEADERS });
+  }
+
   const allowedDsn = getOrCacheDsn(env);
   if (!allowedDsn) {
     return new Response(null, { status: 404, headers: SECURITY_HEADERS });
@@ -509,7 +558,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 204, headers: SECURITY_HEADERS });
 }
 
-// GitHub OAuth code format validation (SDR-005): alphanumeric, 1-40 chars.
+// GitHub OAuth code format validation (SDR-005): alphanumeric, hyphens, underscores, 1-40 chars.
 // GitHub's code format is undocumented and has changed historically — validate
 // loosely here; GitHub's server validates the actual code.
 const VALID_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
@@ -524,14 +573,14 @@ async function handleTokenExchange(
     return errorResponse("method_not_allowed", 405, cors);
   }
 
-  pruneTokenRateMap();
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  if (!checkTokenRateLimit(ip)) {
+  if (!tokenRateLimiter.check(ip)) {
     log("warn", "token_exchange_rate_limited", {}, request);
     return new Response(JSON.stringify({ error: "rate_limited" }), {
       status: 429,
       headers: {
         "Content-Type": "application/json",
+        "Retry-After": "60",
         ...cors,
         ...SECURITY_HEADERS,
       },
@@ -704,12 +753,23 @@ export default {
     }
 
     // ── Proxy routes: validation, session, and rate limiting ─────────────────
-    // Applies to /api/proxy/*, /api/jira/*, /api/gitlab/*
+    // Applies to /api/proxy/*, /api/jira/*
     // validateAndGuardProxyRoute handles OPTIONS preflight for proxy routes.
-    const guardResponse = validateAndGuardProxyRoute(request, env, url.pathname);
-    if (guardResponse !== null) return guardResponse;
-
+    // Proxy routes assume SPA fetch() callers — browser navigation GETs do not send Origin.
     if (isProxyPath(url.pathname)) {
+      const guardResponse = validateAndGuardProxyRoute(request, env, url.pathname);
+      if (guardResponse !== null) return guardResponse;
+
+      // Step 2.5: IP pre-gate — rejects burst abuse before any crypto work (HKDF, HMAC)
+      const proxyIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      if (!proxyPreGateLimiter.check(proxyIp)) {
+        log("warn", "proxy_ip_rate_limited", { pathname: url.pathname }, request);
+        return new Response(JSON.stringify({ error: "rate_limited" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "60", ...SECURITY_HEADERS },
+        });
+      }
+
       // Step 3: Session middleware — ensureSession never throws (SDR-003)
       const { sessionId, setCookie } = await ensureSession(request, env);
 
@@ -727,14 +787,13 @@ export default {
       }
       if (rateLimited) {
         log("warn", "proxy_rate_limited", { pathname: url.pathname }, request);
-        const rateLimitResponse = errorResponse("rate_limited", 429);
-        const headers = new Headers(rateLimitResponse.headers);
-        headers.set("Retry-After", "60");
-        if (setCookie) headers.set("Set-Cookie", setCookie);
-        return new Response(rateLimitResponse.body, {
-          status: 429,
-          headers,
-        });
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "Retry-After": "60",
+          ...SECURITY_HEADERS,
+        };
+        if (setCookie) headers["Set-Cookie"] = setCookie;
+        return new Response(JSON.stringify({ error: "rate_limited" }), { status: 429, headers });
       }
 
       // Step 5: Sealed-token endpoint

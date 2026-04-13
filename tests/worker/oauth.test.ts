@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
+import { collectLogs, findLog } from "./helpers";
 
 const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
 
@@ -28,7 +29,7 @@ function makeRequest(
   const url = `https://gh.gordoncode.dev${path}`;
   const headers: Record<string, string> = {
     // Unique IP per request to avoid hitting the in-memory rate limiter across tests
-    "CF-Connecting-IP": `127.0.0.${++_requestCounter}`,
+    "CF-Connecting-IP": `10.1.0.${++_requestCounter}`,
   };
   if (options.origin !== undefined) {
     headers["Origin"] = options.origin;
@@ -51,32 +52,6 @@ function makeRequest(
 // Valid 20-char hex code
 const VALID_CODE = "a1b2c3d4e5f6a1b2c3d4";
 
-/** Parse all structured log calls from a console spy, returning {level, entry} tuples. */
-function collectLogs(spies: {
-  info: ReturnType<typeof vi.spyOn>;
-  warn: ReturnType<typeof vi.spyOn>;
-  error: ReturnType<typeof vi.spyOn>;
-}): Array<{ level: string; entry: Record<string, unknown> }> {
-  const logs: Array<{ level: string; entry: Record<string, unknown> }> = [];
-  for (const [level, spy] of Object.entries(spies)) {
-    for (const call of spy.mock.calls) {
-      try {
-        logs.push({ level, entry: JSON.parse(call[0] as string) });
-      } catch {
-        // non-JSON console output — ignore
-      }
-    }
-  }
-  return logs;
-}
-
-/** Find the first log entry matching a given event name. */
-function findLog(
-  logs: Array<{ level: string; entry: Record<string, unknown> }>,
-  event: string
-): { level: string; entry: Record<string, unknown> } | undefined {
-  return logs.find((l) => l.entry.event === event);
-}
 
 describe("Worker OAuth endpoint", () => {
   let originalFetch: typeof globalThis.fetch;
@@ -103,7 +78,7 @@ describe("Worker OAuth endpoint", () => {
   // ── Rate limiting ────────────────────────────────────────────────────────
 
   it("returns 429 after exceeding 10 requests per minute from the same IP", async () => {
-    const fixedIp = "10.0.0.99";
+    const fixedIp = "10.1.99.1";
     function makeRateLimitRequest() {
       return new Request("https://gh.gordoncode.dev/api/oauth/token", {
         method: "POST",
@@ -135,12 +110,13 @@ describe("Worker OAuth endpoint", () => {
     expect(resp.status).toBe(429);
     const body = await resp.json() as { error: string };
     expect(body.error).toBe("rate_limited");
+    expect(resp.headers.get("Retry-After")).toBe("60");
     // Should include security headers
     expect(resp.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
   it("allows requests again after the rate-limit window expires", async () => {
-    const fixedIp = "10.0.0.100";
+    const fixedIp = "10.1.99.2";
     function makeRateLimitRequest() {
       return new Request("https://gh.gordoncode.dev/api/oauth/token", {
         method: "POST",
@@ -849,228 +825,4 @@ describe("Worker OAuth endpoint", () => {
     });
   });
 
-  // ── Sentry tunnel ─────────────────────────────────────────────────────────
-
-  describe("Sentry tunnel (/api/error-reporting)", () => {
-    const SENTRY_HOST = "o123456.ingest.sentry.io";
-    const SENTRY_PROJECT_ID = "7890123";
-    const VALID_DSN = `https://abc123@${SENTRY_HOST}/${SENTRY_PROJECT_ID}`;
-
-    function makeEnvelope(dsn: string, eventPayload = "{}"): string {
-      return `${JSON.stringify({ dsn })}\n${JSON.stringify({ type: "event" })}\n${eventPayload}`;
-    }
-
-    function makeTunnelRequest(body: string): Request {
-      return new Request("https://gh.gordoncode.dev/api/error-reporting", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-sentry-envelope" },
-        body,
-      });
-    }
-
-    it("forwards valid envelope to Sentry and returns Sentry's status code", async () => {
-      const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-      globalThis.fetch = mockFetch;
-
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      const res = await worker.fetch(req, makeEnv());
-
-      expect(res.status).toBe(200);
-      expect(mockFetch).toHaveBeenCalledOnce();
-
-      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe(`https://${SENTRY_HOST}/api/${SENTRY_PROJECT_ID}/envelope/`);
-      expect(init.method).toBe("POST");
-    });
-
-    it("rejects GET requests with 405", async () => {
-      const req = new Request("https://gh.gordoncode.dev/api/error-reporting", { method: "GET" });
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(405);
-    });
-
-    it("rejects envelopes with mismatched DSN host", async () => {
-      const badDsn = `https://abc@evil.ingest.sentry.io/${SENTRY_PROJECT_ID}`;
-      const req = makeTunnelRequest(makeEnvelope(badDsn));
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(403);
-
-      const logs = collectLogs(consoleSpy);
-      const mismatchLog = findLog(logs, "sentry_tunnel_dsn_mismatch");
-      expect(mismatchLog).toBeDefined();
-      expect(mismatchLog!.entry.dsn_host).toBe("evil.ingest.sentry.io");
-    });
-
-    it("rejects envelopes with mismatched DSN project ID", async () => {
-      const badDsn = `https://abc@${SENTRY_HOST}/9999999`;
-      const req = makeTunnelRequest(makeEnvelope(badDsn));
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(403);
-
-      const logs = collectLogs(consoleSpy);
-      const mismatchLog = findLog(logs, "sentry_tunnel_dsn_mismatch");
-      expect(mismatchLog).toBeDefined();
-      expect(mismatchLog!.entry.dsn_project).toBe("9999999");
-    });
-
-    it("returns 400 for invalid envelope format (no newline)", async () => {
-      const req = makeTunnelRequest("not an envelope");
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(400);
-
-      const logs = collectLogs(consoleSpy);
-      const log = findLog(logs, "sentry_tunnel_invalid_envelope");
-      expect(log).toBeDefined();
-      expect(log!.level).toBe("warn");
-    });
-
-    it("returns 400 for invalid JSON in envelope header", async () => {
-      const req = makeTunnelRequest("{invalid json\n{}");
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(400);
-
-      const logs = collectLogs(consoleSpy);
-      const log = findLog(logs, "sentry_tunnel_header_parse_failed");
-      expect(log).toBeDefined();
-      expect(log!.level).toBe("warn");
-    });
-
-    it("returns 200 for client_report envelopes without DSN", async () => {
-      const envelope = `${JSON.stringify({ type: "client_report" })}\n{}`;
-      const req = makeTunnelRequest(envelope);
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(200);
-
-      const logs = collectLogs(consoleSpy);
-      const log = findLog(logs, "sentry_tunnel_no_dsn");
-      expect(log).toBeDefined();
-      expect(log!.level).toBe("info");
-    });
-
-    it("returns 400 for invalid DSN URL", async () => {
-      const envelope = `${JSON.stringify({ dsn: "not-a-url" })}\n{}`;
-      const req = makeTunnelRequest(envelope);
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(400);
-
-      const logs = collectLogs(consoleSpy);
-      const log = findLog(logs, "sentry_tunnel_invalid_dsn");
-      expect(log).toBeDefined();
-      expect(log!.level).toBe("warn");
-    });
-
-    it("returns 404 when SENTRY_DSN is empty string", async () => {
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: "" }));
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 404 when SENTRY_DSN is undefined", async () => {
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      const res = await worker.fetch(req, makeEnv({ SENTRY_DSN: undefined as unknown as string }));
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 502 when Sentry is unreachable", async () => {
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("connection refused"));
-
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(502);
-
-      const logs = collectLogs(consoleSpy);
-      const fetchLog = findLog(logs, "sentry_tunnel_fetch_failed");
-      expect(fetchLog).toBeDefined();
-      expect(fetchLog!.level).toBe("error");
-    });
-
-    it("logs sentry_tunnel_forwarded on successful proxy", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
-      await worker.fetch(req, makeEnv());
-
-      const logs = collectLogs(consoleSpy);
-      const fwdLog = findLog(logs, "sentry_tunnel_forwarded");
-      expect(fwdLog).toBeDefined();
-      expect(fwdLog!.level).toBe("info");
-      expect(fwdLog!.entry.sentry_status).toBe(200);
-    });
-
-    it("includes security headers on all tunnel responses", async () => {
-      const req = new Request("https://gh.gordoncode.dev/api/error-reporting", { method: "GET" });
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-      expect(res.headers.get("X-Frame-Options")).toBe("DENY");
-    });
-
-    it("never logs the envelope body contents", async () => {
-      const sensitivePayload = '{"user":{"email":"user@example.com"}}';
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-
-      const req = makeTunnelRequest(makeEnvelope(VALID_DSN, sensitivePayload));
-      await worker.fetch(req, makeEnv());
-
-      const logs = collectLogs(consoleSpy);
-      const allLogText = logs.map((l) => JSON.stringify(l.entry)).join("\n");
-      expect(allLogText).not.toContain("user@example.com");
-      expect(allLogText).not.toContain(sensitivePayload);
-    });
-
-    it("rejects OPTIONS with 405", async () => {
-      const req = new Request("https://gh.gordoncode.dev/api/error-reporting", {
-        method: "OPTIONS",
-      });
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(405);
-      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-    });
-
-    it("returns 413 when body exceeds size limit", async () => {
-      const oversizedBody = "x".repeat(256 * 1024 + 1);
-      const req = makeTunnelRequest(oversizedBody);
-      const res = await worker.fetch(req, makeEnv());
-      expect(res.status).toBe(413);
-
-      const logs = collectLogs(consoleSpy);
-      const sizeLog = findLog(logs, "sentry_tunnel_payload_too_large");
-      expect(sizeLog).toBeDefined();
-      expect(sizeLog!.level).toBe("warn");
-      expect(sizeLog!.entry.body_length).toBe(256 * 1024 + 1);
-    });
-
-    it("allows body at exactly the size limit", async () => {
-      // Build a valid envelope that is exactly at the limit
-      const header = JSON.stringify({ dsn: VALID_DSN });
-      const padding = "x".repeat(256 * 1024 - header.length - 1); // -1 for newline
-      const body = `${header}\n${padding}`;
-      expect(body.length).toBe(256 * 1024);
-
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-      const req = makeTunnelRequest(body);
-      const res = await worker.fetch(req, makeEnv());
-      // Should not be 413 — the body is within limits
-      expect(res.status).not.toBe(413);
-    });
-
-    it("logs cors_origin_mismatch for tunnel requests with wrong origin", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-
-      const req = new Request("https://gh.gordoncode.dev/api/error-reporting", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-sentry-envelope",
-          "Origin": "https://evil.example.com",
-        },
-        body: makeEnvelope(VALID_DSN),
-      });
-      await worker.fetch(req, makeEnv());
-
-      const logs = collectLogs(consoleSpy);
-      const corsLog = findLog(logs, "cors_origin_mismatch");
-      expect(corsLog).toBeDefined();
-      expect(corsLog!.level).toBe("warn");
-      expect(corsLog!.entry.request_origin).toBe("https://evil.example.com");
-    });
-  });
 });

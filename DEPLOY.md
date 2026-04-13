@@ -92,6 +92,37 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 - `Access-Control-Allow-Origin`: exact match against `ALLOWED_ORIGIN` (no wildcards)
 - No `Access-Control-Allow-Credentials` header (OAuth App uses no cookies)
 
+### Tunnel Endpoint Security
+
+The two tunnel endpoints (`/api/error-reporting` and `/api/csp-report`) receive untrusted browser data and forward it to Sentry. They are hardened with layered fail-fast guards:
+
+**Layered defense model (applied in order):**
+1. **IP rate limit** (catches all abuse including curl — headers are irrelevant)
+2. **Origin check** (catches cross-origin browser abuse and lazy curl scripts)
+3. **DSN/project validation** (catches misdirected requests)
+
+Content-Length pre-check fires between origin check and DSN validation but is an optimization gate, not a security layer (see Content-Length section below).
+
+**Per-endpoint IP rate limits (in-memory, per-isolate):**
+- Token exchange (`/api/oauth/token`): 10 requests/min per IP
+- Sentry tunnel (`/api/error-reporting`): 15 requests/min per IP
+- CSP report tunnel (`/api/csp-report`): 15 requests/min per IP
+- Proxy pre-gate (`/api/proxy/*`, `/api/jira/*`): 60 requests/min per IP (complements CF rate limiter binding)
+
+Note: these counters are in-memory and do not survive isolate restarts. A fresh isolate gets a clean slate. CF isolates are short-lived, so this gates burst abuse within a single isolate lifetime — the intended use case.
+
+**Origin check behavior:**
+- Sentry tunnel (`/api/error-reporting`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. The Sentry SDK always includes `Origin` in its `fetch()` calls from our SPA.
+- CSP report tunnel (`/api/csp-report`): **soft** — allows absent Origin (browser CSP reports sent via the Reporting API may omit Origin), rejects only if Origin is present and does not match `ALLOWED_ORIGIN`.
+
+Note: Origin and Sec-Fetch-Site headers can be spoofed by programmatic clients (curl, scripts). IP rate limiting is the primary defense; origin checks are defense-in-depth.
+
+**Content-Length pre-check:**
+Both tunnel endpoints check the `Content-Length` header before reading the request body as an optimization. If the declared size exceeds the per-endpoint maximum, the request is rejected with 413 without buffering the body. The post-read size check remains the authoritative guard — Content-Length can be absent (chunked transfer, passes through) or spoofed (attacker declares small size but sends large body, caught by the post-read check).
+
+**CSP report fan-out amplification:**
+A single POST to `/api/csp-report` can contain up to 20 individual violation reports (via the Reporting API batch format), each triggering a separate outbound subrequest to Sentry's security endpoint. With the 15/min rate limit, worst case is 15 × 20 = **300 outbound subrequests per minute per IP**. This is bounded by the rate limiter on inbound requests and the 20-report cap enforced in code (`scrubbedPayloads.slice(0, 20)`).
+
 ## Local Development
 
 Copy `.dev.vars.example` to `.dev.vars` and fill in your values. Wrangler picks up `.dev.vars` automatically for local `wrangler dev` runs.
@@ -151,7 +182,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 
 **Exemptions:**
 - `/api/csp-report` is exempted because browser-generated CSP violation reports (via the Reporting API) may not include an `Origin` header.
-- `/api/error-reporting` is exempted for consistency with the CSP tunnel — while the Sentry SDK does include `Origin` in its `fetch()` calls, the exemption keeps both tunnel endpoints treated identically. Both endpoints are low-risk (error reporting only, no sensitive data returned) and have their own validation (DSN check, payload format check).
+- `/api/error-reporting` is exempted because the Worker enforces its own strict origin check (rejects missing or mismatched Origin), making the WAF exemption safe. The exemption exists because the WAF expression cannot selectively allow absent-Origin for CSP while also blocking it for Sentry — the Worker handles both policies independently.
 
 **Notes:**
 - This uses **1 of the 5 free WAF custom rules** available on all plans.

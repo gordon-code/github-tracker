@@ -9,6 +9,8 @@ const TEST_SESSION_KEY = "dGVzdC1zZXNzaW9uLWtleQ==";
 // "test-seal-key" base64-encoded
 const TEST_SEAL_KEY = "dGVzdC1zZWFsLWtleQ==";
 
+let _requestCounter = 0;
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: { fetch: async () => new Response("asset") },
@@ -40,7 +42,10 @@ function makeSealRequest(options: {
     method = "POST",
   } = options;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    // Unique IP per request to avoid hitting the in-memory IP pre-gate rate limiter across tests
+    "CF-Connecting-IP": `10.4.0.${++_requestCounter}`,
+  };
   if (origin) headers["Origin"] = origin;
   if (addXRequestedWith) headers["X-Requested-With"] = "fetch";
   if (addContentType) headers["Content-Type"] = "application/json";
@@ -374,23 +379,6 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(json["error"]).toBe("not_found");
   });
 
-  it("valid POST to /api/gitlab/token falls through to 404 with not_found", async () => {
-    const req = new Request("https://gh.gordoncode.dev/api/gitlab/token", {
-      method: "POST",
-      headers: {
-        "Origin": ALLOWED_ORIGIN,
-        "X-Requested-With": "fetch",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-    const res = await worker.fetch(req, makeEnv());
-
-    expect(res.status).toBe(404);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("not_found");
-  });
-
   // ── Session cookie issuance ───────────────────────────────────────────────
 
   it("first request issues a session cookie in Set-Cookie", async () => {
@@ -470,5 +458,105 @@ describe("Worker /api/proxy/seal endpoint", () => {
     // Must NOT log the actual token value
     const allLogText = allLogs.map((l) => JSON.stringify(l)).join("\n");
     expect(allLogText).not.toContain("ghp_abc123");
+  });
+
+  // ── Proxy IP pre-gate ─────────────────────────────────────────────────────
+
+  describe("proxy IP pre-gate", () => {
+    it("rejects proxy requests after IP threshold exceeded", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true }), { status: 200 })
+      );
+
+      const env = makeEnv();
+      const fixedIp = "10.4.99.1";
+      // Send 60 requests — all should pass
+      for (let i = 0; i < 60; i++) {
+        const req = new Request("https://gh.gordoncode.dev/api/proxy/seal", {
+          method: "POST",
+          headers: {
+            "CF-Connecting-IP": fixedIp,
+            "Origin": ALLOWED_ORIGIN,
+            "X-Requested-With": "fetch",
+            "Content-Type": "application/json",
+            "cf-turnstile-response": "valid-turnstile-token",
+          },
+          body: JSON.stringify({ token: "ghp_test", purpose: "jira-api-token" }),
+        });
+        const res = await worker.fetch(req, env);
+        expect(res.status).not.toBe(429);
+      }
+      // 61st request from same IP should be rejected
+      const req = new Request("https://gh.gordoncode.dev/api/proxy/seal", {
+        method: "POST",
+        headers: {
+          "CF-Connecting-IP": fixedIp,
+          "Origin": ALLOWED_ORIGIN,
+          "X-Requested-With": "fetch",
+          "Content-Type": "application/json",
+          "cf-turnstile-response": "valid-turnstile-token",
+        },
+        body: JSON.stringify({ token: "ghp_test", purpose: "jira-api-token" }),
+      });
+      const res = await worker.fetch(req, env);
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).toBe("60");
+      // TCG-003: pre-gate 429 response body must contain {error: "rate_limited"}
+      const body = await res.json() as Record<string, unknown>;
+      expect(body["error"]).toBe("rate_limited");
+    });
+
+    it("does not issue session cookie when IP pre-gate rejects", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true }), { status: 200 })
+      );
+
+      const env = makeEnv();
+      const fixedIp = "10.4.99.4";
+      // Exhaust the 60/min limit
+      for (let i = 0; i < 60; i++) {
+        await worker.fetch(new Request("https://gh.gordoncode.dev/api/proxy/seal", {
+          method: "POST",
+          headers: {
+            "CF-Connecting-IP": fixedIp,
+            "Origin": ALLOWED_ORIGIN,
+            "X-Requested-With": "fetch",
+            "Content-Type": "application/json",
+            "cf-turnstile-response": "valid-turnstile-token",
+          },
+          body: JSON.stringify({ token: "ghp_test", purpose: "jira-api-token" }),
+        }), env);
+      }
+      // 61st — should be rejected with no Set-Cookie (ensureSession was never called)
+      const req = new Request("https://gh.gordoncode.dev/api/proxy/seal", {
+        method: "POST",
+        headers: {
+          "CF-Connecting-IP": fixedIp,
+          "Origin": ALLOWED_ORIGIN,
+          "X-Requested-With": "fetch",
+          "Content-Type": "application/json",
+          "cf-turnstile-response": "valid-turnstile-token",
+        },
+        body: JSON.stringify({ token: "ghp_test", purpose: "jira-api-token" }),
+      });
+      const res = await worker.fetch(req, env);
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Set-Cookie")).toBeNull();
+    });
+
+    it("IP pre-gate is independent of session-based rate limiter", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true }), { status: 200 })
+      );
+
+      // A request that passes the IP pre-gate should still go through session + CF rate limiter as normal
+      const env = makeEnv();
+      const req = makeSealRequest();
+      const res = await worker.fetch(req, env);
+      // Should succeed — IP pre-gate passed, session created, CF limiter allowed
+      expect(res.status).toBe(200);
+      const json = await res.json() as Record<string, unknown>;
+      expect(typeof json["sealed"]).toBe("string");
+    });
   });
 });

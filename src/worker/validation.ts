@@ -3,6 +3,10 @@ export type ValidationResult = { ok: true } | { ok: false; code: string; status:
 /**
  * Validates that the request Origin header matches the allowed origin exactly.
  * Strict equality only — prevents substring spoofing (e.g. evil.gh.gordoncode.dev).
+ *
+ * Returns { ok: false } when Origin header is absent or does not match allowedOrigin.
+ * The Sentry tunnel relies on this strict behavior to reject requests without an Origin.
+ * For soft origin checks (allowing absent Origin), use an inline check instead.
  */
 export function validateOrigin(request: Request, allowedOrigin: string): ValidationResult {
   const origin = request.headers.get("Origin");
