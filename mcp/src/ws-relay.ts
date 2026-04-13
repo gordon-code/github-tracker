@@ -44,7 +44,6 @@ const ALLOWED_ORIGINS_DEFAULT = new Set([
   "https://localhost",
   "http://127.0.0.1",
   "https://127.0.0.1",
-  "https://gh.gordoncode.dev",
 ]);
 
 function buildAllowedOrigins(): Set<string> {
@@ -60,6 +59,11 @@ function buildAllowedOrigins(): Set<string> {
 
 // Computed once at module scope — origins don't change at runtime
 const ALLOWED_ORIGINS = buildAllowedOrigins();
+
+// Warn if only localhost origins are configured — production domains need MCP_RELAY_ALLOWED_ORIGINS
+if (!process.env.MCP_RELAY_ALLOWED_ORIGINS) {
+  console.error("[mcp/ws] Warning: No MCP_RELAY_ALLOWED_ORIGINS set — only localhost connections allowed. Set this to your production domain to allow WebSocket relay from the deployed SPA.");
+}
 
 function isOriginAllowed(origin: string | undefined): boolean {
   // Non-browser clients (e.g. CLI tools) do not send Origin — allow them.

@@ -18,6 +18,7 @@ npm install -g github-tracker-mcp
 |----------|----------|---------|-------------|
 | `GITHUB_TOKEN` | No | — | Classic PAT with `repo` and `read:org` scopes (recommended), or fine-grained PAT with Actions (read), Contents (read), Issues (read), and Pull requests (read) permissions. Fine-grained PATs skip scope validation at startup. |
 | `MCP_WS_PORT` | No | `9876` | WebSocket relay port for receiving live data from the dashboard SPA. |
+| `MCP_RELAY_ALLOWED_ORIGINS` | No | — | Comma-separated additional origins for WebSocket connections (e.g., `https://your-domain.example.com`). Localhost origins are always allowed. |
 
 `GITHUB_TOKEN` is required for standalone (direct API) mode. In relay mode the server receives data from the dashboard and works without a token. If you set `GITHUB_TOKEN` alongside the relay, the server uses it as a fallback when the relay disconnects.
 
