@@ -352,6 +352,13 @@ describe("Worker CSP report endpoint", () => {
     expect(resp.status).toBe(204);
   });
 
+  it("rejects requests with Origin: null (string literal from sandboxed iframes) with 403", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: "null" });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(403);
+  });
+
   it("allows requests with correct Origin", async () => {
     const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
     const req = makeCspRequest(body, "application/csp-report", "POST", { origin: ALLOWED_ORIGIN });

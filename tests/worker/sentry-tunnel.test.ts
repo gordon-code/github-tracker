@@ -293,6 +293,12 @@ describe("Sentry tunnel (/api/error-reporting)", () => {
     expect(originLog).toBeDefined();
   });
 
+  it("rejects requests with Origin: null (string literal from sandboxed iframes) with 403", async () => {
+    const req = makeTunnelRequest(makeEnvelope(VALID_DSN), { origin: "null" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(403);
+  });
+
   it("allows requests with correct Origin", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     const req = makeTunnelRequest(makeEnvelope(VALID_DSN), { origin: ALLOWED_ORIGIN });

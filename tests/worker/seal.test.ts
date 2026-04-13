@@ -62,11 +62,11 @@ function makeSealRequest(options: {
 
 describe("Worker /api/proxy/seal endpoint", () => {
   let originalFetch: typeof globalThis.fetch;
-  let consoleSpies: { info: ReturnType<typeof vi.spyOn>; warn: ReturnType<typeof vi.spyOn>; error: ReturnType<typeof vi.spyOn> };
+  let consoleSpy: { info: ReturnType<typeof vi.spyOn>; warn: ReturnType<typeof vi.spyOn>; error: ReturnType<typeof vi.spyOn> };
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    consoleSpies = {
+    consoleSpy = {
       info: vi.spyOn(console, "info").mockImplementation(() => {}),
       warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
       error: vi.spyOn(console, "error").mockImplementation(() => {}),
@@ -442,7 +442,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     const req = makeSealRequest({ body: { token: "ghp_abc123", purpose: "jira-api-token" } });
     await worker.fetch(req, makeEnv());
 
-    const allLogs = collectLogs(consoleSpies);
+    const allLogs = collectLogs(consoleSpy);
     const sealLog = findLog(allLogs, "token_sealed");
     expect(sealLog).toBeDefined();
     expect(sealLog!.entry["purpose"]).toBe("jira-api-token");
