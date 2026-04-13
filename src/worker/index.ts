@@ -113,7 +113,7 @@ const cspRateLimiter = createIpRateLimiter(15, 60_000);      // csp report: 15/m
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000); // proxy pre-gate: complements CF binding
 
 // Content-Length pre-check helper — optimization only, not a security boundary.
-// Absent or unparseable Content-Length passes through (post-read check is authoritative).
+// Absent, non-integer, or negative Content-Length passes through (post-read check is authoritative).
 function checkContentLength(request: Request, maxBytes: number): boolean {
   const cl = request.headers.get("Content-Length");
   if (cl === null) return true;

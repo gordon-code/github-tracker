@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
+import { collectLogs, findLog } from "./helpers";
 
 const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
 
@@ -44,15 +45,21 @@ function makeCspRequest(
 describe("Worker CSP report endpoint", () => {
   let originalFetch: typeof globalThis.fetch;
   let mockFetch: ReturnType<typeof vi.fn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleSpy: {
+    info: ReturnType<typeof vi.spyOn>;
+    warn: ReturnType<typeof vi.spyOn>;
+    error: ReturnType<typeof vi.spyOn>;
+  };
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     globalThis.fetch = mockFetch as typeof globalThis.fetch;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleSpy = {
+      info: vi.spyOn(console, "info").mockImplementation(() => {}),
+      warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+      error: vi.spyOn(console, "error").mockImplementation(() => {}),
+    };
   });
 
   afterEach(() => {
@@ -421,10 +428,8 @@ describe("Worker CSP report endpoint", () => {
     expect(resp.status).toBe(413);
 
     // TCG-002: verify the structured log event fires
-    const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => {
-      try { return JSON.parse(c[0] as string) as Record<string, unknown>; } catch { return null; }
-    }).filter(Boolean) as Array<Record<string, unknown>>;
-    const sizeLog = warnCalls.find((l) => typeof l["event"] === "string" && (l["event"] as string).includes("csp_report_content_length_exceeded"));
+    const logs = collectLogs(consoleSpy);
+    const sizeLog = findLog(logs, "csp_report_content_length_exceeded");
     expect(sizeLog).toBeDefined();
   });
 
