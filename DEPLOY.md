@@ -202,7 +202,7 @@ The Worker validates that the `PROXY_RATE_LIMITER` binding exists (via `typeof e
 
 **Origin check behavior:**
 - Sentry tunnel (`/api/error-reporting`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. The Sentry SDK always includes `Origin` in its `fetch()` calls from our SPA.
-- CSP report tunnel (`/api/csp-report`): **soft** — allows absent Origin (browser CSP reports sent via the Reporting API may omit Origin), rejects only if Origin is present and does not match `ALLOWED_ORIGIN`.
+- CSP report tunnel (`/api/csp-report`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. Same-origin CSP reports (via `report-uri`) always include Origin; the WAF exempts this endpoint so the Worker can enforce its own policy independently.
 
 Note: Origin and Sec-Fetch-Site headers can be spoofed by programmatic clients (curl, scripts). IP rate limiting is the primary defense; origin checks are defense-in-depth.
 
@@ -275,8 +275,8 @@ not (http.request.uri.path eq "/api/error-reporting")
 **Action:** Block
 
 **Exemptions:**
-- `/api/csp-report` is exempted because browser-generated CSP violation reports (via the Reporting API) may not include an `Origin` header.
-- `/api/error-reporting` is exempted because the Worker enforces its own strict origin check (rejects missing or mismatched Origin), making the WAF exemption safe. The exemption exists because the WAF expression cannot selectively allow absent-Origin for CSP while also blocking it for Sentry — the Worker handles both policies independently.
+- `/api/csp-report` is exempted because the Worker enforces its own strict origin check (rejects missing or mismatched Origin), making the WAF exemption safe.
+- `/api/error-reporting` is exempted for the same reason — the Worker enforces its own strict origin check independently. Both endpoints are exempted so the Worker handles origin policies at the application layer, where per-endpoint logic is possible — the WAF expression is too coarse to distinguish per-endpoint behavior.
 
 **Notes:**
 - This uses **1 of the 5 free WAF custom rules** available on all plans.

@@ -66,6 +66,7 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
       try {
         const widgetId = window.turnstile.render(container, {
           sitekey: siteKey,
+          action: "seal",
           size: "invisible",
           execution: "execute",
           retry: "never",
@@ -111,7 +112,6 @@ export async function proxyFetch(
   options?: RequestInit,
 ): Promise<Response> {
   const defaultHeaders: Record<string, string> = {
-    "X-Requested-With": "fetch",
     "Content-Type": "application/json",
   };
 
@@ -123,6 +123,7 @@ export async function proxyFetch(
   const mergedHeaders = {
     ...defaultHeaders,
     ...callerHeaders,
+    // Always override — callers must not be able to spoof this header.
     "X-Requested-With": "fetch",
   };
 

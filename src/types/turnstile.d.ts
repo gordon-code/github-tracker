@@ -3,6 +3,7 @@
 
 interface TurnstileRenderOptions {
   sitekey: string;
+  action?: string;
   size?: "normal" | "compact" | "invisible" | "flexible";
   execution?: "render" | "execute";
   retry?: "auto" | "never";

@@ -26,9 +26,57 @@ afterEach(() => {
 // ── verifyTurnstile ─────────────────────────────────────────────────────────
 
 describe("verifyTurnstile", () => {
-  it("returns success: true on successful verification", async () => {
+  it("returns success: true on successful verification (no action binding)", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV);
+    expect(result).toEqual({ success: true });
+  });
+
+  it("returns success: true when expectedAction matches response action", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, action: "seal" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV, "seal");
+    expect(result).toEqual({ success: true });
+  });
+
+  it("returns action-mismatch when expectedAction does not match response action", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, action: "other-action" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV, "seal");
+    expect(result).toEqual({ success: false, errorCodes: ["action-mismatch"] });
+  });
+
+  it("returns action-mismatch when expectedAction is provided but response action is missing", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV, "seal");
+    expect(result).toEqual({ success: false, errorCodes: ["action-mismatch"] });
+  });
+
+  it("does not validate action when expectedAction is omitted", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, action: "anything" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })

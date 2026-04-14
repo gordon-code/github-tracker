@@ -4,6 +4,7 @@ export interface TurnstileEnv {
 
 interface TurnstileResponse {
   success: boolean;
+  action?: string;
   "error-codes"?: string[];
 }
 
@@ -19,7 +20,8 @@ interface TurnstileResponse {
 export async function verifyTurnstile(
   token: string,
   ip: string | null,
-  env: TurnstileEnv
+  env: TurnstileEnv,
+  expectedAction?: string
 ): Promise<{ success: boolean; errorCodes?: string[] }> {
   const body = new FormData();
   body.append("secret", env.TURNSTILE_SECRET_KEY);
@@ -56,6 +58,9 @@ export async function verifyTurnstile(
   }
 
   if (data.success) {
+    if (expectedAction !== undefined && data.action !== expectedAction) {
+      return { success: false, errorCodes: ["action-mismatch"] };
+    }
     return { success: true };
   }
 

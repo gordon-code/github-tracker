@@ -213,10 +213,8 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
 
-// Module-level cache for derived seal keys, keyed by "<raw>:<purpose>".
-// Seal key cache: keyed by purpose, invalidated when SEAL_KEY changes.
-// Tracks a fingerprint of the SEAL_KEY (first 8 chars) to detect rotation
-// without storing raw key material as a Map key.
+// Module-level cache for derived seal keys, keyed by purpose.
+// Invalidated on SEAL_KEY rotation via full-value fingerprint comparison.
 const _sealKeyCache = new Map<string, CryptoKey>();
 let _sealKeyFingerprint = "";
 
@@ -238,7 +236,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   }
 
   const ip = request.headers.get("CF-Connecting-IP");
-  const turnstileResult = await verifyTurnstile(turnstileToken, ip, env);
+  const turnstileResult = await verifyTurnstile(turnstileToken, ip, env, "seal");
   if (!turnstileResult.success) {
     log("warn", "seal_turnstile_failed", { error_codes: turnstileResult.errorCodes }, request);
     return errorResponse("turnstile_failed", 403);
@@ -275,9 +273,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   let sealed: string;
   try {
     // SC-8: derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
-    // Keyed by purpose only — avoids storing raw key material as a Map key string.
-    // Fingerprint detects SEAL_KEY rotation without retaining the full secret.
-    const fingerprint = env.SEAL_KEY.slice(0, 8);
+    const fingerprint = env.SEAL_KEY;
     if (fingerprint !== _sealKeyFingerprint) {
       _sealKeyCache.clear();
       _sealKeyFingerprint = fingerprint;

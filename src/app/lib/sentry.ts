@@ -106,7 +106,7 @@ export function initSentry(): void {
     profilesSampleRate: 0,
 
     // ── Only capture errors from our own code ───────────────────
-    allowUrls: [window.location.origin],
+    allowUrls: [new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[/\\?#])`)],
 
     // ── Scrub sensitive data before it leaves the browser ────────
     beforeSend: beforeSendHandler,

@@ -24,7 +24,7 @@ else
     if ! SECRETS=$(wrangler secret list --json 2>&1); then
       fail "wrangler secret list failed — run: wrangler login"
     else
-      for s in ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY; do
+      for s in ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY TURNSTILE_SECRET_KEY; do
         echo "$SECRETS" | grep -q "\"name\":\"$s\"" || fail "CF Worker secret '$s' not set (run: wrangler secret put $s)"
       done
       echo "$SECRETS" | grep -q '"name":"SENTRY_DSN"' || warn "CF Worker secret 'SENTRY_DSN' not set — Sentry error tunnel returns 404"

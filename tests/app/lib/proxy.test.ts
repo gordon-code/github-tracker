@@ -255,7 +255,7 @@ describe("acquireTurnstileToken", () => {
     expect(mockTurnstile.ready).toHaveBeenCalledOnce();
     expect(mockTurnstile.render).toHaveBeenCalledWith(
       expect.any(HTMLDivElement),
-      expect.objectContaining({ retry: "never" }),
+      expect.objectContaining({ action: "seal", retry: "never" }),
     );
   });
 
@@ -374,6 +374,101 @@ describe("acquireTurnstileToken", () => {
     await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
       "Failed to load Turnstile script",
     );
+  });
+});
+
+// ── acquireTurnstileToken — outer 30-second timeout ──────────────────────────
+
+describe("acquireTurnstileToken — 30-second outer timeout", () => {
+  let mod: typeof import("../../../src/app/lib/proxy");
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    mod = await loadModule();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects with timeout message when Turnstile never calls ready callback", async () => {
+    const mockTurnstile = makeMockTurnstile();
+    // ready() captures the callback but never calls it — simulates a hung Turnstile widget
+    mockTurnstile.ready = vi.fn();
+
+    vi.stubGlobal("window", {
+      ...window,
+      turnstile: mockTurnstile,
+    });
+
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    // Prevent unhandled rejection during timer advancement
+    void tokenPromise.catch(() => {});
+
+    // Allow loadTurnstileScript (microtask) to resolve and setTimeout to register
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Advance past the 30-second timeout
+    await vi.advanceTimersByTimeAsync(30_001);
+
+    await expect(tokenPromise).rejects.toThrow(
+      "Turnstile challenge timed out after 30 seconds",
+    );
+  });
+});
+
+// ── acquireTurnstileToken — script reuse ─────────────────────────────────────
+
+describe("acquireTurnstileToken — script reuse", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("appends the Turnstile script to <head> only once across multiple calls", async () => {
+    const mod = await loadModule();
+
+    const mockTurnstile = makeMockTurnstile();
+    mockTurnstile.execute.mockImplementation(() => {
+      mockTurnstile._resolveToken("reuse-token");
+    });
+
+    vi.stubGlobal("window", {
+      ...window,
+      turnstile: mockTurnstile,
+    });
+
+    const appendSpy = vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+
+    const token1 = await mod.acquireTurnstileToken("test-site-key");
+    expect(token1).toBe("reuse-token");
+
+    const token2 = await mod.acquireTurnstileToken("test-site-key");
+    expect(token2).toBe("reuse-token");
+
+    const scriptAppends = appendSpy.mock.calls.filter(
+      ([node]) => (node as HTMLElement).tagName === "SCRIPT",
+    );
+    expect(scriptAppends).toHaveLength(1);
   });
 });
 

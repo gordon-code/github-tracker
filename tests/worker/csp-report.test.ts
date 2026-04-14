@@ -383,7 +383,7 @@ describe("Worker CSP report endpoint", () => {
     expect(report["violated-directive"].length).toBe(2048);
   });
 
-  // ── Soft origin check ─────────────────────────────────────────────────────
+  // ── Strict origin check ───────────────────────────────────────────────────
 
   it("rejects requests with wrong Origin with 403", async () => {
     const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
@@ -422,15 +422,15 @@ describe("Worker CSP report endpoint", () => {
     for (let i = 0; i < 15; i++) {
       const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
         method: "POST",
-        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp },
+        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
         body,
       });
       const resp = await worker.fetch(req, env);
-      expect(resp.status).not.toBe(429);
+      expect(resp.status).toBe(204);
     }
     const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
       method: "POST",
-      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp },
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
       body,
     });
     const resp = await worker.fetch(req, env);

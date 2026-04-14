@@ -32,16 +32,25 @@ const SESSION_HMAC_SALT = "github-tracker-session-v1";
 const SESSION_HMAC_INFO = "session-hmac";
 const SESSION_MAX_AGE = 28800; // 8 hours in seconds
 
-// Module-level cache for derived session HMAC keys.
-// SESSION_KEY is a deployment constant — safe to cache per-isolate (follows _dsnCache pattern).
-// Keyed by raw secret string; supports both current and previous key without duplicate logic.
+// Module-level cache for derived session HMAC keys, keyed by purpose ("current" | "prev").
+// Invalidated on SESSION_KEY rotation via compound fingerprint comparison.
 const _sessionKeyCache = new Map<string, CryptoKey>();
+let _sessionKeyFingerprint = "";
 
-async function getSessionHmacKey(raw: string): Promise<CryptoKey> {
-  const cached = _sessionKeyCache.get(raw);
+async function getSessionHmacKey(
+  env: SessionEnv,
+  purpose: "current" | "prev"
+): Promise<CryptoKey> {
+  const raw = purpose === "current" ? env.SESSION_KEY : env.SESSION_KEY_PREV!;
+  const fp = `${env.SESSION_KEY}:${env.SESSION_KEY_PREV ?? ""}`;
+  if (fp !== _sessionKeyFingerprint) {
+    _sessionKeyCache.clear();
+    _sessionKeyFingerprint = fp;
+  }
+  const cached = _sessionKeyCache.get(purpose);
   if (cached !== undefined) return cached;
   const key = await deriveKey(raw, SESSION_HMAC_SALT, SESSION_HMAC_INFO, "sign");
-  _sessionKeyCache.set(raw, key);
+  _sessionKeyCache.set(purpose, key);
   return key;
 }
 
@@ -60,7 +69,7 @@ export async function issueSession(
   };
 
   const json = JSON.stringify(payload);
-  const hmacKey = await getSessionHmacKey(env.SESSION_KEY);
+  const hmacKey = await getSessionHmacKey(env, "current");
   const signature = await signSession(json, hmacKey);
 
   // base64url(JSON(payload)).base64url(HMAC-SHA256(JSON(payload)))
@@ -108,10 +117,10 @@ export async function parseSession(
     const payload = JSON.parse(json) as SessionPayload;
 
     // Verify HMAC signature (rotation-aware, using cached derived keys)
-    const currentKey = await getSessionHmacKey(env.SESSION_KEY);
+    const currentKey = await getSessionHmacKey(env, "current");
     let valid = await verifySession(json, signature, currentKey);
     if (!valid && env.SESSION_KEY_PREV !== undefined) {
-      const prevKey = await getSessionHmacKey(env.SESSION_KEY_PREV);
+      const prevKey = await getSessionHmacKey(env, "prev");
       valid = await verifySession(json, signature, prevKey);
     }
     if (!valid) return null;

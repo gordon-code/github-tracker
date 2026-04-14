@@ -82,7 +82,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("valid request with all headers + mocked Turnstile returns sealed token", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest();
@@ -154,6 +154,32 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(json["error"]).toBe("turnstile_failed");
   });
 
+  it("request with Turnstile action mismatch returns 403 with turnstile_failed", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "wrong-action" }), { status: 200 })
+    );
+
+    const req = makeSealRequest();
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("turnstile_failed");
+  });
+
+  it("request with Turnstile response missing action field returns 403 with turnstile_failed", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 })
+    );
+
+    const req = makeSealRequest();
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("turnstile_failed");
+  });
+
   it("request with missing Turnstile token returns 403 with turnstile_failed", async () => {
     const req = makeSealRequest({ turnstileToken: "" });
     const res = await worker.fetch(req, makeEnv());
@@ -175,7 +201,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with Turnstile header exactly 2048 chars is not rejected by length guard", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const maxToken = "a".repeat(2048);
@@ -191,7 +217,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request exceeding rate limit returns 429 with rate_limited and Retry-After header", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const rateLimiter = { limit: vi.fn().mockResolvedValue({ success: false }) };
@@ -206,7 +232,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request proceeds when rate limiter throws (fail-open)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const rateLimiter = { limit: vi.fn().mockRejectedValue(new Error("binding unavailable")) };
@@ -223,7 +249,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with token exceeding 2048 chars returns 400 with invalid_request", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const longToken = "a".repeat(2049);
@@ -237,7 +263,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with token exactly 2048 chars is accepted", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const maxToken = "a".repeat(2048);
@@ -251,7 +277,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with missing purpose returns 400 with invalid_request", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest({ body: { token: "ghp_test" } });
@@ -264,7 +290,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with empty purpose string returns 400 with invalid_request", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest({ body: { token: "ghp_test", purpose: "" } });
@@ -277,7 +303,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with invalid purpose (not in VALID_PURPOSES) returns 400", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest({ body: { token: "ghp_test", purpose: "github-pat" } });
@@ -290,7 +316,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("request with missing token returns 400 with invalid_request", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest({ body: { purpose: "jira-api-token" } });
@@ -351,7 +377,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("successful POST to /api/proxy/seal does not set Access-Control-Allow-Origin", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest();
@@ -385,7 +411,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("first request issues a session cookie in Set-Cookie", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest();
@@ -403,7 +429,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("when sealToken fails due to invalid key, returns 500 with seal_failed", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     // Use an invalid (non-base64url) key to force a crypto failure in deriveKey
@@ -422,7 +448,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("responses include security headers", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest();
@@ -437,7 +463,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("successful seal logs token_sealed event with purpose and token_length", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
 
     const req = makeSealRequest({ body: { token: "ghp_abc123", purpose: "jira-api-token" } });
@@ -451,6 +477,60 @@ describe("Worker /api/proxy/seal endpoint", () => {
     // Must NOT log the actual token value
     const allLogText = allLogs.map((l) => JSON.stringify(l.entry)).join("\n");
     expect(allLogText).not.toContain("ghp_abc123");
+  });
+
+  // ── Second valid purpose value ────────────────────────────────────────────
+
+  it("valid request with purpose 'jira-refresh-token' returns 200 with sealed token", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    const req = makeSealRequest({ body: { token: "refresh_token_xyz", purpose: "jira-refresh-token" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["sealed"]).toBe("string");
+    expect((json["sealed"] as string).length).toBeGreaterThan(0);
+  });
+
+  // ── SEAL_KEY rotation / cache invalidation ────────────────────────────────
+  // These two tests run sequentially and share module-level _sealKeyCache state.
+  // The first primes the cache; the second rotates SEAL_KEY and verifies a distinct sealed output.
+
+  it("SEAL_KEY rotation: request with original key produces sealed output (primes cache)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    const req = makeSealRequest({ body: { token: "rotation_test_token", purpose: "jira-api-token" } });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["sealed"]).toBe("string");
+    // Store sealed output for comparison in the next test
+    (globalThis as Record<string, unknown>)._rotationTestSealed1 = json["sealed"];
+  });
+
+  it("SEAL_KEY rotation: request with rotated key succeeds and produces distinct sealed output", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    const ROTATED_SEAL_KEY = "cm90YXRlZC1zZWFsLWtleQ==";
+    const req = makeSealRequest({ body: { token: "rotation_test_token", purpose: "jira-api-token" } });
+    const res = await worker.fetch(req, makeEnv({ SEAL_KEY: ROTATED_SEAL_KEY }));
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    const sealed2 = json["sealed"] as string;
+    expect(typeof sealed2).toBe("string");
+
+    // Different key → different ciphertext (even with same plaintext + purpose)
+    const sealed1 = (globalThis as Record<string, unknown>)._rotationTestSealed1 as string;
+    expect(sealed1).toBeDefined();
+    expect(typeof sealed1).toBe("string");
+    expect(sealed2).not.toBe(sealed1);
   });
 
   // ── Missing CF-Connecting-IP and binding validation ────────────────────────
@@ -471,7 +551,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
   it("returns 503 when PROXY_RATE_LIMITER binding is missing", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), { status: 200 })
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
     );
     const req = makeSealRequest({ body: { token: "ghp_test", purpose: "jira-api-token" } });
     const env = makeEnv({ PROXY_RATE_LIMITER: undefined as unknown as Env["PROXY_RATE_LIMITER"] });
@@ -484,7 +564,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
   describe("proxy IP pre-gate", () => {
     it("rejects proxy requests after IP threshold exceeded", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ success: true }), { status: 200 })
+        new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
       );
 
       const env = makeEnv();
@@ -527,7 +607,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
     it("does not issue session cookie when IP pre-gate rejects", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ success: true }), { status: 200 })
+        new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
       );
 
       const env = makeEnv();
@@ -565,7 +645,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
 
     it("IP pre-gate is independent of session-based rate limiter", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ success: true }), { status: 200 })
+        new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
       );
 
       // A request that passes the IP pre-gate should still go through session + CF rate limiter as normal
