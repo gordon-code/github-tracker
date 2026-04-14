@@ -278,8 +278,6 @@ not (http.request.uri.path eq "/api/error-reporting")
 - `/api/csp-report` is exempted because the Worker enforces its own strict origin check (rejects missing or mismatched Origin), making the WAF exemption safe.
 - `/api/error-reporting` is exempted for the same reason — the Worker enforces its own strict origin check independently. Both endpoints are exempted so the Worker handles origin policies at the application layer, where per-endpoint logic is possible — the WAF expression is too coarse to distinguish per-endpoint behavior.
 
-> **Simplification opportunity:** Both tunnel endpoints now enforce strict Origin checks at the Worker level (reject absent or mismatched Origin). The WAF exemptions above are therefore redundant — removing them would let the WAF block originless requests to these endpoints before they reach the Worker, saving a Worker invocation per blocked request. To simplify: delete the two `not (http.request.uri.path eq ...)` lines from the WAF expression. The Worker's strict checks remain as defense-in-depth. Safe to apply any time after this PR is deployed.
-
 **Notes:**
 - This uses **1 of the 5 free WAF custom rules** available on all plans.
 - Blocks scanners, `curl` without `Origin`, and cross-site browser attacks before the Worker runs (never billed as a Worker request).
