@@ -1,0 +1,35 @@
+name: Spike Test
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to comment on'
+        required: true
+        type: string
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - comment
+          - close
+jobs:
+  act:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Comment on issue
+        if: inputs.action == 'comment'
+        run: |
+          gh api --method POST "/repos/${{ github.repository }}/issues/${{ inputs.issue_number }}/comments" \
+            -f body="Bot comment from github-actions[bot] — spike test at $(date -u)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Close issue
+        if: inputs.action == 'close'
+        run: |
+          gh api --method PATCH "/repos/${{ github.repository }}/issues/${{ inputs.issue_number }}" \
+            -f state=closed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
