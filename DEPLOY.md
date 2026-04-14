@@ -22,7 +22,7 @@ building.
 
 5. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira/GitLab token sealing feature.
 6. **Sentry error reporting** — Set `VITE_SENTRY_DSN` (build-time, via GitHub Actions variable) and `SENTRY_DSN` (Worker secret, via `wrangler secret put`) to the **same** DSN value. The Worker tunnel (`/api/error-reporting`) validates the incoming envelope DSN against `env.SENTRY_DSN` — different values cause all Sentry events to silently return 403. Leave both empty to disable.
-7. **MCP relay** — Set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server
+7. **MCP relay** — If deploying to a custom domain, set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server (`https://gh.gordoncode.dev` is allowed by default)
 8. **WAF smoke tests** — Set `DEPLOY_DOMAIN` as a GitHub Actions variable (e.g., `your-domain.example.com`). CI runs `pnpm test:waf https://$DEPLOY_DOMAIN` automatically. If `DEPLOY_DOMAIN` is not set, the WAF test is skipped. Run locally with: `pnpm test:waf https://YOUR-DOMAIN`.
 9. **Social metadata** — Update `og:image` and `og:url` in `index.html` to your domain
 10. **Security contact** — Update the email and scope domain in `SECURITY.md`
