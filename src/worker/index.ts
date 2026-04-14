@@ -26,7 +26,6 @@ export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
   PROXY_RATE_LIMITER: RateLimiter; // Workers Rate Limiting Binding
 }
 
-// Predefined error strings only (SDR-006)
 type ErrorCode =
   | "token_exchange_failed"
   | "invalid_request"
@@ -140,34 +139,19 @@ function checkContentLength(request: Request, maxBytes: number): boolean {
   return parsed <= maxBytes;
 }
 
-// CORS: strict equality only (SDR-004)
-function getCorsHeaders(
-  requestOrigin: string | null,
-  allowedOrigin: string
-): Record<string, string> {
-  if (requestOrigin === allowedOrigin) {
-    return {
-      "Access-Control-Allow-Origin": allowedOrigin,
-      "Access-Control-Allow-Methods": "POST",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Vary": "Origin",
-    };
-  }
-  return {};
-}
-
-// ── Proxy CORS headers ─────────────────────────────────────────────────────
-// SC-7: Must check requestOrigin === allowedOrigin before reflecting.
+// Must check requestOrigin === allowedOrigin before reflecting.
 // Returns empty object if no match — never reflects untrusted origins.
-function getProxyCorsHeaders(
+function buildCorsHeaders(
   requestOrigin: string | null,
-  allowedOrigin: string
+  allowedOrigin: string,
+  methods: string,
+  allowHeaders: string
 ): Record<string, string> {
   if (requestOrigin !== allowedOrigin) return {};
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "POST, GET",
-    "Access-Control-Allow-Headers": "Content-Type, X-Requested-With, cf-turnstile-response",
+    "Access-Control-Allow-Methods": methods,
+    "Access-Control-Allow-Headers": allowHeaders,
     "Vary": "Origin",
   };
 }
@@ -190,7 +174,7 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
   // Legitimate SPA requests are same-origin and don't trigger preflight,
   // so this handler exists only to explicitly reject cross-origin preflights.
   if (request.method === "OPTIONS") {
-    const corsHeaders = getProxyCorsHeaders(origin, env.ALLOWED_ORIGIN);
+    const corsHeaders = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST, GET", "Content-Type, X-Requested-With, cf-turnstile-response");
     if (Object.keys(corsHeaders).length === 0) {
       return new Response(null, { status: 403, headers: SECURITY_HEADERS });
     }
@@ -203,7 +187,7 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
   const result = validateProxyRequest(request, env.ALLOWED_ORIGIN);
   if (!result.ok) {
     log("warn", "proxy_validation_failed", { code: result.code, pathname }, request);
-    const corsHeaders = getProxyCorsHeaders(origin, env.ALLOWED_ORIGIN);
+    const corsHeaders = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST, GET", "Content-Type, X-Requested-With, cf-turnstile-response");
     return errorResponse(result.code as ErrorCode, result.status, corsHeaders);
   }
 
@@ -262,17 +246,17 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   if (token.length > 2048) {
     return errorResponse("invalid_request", 400);
   }
-  // SC-8: purpose field required for token audience binding
+  // Purpose field required for token audience binding
   if (typeof purpose !== "string" || purpose.length === 0) {
     return errorResponse("invalid_request", 400);
   }
-  if (purpose.length > 64 || !VALID_PURPOSES.has(purpose)) {
+  if (!VALID_PURPOSES.has(purpose)) {
     return errorResponse("invalid_request", 400);
   }
 
   let sealed: string;
   try {
-    // SC-8: derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
+    // Derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
     const fingerprint = env.SEAL_KEY;
     if (fingerprint !== _sealKeyFingerprint) {
       _sealKeyCache.clear();
@@ -285,7 +269,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
     }
     sealed = await sealToken(token, key);
   } catch (err) {
-    // SC-9: log error server-side but DO NOT include crypto error in response
+    // Log error server-side — do not expose crypto error details in response
     log("error", "seal_failed", {
       error: err instanceof Error ? err.message : "unknown",
     }, request);
@@ -293,7 +277,6 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
     return errorResponse("seal_failed", 500);
   }
 
-  // SC-11: log seal operations (sessionId for correlation)
   log("info", "token_sealed", {
     sessionId,
     purpose,
@@ -489,17 +472,17 @@ function sanitizeCspField(value: unknown): unknown {
 
 function scrubCspReportBody(body: Record<string, unknown>): Record<string, unknown> {
   const scrubbed = { ...body };
-  // Sanitize all string fields — attacker-controlled CSP report bodies are forwarded to Sentry
+  // Scrub OAuth params and token prefixes from URL fields FIRST (before truncation)
+  const urlKeys = [
+    "document-uri", "blocked-uri", "source-file", "referrer",
+    "documentURL", "blockedURL", "sourceFile",
+  ];
+  for (const key of urlKeys) {
+    if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
+  }
+  // Then sanitize all string fields (control-char strip + length cap)
   for (const key of Object.keys(scrubbed)) {
     scrubbed[key] = sanitizeCspField(scrubbed[key]);
-  }
-  // Legacy report-uri format uses kebab-case keys — scrub OAuth params from URLs
-  for (const key of ["document-uri", "blocked-uri", "source-file", "referrer"]) {
-    if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
-  }
-  // report-to format uses camelCase keys
-  for (const key of ["documentURL", "blockedURL", "sourceFile", "referrer"]) {
-    if (typeof scrubbed[key] === "string") scrubbed[key] = scrubReportUrl(scrubbed[key]);
   }
   return scrubbed;
 }
@@ -608,7 +591,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 204, headers: SECURITY_HEADERS });
 }
 
-// GitHub OAuth code format validation (SDR-005): alphanumeric, hyphens, underscores, 1-40 chars.
+// GitHub OAuth code format validation: alphanumeric, hyphens, underscores, 1-40 chars.
 // GitHub's code format is undocumented and has changed historically — validate
 // loosely here; GitHub's server validates the actual code.
 const VALID_CODE_RE = /^[a-zA-Z0-9_-]{1,40}$/;
@@ -702,7 +685,7 @@ async function handleTokenExchange(
 
   const code = (body as Record<string, unknown>)["code"] as string;
 
-  // Strict code format validation before touching GitHub (SDR-005)
+  // Strict code format validation before touching GitHub
   if (!VALID_CODE_RE.test(code)) {
     log("warn", "token_exchange_invalid_code_format", {
       code_length: code.length,
@@ -744,7 +727,7 @@ async function handleTokenExchange(
     return errorResponse("token_exchange_failed", 400, cors);
   }
 
-  // GitHub returns 200 even on error — check for error field (SDR-006)
+  // GitHub returns 200 even on error — check for error field
   if (
     typeof githubData["error"] === "string" ||
     typeof githubData["access_token"] !== "string"
@@ -788,7 +771,7 @@ export default Sentry.withSentry(
     async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const origin = request.headers.get("Origin");
-      const cors = getCorsHeaders(origin, env.ALLOWED_ORIGIN);
+      const cors = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST", "Content-Type");
       const corsMatched = Object.keys(cors).length > 0;
 
       // Log all API requests (skip static asset requests to reduce noise)
@@ -860,7 +843,7 @@ export default Sentry.withSentry(
           });
         }
 
-        // Step 3: Session middleware — ensureSession never throws (SDR-003)
+        // Step 3: Session middleware — ensureSession never throws
         const { sessionId, setCookie } = await ensureSession(request, env);
 
         // Step 4: Durable rate limiting using session ID as key.

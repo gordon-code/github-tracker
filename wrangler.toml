@@ -29,8 +29,8 @@ name = "PROXY_RATE_LIMITER"
 namespace_id = "1001"
 
 [ratelimits.simple]
-limit = 60
-period = 60
+limit = 10
+period = 10
 
 [observability]
 enabled = true

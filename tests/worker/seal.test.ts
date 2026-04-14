@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
-import { collectLogs, findLog } from "./helpers";
-
-const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+import { collectLogs, findLog, ALLOWED_ORIGIN } from "./helpers";
 
 // Base64-encoded test keys for testing (HKDF accepts any length input key material)
 // "test-session-key" base64-encoded
@@ -327,6 +325,30 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(json["error"]).toBe("invalid_request");
   });
 
+  it("request with numeric token returns 400 with invalid_request", async () => {
+    // Turnstile verification runs before body parsing — mock needed for workerd fetch
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+    const req = makeSealRequest({ body: { token: 42, purpose: "jira-api-token" } });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as { error: string };
+    expect(json.error).toBe("invalid_request");
+  });
+
+  it("request with null token returns 400 with invalid_request", async () => {
+    // Turnstile verification runs before body parsing — mock needed for workerd fetch
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+    const req = makeSealRequest({ body: { token: null, purpose: "jira-api-token" } });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as { error: string };
+    expect(json.error).toBe("invalid_request");
+  });
+
   // ── OPTIONS preflight ─────────────────────────────────────────────────────
 
   it("OPTIONS preflight with valid origin returns 204 with correct CORS headers", async () => {
@@ -373,6 +395,8 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.status).toBe(405);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("method_not_allowed");
+    // Session IS issued even on 405 responses (ensureSession runs before method check)
+    expect(res.headers.get("Set-Cookie")).toContain("__Host-session=");
   });
 
   it("successful POST to /api/proxy/seal does not set Access-Control-Allow-Origin", async () => {
@@ -439,7 +463,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.status).toBe(500);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("seal_failed");
-    // Must not include crypto error details in response (SC-9)
+    // Must not include crypto error details in response
     expect(JSON.stringify(json)).not.toContain("DOMException");
     expect(JSON.stringify(json)).not.toContain("DataError");
   });
@@ -459,7 +483,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 
-  // ── SC-11: seal operation logging ─────────────────────────────────────────
+  // ── Seal operation logging ───────────────────────────────────────────────
 
   it("successful seal logs token_sealed event with purpose and token_length", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(

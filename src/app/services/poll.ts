@@ -331,7 +331,7 @@ function withJitter(intervalMs: number): number {
  * Creates a poll coordinator that:
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
- * - If getInterval() === 0, disables auto-polling (SDR-017)
+ * - If getInterval() === 0, disables auto-polling
  * - Continues polling in background tabs when notifications gate is available
  *   (304 responses make background polls near-zero cost). When the gate is
  *   disabled (fine-grained PAT or missing notifications scope), background

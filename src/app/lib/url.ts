@@ -1,7 +1,7 @@
 /**
  * Validates that a URL points to GitHub before opening it.
- * Uses URL constructor for proper hostname parsing (ADV-013).
- * Defense-in-depth against tampered cache data (SDR-012).
+ * Uses URL constructor for proper hostname parsing.
+ * Defense-in-depth against tampered cache data.
  */
 export function isSafeGitHubUrl(url: string): boolean {
   try {

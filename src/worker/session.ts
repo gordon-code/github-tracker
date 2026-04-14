@@ -1,6 +1,6 @@
 // Session cookie infrastructure for proxy request binding.
 //
-// SDR-001: The __Host-session cookie is for rate-limiting binding ONLY,
+// The __Host-session cookie is for rate-limiting binding ONLY,
 // NOT authentication. It proves a browser initiated the request; it does
 // not prove who the user is. API tokens are managed separately via sealed
 // blobs in localStorage.

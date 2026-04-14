@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
-import { collectLogs, findLog } from "./helpers";
-
-const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+import { collectLogs, findLog, ALLOWED_ORIGIN } from "./helpers";
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -270,7 +268,7 @@ describe("Worker OAuth endpoint", () => {
 
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("token_exchange_failed");
-    // GitHub error description must NOT be forwarded (SDR-006)
+    // GitHub error description must NOT be forwarded
     expect(JSON.stringify(json)).not.toContain("bad_verification_code");
     expect(JSON.stringify(json)).not.toContain("incorrect");
   });
@@ -384,7 +382,7 @@ describe("Worker OAuth endpoint", () => {
     expect(res.status).toBe(400);
     const json = await res.json() as Record<string, unknown>;
     expect(json["error"]).toBe("token_exchange_failed");
-    // Stack trace must not be in response (SDR-006)
+    // Stack trace must not be in response
     expect(JSON.stringify(json)).not.toContain("Error");
   });
 
@@ -435,7 +433,7 @@ describe("Worker OAuth endpoint", () => {
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
 
-  it("CORS headers are absent for non-matching origin (SDR-004)", async () => {
+  it("CORS headers are absent for non-matching origin", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: "ghu_tok", token_type: "bearer" }), {
         status: 200,
@@ -450,7 +448,7 @@ describe("Worker OAuth endpoint", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
-  it("CORS headers are absent for substring-matching origin (SDR-004 strict equality)", async () => {
+  it("CORS headers are absent for substring-matching origin (strict equality)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ access_token: "ghu_tok", token_type: "bearer" }), {
         status: 200,

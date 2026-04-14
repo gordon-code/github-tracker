@@ -20,7 +20,7 @@ export default function OAuthCallback() {
     const code = params.get("code");
     const stateFromUrl = params.get("state");
 
-    // Retrieve and immediately clear stored state (single-use, SDR-002)
+    // Retrieve and immediately clear stored state (single-use)
     const storedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     sessionStorage.removeItem(OAUTH_STATE_KEY);
 

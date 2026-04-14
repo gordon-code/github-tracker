@@ -81,7 +81,7 @@ export function clearAuth(): void {
     localStorage.removeItem(DASHBOARD_STORAGE_KEY);
     _setToken(null);
     setUser(null);
-    // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
+    // Clear IndexedDB cache to prevent data leakage between users
     clearCache().catch((err) => {
       console.warn("[auth] Cache clear failed during logout:", err);
       Sentry.captureException(err, { tags: { source: "auth-logout-cache-clear" } });

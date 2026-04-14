@@ -4,3 +4,5 @@ ALLOWED_ORIGIN=http://localhost:5173
 SESSION_KEY=your-base64-encoded-32-byte-key
 SEAL_KEY=your-base64-encoded-32-byte-key
 TURNSTILE_SECRET_KEY=your-turnstile-secret-from-cf-dashboard
+# Optional: only needed if Sentry "Allowed Domains" is configured in your Sentry project settings
+# SENTRY_SECURITY_TOKEN=your-sentry-security-token

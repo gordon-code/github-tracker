@@ -103,7 +103,7 @@ export function resetUsageData(): void {
 }
 
 export function clearUsageData(): void {
-  // Cancel any pending flush debounce timer before removing localStorage (SDR-012)
+  // Cancel any pending flush debounce timer before removing localStorage
   if (_flushTimer !== null) {
     clearTimeout(_flushTimer);
     _flushTimer = null;

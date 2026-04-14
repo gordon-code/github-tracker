@@ -6,8 +6,7 @@ import {
   validateContentType,
   validateProxyRequest,
 } from "../../src/worker/validation";
-
-const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+import { ALLOWED_ORIGIN } from "./helpers";
 
 function makeRequest(
   options: {

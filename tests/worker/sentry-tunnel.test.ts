@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
-import { collectLogs, findLog } from "./helpers";
-
-const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+import { collectLogs, findLog, ALLOWED_ORIGIN } from "./helpers";
 const SENTRY_HOST = "o123456.ingest.sentry.io";
 const SENTRY_PROJECT_ID = "7890123";
 const VALID_DSN = `https://abc123@${SENTRY_HOST}/${SENTRY_PROJECT_ID}`;
@@ -454,5 +452,33 @@ describe("Sentry tunnel (/api/error-reporting)", () => {
     // absent Origin skips it, so cors_origin_mismatch must NOT appear here
     const corsLog = findLog(logs, "cors_origin_mismatch");
     expect(corsLog).toBeUndefined();
+  });
+
+  // ── SENTRY_SECURITY_TOKEN forwarding ──────────────────────────────────────
+
+  it("forwards X-Sentry-Token header when SENTRY_SECURITY_TOKEN is set", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    globalThis.fetch = mockFetch;
+
+    const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: "my-sentry-secret" }));
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBe("my-sentry-secret");
+  });
+
+  it("does not send X-Sentry-Token header when SENTRY_SECURITY_TOKEN is not set", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    globalThis.fetch = mockFetch;
+
+    const req = makeTunnelRequest(makeEnvelope(VALID_DSN));
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: undefined }));
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBeUndefined();
   });
 });

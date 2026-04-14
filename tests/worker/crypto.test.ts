@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import {
   toBase64Url,
@@ -259,6 +259,15 @@ describe("signSession / verifySession", () => {
     // 33 bytes — valid base64url, longer than expected
     const longSig = toBase64Url(new Uint8Array(33));
     expect(await verifySession("payload-data", longSig, key)).toBe(false);
+  });
+
+  it("uses crypto.subtle.verify for constant-time comparison", async () => {
+    const verifySpy = vi.spyOn(crypto.subtle, "verify");
+    const key = await deriveKey(KEY_A, "github-tracker-session-v1", "session-hmac", "sign");
+    const sig = await signSession("test-payload", key);
+    await verifySession("test-payload", sig, key);
+    expect(verifySpy).toHaveBeenCalledWith("HMAC", key, expect.any(ArrayBuffer), expect.any(Uint8Array));
+    verifySpy.mockRestore();
   });
 });
 

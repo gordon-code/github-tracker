@@ -277,7 +277,7 @@ describe("clearUsageData", () => {
     expect(mod.getUsageResetAt()).toBeNull();
   });
 
-  it("cancels a pending flush timer before removing (SDR-012)", () => {
+  it("cancels a pending flush timer before removing", () => {
     mod.trackApiCall("lightSearch", "graphql");
     // Timer is set but not yet fired (< 500ms)
     mod.clearUsageData();

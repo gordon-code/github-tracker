@@ -175,45 +175,7 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 
 ### Tunnel Endpoint Security
 
-The two tunnel endpoints (`/api/error-reporting` and `/api/csp-report`) receive untrusted browser data and forward it to Sentry. They are hardened with layered fail-fast guards:
-
-**Layered defense model (applied in order):**
-1. **IP rate limit** (catches all abuse including curl — headers are irrelevant)
-2. **Origin check** (catches cross-origin browser abuse and lazy curl scripts)
-3. **DSN/project validation** (catches misdirected requests)
-
-Content-Length pre-check fires between origin check and DSN validation but is an optimization gate, not a security layer (see Content-Length section below).
-
-**Per-endpoint IP rate limits (in-memory, per-isolate):**
-- Token exchange (`/api/oauth/token`): 10 requests/min per IP
-- Sentry tunnel (`/api/error-reporting`): 15 requests/min per IP
-- CSP report tunnel (`/api/csp-report`): 15 requests/min per IP
-- Proxy pre-gate (`/api/proxy/*`, `/api/jira/*`): 60 requests/min per IP (complements CF rate limiter binding)
-
-Note: these counters are in-memory and do not survive isolate restarts. A fresh isolate gets a clean slate. CF isolates are short-lived, so this gates burst abuse within a single isolate lifetime — the intended use case.
-
-Token exchange also uses the durable CF rate limiter binding (`PROXY_RATE_LIMITER`) with key `token:{ip}`, enforcing the limit globally across isolates.
-
-**`CF-Connecting-IP` requirement:**
-All rate-limited endpoints require the `CF-Connecting-IP` header and return 400 if absent. Cloudflare's proxy layer sets this header on all production requests. Miniflare sets it to the connecting client's address in `wrangler dev`. There is no fallback — requests without this header are rejected outright.
-
-**`PROXY_RATE_LIMITER` binding validation:**
-The Worker validates that the `PROXY_RATE_LIMITER` binding exists (via `typeof env.PROXY_RATE_LIMITER?.limit === "function"`) before calling it. A missing binding indicates a deployment misconfiguration (missing `[[ratelimits]]` in `wrangler.toml`) and returns 503. Transient `.limit()` errors on an existing binding fail open — the in-memory IP pre-gate still protects.
-
-**Origin check behavior:**
-- Sentry tunnel (`/api/error-reporting`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. The Sentry SDK always includes `Origin` in its `fetch()` calls from our SPA.
-- CSP report tunnel (`/api/csp-report`): **strict** — rejects if Origin is absent or does not match `ALLOWED_ORIGIN`. Same-origin CSP reports (via `report-uri`) always include Origin; the WAF exempts this endpoint so the Worker can enforce its own policy independently.
-
-Note: Origin and Sec-Fetch-Site headers can be spoofed by programmatic clients (curl, scripts). IP rate limiting is the primary defense; origin checks are defense-in-depth.
-
-**CSP field sanitization:**
-All string fields in CSP report bodies are sanitized before forwarding to Sentry: control characters (`\x00`–`\x08`, `\x0B`, `\x0C`, `\x0E`–`\x1F`, `\x7F`) are stripped and fields are capped at 2048 characters. This prevents log/SIEM injection via attacker-crafted CSP report values. URL fields are additionally scrubbed of OAuth parameters (`code`, `state`, `access_token`).
-
-**Content-Length pre-check (Sentry: 256 KB, CSP: 64 KB):**
-Both tunnel endpoints check the `Content-Length` header before reading the request body as an optimization. If the declared size exceeds the per-endpoint maximum, the request is rejected with 413 without buffering the body. The post-read size check remains the authoritative guard — Content-Length can be absent (chunked transfer, passes through) or spoofed (attacker declares small size but sends large body, caught by the post-read check).
-
-**CSP report fan-out amplification:**
-A single POST to `/api/csp-report` can contain up to 20 individual violation reports (via the Reporting API batch format), each triggering a separate outbound subrequest to Sentry's security endpoint. With the 15/min rate limit, worst case is 15 × 20 = **300 outbound subrequests per minute per IP**. This is bounded by the rate limiter on inbound requests and the 20-report cap enforced in code (`scrubbedPayloads.slice(0, 20)`).
+The two tunnel endpoints (`/api/error-reporting` and `/api/csp-report`) receive untrusted browser data and forward it to Sentry. They are hardened with layered fail-fast guards (IP rate limit → Origin check → DSN validation). See `hack/docs/security-runbook.md` for the full threat model, per-endpoint rate limit values, Origin check behavior, CSP field sanitization details, Content-Length pre-check semantics, and fan-out amplification analysis.
 
 ## Local Development
 
@@ -274,9 +236,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 ```
 **Action:** Block
 
-**Exemptions:**
-- `/api/csp-report` is exempted because the Worker enforces its own strict origin check (rejects missing or mismatched Origin), making the WAF exemption safe.
-- `/api/error-reporting` is exempted for the same reason — the Worker enforces its own strict origin check independently. Both endpoints are exempted so the Worker handles origin policies at the application layer, where per-endpoint logic is possible — the WAF expression is too coarse to distinguish per-endpoint behavior.
+**Exemptions:** `/api/csp-report` and `/api/error-reporting` are excluded because the Worker enforces its own strict origin check on both endpoints. See `hack/docs/security-runbook.md` for exemption rationale.
 
 **Notes:**
 - This uses **1 of the 5 free WAF custom rules** available on all plans.
@@ -296,9 +256,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 **Rate:** 60 requests per 10 seconds per IP
 **Action:** Block for 60 seconds
 
-**Notes:**
-- `OPTIONS` (CORS preflight) is excluded from counting to avoid blocking legitimate preflight requests.
-- Provides globally-consistent rate limiting that runs before the Worker (not per-location like Workers Rate Limiting Binding).
+See `hack/docs/security-runbook.md` for implementation details.
 
 ---
 
@@ -323,6 +281,7 @@ wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
 
 - `SESSION_KEY`: HKDF input key material used to derive the HMAC-SHA256 key for signing `__Host-session` cookies. Generate with `openssl rand -base64 32`.
 - `SENTRY_DSN` (Worker secret, set via `wrangler secret put SENTRY_DSN`): used by both the Sentry tunnel endpoint for DSN validation and the `@sentry/cloudflare` SDK for direct worker-side error capture. Sentry DSNs are public keys — they authorize sending events, not reading them. Must match the `VITE_SENTRY_DSN` build-time env var; a mismatch causes tunnel requests to return 403.
+- `SENTRY_SECURITY_TOKEN` (**optional**, set via `wrangler secret put SENTRY_SECURITY_TOKEN`): only needed if you have configured "Allowed Domains" in your Sentry project's security settings. The Worker sends this token as the `X-Sentry-Token` HTTP header on outbound requests to Sentry's envelope and CSP report endpoints. Leave unset if Allowed Domains is not configured.
 - `SEAL_KEY`: HKDF input key material used to derive the AES-256-GCM key for encrypting API tokens stored client-side as sealed blobs. Generate with `openssl rand -base64 32`.
 - `TURNSTILE_SECRET_KEY`: From the Cloudflare Turnstile dashboard (Security → Turnstile → your widget → Secret key).
 - `VITE_TURNSTILE_SITE_KEY`: **Build-time env var (public)** — goes in `.env`, not a Worker secret. From the same Turnstile dashboard (Site key).

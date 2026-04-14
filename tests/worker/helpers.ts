@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 
+export const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+
 /** Parse all structured log calls from a console spy, returning {level, entry} tuples. */
 export function collectLogs(spies: {
   info: ReturnType<typeof vi.spyOn>;

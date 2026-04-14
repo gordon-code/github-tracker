@@ -29,8 +29,8 @@ export function fromBase64Url(str: string): Uint8Array {
  * - usage "encrypt" → AES-256-GCM key
  * - usage "sign" → HMAC-SHA256 key
  *
- * The info parameter MUST include a purpose string for token audience binding
- * (SC-8). Pass e.g. "aes-gcm-key:<purpose>" or "session-hmac" so keys derived
+ * The info parameter MUST include a purpose string for token audience binding.
+ * Pass e.g. "aes-gcm-key:<purpose>" or "session-hmac" so keys derived
  * for different purposes are cryptographically isolated.
  */
 export async function deriveKey(
@@ -138,7 +138,7 @@ export async function unsealToken(
 /**
  * Unseals a token, falling back to prevKey if currentKey fails.
  * Both salt and info must match the values used during sealing.
- * SC-8: info MUST include a purpose string for token audience binding.
+ * The info parameter MUST include a purpose string for token audience binding.
  */
 export async function unsealTokenWithRotation(
   sealed: string,
@@ -175,12 +175,10 @@ export async function signSession(
 }
 
 /**
- * Verifies an HMAC-SHA256 signature using crypto.subtle.timingSafeEqual
- * (Cloudflare Workers extension) for an explicit constant-time guarantee.
- *
- * Both inputs are hashed to SHA-256 before comparison so timingSafeEqual
- * always receives equal-length buffers — no early-return length guard needed.
- * This follows Cloudflare's recommended pattern for timing-attack protection.
+ * Verifies an HMAC-SHA256 signature using crypto.subtle.verify.
+ * Cloudflare Workers implements this with constant-time comparison;
+ * the Web Crypto spec does not mandate it, but this is the
+ * platform-recommended pattern over manual sign() + comparison.
  */
 export async function verifySession(
   payload: string,
@@ -196,16 +194,7 @@ export async function verifySession(
 
   const payloadBytes = new TextEncoder().encode(payload);
   try {
-    const expected = new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, payloadBytes)
-    );
-    // Hash both to fixed 32 bytes so timingSafeEqual never sees mismatched
-    // lengths and the comparison is unconditionally constant-time.
-    const [hashA, hashB] = await Promise.all([
-      crypto.subtle.digest("SHA-256", sigBytes.buffer as ArrayBuffer),
-      crypto.subtle.digest("SHA-256", expected.buffer as ArrayBuffer),
-    ]);
-    return crypto.subtle.timingSafeEqual(hashA, hashB);
+    return await crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, payloadBytes);
   } catch {
     return false;
   }

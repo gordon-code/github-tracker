@@ -138,7 +138,7 @@ describe("clearAuth", () => {
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
   });
 
-  it("removes config and view keys from localStorage (SDR-016)", () => {
+  it("removes config and view keys from localStorage", () => {
     localStorageMock.setItem("github-tracker:config", "{}");
     localStorageMock.setItem("github-tracker:view", "{}");
     mod.clearAuth();

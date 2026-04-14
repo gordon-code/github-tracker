@@ -80,7 +80,7 @@ test("sign out clears auth and redirects to login", async ({ page }) => {
   );
   expect(authToken).toBeNull();
 
-  // Verify config was reset (SDR-016 data leakage prevention).
+  // Verify config was reset (data leakage prevention).
   // The persistence effect may re-write defaults, so check that user-specific
   // data (selectedOrgs, onboardingComplete) was cleared rather than checking null.
   const configEntry = await page.evaluate(() =>

@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
-import { collectLogs, findLog } from "./helpers";
-
-const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
+import { collectLogs, findLog, ALLOWED_ORIGIN } from "./helpers";
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -126,6 +124,26 @@ describe("Worker CSP report endpoint", () => {
     expect(sentryBody["csp-report"]["source-file"]).toBe(
       "https://gh.gordoncode.dev/app.js?access_token=[REDACTED]",
     );
+  });
+
+  it("scrubs bare GitHub token prefixes from URL fields", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/app",
+        "blocked-uri": "https://example.com/callback#ghu_abc123def456",
+        "source-file": "https://gh.gordoncode.dev/app.js?ref=ghp_secrettoken123",
+        "violated-directive": "script-src 'self'",
+      },
+    });
+    const req = makeCspRequest(body);
+    const env = makeEnv();
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await worker.fetch(req, env);
+    const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(sentPayload["csp-report"]["blocked-uri"]).not.toContain("ghu_abc123");
+    expect(sentPayload["csp-report"]["blocked-uri"]).toContain("ghu_[REDACTED]");
+    expect(sentPayload["csp-report"]["source-file"]).not.toContain("ghp_secrettoken");
+    expect(sentPayload["csp-report"]["source-file"]).toContain("ghp_[REDACTED]");
   });
 
   it("handles report-to format (application/reports+json)", async () => {
@@ -494,5 +512,37 @@ describe("Worker CSP report endpoint", () => {
     expect(req.headers.get("Content-Length")).toBeNull();
     const resp = await worker.fetch(req, makeEnv());
     expect(resp.status).toBe(204);
+  });
+
+  // ── SENTRY_SECURITY_TOKEN forwarding ──────────────────────────────────────
+
+  it("forwards X-Sentry-Token header when SENTRY_SECURITY_TOKEN is set", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/dashboard",
+        "violated-directive": "script-src",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: "my-csp-secret" }));
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBe("my-csp-secret");
+  });
+
+  it("does not send X-Sentry-Token header when SENTRY_SECURITY_TOKEN is not set", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/dashboard",
+        "violated-directive": "script-src",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: undefined }));
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBeUndefined();
   });
 });

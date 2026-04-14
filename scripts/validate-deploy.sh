@@ -28,6 +28,7 @@ else
         echo "$SECRETS" | grep -q "\"name\":\"$s\"" || fail "CF Worker secret '$s' not set (run: wrangler secret put $s)"
       done
       echo "$SECRETS" | grep -q '"name":"SENTRY_DSN"' || warn "CF Worker secret 'SENTRY_DSN' not set — Sentry error tunnel returns 404"
+      echo "$SECRETS" | grep -q '"name":"SENTRY_SECURITY_TOKEN"' || warn "CF Worker secret 'SENTRY_SECURITY_TOKEN' not set — only needed if Sentry Allowed Domains is configured"
     fi
   fi
 fi
