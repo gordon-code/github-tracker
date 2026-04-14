@@ -14,6 +14,8 @@ import {
   deriveKey,
   signSession,
   verifySession,
+  toBase64Url,
+  fromBase64Url,
 } from "./crypto";
 
 export interface SessionEnv {
@@ -73,10 +75,7 @@ export async function issueSession(
   const signature = await signSession(json, hmacKey);
 
   // base64url(JSON(payload)).base64url(HMAC-SHA256(JSON(payload)))
-  const encodedPayload = btoa(json)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  const encodedPayload = toBase64Url(new TextEncoder().encode(json));
 
   const cookieValue = `${encodedPayload}.${signature}`;
   const cookie = `${SESSION_COOKIE_NAME}=${cookieValue}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE}`;
@@ -110,10 +109,7 @@ export async function parseSession(
     const signature = cookieValue.slice(dotIndex + 1);
 
     // Decode and parse the payload
-    const paddedPayload =
-      encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
-    const padding = (4 - (paddedPayload.length % 4)) % 4;
-    const json = atob(paddedPayload + "=".repeat(padding));
+    const json = new TextDecoder().decode(fromBase64Url(encodedPayload));
     const payload = JSON.parse(json) as SessionPayload;
 
     // Verify HMAC signature (rotation-aware, using cached derived keys)

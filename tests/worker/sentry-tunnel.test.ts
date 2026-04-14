@@ -44,7 +44,6 @@ function makeTunnelRequest(body: string, options: { origin?: string | null; ip?:
   });
 }
 
-
 describe("Sentry tunnel (/api/error-reporting)", () => {
   let originalFetch: typeof globalThis.fetch;
   let consoleSpy: {
