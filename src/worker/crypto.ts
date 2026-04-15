@@ -1,6 +1,6 @@
 export interface CryptoEnv {
   SEAL_KEY: string; // base64-encoded HKDF input key material (32 bytes recommended)
-  SEAL_KEY_PREV?: string; // previous HKDF key material for rotation
+  SEAL_KEY_NEXT?: string; // next HKDF key material for rotation (set before promoting to SEAL_KEY)
 }
 
 // ── Base64url utilities ────────────────────────────────────────────────────
@@ -136,14 +136,18 @@ export async function unsealToken(
 }
 
 /**
- * Unseals a token, falling back to prevKey if currentKey fails.
+ * Unseals a token, trying both current and next keys during rotation.
  * Both salt and info must match the values used during sealing.
  * The info parameter MUST include a purpose string for token audience binding.
+ *
+ * During rotation, tokens may have been sealed with either the current key
+ * (SEAL_KEY) or the next key (SEAL_KEY_NEXT). Try current first since most
+ * tokens were sealed before rotation began.
  */
 export async function unsealTokenWithRotation(
   sealed: string,
   currentKey: string,
-  prevKey: string | undefined,
+  nextKey: string | undefined,
   salt: string,
   info: string
 ): Promise<string | null> {
@@ -151,9 +155,9 @@ export async function unsealTokenWithRotation(
   const result = await unsealToken(sealed, current);
   if (result !== null) return result;
 
-  if (prevKey !== undefined) {
-    const prev = await deriveKey(prevKey, salt, info, "encrypt");
-    return unsealToken(sealed, prev);
+  if (nextKey !== undefined) {
+    const next = await deriveKey(nextKey, salt, info, "encrypt");
+    return unsealToken(sealed, next);
   }
 
   return null;

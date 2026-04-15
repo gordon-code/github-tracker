@@ -74,36 +74,36 @@ interface ScriptChecks {
 }
 
 function extractScriptChecks(source: string): {
-  local: ScriptChecks;
-  ci: ScriptChecks;
+  secrets: ScriptChecks;
+  viteVars: ScriptChecks;
 } {
-  const local: ScriptChecks = { required: new Set(), warned: new Set() };
-  const ci: ScriptChecks = { required: new Set(), warned: new Set() };
+  const secrets: ScriptChecks = { required: new Set(), warned: new Set() };
+  const viteVars: ScriptChecks = { required: new Set(), warned: new Set() };
 
-  // Local mode — `for s in VAR1 VAR2 ...; do`
+  // Worker secrets — `for s in VAR1 VAR2 ...; do`
   const forMatch = source.match(/for s in ([^;]+);/);
   if (forMatch) {
     for (const name of forMatch[1].trim().split(/\s+/)) {
-      local.required.add(name);
+      secrets.required.add(name);
     }
   }
 
-  // Local mode — `grep -q '"name":"VAR"' || warn ...`
-  for (const m of source.matchAll(/grep -q[^"]*"name":"(\w+)".*\|\|\s*warn/g)) {
-    local.warned.add(m[1]);
+  // Worker secrets — `has_secret VAR || warn ...`
+  for (const m of source.matchAll(/has_secret\s+(\w+)\s*\|\|\s*warn/g)) {
+    secrets.warned.add(m[1]);
   }
 
-  // CI mode — `[[ -z "${VAR:-}" ]] && fail`
-  for (const m of source.matchAll(/\$\{(\w+):-\}.*&&\s*fail/g)) {
-    ci.required.add(m[1]);
+  // VITE_ vars — `check_vite_var VAR fail "..."`
+  for (const m of source.matchAll(/check_vite_var\s+(VITE_\w+)\s+fail\b/g)) {
+    viteVars.required.add(m[1]);
   }
 
-  // CI mode — `[[ -z "${VAR:-}" ]] && warn`
-  for (const m of source.matchAll(/\$\{(\w+):-\}.*&&\s*warn/g)) {
-    ci.warned.add(m[1]);
+  // VITE_ vars — `check_vite_var VAR warn "..."`
+  for (const m of source.matchAll(/check_vite_var\s+(VITE_\w+)\s+warn\b/g)) {
+    viteVars.warned.add(m[1]);
   }
 
-  return { local, ci };
+  return { secrets, viteVars };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -135,25 +135,25 @@ describe("validate-deploy.sh stays in sync with Env interfaces", () => {
   const script = readFile("scripts/validate-deploy.sh");
   const checks = extractScriptChecks(script);
 
-  it("every required Env field is checked as required in local mode", () => {
-    const missing = requiredFields.filter((f) => !checks.local.required.has(f));
+  it("every required Env field is checked as required", () => {
+    const missing = requiredFields.filter((f) => !checks.secrets.required.has(f));
     expect(missing, `Add these to the 'for s in ...' loop in validate-deploy.sh`).toEqual([]);
   });
 
-  it("every optional Env field is warned about in local mode", () => {
-    const allChecked = new Set([...checks.local.required, ...checks.local.warned]);
+  it("every optional Env field is warned about", () => {
+    const allChecked = new Set([...checks.secrets.required, ...checks.secrets.warned]);
     const missing = optionalFields.filter((f) => !allChecked.has(f));
-    expect(missing, `Add 'grep ... || warn' lines for these in validate-deploy.sh`).toEqual([]);
+    expect(missing, `Add 'has_secret VAR || warn' lines for these in validate-deploy.sh`).toEqual([]);
   });
 
   it("script doesn't check for fields removed from Env", () => {
     const allFieldNames = new Set(allFields.map((f) => f.name));
-    const allScriptVars = new Set([...checks.local.required, ...checks.local.warned]);
+    const allScriptVars = new Set([...checks.secrets.required, ...checks.secrets.warned]);
     const stale = [...allScriptVars].filter((v) => !allFieldNames.has(v));
     expect(stale, `Remove these from validate-deploy.sh — they no longer exist in Env`).toEqual([]);
   });
 
-  it("every VITE_ variable used in source is checked in CI mode", () => {
+  it("every VITE_ variable used in source is checked", () => {
     const viteFiles = [
       "src/app/lib/oauth.ts",
       "src/app/lib/sentry.ts",
@@ -165,9 +165,9 @@ describe("validate-deploy.sh stays in sync with Env interfaces", () => {
         viteVars.add(m[1]);
       }
     }
-    const allCiVars = new Set([...checks.ci.required, ...checks.ci.warned]);
-    const missing = [...viteVars].filter((v) => !allCiVars.has(v));
-    expect(missing, `Add CI-mode checks for these VITE_ vars in validate-deploy.sh`).toEqual([]);
+    const allScriptViteVars = new Set([...checks.viteVars.required, ...checks.viteVars.warned]);
+    const missing = [...viteVars].filter((v) => !allScriptViteVars.has(v));
+    expect(missing, `Add checks for these VITE_ vars in validate-deploy.sh`).toEqual([]);
   });
 
   it("Env extends chain is fully covered", () => {

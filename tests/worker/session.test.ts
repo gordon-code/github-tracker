@@ -164,29 +164,47 @@ describe("parseSession", () => {
     expect(parsed!.sid).toBe(sessionId);
   });
 
-  it("signature rotation: signed with old key, verified with new+old", async () => {
-    const envOld = makeEnv({ SESSION_KEY: KEY_A });
-    const { cookie } = await issueSession(envOld);
+  it("rotation: session signed with current key, verified after NEXT is set", async () => {
+    // Session issued before rotation (signed with KEY_A)
+    const envBefore = makeEnv({ SESSION_KEY: KEY_A });
+    const { cookie } = await issueSession(envBefore);
     const cookieValue = cookie.split(";")[0].split("=").slice(1).join("=");
 
-    // Now verify with KEY_B as current, KEY_A as prev
-    const envNew = makeEnv({
-      SESSION_KEY: KEY_B,
-      SESSION_KEY_PREV: KEY_A,
+    // Rotation starts: KEY_A still current, KEY_B is next
+    const envDuring = makeEnv({
+      SESSION_KEY: KEY_A,
+      SESSION_KEY_NEXT: KEY_B,
     });
     const result = await parseSession(
       `__Host-session=${cookieValue}`,
-      envNew
+      envDuring
     );
     expect(result).not.toBeNull();
   });
 
-  it("returns null when old key is not in rotation", async () => {
+  it("rotation: session signed with NEXT key, verified with both", async () => {
+    // Rotation in progress: new sessions signed with NEXT
+    const envDuring = makeEnv({
+      SESSION_KEY: KEY_A,
+      SESSION_KEY_NEXT: KEY_B,
+    });
+    const { cookie } = await issueSession(envDuring);
+    const cookieValue = cookie.split(";")[0].split("=").slice(1).join("=");
+
+    // Verify with same rotation env — should find via NEXT key
+    const result = await parseSession(
+      `__Host-session=${cookieValue}`,
+      envDuring
+    );
+    expect(result).not.toBeNull();
+  });
+
+  it("returns null when key is not in rotation set", async () => {
     const envOld = makeEnv({ SESSION_KEY: KEY_A });
     const { cookie } = await issueSession(envOld);
     const cookieValue = cookie.split(";")[0].split("=").slice(1).join("=");
 
-    // KEY_B only, no KEY_A in rotation
+    // KEY_B only, KEY_A not in rotation
     const envNew = makeEnv({ SESSION_KEY: KEY_B });
     const result = await parseSession(
       `__Host-session=${cookieValue}`,

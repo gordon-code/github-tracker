@@ -289,26 +289,28 @@ wrangler secret put TURNSTILE_SECRET_KEY  # From Cloudflare Turnstile dashboard
 
 ### First deployment
 
-On initial deployment, set only `SESSION_KEY`, `SEAL_KEY`, and `TURNSTILE_SECRET_KEY`. Do **not** set `SESSION_KEY_PREV` or `SEAL_KEY_PREV` — these are only needed during key rotation after the initial keys are in use.
+On initial deployment, set only `SESSION_KEY`, `SEAL_KEY`, and `TURNSTILE_SECRET_KEY`. Do **not** set `SESSION_KEY_NEXT` or `SEAL_KEY_NEXT` — these are only needed during key rotation.
 
 ### Key rotation
 
 To rotate a key without invalidating existing sessions/tokens:
 
-1. Set the `*_PREV` secret to the **current** key value:
+1. Generate the new key and set it as `*_NEXT`:
    ```bash
-   wrangler secret put SESSION_KEY_PREV  # Copy current SESSION_KEY value here first
-   wrangler secret put SEAL_KEY_PREV     # Copy current SEAL_KEY value here first
+   openssl rand -base64 32  # generate new value, save it
+   wrangler secret put SESSION_KEY_NEXT  # paste the new value
+   wrangler secret put SEAL_KEY_NEXT     # paste the new value
    ```
-2. Generate a new key and update the main secret:
+2. The Worker immediately starts signing new sessions and sealing new tokens with the `*_NEXT` key, while still accepting the current key for verification/unsealing.
+3. After all clients have cycled (sessions expire after 8 hours), promote the new key:
    ```bash
-   openssl rand -base64 32  # generate new value
-   wrangler secret put SESSION_KEY       # update with new value
-   wrangler secret put SEAL_KEY          # update with new value
+   wrangler secret put SESSION_KEY   # paste the same new value from step 1
+   wrangler secret put SEAL_KEY      # paste the same new value from step 1
    ```
-3. The Worker will accept tokens signed/sealed with either the current or previous key during the transition window.
-4. After all clients have cycled (sessions expire after 8 hours), optionally remove `*_PREV`:
+4. Remove the `*_NEXT` secrets:
    ```bash
-   wrangler secret delete SESSION_KEY_PREV
-   wrangler secret delete SEAL_KEY_PREV
+   wrangler secret delete SESSION_KEY_NEXT
+   wrangler secret delete SEAL_KEY_NEXT
    ```
+
+**Why `_NEXT` instead of `_PREV`?** Cloudflare Worker secrets are write-only — you cannot read back a secret's value. A `_PREV` design requires knowing the current key value to copy it, which is impossible to retrieve. With `_NEXT`, you only need the value you just generated (which you still have in your clipboard).

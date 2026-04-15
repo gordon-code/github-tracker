@@ -24,7 +24,7 @@ jobs:
         if: vars.DEPLOY_DOMAIN != ''
         run: pnpm test:waf "https://${{ vars.DEPLOY_DOMAIN }}"
       - name: Validate deploy configuration
-        run: pnpm validate:deploy --ci
+        run: pnpm validate:deploy
         env:
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
