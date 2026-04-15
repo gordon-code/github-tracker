@@ -293,24 +293,30 @@ On initial deployment, set only `SESSION_KEY`, `SEAL_KEY`, and `TURNSTILE_SECRET
 
 ### Key rotation
 
-To rotate a key without invalidating existing sessions/tokens:
+Session keys and seal keys have different rotation lifecycles because their tokens have different lifetimes.
 
-1. Generate the new key and set it as `*_NEXT`:
+**Session key** (`SESSION_KEY`) — sessions expire after 8 hours (`__Host-session` cookie `Max-Age`), so the transition window is short:
+
+1. Generate a new key and set it as `SESSION_KEY_NEXT`:
    ```bash
-   openssl rand -base64 32  # generate new value, save it
-   wrangler secret put SESSION_KEY_NEXT  # paste the new value
-   wrangler secret put SEAL_KEY_NEXT     # paste the new value
+   openssl rand -base64 32  # save this value
+   wrangler secret put SESSION_KEY_NEXT
    ```
-2. The Worker immediately starts signing new sessions and sealing new tokens with the `*_NEXT` key, while still accepting the current key for verification/unsealing.
-3. After all clients have cycled (sessions expire after 8 hours), promote the new key:
+2. The Worker signs new sessions with `SESSION_KEY_NEXT` and verifies with both keys.
+3. After 8 hours (all old sessions expired), promote and clean up:
    ```bash
-   wrangler secret put SESSION_KEY   # paste the same new value from step 1
-   wrangler secret put SEAL_KEY      # paste the same new value from step 1
-   ```
-4. Remove the `*_NEXT` secrets:
-   ```bash
+   wrangler secret put SESSION_KEY  # paste the same value from step 1
    wrangler secret delete SESSION_KEY_NEXT
-   wrangler secret delete SEAL_KEY_NEXT
    ```
 
-**Why `_NEXT` instead of `_PREV`?** Cloudflare Worker secrets are write-only — you cannot read back a secret's value. A `_PREV` design requires knowing the current key value to copy it, which is impossible to retrieve. With `_NEXT`, you only need the value you just generated (which you still have in your clipboard).
+**Seal key** (`SEAL_KEY`) — sealed tokens (e.g., Jira API tokens) are stored in the client's `localStorage` with no expiry. They persist until the user re-seals or clears storage:
+
+1. Generate a new key and set it as `SEAL_KEY_NEXT`:
+   ```bash
+   openssl rand -base64 32  # save this value
+   wrangler secret put SEAL_KEY_NEXT
+   ```
+2. The Worker seals new tokens with `SEAL_KEY_NEXT` and unseals with both keys.
+3. **Do not promote until all clients have re-sealed their tokens.** Promoting `SEAL_KEY` and deleting `SEAL_KEY_NEXT` makes tokens sealed with the old key permanently unreadable. If you cannot ensure all clients have re-sealed, keep `SEAL_KEY_NEXT` set indefinitely — the Worker handles both keys with no performance penalty.
+
+**Why `_NEXT` instead of `_PREV`?** Cloudflare Worker secrets are write-only — you cannot read back a secret's value. A `_PREV` design requires knowing the current key value to copy it, which is impossible to retrieve. With `_NEXT`, you only need the value you just generated.
