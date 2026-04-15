@@ -67,7 +67,7 @@ PAT instead), and Turnstile is only used by the planned Jira integration.
 
 **Verify configuration:** Run `pnpm validate:deploy` locally to check that all required
 Cloudflare Worker secrets are set. In CI, the deploy workflow runs
-`pnpm validate:deploy --ci` automatically before building.
+`pnpm validate:deploy` automatically before building.
 
 ### Optional (both deployment paths)
 
@@ -230,7 +230,7 @@ Configure these rules in the Cloudflare dashboard under **Security → WAF**.
 **Where:** Security → WAF → Custom Rules
 **Expression:**
 ```
-(http.request.uri.path starts_with "/api/") and
+(starts_with(http.request.uri.path, "/api/")) and
 not (any(http.request.headers["origin"][*] in {"https://YOUR-DOMAIN"})) and
 not (http.request.uri.path eq "/api/csp-report") and
 not (http.request.uri.path eq "/api/error-reporting")
@@ -251,7 +251,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 **Where:** Security → WAF → Rate Limiting Rules
 **Matching expression:**
 ```
-(http.request.uri.path starts_with "/api/") and
+(starts_with(http.request.uri.path, "/api/")) and
 (http.request.method ne "OPTIONS")
 ```
 **Rate:** 60 requests per 10 seconds per IP
