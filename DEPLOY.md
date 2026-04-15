@@ -2,34 +2,10 @@
 
 ## Fork Deployment Checklist
 
-If you're deploying your own instance of GitHub Tracker, update these values:
+If you're deploying your own instance of GitHub Tracker, choose a deployment path:
 
-### Required (deployment won't work without these)
-
-1. **Create a GitHub OAuth App** — [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers)
-   - Set the callback URL to `https://YOUR-DOMAIN/oauth/callback`
-2. **Update `wrangler.toml`** — Change `pattern = "gh.gordoncode.dev"` to your domain
-3. **Set GitHub Actions secrets and variables** — See sections below
-4. **Set Cloudflare Worker secrets** — See "Cloudflare Worker Secrets" section below. **Critical:** `ALLOWED_ORIGIN` must exactly match your deployment URL (e.g., `https://your-domain.example.com`). An incorrect value causes all API requests to fail with CORS errors.
-
-### Verify configuration
-
-Run `pnpm validate:deploy` locally to check that all required Cloudflare Worker secrets
-are set. In CI, the deploy workflow runs `pnpm validate:deploy --ci` automatically before
-building.
-
-### Optional
-
-5. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira/GitLab token sealing feature.
-6. **Sentry error reporting** — Set `VITE_SENTRY_DSN` (build-time, via GitHub Actions variable) and `SENTRY_DSN` (Worker secret, via `wrangler secret put`) to the **same** DSN value. The Worker tunnel (`/api/error-reporting`) validates the incoming envelope DSN against `env.SENTRY_DSN` — different values cause all Sentry events to silently return 403. Leave both empty to disable.
-7. **MCP relay** — If deploying to a custom domain, set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server (`https://gh.gordoncode.dev` is allowed by default)
-8. **WAF smoke tests** — Set `DEPLOY_DOMAIN` as a GitHub Actions variable (e.g., `your-domain.example.com`). CI runs `pnpm test:waf https://$DEPLOY_DOMAIN` automatically. If `DEPLOY_DOMAIN` is not set, the WAF test is skipped. Run locally with: `pnpm test:waf https://YOUR-DOMAIN`.
-9. **Social metadata** — Update `og:image` and `og:url` in `index.html` to your domain
-10. **Security contact** — Update the email and scope domain in `SECURITY.md`
-11. **README** — Update the "Live demo" URL in `README.md`
-12. **User Guide** — Update the domain reference in `docs/USER_GUIDE.md`
-13. **App footer links** — Update "Source" and "Guide" URLs in `src/app/components/dashboard/DashboardPage.tsx` and `src/app/components/settings/SettingsPage.tsx` if you want them to point to your fork
-14. **Contributing guide** — Update the clone URL and PR target in `CONTRIBUTING.md`
+- **OAuth + Cloudflare Worker** — "Sign in with GitHub" button, requires a backend for the OAuth client secret exchange
+- **Static-only (PAT)** — Host anywhere, no backend needed, users paste a Personal Access Token
 
 ### Static-only deployment (no Cloudflare Worker)
 
@@ -80,6 +56,31 @@ pnpm run build     # Output in dist/
 No `VITE_GITHUB_CLIENT_ID` or `VITE_TURNSTILE_SITE_KEY` is needed for PAT-only
 deployments — leave them empty. OAuth login won't work without a client ID (use
 PAT instead), and Turnstile is only used by the planned Jira/GitLab integration.
+
+### OAuth + Cloudflare Worker
+
+1. **Create a GitHub OAuth App** — [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers)
+   - Set the callback URL to `https://YOUR-DOMAIN/oauth/callback`
+2. **Update `wrangler.toml`** — Change `pattern = "gh.gordoncode.dev"` to your domain
+3. **Set GitHub Actions secrets and variables** — See sections below
+4. **Set Cloudflare Worker secrets** — See "Cloudflare Worker Secrets" section below. **Critical:** `ALLOWED_ORIGIN` must exactly match your deployment URL (e.g., `https://your-domain.example.com`). An incorrect value causes all API requests to fail with CORS errors.
+
+**Verify configuration:** Run `pnpm validate:deploy` locally to check that all required
+Cloudflare Worker secrets are set. In CI, the deploy workflow runs
+`pnpm validate:deploy --ci` automatically before building.
+
+### Optional (both deployment paths)
+
+5. **MCP relay** — If deploying to a custom domain, set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server (`https://gh.gordoncode.dev` is allowed by default)
+6. **Sentry error reporting** — Set `VITE_SENTRY_DSN` (build-time, via GitHub Actions variable) and `SENTRY_DSN` (Worker secret, via `wrangler secret put`) to the **same** DSN value. The Worker tunnel (`/api/error-reporting`) validates the incoming envelope DSN against `env.SENTRY_DSN` — different values cause all Sentry events to silently return 403. Leave both empty to disable. **Worker-only** — does not work on static deploys.
+7. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira/GitLab token sealing feature. **Worker-only.**
+8. **WAF smoke tests** — Set `DEPLOY_DOMAIN` as a GitHub Actions variable (e.g., `your-domain.example.com`). CI runs `pnpm test:waf https://$DEPLOY_DOMAIN` automatically. If `DEPLOY_DOMAIN` is not set, the WAF test is skipped. Run locally with: `pnpm test:waf https://YOUR-DOMAIN`. **Worker-only.**
+9. **Social metadata** — Update `og:image` and `og:url` in `index.html` to your domain
+10. **Security contact** — Update the email and scope domain in `SECURITY.md`
+11. **README** — Update the "Live demo" URL in `README.md`
+12. **User Guide** — Update the domain reference in `docs/USER_GUIDE.md`
+13. **App footer links** — Update "Source" and "Guide" URLs in `src/app/components/dashboard/DashboardPage.tsx` and `src/app/components/settings/SettingsPage.tsx` if you want them to point to your fork
+14. **Contributing guide** — Update the clone URL and PR target in `CONTRIBUTING.md`
 
 ## GitHub Actions Secrets and Variables
 
