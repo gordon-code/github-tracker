@@ -15,7 +15,8 @@
     "test:e2e": "E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})\") playwright test",
     "test:waf": "bash scripts/waf-smoke-test.sh",
     "screenshot": "pnpm exec playwright test --config playwright.config.screenshot.ts",
-    "mcp:serve": "pnpm --filter github-tracker-mcp dev"
+    "mcp:serve": "pnpm --filter github-tracker-mcp dev",
+    "validate:deploy": "bash scripts/validate-deploy.sh"
   },
   "dependencies": {
     "@kobalte/core": "0.13.11",
@@ -23,6 +24,7 @@
     "@octokit/plugin-paginate-rest": "14.0.0",
     "@octokit/plugin-retry": "8.1.0",
     "@octokit/plugin-throttling": "11.0.3",
+    "@sentry/cloudflare": "10.46.0",
     "@sentry/solid": "10.46.0",
     "@solidjs/router": "0.16.1",
     "idb": "8.0.3",
@@ -33,6 +35,7 @@
     "@amiceli/vitest-cucumber": "6.3.0",
     "@cloudflare/vite-plugin": "1.30.1",
     "@cloudflare/vitest-pool-workers": "0.13.4",
+    "@fast-check/vitest": "^0.4.0",
     "@playwright/test": "1.58.2",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.2.2",

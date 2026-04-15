@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from "idb";
+import * as Sentry from "@sentry/solid";
 
 export interface CacheEntry {
   key: string;
@@ -68,8 +69,9 @@ export async function setCacheEntry(
       try {
         const db = await getDb();
         await db.put("cache", entry);
-      } catch {
+      } catch (err) {
         console.warn("[cache] Still over quota after emergency eviction — entry dropped");
+        Sentry.captureException(err, { tags: { source: "cache-eviction-retry" } });
       }
     } else {
       throw err;

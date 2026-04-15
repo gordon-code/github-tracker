@@ -1,12 +1,14 @@
 import * as Sentry from "@sentry/solid";
 import type { ErrorEvent, Breadcrumb } from "@sentry/solid";
 
-/** Strip OAuth credentials from any captured URL or query string. */
+/** Strip OAuth credentials and tokens from any captured URL or query string. */
 export function scrubUrl(url: string): string {
   return url
-    .replace(/code=[^&\s]+/g, "code=[REDACTED]")
-    .replace(/state=[^&\s]+/g, "state=[REDACTED]")
-    .replace(/access_token=[^&\s]+/g, "access_token=[REDACTED]");
+    .replace(/code=[^&\s"]+/g, "code=[REDACTED]")
+    .replace(/state=[^&\s"]+/g, "state=[REDACTED]")
+    .replace(/access_token=[^&\s"]+/g, "access_token=[REDACTED]")
+    .replace(/client_secret=[^&\s"]+/gi, "client_secret=[REDACTED]")
+    .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[REDACTED]");
 }
 
 /** Allowed console breadcrumb prefixes — drop everything else. */
@@ -17,9 +19,12 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[poll]",
   "[dashboard]",
   "[settings]",
+  "[hot-poll]",
+  "[cache]",
+  "[github]",
+  "[mcp-relay]",
+  "[notifications]",
 ];
-
-const SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240";
 
 export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
   // Strip OAuth params from captured URLs
@@ -32,12 +37,13 @@ export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
         ? scrubUrl(event.request.query_string)
         : "[REDACTED]";
   }
-  // Remove headers and cookies entirely
+  // Remove headers, cookies, and request body entirely
   delete event.request?.headers;
   delete event.request?.cookies;
+  delete event.request?.data;
   // Remove user identity — we never want to track users
   delete event.user;
-  // Scrub URLs in stack trace frames
+  // Scrub URLs in stack trace frames and exception messages
   if (event.exception?.values) {
     for (const ex of event.exception.values) {
       if (ex.stacktrace?.frames) {
@@ -46,6 +52,10 @@ export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
             frame.abs_path = scrubUrl(frame.abs_path);
           }
         }
+      }
+      // Scrub exception message strings — defense-in-depth for token leakage
+      if (ex.value) {
+        ex.value = scrubUrl(ex.value);
       }
     }
   }
@@ -81,22 +91,22 @@ export function beforeBreadcrumbHandler(
 }
 
 export function initSentry(): void {
-  if (import.meta.env.DEV || !SENTRY_DSN) return;
+  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+  if (import.meta.env.DEV || !dsn) return;
 
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
 
     // ── Privacy: absolute minimum data ──────────────────────────
     sendDefaultPii: false,
 
-    // ── Disable everything except error tracking ────────────────
-    tracesSampleRate: 0,
+    // ── Disable performance tracing (tracesSampleRate omitted = undefined = no spans) ───
     profilesSampleRate: 0,
 
     // ── Only capture errors from our own code ───────────────────
-    allowUrls: [/^https:\/\/gh\.gordoncode\.dev/],
+    allowUrls: [new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[/\\?#])`)],
 
     // ── Scrub sensitive data before it leaves the browser ────────
     beforeSend: beforeSendHandler,

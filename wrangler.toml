@@ -1,6 +1,11 @@
 name = "github-tracker"
 main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
+compatibility_flags = [
+  "global_fetch_strictly_public",
+  # nodejs_als: required by @sentry/cloudflare for AsyncLocalStorage (request context propagation)
+  "nodejs_als",
+]
 workers_dev = false
 
 [assets]
@@ -10,12 +15,22 @@ directory = "public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+# DEPLOY: Change the pattern below to your custom domain.
 [[routes]]
 pattern = "gh.gordoncode.dev"
 custom_domain = true
 
-[vars]
-SENTRY_DSN = "https://4dc4335a9746201c02ff2107c0d20f73@o284235.ingest.us.sentry.io/4511122822922240"
+# DEPLOY: Uncomment and set your Sentry DSN, or leave commented to disable error reporting.
+# [vars]
+# SENTRY_DSN = "https://your-public-key@o12345.ingest.us.sentry.io/your-project-id"
+
+[[ratelimits]]
+name = "PROXY_RATE_LIMITER"
+namespace_id = "1001"
+
+[ratelimits.simple]
+limit = 10
+period = 10
 
 [observability]
 enabled = true

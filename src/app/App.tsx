@@ -1,4 +1,5 @@
 import { createSignal, createEffect, onMount, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
@@ -13,6 +14,8 @@ import PrivacyPage from "./pages/PrivacyPage";
 const DashboardPage = lazy(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazy(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazy(() => import("./components/settings/SettingsPage"));
+
+const SentryErrorBoundary = Sentry.withSentryErrorBoundary(ErrorBoundary);
 
 function handleRouteError(err: unknown) {
   console.error("[app] Route render failed:", err);
@@ -182,7 +185,7 @@ export default function App() {
   });
 
   return (
-    <ErrorBoundary fallback={handleRouteError}>
+    <SentryErrorBoundary fallback={handleRouteError}>
       <Suspense fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <span class="loading loading-spinner loading-lg" aria-label="Loading" />
@@ -199,6 +202,6 @@ export default function App() {
           <Route path="/*" component={() => <Navigate href="/" />} />
         </Router>
       </Suspense>
-    </ErrorBoundary>
+    </SentryErrorBoundary>
   );
 }

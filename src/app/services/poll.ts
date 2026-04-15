@@ -1,4 +1,5 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { getClient } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
@@ -330,7 +331,7 @@ function withJitter(intervalMs: number): number {
  * Creates a poll coordinator that:
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
- * - If getInterval() === 0, disables auto-polling (SDR-017)
+ * - If getInterval() === 0, disables auto-polling
  * - Continues polling in background tabs when notifications gate is available
  *   (304 responses make background polls near-zero cost). When the gate is
  *   disabled (fine-grained PAT or missing notifications scope), background
@@ -544,6 +545,7 @@ export async function fetchHotData(): Promise<{
   } catch (err) {
     hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
+    Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
     // Items stay in _hotPRs for retry next cycle
   }
 
@@ -558,6 +560,8 @@ export async function fetchHotData(): Promise<{
       runUpdates.set(result.value.id, result.value);
     } else {
       hadErrors = true;
+      console.warn("[hot-poll] Workflow run fetch failed:", result.reason);
+      Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
     }
   }
 

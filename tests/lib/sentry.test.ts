@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   scrubUrl,
   beforeSendHandler,
   beforeBreadcrumbHandler,
+  initSentry,
 } from "../../src/app/lib/sentry";
+
+vi.mock("@sentry/solid", () => ({
+  init: vi.fn(),
+}));
 
 describe("scrubUrl", () => {
   it("strips code= parameter", () => {
@@ -48,6 +53,21 @@ describe("scrubUrl", () => {
       "https://example.com?code=[REDACTED]",
     );
   });
+
+  it("strips client_secret= parameter", () => {
+    expect(scrubUrl("https://example.com?client_secret=supersecret")).toBe(
+      "https://example.com?client_secret=[REDACTED]",
+    );
+  });
+
+  it("strips GitHub token prefixes (ghu_, ghp_, gho_, github_pat_)", () => {
+    expect(scrubUrl("Error: token ghu_abc123 exposed")).toBe(
+      "Error: token ghu_[REDACTED] exposed",
+    );
+    expect(scrubUrl("token ghp_xyz789")).toBe("token ghp_[REDACTED]");
+    expect(scrubUrl("token gho_def456")).toBe("token gho_[REDACTED]");
+    expect(scrubUrl("token github_pat_abc123")).toBe("token github_pat_[REDACTED]");
+  });
 });
 
 describe("beforeSendHandler", () => {
@@ -85,17 +105,19 @@ describe("beforeSendHandler", () => {
     expect(result!.request!.query_string).toBe("[REDACTED]");
   });
 
-  it("deletes request headers and cookies", () => {
+  it("deletes request headers, cookies, and data", () => {
     const event = {
       request: {
         url: "https://gh.gordoncode.dev",
         headers: { Authorization: "Bearer ghu_token" },
         cookies: "session=abc",
+        data: '{"token":"ghu_secret"}',
       },
     };
     const result = beforeSendHandler(event as never);
     expect(result!.request!.headers).toBeUndefined();
     expect(result!.request!.cookies).toBeUndefined();
+    expect((result!.request as Record<string, unknown>).data).toBeUndefined();
   });
 
   it("deletes user identity", () => {
@@ -135,6 +157,57 @@ describe("beforeSendHandler", () => {
     const event = {};
     const result = beforeSendHandler(event as never);
     expect(result).toBeDefined();
+  });
+
+  it("scrubs OAuth params from exception message values", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Request failed with code=abc123&state=xyz in URL",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("abc123");
+    expect(result!.exception!.values![0].value).toContain("code=[REDACTED]");
+    expect(result!.exception!.values![0].value).toContain("state=[REDACTED]");
+  });
+
+  it("scrubs GitHub token prefixes from exception message values", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Token ghp_secrettoken123 was used in request",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("secrettoken123");
+    expect(result!.exception!.values![0].value).toContain("ghp_[REDACTED]");
+  });
+
+  it("scrubs client_secret and tokens from exception message values", () => {
+    const event = {
+      request: { url: "https://gh.gordoncode.dev" },
+      exception: {
+        values: [
+          {
+            value: "Fetch failed: client_secret=supersecret ghu_abc123",
+          },
+        ],
+      },
+    };
+    const result = beforeSendHandler(event as never);
+    expect(result!.exception!.values![0].value).not.toContain("supersecret");
+    expect(result!.exception!.values![0].value).not.toContain("ghu_abc123");
+    expect(result!.exception!.values![0].value).toContain("client_secret=[REDACTED]");
+    expect(result!.exception!.values![0].value).toContain("ghu_[REDACTED]");
   });
 });
 
@@ -179,7 +252,10 @@ describe("beforeBreadcrumbHandler", () => {
   });
 
   it("keeps allowed console breadcrumbs", () => {
-    const prefixes = ["[app]", "[auth]", "[api]", "[poll]", "[dashboard]", "[settings]"];
+    const prefixes = [
+      "[app]", "[auth]", "[api]", "[poll]", "[dashboard]", "[settings]",
+      "[hot-poll]", "[cache]", "[github]", "[mcp-relay]", "[notifications]",
+    ];
     for (const prefix of prefixes) {
       const breadcrumb = {
         category: "console",
@@ -210,5 +286,61 @@ describe("beforeBreadcrumbHandler", () => {
   it("passes through non-console, non-navigation breadcrumbs unchanged", () => {
     const breadcrumb = { category: "ui.click", message: "button" };
     expect(beforeBreadcrumbHandler(breadcrumb as never)).toBe(breadcrumb);
+  });
+});
+
+describe("initSentry", () => {
+  // Import the mock so we can inspect calls
+  let mockInit: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const sentry = await import("@sentry/solid");
+    mockInit = sentry.init as ReturnType<typeof vi.fn>;
+    mockInit.mockClear();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("is a no-op when VITE_SENTRY_DSN is undefined", () => {
+    vi.stubEnv("DEV", false);
+    // Do not stub VITE_SENTRY_DSN — beforeEach calls vi.unstubAllEnvs() so it is truly undefined
+    initSentry();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when VITE_SENTRY_DSN is empty string", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_SENTRY_DSN", "");
+    initSentry();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it("calls Sentry.init with correct DSN when VITE_SENTRY_DSN is set", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
+    initSentry();
+    expect(mockInit).toHaveBeenCalledOnce();
+    expect(mockInit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dsn: "https://test-key@o1.ingest.us.sentry.io/1",
+      }),
+    );
+  });
+
+  it("sets allowUrls to a RegExp anchored to window.location.origin", () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
+    vi.stubGlobal("location", { ...window.location, origin: "https://test.example.com" });
+    initSentry();
+    const [config] = mockInit.mock.calls[0] as [{ allowUrls: RegExp[] }];
+    expect(config.allowUrls).toHaveLength(1);
+    expect(config.allowUrls[0]).toBeInstanceOf(RegExp);
+    expect(config.allowUrls[0].test("https://test.example.com/path")).toBe(true);
+    expect(config.allowUrls[0].test("https://test.example.com.evil.com/path")).toBe(false);
   });
 });

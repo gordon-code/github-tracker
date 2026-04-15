@@ -407,6 +407,22 @@ describe("WebSocket relay server — origin validation", () => {
     expect(opened).toBe(true);
   });
 
+  it("allows connections from the production domain", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
+      headers: { origin: "https://gh.gordoncode.dev" },
+    });
+
+    const opened = await new Promise<boolean>((resolve) => {
+      ws.once("open", () => { ws.close(); resolve(true); });
+      ws.once("error", () => resolve(false));
+      ws.once("close", (code) => {
+        if (code !== 1000 && code !== 1001) resolve(false);
+      });
+    });
+
+    expect(opened).toBe(true);
+  });
+
   it("rejects connections from disallowed origins", async () => {
     // The server calls verifyClient with callback(false, 403, "Origin not allowed").
     // The ws library sends an HTTP 403 response, which the client sees as an error.

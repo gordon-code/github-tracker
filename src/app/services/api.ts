@@ -1,4 +1,5 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
+import * as Sentry from "@sentry/solid";
 import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
@@ -863,7 +864,13 @@ async function executeLightCombinedQuery(
     ));
   }
   if (prPaginationTasks.length > 0) {
-    await Promise.allSettled(prPaginationTasks);
+    const paginationSettled = await Promise.allSettled(prPaginationTasks);
+    for (const s of paginationSettled) {
+      if (s.status === "rejected") {
+        console.warn("[api] PR pagination task failed:", s.reason);
+        Sentry.captureException(s.reason, { tags: { source: "pr-pagination" } });
+      }
+    }
   }
 }
 
@@ -1678,6 +1685,7 @@ export async function fetchHotPRStatus(
     if (s.status === "rejected") {
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
+      Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
     }
   }
 

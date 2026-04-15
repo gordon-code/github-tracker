@@ -1,25 +1,44 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import worker, { type Env } from "../../src/worker/index";
+import { collectLogs, findLog, ALLOWED_ORIGIN } from "./helpers";
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: { fetch: async () => new Response("asset") },
     GITHUB_CLIENT_ID: "test_client_id",
     GITHUB_CLIENT_SECRET: "test_client_secret",
-    ALLOWED_ORIGIN: "https://gh.gordoncode.dev",
+    ALLOWED_ORIGIN,
     SENTRY_DSN: "https://abc123@o123456.ingest.sentry.io/7890123",
+    SESSION_KEY: "dGVzdC1zZXNzaW9uLWtleQ==",
+    SEAL_KEY: "dGVzdC1zZWFsLWtleQ==",
+    TURNSTILE_SECRET_KEY: "test-turnstile-secret",
+    PROXY_RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
     ...overrides,
   };
 }
+
+let _requestCounter = 0;
 
 function makeCspRequest(
   body: string,
   contentType = "application/csp-report",
   method = "POST",
+  options: { origin?: string | null } = {},
 ): Request {
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    // Unique IP per request to avoid hitting the in-memory rate limiter across tests
+    "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
+  };
+  // Default to ALLOWED_ORIGIN (same-origin CSP reports always include it).
+  // Pass { origin: null } to explicitly test missing Origin.
+  const effectiveOrigin = options.origin === undefined ? ALLOWED_ORIGIN : options.origin;
+  if (effectiveOrigin !== null) {
+    headers["Origin"] = effectiveOrigin;
+  }
   return new Request("https://gh.gordoncode.dev/api/csp-report", {
     method,
-    headers: { "Content-Type": contentType },
+    headers,
     body: method !== "GET" ? body : undefined,
   });
 }
@@ -27,14 +46,21 @@ function makeCspRequest(
 describe("Worker CSP report endpoint", () => {
   let originalFetch: typeof globalThis.fetch;
   let mockFetch: ReturnType<typeof vi.fn>;
+  let consoleSpy: {
+    info: ReturnType<typeof vi.spyOn>;
+    warn: ReturnType<typeof vi.spyOn>;
+    error: ReturnType<typeof vi.spyOn>;
+  };
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     globalThis.fetch = mockFetch as typeof globalThis.fetch;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleSpy = {
+      info: vi.spyOn(console, "info").mockImplementation(() => {}),
+      warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+      error: vi.spyOn(console, "error").mockImplementation(() => {}),
+    };
   });
 
   afterEach(() => {
@@ -42,8 +68,22 @@ describe("Worker CSP report endpoint", () => {
     vi.restoreAllMocks();
   });
 
+  it("rejects requests without CF-Connecting-IP with 400", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report" },
+      body,
+    });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(400);
+  });
+
   it("rejects non-POST requests", async () => {
-    const req = new Request("https://gh.gordoncode.dev/api/csp-report", { method: "GET" });
+    const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "GET",
+      headers: { "CF-Connecting-IP": `10.3.0.${++_requestCounter}` },
+    });
     const resp = await worker.fetch(req, makeEnv());
     expect(resp.status).toBe(405);
   });
@@ -84,6 +124,26 @@ describe("Worker CSP report endpoint", () => {
     expect(sentryBody["csp-report"]["source-file"]).toBe(
       "https://gh.gordoncode.dev/app.js?access_token=[REDACTED]",
     );
+  });
+
+  it("scrubs bare GitHub token prefixes from URL fields", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/app",
+        "blocked-uri": "https://example.com/callback#ghu_abc123def456",
+        "source-file": "https://gh.gordoncode.dev/app.js?ref=ghp_secrettoken123",
+        "violated-directive": "script-src 'self'",
+      },
+    });
+    const req = makeCspRequest(body);
+    const env = makeEnv();
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await worker.fetch(req, env);
+    const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(sentPayload["csp-report"]["blocked-uri"]).not.toContain("ghu_abc123");
+    expect(sentPayload["csp-report"]["blocked-uri"]).toContain("ghu_[REDACTED]");
+    expect(sentPayload["csp-report"]["source-file"]).not.toContain("ghp_secrettoken");
+    expect(sentPayload["csp-report"]["source-file"]).toContain("ghp_[REDACTED]");
   });
 
   it("handles report-to format (application/reports+json)", async () => {
@@ -305,5 +365,184 @@ describe("Worker CSP report endpoint", () => {
     expect(report["violated-directive"]).toBe("font-src 'self'");
     expect(report["original-policy"]).toBe("font-src 'self'");
     expect(report["status-code"]).toBe(200);
+  });
+
+  // ── Field sanitization ────────────────────────────────────────────────────
+
+  it("strips control characters from CSP report string fields", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/",
+        "violated-directive": "script-src\x00\x01\x7F injected",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv());
+
+    const sentryBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    const report = sentryBody["csp-report"];
+    expect(report["violated-directive"]).toBe("script-src injected");
+    expect(report["violated-directive"]).not.toContain("\x00");
+  });
+
+  it("truncates oversized CSP report string fields to 2048 chars", async () => {
+    const longValue = "x".repeat(3000);
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/",
+        "violated-directive": longValue,
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv());
+
+    const sentryBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    const report = sentryBody["csp-report"];
+    expect(report["violated-directive"].length).toBe(2048);
+  });
+
+  // ── Strict origin check ───────────────────────────────────────────────────
+
+  it("rejects requests with wrong Origin with 403", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: "https://evil.example.com" });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(403);
+  });
+
+  it("rejects requests with missing Origin (same-origin CSP reports always include it)", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: null });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(403);
+  });
+
+  it("rejects requests with Origin: null (string literal from sandboxed iframes) with 403", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: "null" });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(403);
+  });
+
+  it("allows requests with correct Origin", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body, "application/csp-report", "POST", { origin: ALLOWED_ORIGIN });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(204);
+  });
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+
+  it("rate limits after 15 requests from same IP", async () => {
+    const env = makeEnv();
+    const fixedIp = "10.3.99.1";
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    for (let i = 0; i < 15; i++) {
+      const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
+        body,
+      });
+      const resp = await worker.fetch(req, env);
+      expect(resp.status).toBe(204);
+    }
+    const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
+      body,
+    });
+    const resp = await worker.fetch(req, env);
+    expect(resp.status).toBe(429);
+    expect(resp.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("rate limits are per-IP — different IPs have independent counters", async () => {
+    const env = makeEnv();
+    const fixedIp = "10.3.99.2";
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    // Exhaust limit for fixedIp
+    for (let i = 0; i < 15; i++) {
+      await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
+        body,
+      }), env);
+    }
+    const limited = await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": fixedIp, "Origin": ALLOWED_ORIGIN },
+      body,
+    }), env);
+    expect(limited.status).toBe(429);
+
+    // Different IP should still succeed
+    const otherResp = await worker.fetch(new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report", "CF-Connecting-IP": "10.3.99.3", "Origin": ALLOWED_ORIGIN },
+      body,
+    }), env);
+    expect(otherResp.status).toBe(204);
+  });
+
+  // ── Content-Length pre-check ──────────────────────────────────────────────
+
+  it("rejects Content-Length exceeding 64KB with 413 and logs csp_report_content_length_exceeded", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/csp-report", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/csp-report",
+        "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
+        "Origin": ALLOWED_ORIGIN,
+        "Content-Length": String(64 * 1024 + 1),
+      },
+      body: "x",
+    });
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(413);
+
+    // TCG-002: verify the structured log event fires
+    const logs = collectLogs(consoleSpy);
+    const sizeLog = findLog(logs, "csp_report_content_length_exceeded");
+    expect(sizeLog).toBeDefined();
+  });
+
+  it("allows requests without Content-Length header", async () => {
+    const body = JSON.stringify({ "csp-report": { "document-uri": "https://gh.gordoncode.dev/", "violated-directive": "script-src" } });
+    const req = makeCspRequest(body);
+    expect(req.headers.get("Content-Length")).toBeNull();
+    const resp = await worker.fetch(req, makeEnv());
+    expect(resp.status).toBe(204);
+  });
+
+  // ── SENTRY_SECURITY_TOKEN forwarding ──────────────────────────────────────
+
+  it("forwards X-Sentry-Token header when SENTRY_SECURITY_TOKEN is set", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/dashboard",
+        "violated-directive": "script-src",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: "my-csp-secret" }));
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBe("my-csp-secret");
+  });
+
+  it("does not send X-Sentry-Token header when SENTRY_SECURITY_TOKEN is not set", async () => {
+    const body = JSON.stringify({
+      "csp-report": {
+        "document-uri": "https://gh.gordoncode.dev/dashboard",
+        "violated-directive": "script-src",
+      },
+    });
+    const req = makeCspRequest(body);
+    await worker.fetch(req, makeEnv({ SENTRY_SECURITY_TOKEN: undefined }));
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Sentry-Token"]).toBeUndefined();
   });
 });

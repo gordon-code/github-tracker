@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
@@ -80,9 +81,10 @@ export function clearAuth(): void {
     localStorage.removeItem(DASHBOARD_STORAGE_KEY);
     _setToken(null);
     setUser(null);
-    // Clear IndexedDB cache to prevent data leakage between users (SDR-016)
-    clearCache().catch(() => {
-      // Non-fatal — cache clear failure should not block logout
+    // Clear IndexedDB cache to prevent data leakage between users
+    clearCache().catch((err) => {
+      console.warn("[auth] Cache clear failed during logout:", err);
+      Sentry.captureException(err, { tags: { source: "auth-logout-cache-clear" } });
     });
     // Run registered cleanup callbacks (e.g., poll state reset)
     for (const cb of _onClearCallbacks) {

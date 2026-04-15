@@ -61,6 +61,11 @@ function buildAllowedOrigins(): Set<string> {
 // Computed once at module scope — origins don't change at runtime
 const ALLOWED_ORIGINS = buildAllowedOrigins();
 
+// Log extra origins if configured (useful for custom deployments / forks)
+if (process.env.MCP_RELAY_ALLOWED_ORIGINS) {
+  console.error("[mcp/ws] Additional allowed origins:", process.env.MCP_RELAY_ALLOWED_ORIGINS);
+}
+
 function isOriginAllowed(origin: string | undefined): boolean {
   // Non-browser clients (e.g. CLI tools) do not send Origin — allow them.
   if (origin === undefined) return true;
