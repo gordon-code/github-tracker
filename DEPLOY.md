@@ -40,7 +40,7 @@ routing.
   `report-uri /api/csp-report` directive in `public/_headers` will produce harmless
   404 console errors on static hosts. Optionally remove the `report-uri` and
   `report-to` directives if the noise is unwanted.
-- **Jira/GitLab token sealing** (planned) — requires server-side encryption
+- **Jira token sealing** (planned) — requires server-side encryption
 
 **Security note:** The `public/_headers` file sets Content-Security-Policy and other
 security headers. Ensure your static host serves these headers — Cloudflare Pages,
@@ -55,7 +55,7 @@ pnpm run build     # Output in dist/
 ```
 No `VITE_GITHUB_CLIENT_ID` or `VITE_TURNSTILE_SITE_KEY` is needed for PAT-only
 deployments — leave them empty. OAuth login won't work without a client ID (use
-PAT instead), and Turnstile is only used by the planned Jira/GitLab integration.
+PAT instead), and Turnstile is only used by the planned Jira integration.
 
 ### OAuth + Cloudflare Worker
 
@@ -73,7 +73,7 @@ Cloudflare Worker secrets are set. In CI, the deploy workflow runs
 
 5. **MCP relay** — If deploying to a custom domain, set `MCP_RELAY_ALLOWED_ORIGINS=https://YOUR-DOMAIN` when running the MCP server (`https://gh.gordoncode.dev` is allowed by default)
 6. **Sentry error reporting** — Set `VITE_SENTRY_DSN` (build-time, via GitHub Actions variable) and `SENTRY_DSN` (Worker secret, via `wrangler secret put`) to the **same** DSN value. The Worker tunnel (`/api/error-reporting`) validates the incoming envelope DSN against `env.SENTRY_DSN` — different values cause all Sentry events to silently return 403. Leave both empty to disable. **Worker-only** — does not work on static deploys.
-7. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira/GitLab token sealing feature. **Worker-only.**
+7. **Cloudflare Turnstile** — Create a widget and set `VITE_TURNSTILE_SITE_KEY` in `.env`. Only needed for the planned Jira token sealing feature. **Worker-only.**
 8. **WAF smoke tests** — Set `DEPLOY_DOMAIN` as a GitHub Actions variable (e.g., `your-domain.example.com`). CI runs `pnpm test:waf https://$DEPLOY_DOMAIN` automatically. If `DEPLOY_DOMAIN` is not set, the WAF test is skipped. Run locally with: `pnpm test:waf https://YOUR-DOMAIN`. **Worker-only.**
 9. **Social metadata** — Update `og:image` and `og:url` in `index.html` to your domain
 10. **Security contact** — Update the email and scope domain in `SECURITY.md`
