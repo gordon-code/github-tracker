@@ -29,6 +29,18 @@ else
       done
       echo "$SECRETS" | grep -q '"name":"SENTRY_DSN"' || warn "CF Worker secret 'SENTRY_DSN' not set — Sentry error tunnel returns 404"
       echo "$SECRETS" | grep -q '"name":"SENTRY_SECURITY_TOKEN"' || warn "CF Worker secret 'SENTRY_SECURITY_TOKEN' not set — only needed if Sentry Allowed Domains is configured"
+      echo "$SECRETS" | grep -q '"name":"SEAL_KEY_PREV"' || warn "CF Worker secret 'SEAL_KEY_PREV' not set — needed during key rotation"
+      echo "$SECRETS" | grep -q '"name":"SESSION_KEY_PREV"' || warn "CF Worker secret 'SESSION_KEY_PREV' not set — needed during key rotation"
+
+      # Detect unexpected secrets not in the known set
+      KNOWN="ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY TURNSTILE_SECRET_KEY SENTRY_DSN SENTRY_SECURITY_TOKEN SEAL_KEY_PREV SESSION_KEY_PREV"
+      while IFS= read -r secret_name; do
+        found=false
+        for k in $KNOWN; do
+          [[ "$secret_name" == "$k" ]] && found=true && break
+        done
+        $found || warn "Unknown CF Worker secret '$secret_name' — not referenced by the app (stale?)"
+      done < <(echo "$SECRETS" | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//')
     fi
   fi
 fi
