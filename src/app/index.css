@@ -51,7 +51,11 @@
 }
 
 @utility animate-reorder-highlight {
-  animation: reorder-highlight 1.5s ease-out forwards;
+  animation: reorder-highlight 1.5s ease-out;
+}
+
+@utility repo-header-text {
+  color: light-dark(oklch(0.45 0.15 250), oklch(0.85 0.18 250));
 }
 
 /* ── Notification animations ──────────────────────────────────────────────── */
