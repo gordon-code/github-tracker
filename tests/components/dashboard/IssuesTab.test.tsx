@@ -29,8 +29,9 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
+import { produce } from "solid-js/store";
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
-import { viewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
+import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
 import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
@@ -705,5 +706,38 @@ describe("IssuesTab — pin button wiring", () => {
     await user.click(ignoreBtn);
 
     expect(viewState.trackedItems.some(t => t.id === 52 && t.type === "issue")).toBe(false);
+  });
+});
+
+describe("IssuesTab — empty-repo state preservation", () => {
+  it("preserves expand/lock state for empty repos in configRepoNames", () => {
+    setViewState(produce((s) => {
+      s.expandedRepos.issues["owner/empty-repo"] = true;
+      s.expandedRepos.issues["owner/stale-repo"] = true;
+      s.lockedRepos = ["owner/empty-repo", "owner/stale-repo"];
+    }));
+
+    render(() => (
+      <IssuesTab
+        issues={[makeIssue({ id: 1, repoFullName: "owner/active-repo", surfacedBy: ["me"] })]}
+        userLogin="me"
+        configRepoNames={["owner/active-repo", "owner/empty-repo"]}
+      />
+    ));
+
+    // Empty repo preserved (in configRepoNames but no items)
+    expect(viewState.expandedRepos.issues["owner/empty-repo"]).toBe(true);
+    expect(viewState.lockedRepos).toContain("owner/empty-repo");
+    // Stale repo pruned (not in configRepoNames)
+    expect(viewState.expandedRepos.issues["owner/stale-repo"]).toBeUndefined();
+    expect(viewState.lockedRepos).not.toContain("owner/stale-repo");
+  });
+
+  it("falls back to item-derived names when configRepoNames not provided", () => {
+    render(() => (
+      <IssuesTab issues={[]} userLogin="me" />
+    ));
+    // With empty items and no configRepoNames, guard returns early — no pruning
+    expect(viewState.lockedRepos).toEqual([]);
   });
 });

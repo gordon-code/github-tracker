@@ -507,6 +507,10 @@ export default function DashboardPage() {
     ];
   });
 
+  const configRepoNames = createMemo(() =>
+    [...new Set([...config.selectedRepos, ...config.upstreamRepos, ...config.monitoredRepos].map(r => r.fullName))]
+  );
+
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -550,6 +554,7 @@ export default function DashboardPage() {
                   allUsers={allUsers()}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}
+                  configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
                 />
               </Match>
@@ -562,6 +567,7 @@ export default function DashboardPage() {
                   trackedUsers={config.trackedUsers}
                   hotPollingPRIds={hotPollingPRIds()}
                   monitoredRepos={config.monitoredRepos}
+                  configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
                 />
               </Match>
@@ -579,6 +585,7 @@ export default function DashboardPage() {
                   workflowRuns={dashboardData.workflowRuns}
                   loading={dashboardData.loading}
                   hasUpstreamRepos={config.upstreamRepos.length > 0}
+                  configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
                   hotPollingRunIds={hotPollingRunIds()}
                 />

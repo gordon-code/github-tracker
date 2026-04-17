@@ -107,7 +107,7 @@ TESTS=(
 # --- Run in parallel (:::  passes array elements directly, avoiding stdin quoting issues) ---
 TOTAL=${#TESTS[@]}
 
-OUTPUT=$(parallel --will-cite -k -j10 --timeout 15 run_spec ::: "${TESTS[@]}") || true
+OUTPUT=$(parallel --will-cite -k -j2 --delay 0.3 --timeout 15 run_spec ::: "${TESTS[@]}") || true
 
 # Detect infrastructure failure (parallel crashed, no tests ran)
 if [[ -z "$OUTPUT" ]]; then

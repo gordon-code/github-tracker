@@ -6,6 +6,7 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
+const LOCKED_REPOS_CAP = 50;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -93,27 +94,55 @@ export const ViewStateSchema = z.object({
     pullRequests: {},
     actions: {},
   }),
-  lockedRepos: z.object({
-    issues: z.array(z.string()).default([]),
-    pullRequests: z.array(z.string()).default([]),
-    actions: z.array(z.string()).default([]),
-  }).default({
-    issues: [],
-    pullRequests: [],
-    actions: [],
-  }),
+  lockedRepos: z.array(z.string().max(200)).max(LOCKED_REPOS_CAP).default([]),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
-export type LockedReposTab = keyof ViewState["lockedRepos"];
+
+export function migrateLockedRepos(raw: unknown, lastActiveTab?: unknown): unknown {
+  if (Array.isArray(raw) || raw == null) return raw;
+  if (typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+  if (!("issues" in obj || "pullRequests" in obj || "actions" in obj)) return raw;
+  const tabs = ["issues", "pullRequests", "actions"] as const;
+  const preferred = (typeof lastActiveTab === "string" && tabs.includes(lastActiveTab as typeof tabs[number]))
+    ? lastActiveTab as typeof tabs[number]
+    : "issues";
+  const remaining = tabs.filter(t => t !== preferred);
+  const all = [preferred, ...remaining];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const tab of all) {
+    const arr = obj[tab];
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (typeof item === "string" && !seen.has(item)) {
+          seen.add(item);
+          result.push(item);
+        }
+      }
+    }
+  }
+  return result.slice(0, LOCKED_REPOS_CAP);
+}
 
 function loadViewState(): ViewState {
   try {
     const raw = localStorage.getItem(VIEW_STORAGE_KEY);
     if (raw === null) return ViewStateSchema.parse({});
     const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return ViewStateSchema.parse({});
+    }
+    const obj = parsed as Record<string, unknown>;
+    obj.lockedRepos = migrateLockedRepos(obj.lockedRepos, obj.lastActiveTab);
+    // Cap lockedRepos before Zod validates — an oversized array would fail
+    // .max(LOCKED_REPOS_CAP) and reject the ENTIRE ViewState, wiping all settings.
+    if (Array.isArray(obj.lockedRepos) && obj.lockedRepos.length > LOCKED_REPOS_CAP) {
+      obj.lockedRepos = obj.lockedRepos.slice(0, LOCKED_REPOS_CAP);
+    }
     const result = ViewStateSchema.safeParse(parsed);
     if (result.success) return result.data;
     return ViewStateSchema.parse({});
@@ -140,7 +169,7 @@ export function resetViewState(): void {
     showPrRuns: false,
     hideDepDashboard: true,
     expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-    lockedRepos: { issues: [], pullRequests: [], actions: [] },
+    lockedRepos: [],
     trackedItems: [],
   });
 }
@@ -296,27 +325,26 @@ export function pruneExpandedRepos(
   );
 }
 
-export function lockRepo(tab: LockedReposTab, repoFullName: string): void {
+export function lockRepo(repoFullName: string): void {
   setViewState(produce((draft) => {
-    if (!draft.lockedRepos[tab].includes(repoFullName)) {
-      draft.lockedRepos[tab].push(repoFullName);
+    if (!draft.lockedRepos.includes(repoFullName) && draft.lockedRepos.length < LOCKED_REPOS_CAP) {
+      draft.lockedRepos.push(repoFullName);
     }
   }));
 }
 
-export function unlockRepo(tab: LockedReposTab, repoFullName: string): void {
+export function unlockRepo(repoFullName: string): void {
   setViewState(produce((draft) => {
-    draft.lockedRepos[tab] = draft.lockedRepos[tab].filter(r => r !== repoFullName);
+    draft.lockedRepos = draft.lockedRepos.filter(r => r !== repoFullName);
   }));
 }
 
 export function moveLockedRepo(
-  tab: LockedReposTab,
   repoFullName: string,
   direction: "up" | "down"
 ): void {
   setViewState(produce((draft) => {
-    const arr = draft.lockedRepos[tab];
+    const arr = draft.lockedRepos;
     const idx = arr.indexOf(repoFullName);
     if (idx === -1) return;
     const targetIdx = direction === "up" ? idx - 1 : idx + 1;
@@ -328,16 +356,15 @@ export function moveLockedRepo(
 }
 
 export function pruneLockedRepos(
-  tab: LockedReposTab,
   activeRepoNames: string[]
 ): void {
-  const current = untrack(() => viewState.lockedRepos[tab]);
+  const current = untrack(() => viewState.lockedRepos);
   if (current.length === 0) return;
   const activeSet = new Set(activeRepoNames);
   const filtered = current.filter(name => activeSet.has(name));
   if (filtered.length === current.length) return;
   setViewState(produce((draft) => {
-    draft.lockedRepos[tab] = filtered;
+    draft.lockedRepos = filtered;
   }));
 }
 

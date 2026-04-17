@@ -32,6 +32,7 @@ export interface PullRequestsTabProps {
   trackedUsers?: TrackedUser[];
   hotPollingPRIds?: ReadonlySet<number>;
   monitoredRepos?: RepoRef[];
+  configRepoNames?: string[];
   refreshTick?: number;
 }
 
@@ -288,7 +289,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const repoGroups = createMemo(() =>
-    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos.pullRequests)
+    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
   );
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
@@ -302,7 +303,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   });
 
   const activeRepoNames = createMemo(() =>
-    [...new Set(props.pullRequests.map((pr) => pr.repoFullName))]
+    props.configRepoNames ?? [...new Set(props.pullRequests.map((pr) => pr.repoFullName))]
   );
 
   createEffect(() => {
@@ -314,7 +315,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos("pullRequests", names);
+    pruneLockedRepos(names);
   });
 
   const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
@@ -334,7 +335,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos.pullRequests,
+    () => viewState.lockedRepos,
     () => ignoredPullRequests().length,
     () => JSON.stringify(viewState.tabFilters.pullRequests),
   );
@@ -535,7 +536,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         </Show>
                       </button>
                       <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
-                      <RepoLockControls tab="pullRequests" repoFullName={repoGroup.repoFullName} />
+                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
                       {(peek) => (
