@@ -166,5 +166,41 @@ describe("view lock store", () => {
     it("returns undefined unchanged", () => {
       expect(migrateLockedRepos(undefined)).toBeUndefined();
     });
+
+    it("uses actions tab for precedence when lastActiveTab is actions", () => {
+      expect(migrateLockedRepos(
+        { issues: ["a"], pullRequests: ["b"], actions: ["c", "a"] },
+        "actions"
+      )).toEqual(["c", "a", "b"]);
+    });
+
+    it("caps output at LOCKED_REPOS_CAP when merging exceeds limit", () => {
+      // 20 unique per tab × 3 tabs = 60 unique entries, exceeds cap of 50
+      const issues = Array.from({ length: 20 }, (_, i) => `org/issue-${i}`);
+      const prs = Array.from({ length: 20 }, (_, i) => `org/pr-${i}`);
+      const actions = Array.from({ length: 20 }, (_, i) => `org/action-${i}`);
+      const result = migrateLockedRepos({ issues, pullRequests: prs, actions });
+      expect(Array.isArray(result)).toBe(true);
+      expect((result as string[]).length).toBe(50);
+      // First 20 should be issues (default preferred), then first 20 PRs, then first 10 actions
+      expect((result as string[])[0]).toBe("org/issue-0");
+      expect((result as string[])[20]).toBe("org/pr-0");
+      expect((result as string[])[40]).toBe("org/action-0");
+      expect((result as string[])[49]).toBe("org/action-9");
+    });
+  });
+
+  describe("lockRepo cap enforcement", () => {
+    it("silently no-ops when at LOCKED_REPOS_CAP", () => {
+      // Fill to cap
+      for (let i = 0; i < 50; i++) {
+        lockRepo(`org/repo-${i}`);
+      }
+      expect(viewState.lockedRepos.length).toBe(50);
+      // Attempt to add one more
+      lockRepo("org/repo-overflow");
+      expect(viewState.lockedRepos.length).toBe(50);
+      expect(viewState.lockedRepos).not.toContain("org/repo-overflow");
+    });
   });
 });
