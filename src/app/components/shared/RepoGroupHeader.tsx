@@ -15,7 +15,7 @@ interface RepoGroupHeaderProps {
 
 export default function RepoGroupHeader(props: RepoGroupHeaderProps) {
   return (
-    <div class={`group/repo-header flex items-center bg-info/20 border-y border-base-300 hover:bg-info/25 transition-colors duration-300 ${props.isHighlighted ? "animate-reorder-highlight" : ""}`}>
+    <div class={`group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors duration-300 ${props.isHighlighted ? "animate-reorder-highlight" : ""}`}>
       <button
         onClick={() => props.onToggle()}
         aria-expanded={props.isExpanded}
