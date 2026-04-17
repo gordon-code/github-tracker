@@ -138,6 +138,11 @@ function loadViewState(): ViewState {
     }
     const obj = parsed as Record<string, unknown>;
     obj.lockedRepos = migrateLockedRepos(obj.lockedRepos, obj.lastActiveTab);
+    // Cap lockedRepos before Zod validates — an oversized array would fail
+    // .max(LOCKED_REPOS_CAP) and reject the ENTIRE ViewState, wiping all settings.
+    if (Array.isArray(obj.lockedRepos) && obj.lockedRepos.length > LOCKED_REPOS_CAP) {
+      obj.lockedRepos = obj.lockedRepos.slice(0, LOCKED_REPOS_CAP);
+    }
     const result = ViewStateSchema.safeParse(parsed);
     if (result.success) return result.data;
     return ViewStateSchema.parse({});
