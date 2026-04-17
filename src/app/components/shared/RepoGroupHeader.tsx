@@ -19,7 +19,7 @@ export default function RepoGroupHeader(props: RepoGroupHeaderProps) {
       <button
         onClick={() => props.onToggle()}
         aria-expanded={props.isExpanded}
-        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base font-bold repo-header-text"
+        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold repo-header-text"
       >
         <ChevronIcon size="md" rotated={!props.isExpanded} />
         {props.repoFullName}
