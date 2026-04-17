@@ -19,6 +19,7 @@ interface ActionsTabProps {
   workflowRuns: WorkflowRun[];
   loading?: boolean;
   hasUpstreamRepos?: boolean;
+  configRepoNames?: string[];
   refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
 }
@@ -131,7 +132,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   }
 
   const activeRepoNames = createMemo(() =>
-    [...new Set(props.workflowRuns.map((r) => r.repoFullName))]
+    props.configRepoNames ?? [...new Set(props.workflowRuns.map((r) => r.repoFullName))]
   );
 
   const ignoredWorkflowRuns = createMemo(() =>
@@ -201,18 +202,18 @@ export default function ActionsTab(props: ActionsTabProps) {
   });
 
   const repoGroups = createMemo(() =>
-    orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos.actions)
+    orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos)
   );
 
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos("actions", names);
+    pruneLockedRepos(names);
   });
 
   const highlightedReposActions = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos.actions,
+    () => viewState.lockedRepos,
     () => ignoredWorkflowRuns().length,
     () => JSON.stringify(viewState.tabFilters.actions),
   );
@@ -327,7 +328,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                     </Show>
                   </button>
                   <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                  <RepoLockControls tab="actions" repoFullName={repoGroup.repoFullName} />
+                  <RepoLockControls repoFullName={repoGroup.repoFullName} />
                 </div>
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
                   {(peek) => (

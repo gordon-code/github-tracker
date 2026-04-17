@@ -26,6 +26,7 @@ export interface IssuesTabProps {
   allUsers?: { login: string; label: string }[];
   trackedUsers?: TrackedUser[];
   monitoredRepos?: RepoRef[];
+  configRepoNames?: string[];
   refreshTick?: number;
 }
 
@@ -191,7 +192,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
   const repoGroups = createMemo(() =>
-    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos.issues)
+    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
   );
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
@@ -205,7 +206,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   });
 
   const activeRepoNames = createMemo(() =>
-    [...new Set(props.issues.map((i) => i.repoFullName))]
+    props.configRepoNames ?? [...new Set(props.issues.map((i) => i.repoFullName))]
   );
 
   createEffect(() => {
@@ -217,7 +218,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos("issues", names);
+    pruneLockedRepos(names);
   });
 
   const trackedIssueIds = createMemo(() =>
@@ -228,7 +229,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos.issues,
+    () => viewState.lockedRepos,
     () => ignoredIssues().length,
     () => JSON.stringify(viewState.tabFilters.issues),
   );
@@ -386,7 +387,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                         </Show>
                       </button>
                       <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                      <RepoLockControls tab="issues" repoFullName={repoGroup.repoFullName} />
+                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
                     </div>
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">

@@ -28,8 +28,9 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
+import { produce } from "solid-js/store";
 import ActionsTab from "../../../src/app/components/dashboard/ActionsTab";
-import { resetViewState } from "../../../src/app/stores/view";
+import { viewState, setViewState, resetViewState } from "../../../src/app/stores/view";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -69,5 +70,37 @@ describe("ActionsTab — upstream exclusion note", () => {
       <ActionsTab workflowRuns={runs} hasUpstreamRepos={true} />
     ));
     screen.getByText(/workflow runs are not tracked for upstream/i);
+  });
+});
+
+describe("ActionsTab — empty-repo state preservation", () => {
+  it("preserves expand/lock state for empty repos in configRepoNames", () => {
+    setViewState(produce((s) => {
+      s.expandedRepos.actions["owner/empty-repo"] = true;
+      s.expandedRepos.actions["owner/stale-repo"] = true;
+      s.lockedRepos = ["owner/empty-repo", "owner/stale-repo"];
+    }));
+
+    render(() => (
+      <ActionsTab
+        workflowRuns={[makeWorkflowRun({ repoFullName: "owner/active-repo" })]}
+        configRepoNames={["owner/active-repo", "owner/empty-repo"]}
+      />
+    ));
+
+    // Empty repo preserved (in configRepoNames but no items)
+    expect(viewState.expandedRepos.actions["owner/empty-repo"]).toBe(true);
+    expect(viewState.lockedRepos).toContain("owner/empty-repo");
+    // Stale repo pruned (not in configRepoNames)
+    expect(viewState.expandedRepos.actions["owner/stale-repo"]).toBeUndefined();
+    expect(viewState.lockedRepos).not.toContain("owner/stale-repo");
+  });
+
+  it("falls back to item-derived names when configRepoNames not provided", () => {
+    render(() => (
+      <ActionsTab workflowRuns={[]} />
+    ));
+    // With empty items and no configRepoNames, guard returns early — no pruning
+    expect(viewState.lockedRepos).toEqual([]);
   });
 });
