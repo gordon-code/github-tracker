@@ -8,6 +8,7 @@
 # Rules validated:
 #   1. Path Allowlist — blocks all paths except known SPA routes, /assets/*, /api/*
 #   2. Scanner User-Agents — challenges empty/malicious User-Agent strings
+#   3. Origin Gate — blocks /api/* requests without valid Origin header
 #   Rate limit rule exists but is not tested here (triggers a 10-minute IP block).
 
 set -euo pipefail
@@ -58,9 +59,12 @@ TESTS=(
   "200|GET /privacy|${BASE}/privacy"
   "307|GET /index.html (html_handling redirect)|${BASE}/index.html"
   "200|GET /assets/nonexistent.js|${BASE}/assets/nonexistent.js"
-  "200|GET /api/health|${BASE}/api/health"
-  "400|POST /api/oauth/token (no body)|-X|POST|${BASE}/api/oauth/token"
-  "404|GET /api/nonexistent|${BASE}/api/nonexistent"
+  "200|GET /api/health (with Origin)|-H|Origin: ${BASE}|${BASE}/api/health"
+  "400|POST /api/oauth/token (no body)|-X|POST|-H|Origin: ${BASE}|${BASE}/api/oauth/token"
+  "404|GET /api/nonexistent|-H|Origin: ${BASE}|${BASE}/api/nonexistent"
+  # Rule 3: Origin gate — API requests without valid Origin are blocked at WAF
+  "403|GET /api/health (no Origin)|${BASE}/api/health"
+  "403|POST /api/oauth/token (wrong Origin)|-X|POST|-H|Origin: https://evil.example.com|${BASE}/api/oauth/token"
   # Rule 1: Path Allowlist — blocked paths
   "403|GET /wp-admin|${BASE}/wp-admin"
   "403|GET /wp-login.php|${BASE}/wp-login.php"
