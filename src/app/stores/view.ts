@@ -125,7 +125,7 @@ export function migrateLockedRepos(raw: unknown, lastActiveTab?: unknown): unkno
       }
     }
   }
-  return result;
+  return result.slice(0, LOCKED_REPOS_CAP);
 }
 
 function loadViewState(): ViewState {
@@ -322,7 +322,7 @@ export function pruneExpandedRepos(
 
 export function lockRepo(repoFullName: string): void {
   setViewState(produce((draft) => {
-    if (!draft.lockedRepos.includes(repoFullName)) {
+    if (!draft.lockedRepos.includes(repoFullName) && draft.lockedRepos.length < LOCKED_REPOS_CAP) {
       draft.lockedRepos.push(repoFullName);
     }
   }));
