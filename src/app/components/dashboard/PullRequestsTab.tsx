@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
 import type { PullRequest, RepoRef } from "../../services/api";
-import { deriveInvolvementRoles, prSizeCategory, formatStarCount } from "../../lib/format";
+import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -16,7 +16,7 @@ import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import ChevronIcon from "../shared/ChevronIcon";
+import RepoGroupHeader from "../shared/RepoGroupHeader";
 import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
@@ -458,86 +458,83 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
                 return (
                   <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
-                    <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposPRs().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
-                      <button
-                        onClick={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
-                        aria-expanded={isExpanded()}
-                        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
-                      >
-                        <ChevronIcon size="md" rotated={!isExpanded()} />
-                        {repoGroup.repoFullName}
+                    <RepoGroupHeader
+                      repoFullName={repoGroup.repoFullName}
+                      starCount={repoGroup.starCount}
+                      isExpanded={isExpanded()}
+                      isHighlighted={highlightedReposPRs().has(repoGroup.repoFullName)}
+                      onToggle={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                      badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
                             <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                           </Tooltip>
                         </Show>
-                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
-                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
-                            ★ {formatStarCount(repoGroup.starCount!)}
+                      }
+                      trailing={
+                        <>
+                          <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
+                          <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                        </>
+                      }
+                    >
+                      <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
+                        <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
+                        <Show when={summaryMeta().checks.success > 0}>
+                          <span class="flex items-center gap-0.5">
+                            <span class="inline-block w-2 h-2 rounded-full bg-success" />
+                            <span>{summaryMeta().checks.success}</span>
                           </span>
                         </Show>
-                        <Show when={!isExpanded()}>
-                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
-                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
-                            <Show when={summaryMeta().checks.success > 0}>
-                              <span class="flex items-center gap-0.5">
-                                <span class="inline-block w-2 h-2 rounded-full bg-success" />
-                                <span>{summaryMeta().checks.success}</span>
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().checks.failure > 0}>
-                              <span class="flex items-center gap-0.5">
-                                <span class="inline-block w-2 h-2 rounded-full bg-error" />
-                                <span>{summaryMeta().checks.failure}</span>
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().checks.pending > 0}>
-                              <span class="flex items-center gap-0.5">
-                                <span class="inline-block w-2 h-2 rounded-full bg-warning" />
-                                <span>{summaryMeta().checks.pending}</span>
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().checks.conflict > 0}>
-                              <span class="badge badge-warning badge-sm gap-0.5">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                </svg>
-                                {summaryMeta().checks.conflict === 1 ? "Conflict" : `Conflicts ×${summaryMeta().checks.conflict}`}
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().reviews.APPROVED > 0}>
-                              <span class="badge badge-success badge-sm">
-                                {`Approved ×${summaryMeta().reviews.APPROVED}`}
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
-                              <span class="badge badge-warning badge-sm">
-                                {`Changes ×${summaryMeta().reviews.CHANGES_REQUESTED}`}
-                              </span>
-                            </Show>
-                            <Show when={summaryMeta().reviews.REVIEW_REQUIRED > 0}>
-                              <span class="badge badge-info badge-sm">
-                                {`Needs review ×${summaryMeta().reviews.REVIEW_REQUIRED}`}
-                              </span>
-                            </Show>
-                            <For each={summaryMeta().roles}>
-                              {([role, count]) => (
-                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                  role === "author" ? "bg-primary/10 text-primary" :
-                                  role === "reviewer" ? "bg-secondary/10 text-secondary" :
-                                  role === "assignee" ? "bg-accent/10 text-accent" :
-                                  "bg-base-300 text-base-content/70"
-                                }`}>
-                                  {`${role} ×${count}`}
-                                </span>
-                              )}
-                            </For>
+                        <Show when={summaryMeta().checks.failure > 0}>
+                          <span class="flex items-center gap-0.5">
+                            <span class="inline-block w-2 h-2 rounded-full bg-error" />
+                            <span>{summaryMeta().checks.failure}</span>
                           </span>
                         </Show>
-                      </button>
-                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
-                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                    </div>
+                        <Show when={summaryMeta().checks.pending > 0}>
+                          <span class="flex items-center gap-0.5">
+                            <span class="inline-block w-2 h-2 rounded-full bg-warning" />
+                            <span>{summaryMeta().checks.pending}</span>
+                          </span>
+                        </Show>
+                        <Show when={summaryMeta().checks.conflict > 0}>
+                          <span class="badge badge-warning badge-sm gap-0.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                            {summaryMeta().checks.conflict === 1 ? "Conflict" : `Conflicts ×${summaryMeta().checks.conflict}`}
+                          </span>
+                        </Show>
+                        <Show when={summaryMeta().reviews.APPROVED > 0}>
+                          <span class="badge badge-success badge-sm">
+                            {`Approved ×${summaryMeta().reviews.APPROVED}`}
+                          </span>
+                        </Show>
+                        <Show when={summaryMeta().reviews.CHANGES_REQUESTED > 0}>
+                          <span class="badge badge-warning badge-sm">
+                            {`Changes ×${summaryMeta().reviews.CHANGES_REQUESTED}`}
+                          </span>
+                        </Show>
+                        <Show when={summaryMeta().reviews.REVIEW_REQUIRED > 0}>
+                          <span class="badge badge-info badge-sm">
+                            {`Needs review ×${summaryMeta().reviews.REVIEW_REQUIRED}`}
+                          </span>
+                        </Show>
+                        <For each={summaryMeta().roles}>
+                          {([role, count]) => (
+                            <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                              role === "author" ? "bg-primary/10 text-primary" :
+                              role === "reviewer" ? "bg-secondary/10 text-secondary" :
+                              role === "assignee" ? "bg-accent/10 text-accent" :
+                              "bg-base-300 text-base-content/70"
+                            }`}>
+                              {`${role} ×${count}`}
+                            </span>
+                          )}
+                        </For>
+                      </span>
+                    </RepoGroupHeader>
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
                       {(peek) => (
                         <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">

@@ -461,7 +461,7 @@ describe("PullRequestsTab — star count in repo headers", () => {
       />
     ));
 
-    screen.getByText("★ 1.2k");
+    screen.getByLabelText("1234 stars");
   });
 
   it("does not show star display when starCount is undefined", () => {
