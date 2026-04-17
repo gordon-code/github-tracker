@@ -6,6 +6,7 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
+const LOCKED_REPOS_CAP = 50;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -93,7 +94,7 @@ export const ViewStateSchema = z.object({
     pullRequests: {},
     actions: {},
   }),
-  lockedRepos: z.array(z.string()).default([]),
+  lockedRepos: z.array(z.string().max(200)).max(LOCKED_REPOS_CAP).default([]),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
 });
 
@@ -132,6 +133,9 @@ function loadViewState(): ViewState {
     const raw = localStorage.getItem(VIEW_STORAGE_KEY);
     if (raw === null) return ViewStateSchema.parse({});
     const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return ViewStateSchema.parse({});
+    }
     const obj = parsed as Record<string, unknown>;
     obj.lockedRepos = migrateLockedRepos(obj.lockedRepos, obj.lastActiveTab);
     const result = ViewStateSchema.safeParse(parsed);
