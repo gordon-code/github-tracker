@@ -58,9 +58,10 @@ TESTS=(
   "200|GET /privacy|${BASE}/privacy"
   "307|GET /index.html (html_handling redirect)|${BASE}/index.html"
   "200|GET /assets/nonexistent.js|${BASE}/assets/nonexistent.js"
-  "200|GET /api/health|${BASE}/api/health"
-  "400|POST /api/oauth/token (no body)|-X|POST|${BASE}/api/oauth/token"
-  "404|GET /api/nonexistent|${BASE}/api/nonexistent"
+  "200|GET /api/health (with origin)|-H|Origin: ${BASE}|${BASE}/api/health"
+  "400|POST /api/oauth/token (with origin)|-X|POST|-H|Origin: ${BASE}|${BASE}/api/oauth/token"
+  "404|GET /api/nonexistent (with origin)|-H|Origin: ${BASE}|${BASE}/api/nonexistent"
+  "403|GET /api/health (no origin)|${BASE}/api/health"
   # Rule 1: Path Allowlist — blocked paths
   "403|GET /wp-admin|${BASE}/wp-admin"
   "403|GET /wp-login.php|${BASE}/wp-login.php"
@@ -103,7 +104,7 @@ TESTS=(
 # --- Run in parallel (:::  passes array elements directly, avoiding stdin quoting issues) ---
 TOTAL=${#TESTS[@]}
 
-OUTPUT=$(parallel --will-cite -k -j10 --timeout 15 run_spec ::: "${TESTS[@]}") || true
+OUTPUT=$(parallel --will-cite -k -j2 --delay 0.3 --timeout 15 run_spec ::: "${TESTS[@]}") || true
 
 # Detect infrastructure failure (parallel crashed, no tests ran)
 if [[ -z "$OUTPUT" ]]; then
