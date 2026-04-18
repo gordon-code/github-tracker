@@ -63,24 +63,21 @@ describe("RepoGroupHeader", () => {
     const { getByRole } = render(() => (
       <RepoGroupHeader {...defaultProps} onToggle={onToggle} />
     ));
-    fireEvent.click(getByRole("button"));
+    fireEvent.click(getByRole("button", { name: /owner\/repo/ }));
     expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenCalledWith();
   });
 
-  it("renders children when collapsed", () => {
+  it("renders collapsedSummary when collapsed", () => {
     const { getByText } = render(() => (
-      <RepoGroupHeader {...defaultProps} isExpanded={false}>
-        <span>collapsed content</span>
-      </RepoGroupHeader>
+      <RepoGroupHeader {...defaultProps} isExpanded={false} collapsedSummary={<span>collapsed content</span>} />
     ));
     expect(getByText("collapsed content")).toBeTruthy();
   });
 
-  it("hides children when expanded", () => {
+  it("hides collapsedSummary when expanded", () => {
     const { queryByText } = render(() => (
-      <RepoGroupHeader {...defaultProps} isExpanded={true}>
-        <span>collapsed content</span>
-      </RepoGroupHeader>
+      <RepoGroupHeader {...defaultProps} isExpanded={true} collapsedSummary={<span>collapsed content</span>} />
     ));
     expect(queryByText("collapsed content")).toBeNull();
   });
@@ -119,13 +116,18 @@ describe("RepoGroupHeader", () => {
     const { getByRole } = render(() => (
       <RepoGroupHeader {...defaultProps} isExpanded={true} />
     ));
-    expect(getByRole("button").getAttribute("aria-expanded")).toBe("true");
+    expect(getByRole("button", { name: /owner\/repo/ }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("sets aria-expanded=false when collapsed", () => {
     const { getByRole } = render(() => (
       <RepoGroupHeader {...defaultProps} isExpanded={false} />
     ));
-    expect(getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    expect(getByRole("button", { name: /owner\/repo/ }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("applies repo-header-text class to the button", () => {
+    const { getByRole } = render(() => <RepoGroupHeader {...defaultProps} />);
+    expect(getByRole("button", { name: /owner\/repo/ }).className).toContain("repo-header-text");
   });
 });

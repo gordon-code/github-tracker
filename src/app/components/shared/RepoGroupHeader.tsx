@@ -8,7 +8,7 @@ interface RepoGroupHeaderProps {
   isExpanded: boolean;
   isHighlighted?: boolean;
   onToggle: () => void;
-  children?: JSX.Element;
+  collapsedSummary?: JSX.Element;
   trailing?: JSX.Element;
   badges?: JSX.Element;
 }
@@ -30,7 +30,7 @@ export default function RepoGroupHeader(props: RepoGroupHeaderProps) {
           </span>
         </Show>
         <Show when={!props.isExpanded}>
-          {props.children}
+          {props.collapsedSummary}
         </Show>
       </button>
       {props.trailing}

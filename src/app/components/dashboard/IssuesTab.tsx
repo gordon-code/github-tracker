@@ -370,22 +370,23 @@ export default function IssuesTab(props: IssuesTabProps) {
                           <RepoLockControls repoFullName={repoGroup.repoFullName} />
                         </>
                       }
-                    >
-                      <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                        <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                        <For each={roleSummary()}>
-                          {([role, count]) => (
-                            <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                              role === "author" ? "bg-primary/10 text-primary" :
-                              role === "assignee" ? "bg-secondary/10 text-secondary" :
-                              "bg-base-300 text-base-content/70"
-                            }`}>
-                              {role} ×{count}
-                            </span>
-                          )}
-                        </For>
-                      </span>
-                    </RepoGroupHeader>
+                      collapsedSummary={
+                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                          <For each={roleSummary()}>
+                            {([role, count]) => (
+                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                role === "author" ? "bg-primary/10 text-primary" :
+                                role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                "bg-base-300 text-base-content/70"
+                              }`}>
+                                {role} ×{count}
+                              </span>
+                            )}
+                          </For>
+                        </span>
+                      }
+                    />
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>

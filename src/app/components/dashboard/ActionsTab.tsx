@@ -277,7 +277,7 @@ export default function ActionsTab(props: ActionsTabProps) {
               sortWorkflowsByStatus(repoGroup.workflows)
             );
 
-            const collapsedSummary = createMemo(() => {
+            const workflowCounts = createMemo(() => {
               const wfs = repoGroup.workflows;
               const total = wfs.length;
               let passed = 0;
@@ -305,29 +305,30 @@ export default function ActionsTab(props: ActionsTabProps) {
                       <RepoLockControls repoFullName={repoGroup.repoFullName} />
                     </>
                   }
-                >
-                  <span class="ml-auto text-xs font-normal text-base-content/60">
-                    {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
-                    <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
-                      {": "}
-                      <Show when={collapsedSummary().passed > 0}>
-                        <span>{collapsedSummary().passed} passed</span>
+                  collapsedSummary={
+                    <span class="ml-auto text-xs font-normal text-base-content/60">
+                      {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
+                      <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
+                        {": "}
+                        <Show when={workflowCounts().passed > 0}>
+                          <span>{workflowCounts().passed} passed</span>
+                        </Show>
+                        <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0)}>
+                          {", "}
+                        </Show>
+                        <Show when={workflowCounts().failed > 0}>
+                          <span class="text-error font-medium">{workflowCounts().failed} failed</span>
+                        </Show>
+                        <Show when={workflowCounts().failed > 0 && workflowCounts().running > 0}>
+                          {", "}
+                        </Show>
+                        <Show when={workflowCounts().running > 0}>
+                          <span>{workflowCounts().running} running</span>
+                        </Show>
                       </Show>
-                      <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
-                        {", "}
-                      </Show>
-                      <Show when={collapsedSummary().failed > 0}>
-                        <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
-                      </Show>
-                      <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
-                        {", "}
-                      </Show>
-                      <Show when={collapsedSummary().running > 0}>
-                        <span>{collapsedSummary().running} running</span>
-                      </Show>
-                    </Show>
-                  </span>
-                </RepoGroupHeader>
+                    </span>
+                  }
+                />
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
                   {(peek) => (
                     <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
