@@ -10,9 +10,9 @@ import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes
 import FilterToolbar from "../shared/FilterToolbar";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import ChevronIcon from "../shared/ChevronIcon";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
-import { deriveInvolvementRoles, formatStarCount } from "../../lib/format";
+import { deriveInvolvementRoles } from "../../lib/format";
+import RepoGroupHeader from "../shared/RepoGroupHeader";
 import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -351,44 +351,42 @@ export default function IssuesTab(props: IssuesTabProps) {
 
                 return (
                   <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
-                    <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposIssues().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
-                      <button
-                        onClick={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
-                        aria-expanded={isExpanded()}
-                        class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
-                      >
-                        <ChevronIcon size="md" rotated={!isExpanded()} />
-                        {repoGroup.repoFullName}
+                    <RepoGroupHeader
+                      repoFullName={repoGroup.repoFullName}
+                      starCount={repoGroup.starCount}
+                      isExpanded={isExpanded()}
+                      isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
+                      onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
+                      badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
                             <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                           </Tooltip>
                         </Show>
-                        <Show when={repoGroup.starCount != null && repoGroup.starCount > 0}>
-                          <span class="text-xs text-base-content/50 font-normal" aria-label={`${repoGroup.starCount} stars`}>
-                            ★ {formatStarCount(repoGroup.starCount!)}
-                          </span>
-                        </Show>
-                        <Show when={!isExpanded()}>
-                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                            <For each={roleSummary()}>
-                              {([role, count]) => (
-                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                  role === "author" ? "bg-primary/10 text-primary" :
-                                  role === "assignee" ? "bg-secondary/10 text-secondary" :
-                                  "bg-base-300 text-base-content/70"
-                                }`}>
-                                  {role} ×{count}
-                                </span>
-                              )}
-                            </For>
-                          </span>
-                        </Show>
-                      </button>
-                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                    </div>
+                      }
+                      trailing={
+                        <>
+                          <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
+                          <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                        </>
+                      }
+                      collapsedSummary={
+                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                          <For each={roleSummary()}>
+                            {([role, count]) => (
+                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                role === "author" ? "bg-primary/10 text-primary" :
+                                role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                "bg-base-300 text-base-content/70"
+                              }`}>
+                                {role} ×{count}
+                              </span>
+                            )}
+                          </For>
+                        </span>
+                      }
+                    />
                     <Show when={isExpanded()}>
                       <div role="list" class="divide-y divide-base-300">
                         <For each={repoGroup.items}>

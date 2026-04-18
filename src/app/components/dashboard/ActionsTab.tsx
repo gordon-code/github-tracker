@@ -7,7 +7,7 @@ import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import type { FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
-import ChevronIcon from "../shared/ChevronIcon";
+import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
@@ -277,7 +277,7 @@ export default function ActionsTab(props: ActionsTabProps) {
               sortWorkflowsByStatus(repoGroup.workflows)
             );
 
-            const collapsedSummary = createMemo(() => {
+            const workflowCounts = createMemo(() => {
               const wfs = repoGroup.workflows;
               const total = wfs.length;
               let passed = 0;
@@ -294,42 +294,41 @@ export default function ActionsTab(props: ActionsTabProps) {
 
             return (
               <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
-                {/* Repo header */}
-                <div class={`group/repo-header flex items-center bg-base-200/60 border-y border-base-300 hover:bg-base-200 transition-colors duration-300 ${highlightedReposActions().has(repoGroup.repoFullName) ? "animate-reorder-highlight" : ""}`}>
-                  <button
-                    onClick={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
-                    aria-expanded={isExpanded()}
-                    class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-sm font-semibold text-base-content"
-                  >
-                    <ChevronIcon size="md" rotated={!isExpanded()} />
-                    {repoGroup.repoFullName}
-                    <Show when={!isExpanded()}>
-                      <span class="ml-auto text-xs font-normal text-base-content/60">
-                        {collapsedSummary().total} workflow{collapsedSummary().total !== 1 ? "s" : ""}
-                        <Show when={collapsedSummary().passed > 0 || collapsedSummary().failed > 0 || collapsedSummary().running > 0}>
-                          {": "}
-                          <Show when={collapsedSummary().passed > 0}>
-                            <span>{collapsedSummary().passed} passed</span>
-                          </Show>
-                          <Show when={collapsedSummary().passed > 0 && (collapsedSummary().failed > 0 || collapsedSummary().running > 0)}>
-                            {", "}
-                          </Show>
-                          <Show when={collapsedSummary().failed > 0}>
-                            <span class="text-error font-medium">{collapsedSummary().failed} failed</span>
-                          </Show>
-                          <Show when={collapsedSummary().failed > 0 && collapsedSummary().running > 0}>
-                            {", "}
-                          </Show>
-                          <Show when={collapsedSummary().running > 0}>
-                            <span>{collapsedSummary().running} running</span>
-                          </Show>
+                <RepoGroupHeader
+                  repoFullName={repoGroup.repoFullName}
+                  isExpanded={isExpanded()}
+                  isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
+                  onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                  trailing={
+                    <>
+                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
+                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                    </>
+                  }
+                  collapsedSummary={
+                    <span class="ml-auto text-xs font-normal text-base-content/60">
+                      {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
+                      <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
+                        {": "}
+                        <Show when={workflowCounts().passed > 0}>
+                          <span>{workflowCounts().passed} passed</span>
                         </Show>
-                      </span>
-                    </Show>
-                  </button>
-                  <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                  <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                </div>
+                        <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0)}>
+                          {", "}
+                        </Show>
+                        <Show when={workflowCounts().failed > 0}>
+                          <span class="text-error font-medium">{workflowCounts().failed} failed</span>
+                        </Show>
+                        <Show when={workflowCounts().failed > 0 && workflowCounts().running > 0}>
+                          {", "}
+                        </Show>
+                        <Show when={workflowCounts().running > 0}>
+                          <span>{workflowCounts().running} running</span>
+                        </Show>
+                      </Show>
+                    </span>
+                  }
+                />
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
                   {(peek) => (
                     <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">

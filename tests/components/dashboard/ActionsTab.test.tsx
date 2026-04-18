@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 import { makeWorkflowRun } from "../../helpers/index";
 
 // ── localStorage mock ─────────────────────────────────────────────────────────
@@ -102,5 +103,46 @@ describe("ActionsTab — empty-repo state preservation", () => {
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
+  });
+});
+
+// ── ActionsTab — RepoGroupHeader integration ──────────────────────────────────
+
+describe("ActionsTab — RepoGroupHeader rendering", () => {
+  it("renders the repo name in the group header when workflow runs are present", () => {
+    const runs = [makeWorkflowRun({ repoFullName: "owner/my-repo" })];
+    render(() => (
+      <ActionsTab workflowRuns={runs} />
+    ));
+    // The header toggle button has aria-expanded, distinguishing it from pin/unpin buttons
+    const headerBtn = screen.getAllByRole("button", { name: /owner\/my-repo/i })
+      .find(btn => btn.hasAttribute("aria-expanded"));
+    expect(headerBtn).toBeTruthy();
+  });
+
+  it("toggles repo group expanded state when header button is clicked", async () => {
+    const user = userEvent.setup();
+    const runs = [makeWorkflowRun({ repoFullName: "owner/repo" })];
+
+    render(() => (
+      <ActionsTab workflowRuns={runs} />
+    ));
+
+    const headerBtn = screen.getAllByRole("button", { name: /owner\/repo/i })
+      .find(btn => btn.hasAttribute("aria-expanded"))!;
+
+    // Initially collapsed
+    expect(headerBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBeFalsy();
+
+    // Click to expand
+    await user.click(headerBtn);
+    expect(headerBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+
+    // Click again to collapse
+    await user.click(headerBtn);
+    expect(headerBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(viewState.expandedRepos.actions["owner/repo"]).toBeFalsy();
   });
 });
