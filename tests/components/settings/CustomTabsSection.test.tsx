@@ -175,29 +175,35 @@ describe("CustomTabsSection — table rendering", () => {
   });
 });
 
-describe("CustomTabsSection — delete button", () => {
-  it("calls removeCustomTab when confirmed", () => {
-    const confirmMock = vi.fn().mockReturnValue(true);
-    globalThis.confirm = confirmMock;
+describe("CustomTabsSection — inline delete confirmation", () => {
+  it("shows inline confirmation on delete click", () => {
     renderSection([makeTab({ id: "t1", name: "Delete Me" })]);
     fireEvent.click(screen.getByRole("button", { name: /delete "Delete Me"/i }));
+    expect(screen.getByText("Delete?")).toBeDefined();
+    expect(screen.getByRole("button", { name: /confirm delete/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /cancel delete/i })).toBeDefined();
+  });
+
+  it("calls removeCustomTab when Yes is clicked", () => {
+    renderSection([makeTab({ id: "t1", name: "Delete Me" })]);
+    fireEvent.click(screen.getByRole("button", { name: /delete "Delete Me"/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
     expect(mockRemoveCustomTab).toHaveBeenCalledWith("t1");
   });
 
-  it("does not call removeCustomTab when cancelled", () => {
-    const confirmMock = vi.fn().mockReturnValue(false);
-    globalThis.confirm = confirmMock;
+  it("does not call removeCustomTab when No is clicked", () => {
     renderSection([makeTab({ id: "t1", name: "Keep Me" })]);
     fireEvent.click(screen.getByRole("button", { name: /delete "Keep Me"/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cancel delete/i }));
     expect(mockRemoveCustomTab).not.toHaveBeenCalled();
   });
 
-  it("shows confirm dialog with tab name", () => {
-    const confirmMock = vi.fn().mockReturnValue(false);
-    globalThis.confirm = confirmMock;
-    renderSection([makeTab({ name: "Precious Tab" })]);
-    fireEvent.click(screen.getByRole("button", { name: /delete "Precious Tab"/i }));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("Precious Tab"));
+  it("restores action buttons after cancel", () => {
+    renderSection([makeTab({ id: "t1", name: "Keep Me" })]);
+    fireEvent.click(screen.getByRole("button", { name: /delete "Keep Me"/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cancel delete/i }));
+    expect(screen.getByRole("button", { name: /delete "Keep Me"/i })).toBeDefined();
+    expect(screen.queryByText("Delete?")).toBeNull();
   });
 });
 
