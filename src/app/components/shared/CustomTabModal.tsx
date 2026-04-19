@@ -359,15 +359,16 @@ export default function CustomTabModal(props: CustomTabModalProps) {
             <div class="flex items-start gap-3">
               <div class="flex-1">
                 <p class="text-sm font-medium">Exclusive</p>
-                <p class="text-xs text-base-content/50 mt-0.5">
+                <p id="custom-tab-exclusive-desc" class="text-xs text-base-content/50 mt-0.5">
                   Own matching items — hide them from all other tabs (except Tracked)
                 </p>
               </div>
               <input
+                id="custom-tab-exclusive"
                 type="checkbox"
-                role="switch"
                 class="toggle toggle-primary mt-0.5"
                 checked={exclusive()}
+                aria-describedby="custom-tab-exclusive-desc"
                 onChange={(e) => setExclusive(e.currentTarget.checked)}
               />
             </div>

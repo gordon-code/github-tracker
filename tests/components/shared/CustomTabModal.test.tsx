@@ -217,7 +217,7 @@ describe("CustomTabModal — edit mode", () => {
 
   it("pre-populates exclusive from editingTab", () => {
     renderModal(true, makeTab({ exclusive: true }));
-    const toggle = screen.getByRole("switch") as HTMLInputElement;
+    const toggle = document.getElementById("custom-tab-exclusive") as HTMLInputElement;
     expect(toggle.checked).toBe(true);
   });
 

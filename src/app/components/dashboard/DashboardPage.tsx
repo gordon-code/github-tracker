@@ -338,6 +338,15 @@ export default function DashboardPage() {
     }
   });
 
+  // Close modal if the tab being edited is deleted (CR-014)
+  createEffect(() => {
+    const id = editingTabId();
+    if (id && !config.customTabs.some((t) => t.id === id)) {
+      setShowCustomTabModal(false);
+      setEditingTabId(null);
+    }
+  });
+
   // Auto-prune tracked items that are closed/merged (absent from is:open results)
   createEffect(() => {
     // IMPORTANT: Access reactive store fields BEFORE early-return guards
