@@ -464,13 +464,22 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 });
 
                 return (
-                  <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
+                  <Show
+                    when={!isEmpty()}
+                    fallback={
+                      <div class="flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 opacity-40" data-repo-group={repoGroup.repoFullName}>
+                        <span class="flex-1 text-sm text-base-content/60">{repoGroup.repoFullName}</span>
+                        <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                      </div>
+                    }
+                  >
+                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
                     <RepoGroupHeader
                       repoFullName={repoGroup.repoFullName}
                       starCount={repoGroup.starCount}
                       isExpanded={isExpanded()}
                       isHighlighted={highlightedReposPRs().has(repoGroup.repoFullName)}
-                      onToggle={() => { if (!isEmpty()) toggleExpandedRepo("pullRequests", repoGroup.repoFullName); }}
+                      onToggle={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
                       badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
@@ -485,14 +494,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         </>
                       }
                       collapsedSummary={
-                        <Show
-                          when={!isEmpty()}
-                          fallback={
-                            <span class="ml-auto text-xs font-normal italic text-base-content/40">
-                              No items match current filters
-                            </span>
-                          }
-                        >
                         <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                           <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
                           <Show when={summaryMeta().checks.success > 0}>
@@ -549,7 +550,6 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                             )}
                           </For>
                         </span>
-                        </Show>
                       }
                     />
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
@@ -667,6 +667,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       </div>
                     </Show>
                   </div>
+                  </Show>
                 );
               }}
             </For>

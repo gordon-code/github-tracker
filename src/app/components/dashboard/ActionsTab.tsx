@@ -300,12 +300,21 @@ export default function ActionsTab(props: ActionsTabProps) {
             });
 
             return (
-              <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
+              <Show
+                when={!isEmpty()}
+                fallback={
+                  <div class="flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 opacity-40" data-repo-group={repoGroup.repoFullName}>
+                    <span class="flex-1 text-sm text-base-content/60">{repoGroup.repoFullName}</span>
+                    <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                  </div>
+                }
+              >
+              <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
                 <RepoGroupHeader
                   repoFullName={repoGroup.repoFullName}
                   isExpanded={isExpanded()}
                   isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
-                  onToggle={() => { if (!isEmpty()) toggleExpandedRepo("actions", repoGroup.repoFullName); }}
+                  onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
                   trailing={
                     <>
                       <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
@@ -313,14 +322,6 @@ export default function ActionsTab(props: ActionsTabProps) {
                     </>
                   }
                   collapsedSummary={
-                    <Show
-                      when={!isEmpty()}
-                      fallback={
-                        <span class="ml-auto text-xs font-normal italic text-base-content/40">
-                          No items match current filters
-                        </span>
-                      }
-                    >
                     <span class="ml-auto text-xs font-normal text-base-content/60">
                       {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
                       <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
@@ -342,7 +343,6 @@ export default function ActionsTab(props: ActionsTabProps) {
                         </Show>
                       </Show>
                     </span>
-                    </Show>
                   }
                 />
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
@@ -382,6 +382,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   </div>
                 </Show>
               </div>
+              </Show>
             );
           }}
         </For>

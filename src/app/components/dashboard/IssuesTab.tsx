@@ -357,13 +357,22 @@ export default function IssuesTab(props: IssuesTabProps) {
                 });
 
                 return (
-                  <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
+                  <Show
+                    when={!isEmpty()}
+                    fallback={
+                      <div class="flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 opacity-40" data-repo-group={repoGroup.repoFullName}>
+                        <span class="flex-1 text-sm text-base-content/60">{repoGroup.repoFullName}</span>
+                        <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                      </div>
+                    }
+                  >
+                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
                     <RepoGroupHeader
                       repoFullName={repoGroup.repoFullName}
                       starCount={repoGroup.starCount}
                       isExpanded={isExpanded()}
                       isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
-                      onToggle={() => { if (!isEmpty()) toggleExpandedRepo("issues", repoGroup.repoFullName); }}
+                      onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
                       badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
@@ -378,29 +387,20 @@ export default function IssuesTab(props: IssuesTabProps) {
                         </>
                       }
                       collapsedSummary={
-                        <Show
-                          when={!isEmpty()}
-                          fallback={
-                            <span class="ml-auto text-xs font-normal italic text-base-content/40">
-                              No items match current filters
-                            </span>
-                          }
-                        >
-                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                            <For each={roleSummary()}>
-                              {([role, count]) => (
-                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                  role === "author" ? "bg-primary/10 text-primary" :
-                                  role === "assignee" ? "bg-secondary/10 text-secondary" :
-                                  "bg-base-300 text-base-content/70"
-                                }`}>
-                                  {role} ×{count}
-                                </span>
-                              )}
-                            </For>
-                          </span>
-                        </Show>
+                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                          <For each={roleSummary()}>
+                            {([role, count]) => (
+                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                role === "author" ? "bg-primary/10 text-primary" :
+                                role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                "bg-base-300 text-base-content/70"
+                              }`}>
+                                {role} ×{count}
+                              </span>
+                            )}
+                          </For>
+                        </span>
                       }
                     />
                     <Show when={isExpanded()}>
@@ -444,6 +444,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                       </div>
                     </Show>
                   </div>
+                  </Show>
                 );
               }}
             </For>
