@@ -1091,3 +1091,209 @@ describe("DashboardPage — tracked tab", () => {
     });
   });
 });
+
+// ── Exclusivity / isItemVisibleOnTab ─────────────────────────────────────────
+//
+// `isItemVisibleOnTab` and `exclusiveOwnership` are private to DashboardPage.
+// We test them indirectly by verifying that tab badge counts reflect the
+// exclusive ownership rules: items claimed by an exclusive custom tab are
+// hidden from builtin tabs (and vice versa — visible only on the owning tab).
+
+describe("DashboardPage — exclusive custom tabs", () => {
+  it("exclusive issues tab removes claimed items from the builtin Issues badge", async () => {
+    // Add an exclusive issues custom tab that claims all repos
+    configStore.addCustomTab({
+      id: "excl01",
+      name: "My Issues",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Issue B" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Both issues are claimed by the exclusive tab — builtin Issues badge = 0
+      const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
+    });
+  });
+
+  it("exclusive custom tab shows the claimed items in its own badge", async () => {
+    configStore.addCustomTab({
+      id: "excl02",
+      name: "Exclusive PRs",
+      baseType: "pullRequests",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 10, title: "PR A" }),
+        makePullRequest({ id: 11, title: "PR B" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // The custom tab badge shows the 2 claimed PRs
+      const customTab = screen.getByRole("tab", { name: /Exclusive PRs/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+      // The builtin Pull Requests badge is 0 (all claimed)
+      const prTab = screen.getByRole("tab", { name: /^Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("0");
+    });
+  });
+
+  it("non-exclusive custom tab does not remove items from builtin tabs", async () => {
+    configStore.addCustomTab({
+      id: "nonexcl01",
+      name: "My View",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Issue B" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Non-exclusive tab: builtin Issues badge still shows all items
+      const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("first exclusive tab wins when two exclusive tabs claim the same item", async () => {
+    // Two exclusive issues tabs — first one registered should win
+    configStore.addCustomTab({
+      id: "first01",
+      name: "First Exclusive",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+    configStore.addCustomTab({
+      id: "second01",
+      name: "Second Exclusive",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // First exclusive tab claims the item — count = 1
+      const firstTab = screen.getByRole("tab", { name: /First Exclusive/ });
+      expect(firstTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      // Second exclusive tab gets 0 — item already claimed
+      const secondTab = screen.getByRole("tab", { name: /Second Exclusive/ });
+      expect(secondTab.textContent?.replace(/\D+/g, "")).toBe("0");
+    });
+  });
+
+  it("exclusive actions tab removes runs from builtin Actions badge", async () => {
+    configStore.addCustomTab({
+      id: "exclact01",
+      name: "My Actions",
+      baseType: "actions",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+    viewStore.updateViewState({ showPrRuns: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, isPrRun: false }),
+        makeWorkflowRun({ id: 21, isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Exclusive actions tab claims both runs — builtin Actions badge = 0
+      const actionsTab = screen.getByRole("tab", { name: /^Actions/ });
+      expect(actionsTab.textContent?.replace(/\D+/g, "")).toBe("0");
+      // Custom tab shows 2
+      const customTab = screen.getByRole("tab", { name: /My Actions/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("exclusive issues tab does not affect PRs or Actions tabs", async () => {
+    // An exclusive ISSUES tab must not hide PRs or runs from their builtin tabs
+    configStore.addCustomTab({
+      id: "exclissues",
+      name: "Issues Only",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: true,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeIssue({ id: 1, title: "Claimed" })],
+      pullRequests: [makePullRequest({ id: 10, title: "PR A" })],
+      workflowRuns: [makeWorkflowRun({ id: 20, isPrRun: false })],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // PR and Actions tabs unaffected — still show their items
+      const prTab = screen.getByRole("tab", { name: /^Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      const actionsTab = screen.getByRole("tab", { name: /^Actions/ });
+      expect(actionsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+});
