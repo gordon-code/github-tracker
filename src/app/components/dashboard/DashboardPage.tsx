@@ -730,6 +730,8 @@ export default function DashboardPage() {
                           monitoredRepos={config.monitoredRepos}
                           configRepoNames={configRepoNames()}
                           refreshTick={refreshTick()}
+                          customTabId={tab().id}
+                          filterPreset={tab().filterPreset}
                         />
                       </Match>
                       <Match when={tab().baseType === "pullRequests"}>
@@ -743,6 +745,8 @@ export default function DashboardPage() {
                           monitoredRepos={config.monitoredRepos}
                           configRepoNames={configRepoNames()}
                           refreshTick={refreshTick()}
+                          customTabId={tab().id}
+                          filterPreset={tab().filterPreset}
                         />
                       </Match>
                       <Match when={tab().baseType === "actions"}>
@@ -753,6 +757,8 @@ export default function DashboardPage() {
                           configRepoNames={configRepoNames()}
                           refreshTick={refreshTick()}
                           hotPollingRunIds={hotPollingRunIds()}
+                          customTabId={tab().id}
+                          filterPreset={tab().filterPreset}
                         />
                       </Match>
                     </Switch>

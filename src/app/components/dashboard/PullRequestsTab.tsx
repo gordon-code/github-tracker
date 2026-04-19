@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, setCustomTabFilter, resetCustomTabFilters, PullRequestFiltersSchema, type PullRequestFilterField } from "../../stores/view";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
@@ -35,6 +35,8 @@ export interface PullRequestsTabProps {
   monitoredRepos?: RepoRef[];
   configRepoNames?: string[];
   refreshTick?: number;
+  customTabId?: string;
+  filterPreset?: Record<string, string>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -124,6 +126,8 @@ const prFilterGroups: FilterChipGroupDef[] = [
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
 
+  const tabKey = () => props.customTabId ?? "pullRequests";
+
   const trackedUserMap = createMemo(() =>
     new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
   );
@@ -138,13 +142,28 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
 
-  const showScopeFilter = createMemo(() =>
-    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
-  );
+  const showScopeFilter = createMemo(() => {
+    if (props.customTabId) return true;
+    return (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1;
+  });
 
   const ignoredPullRequests = createMemo(() =>
     viewState.ignoredItems.filter(i => i.type === "pullRequest")
   );
+
+  // Merge chain: schema defaults → preset → stored runtime overrides
+  const activeFilters = createMemo(() => {
+    if (props.customTabId) {
+      const stored = viewState.customTabFilters[props.customTabId] ?? {};
+      const preset = props.filterPreset ?? {};
+      const defaults = PullRequestFiltersSchema.parse({});
+      const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
+      // Resolve _self sentinel: replace with actual login
+      if (merged["user"] === "_self") merged["user"] = props.userLogin || "all";
+      return PullRequestFiltersSchema.safeParse(merged).data ?? defaults;
+    }
+    return viewState.tabFilters.pullRequests;
+  });
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;
@@ -162,18 +181,42 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
+  function handleFilterChange(field: string, value: string) {
+    if (props.customTabId) {
+      setCustomTabFilter(props.customTabId, field, value);
+    } else {
+      setTabFilter("pullRequests", field as PullRequestFilterField, value);
+    }
+  }
+
+  function handleResetFilters() {
+    if (props.customTabId) {
+      resetCustomTabFilters(props.customTabId);
+    } else {
+      resetAllTabFilters("pullRequests");
+    }
+  }
+
   // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
-    if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
-      setTabFilter("pullRequests", "scope", "involves_me");
+    if (!showScopeFilter() && activeFilters().scope !== "involves_me") {
+      if (props.customTabId) {
+        setCustomTabFilter(props.customTabId, "scope", "involves_me");
+      } else {
+        setTabFilter("pullRequests", "scope", "involves_me");
+      }
     }
   });
 
   // Auto-reset user filter when User filter group is hidden
   createEffect(() => {
     const users = props.allUsers;
-    if ((!users || users.length <= 1) && viewState.tabFilters.pullRequests.user !== "all") {
-      setTabFilter("pullRequests", "user", "all");
+    if ((!users || users.length <= 1) && activeFilters().user !== "all") {
+      if (props.customTabId) {
+        setCustomTabFilter(props.customTabId, "user", "all");
+      } else {
+        setTabFilter("pullRequests", "user", "all");
+      }
     }
   });
 
@@ -182,9 +225,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       item.enriched !== false ? item.reviewerLogins : undefined);
 
   const filteredSortedWithMeta = createMemo(() => {
-    const tabFilters = viewState.tabFilters.pullRequests;
+    const tabFilters = activeFilters();
     const ignoredIds = new Set(ignoredPullRequests().map((i) => i.id));
-    const globalFilter = viewState.globalFilter;
+    const globalFilter = props.customTabId ? null : viewState.globalFilter;
 
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
@@ -305,7 +348,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneExpandedRepos("pullRequests", names);
+    pruneExpandedRepos(tabKey(), names);
   });
 
   createEffect(() => {
@@ -317,7 +360,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
     getItems: () => props.pullRequests,
     getHotIds: () => props.hotPollingPRIds,
-    getExpandedRepos: () => viewState.expandedRepos.pullRequests,
+    getExpandedRepos: () => viewState.expandedRepos[tabKey()] ?? {},
     trackKey: (pr) => `${pr.checkStatus}|${pr.reviewDecision}`,
     itemLabel: (pr) => `#${pr.number} ${pr.title}`,
     itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
@@ -333,7 +376,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos,
     () => ignoredPullRequests().length,
-    () => JSON.stringify(viewState.tabFilters.pullRequests),
+    () => JSON.stringify(props.customTabId
+      ? (viewState.customTabFilters[props.customTabId] ?? {})
+      : viewState.tabFilters.pullRequests),
   );
 
   function handleIgnore(pr: PullRequest) {
@@ -362,21 +407,21 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
-            values={viewState.tabFilters.pullRequests}
+            values={activeFilters()}
             onChange={(f, v) => {
-              setTabFilter("pullRequests", f as PullRequestFilterField, v);
+              handleFilterChange(f, v);
               setPage(0);
             }}
             onResetAll={() => {
-              resetAllTabFilters("pullRequests");
+              handleResetFilters();
               setPage(0);
             }}
           />
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
             items={ignoredPullRequests()}
@@ -411,10 +456,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 />
               </svg>
               <p class="text-sm font-medium">
-                {viewState.tabFilters.pullRequests.scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
+                {activeFilters().scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
               </p>
               <p class="text-xs">
-                {viewState.tabFilters.pullRequests.scope === "all"
+                {activeFilters().scope === "all"
                   ? "No pull requests match your current filters."
                   : "PRs where you are the author, assignee, or reviewer will appear here."}
               </p>
@@ -424,7 +469,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <div class="divide-y divide-base-300">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isExpanded = () => !!viewState.expandedRepos.pullRequests[repoGroup.repoFullName];
+                const isExpanded = () => !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
 
                 const summaryMeta = createMemo(() => {
                   const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };
@@ -459,7 +504,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       starCount={repoGroup.starCount}
                       isExpanded={isExpanded()}
                       isHighlighted={highlightedReposPRs().has(repoGroup.repoFullName)}
-                      onToggle={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                      onToggle={() => toggleExpandedRepo(tabKey(), repoGroup.repoFullName)}
                       badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
@@ -546,7 +591,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         <For each={repoGroup.items}>
                           {(pr) => (
                             <div role="listitem" class={
-                              viewState.tabFilters.pullRequests.scope === "all" && isInvolvedItem(pr)
+                              activeFilters().scope === "all" && isInvolvedItem(pr)
                                 ? "border-l-2 border-l-primary"
                                 : undefined
                             }>
