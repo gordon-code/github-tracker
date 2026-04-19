@@ -467,7 +467,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                   <Show
                     when={!isEmpty()}
                     fallback={
-                      <div class="flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 gap-2 opacity-40" data-repo-group={repoGroup.repoFullName}>
+                      <div class="group/repo-header flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 gap-2 opacity-40" data-repo-group={repoGroup.repoFullName}>
                         <span class="h-3.5 w-3.5 shrink-0" />
                         <span class="flex-1 text-sm text-base-content/60">{repoGroup.repoFullName}</span>
                         <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
