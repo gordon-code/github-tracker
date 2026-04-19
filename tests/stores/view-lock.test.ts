@@ -108,13 +108,22 @@ describe("view lock store", () => {
         expect(viewState.lockedRepos).toEqual(["org/hidden", "org/c", "org/a"]);
       });
 
-      it("skips multiple invisible repos", () => {
+      it("skips multiple invisible repos when moving up", () => {
         lockRepo("org/a");
         lockRepo("org/h1");
         lockRepo("org/h2");
         lockRepo("org/d");
         moveLockedRepo("org/d", "up", new Set(["org/a", "org/d"]));
         expect(viewState.lockedRepos).toEqual(["org/d", "org/a", "org/h1", "org/h2"]);
+      });
+
+      it("skips multiple invisible repos when moving down", () => {
+        lockRepo("org/a");
+        lockRepo("org/h1");
+        lockRepo("org/h2");
+        lockRepo("org/d");
+        moveLockedRepo("org/a", "down", new Set(["org/a", "org/d"]));
+        expect(viewState.lockedRepos).toEqual(["org/h1", "org/h2", "org/d", "org/a"]);
       });
 
       it("no-op when already first visible and moving up", () => {
