@@ -372,10 +372,9 @@ export function moveLockedRepo(
 
     // Remove from old position and insert adjacent to target
     arr.splice(idx, 1);
-    // After removal, targetIdx shifts if source was before it
-    const insertIdx = direction === "up"
-      ? targetIdx - (idx < targetIdx ? 1 : 0)
-      : targetIdx - (idx < targetIdx ? 1 : 0) + 1;
+    // After removal, target index shifts down by 1 if source preceded it
+    const adjustedTarget = targetIdx - (idx < targetIdx ? 1 : 0);
+    const insertIdx = direction === "up" ? adjustedTarget : adjustedTarget + 1;
     arr.splice(insertIdx, 0, repoFullName);
   }));
 }

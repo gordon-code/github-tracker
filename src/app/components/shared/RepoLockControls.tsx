@@ -9,6 +9,8 @@ interface RepoLockControlsProps {
 }
 
 export default function RepoLockControls(props: RepoLockControlsProps) {
+  const visibleSet = createMemo(() => new Set(props.visibleLockedRepos));
+
   const lockInfo = createMemo(() => {
     const isLocked = viewState.lockedRepos.indexOf(props.repoFullName) !== -1;
     const visIdx = props.visibleLockedRepos.indexOf(props.repoFullName);
@@ -53,7 +55,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         <Tooltip content={lockInfo().isFirst ? "Already at top of pinned list" : "Move up"}>
           <button
             class="btn btn-ghost btn-xs"
-            onClick={() => withFlipAnimation(() => moveLockedRepo(props.repoFullName, "up", new Set(props.visibleLockedRepos)))}
+            onClick={() => withFlipAnimation(() => moveLockedRepo(props.repoFullName, "up", visibleSet()))}
             disabled={lockInfo().isFirst}
             aria-label={`Move ${props.repoFullName} up`}
           >
@@ -66,7 +68,7 @@ export default function RepoLockControls(props: RepoLockControlsProps) {
         <Tooltip content={lockInfo().isLast ? "Already at bottom of pinned list" : "Move down"}>
           <button
             class="btn btn-ghost btn-xs"
-            onClick={() => withFlipAnimation(() => moveLockedRepo(props.repoFullName, "down", new Set(props.visibleLockedRepos)))}
+            onClick={() => withFlipAnimation(() => moveLockedRepo(props.repoFullName, "down", visibleSet()))}
             disabled={lockInfo().isLast}
             aria-label={`Move ${props.repoFullName} down`}
           >
