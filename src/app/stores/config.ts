@@ -118,7 +118,8 @@ export function updateCustomTab(id: string, updates: Partial<CustomTab>): void {
     produce((draft) => {
       const idx = draft.customTabs.findIndex((t) => t.id === id);
       if (idx === -1) return;
-      Object.assign(draft.customTabs[idx], updates);
+      const { id: _ignored, ...safeUpdates } = updates;
+      Object.assign(draft.customTabs[idx], safeUpdates);
     })
   );
 }

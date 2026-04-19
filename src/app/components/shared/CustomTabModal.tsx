@@ -218,11 +218,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
 
             {/* Name */}
             <div class="form-control gap-1">
-              <label class="label py-0">
+              <label class="label py-0" for="custom-tab-name">
                 <span class="label-text font-medium">Name</span>
                 <span class="label-text-alt text-base-content/50">{name().length}/30</span>
               </label>
               <input
+                id="custom-tab-name"
                 type="text"
                 class="input input-bordered input-sm w-full"
                 placeholder="e.g., My OSAC PRs"
@@ -234,10 +235,11 @@ export default function CustomTabModal(props: CustomTabModalProps) {
 
             {/* Base type */}
             <div class="form-control gap-1">
-              <label class="label py-0">
+              <label class="label py-0" for="custom-tab-type">
                 <span class="label-text font-medium">Type</span>
               </label>
               <select
+                id="custom-tab-type"
                 class="select select-bordered select-sm w-full"
                 value={baseType()}
                 onChange={(e) => handleBaseTypeChange(e.currentTarget.value as "issues" | "pullRequests" | "actions")}
@@ -253,6 +255,8 @@ export default function CustomTabModal(props: CustomTabModalProps) {
               <button
                 type="button"
                 class="w-full flex items-center justify-between px-4 py-2 bg-base-200 text-sm font-medium hover:bg-base-300 transition-colors"
+                aria-expanded={scopeOpen()}
+                aria-controls="custom-tab-scope-panel"
                 onClick={() => setScopeOpen((v) => !v)}
               >
                 <span>Scope</span>
@@ -264,7 +268,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                 </span>
               </button>
               <Show when={scopeOpen()}>
-                <div class="p-3 space-y-3">
+                <div id="custom-tab-scope-panel" class="p-3 space-y-3">
                   <p class="text-xs text-base-content/50">
                     Leave empty to include all repos. Org selection includes all repos in that org.
                   </p>
@@ -332,6 +336,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                       <label class="text-xs text-base-content/70 w-24 shrink-0">{group.label}</label>
                       <select
                         class="select select-bordered select-xs flex-1"
+                        aria-label={group.label}
                         value={getPresetValue(group.field)}
                         onChange={(e) => handlePresetChange(group.field, e.currentTarget.value)}
                       >

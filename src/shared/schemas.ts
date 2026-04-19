@@ -35,11 +35,11 @@ export type BuiltinTabId = (typeof BUILTIN_TAB_IDS)[number];
 export const CustomTabBaseType = z.enum(["issues", "pullRequests", "actions"]);
 
 export const CustomTabSchema = z.object({
-  id: z.string().min(1).max(50),
+  id: z.string().min(1).max(50).regex(/^[a-zA-Z0-9_-]+$/),
   name: z.string().min(1).max(30),
   baseType: CustomTabBaseType,
-  orgScope: z.array(z.string()).default([]),
-  repoScope: z.array(RepoRefSchema).default([]),
+  orgScope: z.array(z.string().regex(REPO_SEGMENT)).max(100).default([]),
+  repoScope: z.array(RepoRefSchema).max(100).default([]),
   filterPreset: z.record(z.string(), z.string()).default({}),
   exclusive: z.boolean().default(false),
 });
