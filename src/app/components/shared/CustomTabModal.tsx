@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, For, Show } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
 import { addCustomTab, updateCustomTab, config } from "../../stores/config";
 import type { CustomTab } from "../../stores/config";
@@ -48,6 +48,22 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   const [scopeOpen, setScopeOpen] = createSignal(false);
   const [capError, setCapError] = createSignal(false);
 
+  // Reinitialize form state when the modal opens with a different editingTab.
+  // Signals are initialized at mount; without this, switching from "edit tab A" to
+  // "edit tab B" (open=false then open=true) would show stale values from tab A.
+  createEffect(() => {
+    if (!props.open) return;
+    const tab = props.editingTab;
+    setName(tab?.name ?? "");
+    setBaseType(tab?.baseType ?? "issues");
+    setSelectedOrgs(new Set(tab?.orgScope ?? []));
+    setSelectedRepos(new Set((tab?.repoScope ?? []).map((r) => r.fullName)));
+    setFilterPreset({ ...(tab?.filterPreset ?? {}) });
+    setExclusive(tab?.exclusive ?? false);
+    setScopeOpen(false);
+    setCapError(false);
+  });
+
   const nameValid = createMemo(() => name().trim().length > 0 && name().trim().length <= 30);
 
   // User field group — dynamic, includes tracked user logins
@@ -68,9 +84,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     }
     return base;
   });
-
-  // Repos visible in scope section — all available repos (org filter applies in UI grouping)
-  const orgList = createMemo(() => props.availableOrgs);
 
   function toggleOrg(org: string) {
     setSelectedOrgs((prev) => {
@@ -256,11 +269,11 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                     Leave empty to include all repos. Org selection includes all repos in that org.
                   </p>
                   <Show
-                    when={orgList().length > 0}
+                    when={props.availableOrgs.length > 0}
                     fallback={<p class="text-xs text-base-content/40">No orgs available.</p>}
                   >
                     <div class="overflow-y-auto max-h-[300px] space-y-3">
-                      <For each={orgList()}>
+                      <For each={props.availableOrgs}>
                         {(org) => {
                           const orgRepos = createMemo(() =>
                             props.availableRepos.filter((r) => r.owner === org)
