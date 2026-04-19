@@ -35,6 +35,8 @@ export interface IssuesTabProps {
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
 
+const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
+
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
@@ -69,11 +71,10 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (props.customTabId) {
       const stored = viewState.customTabFilters[props.customTabId] ?? {};
       const preset = props.filterPreset ?? {};
-      const defaults = IssueFiltersSchema.parse({});
-      const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
+      const merged = { ...ISSUE_FILTER_DEFAULTS, ...preset, ...stored } as Record<string, string>;
       // Resolve _self sentinel: replace with actual login
       if (merged["user"] === "_self") merged["user"] = props.userLogin || "all";
-      return IssueFiltersSchema.safeParse(merged).data ?? defaults;
+      return IssueFiltersSchema.safeParse(merged).data ?? ISSUE_FILTER_DEFAULTS;
     }
     return viewState.tabFilters.issues;
   });

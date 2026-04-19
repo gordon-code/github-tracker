@@ -41,6 +41,8 @@ export interface PullRequestsTabProps {
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
 
+const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
+
 function checkStatusOrder(status: PullRequest["checkStatus"]): number {
   switch (status) {
     case "failure":
@@ -104,11 +106,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (props.customTabId) {
       const stored = viewState.customTabFilters[props.customTabId] ?? {};
       const preset = props.filterPreset ?? {};
-      const defaults = PullRequestFiltersSchema.parse({});
-      const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
+      const merged = { ...PR_FILTER_DEFAULTS, ...preset, ...stored } as Record<string, string>;
       // Resolve _self sentinel: replace with actual login
       if (merged["user"] === "_self") merged["user"] = props.userLogin || "all";
-      return PullRequestFiltersSchema.safeParse(merged).data ?? defaults;
+      return PullRequestFiltersSchema.safeParse(merged).data ?? PR_FILTER_DEFAULTS;
     }
     return viewState.tabFilters.pullRequests;
   });

@@ -66,7 +66,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
         when={config.customTabs.length > 0}
         fallback={
           <p class="text-sm text-base-content/50">
-            No custom tabs. Click + in the tab bar or the button below to create one.
+            No custom tabs yet. Use the button below to create one.
           </p>
         }
       >

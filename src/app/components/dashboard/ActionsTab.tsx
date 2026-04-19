@@ -103,6 +103,7 @@ function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
 const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
 const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
 
+const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
 export default function ActionsTab(props: ActionsTabProps) {
   const [expandedWorkflows, setExpandedWorkflows] = createStore<Record<string, boolean>>({});
@@ -126,9 +127,8 @@ export default function ActionsTab(props: ActionsTabProps) {
     if (props.customTabId) {
       const stored = viewState.customTabFilters[props.customTabId] ?? {};
       const preset = props.filterPreset ?? {};
-      const defaults = ActionsFiltersSchema.parse({});
-      const merged = { ...defaults, ...preset, ...stored };
-      return ActionsFiltersSchema.safeParse(merged).data ?? defaults;
+      const merged = { ...ACTIONS_FILTER_DEFAULTS, ...preset, ...stored };
+      return ActionsFiltersSchema.safeParse(merged).data ?? ACTIONS_FILTER_DEFAULTS;
     }
     return viewState.tabFilters.actions;
   });

@@ -478,9 +478,9 @@ export default function DashboardPage() {
         return !orgSet && !repoSet; // no scope = all repos
       };
       result[tab.id] = {
-        issues: dashboardData.issues.filter((i) => matchesScope(i.repoFullName)),
-        pullRequests: dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)),
-        workflowRuns: dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)),
+        issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
+        pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
+        workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
       };
     }
     return result;
