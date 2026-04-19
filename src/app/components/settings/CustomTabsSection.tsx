@@ -1,0 +1,188 @@
+import { createSignal, createMemo, For, Show } from "solid-js";
+import { config, removeCustomTab, reorderCustomTab } from "../../stores/config";
+import type { RepoRef } from "../../services/api";
+import CustomTabModal from "../shared/CustomTabModal";
+
+interface CustomTabsSectionProps {
+  availableOrgs: string[];
+  availableRepos: RepoRef[];
+}
+
+export default function CustomTabsSection(props: CustomTabsSectionProps) {
+  const [showModal, setShowModal] = createSignal(false);
+  const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
+
+  const editingTab = createMemo(() => {
+    const id = editingTabId();
+    if (!id) return undefined;
+    return config.customTabs.find((t) => t.id === id);
+  });
+
+  const atCap = createMemo(() => config.customTabs.length >= 10);
+
+  function handleEdit(id: string) {
+    setEditingTabId(id);
+    setShowModal(true);
+  }
+
+  function handleDelete(id: string, name: string) {
+    if (window.confirm(`Delete custom tab "${name}"?`)) {
+      removeCustomTab(id);
+    }
+  }
+
+  function handleClose() {
+    setShowModal(false);
+    setEditingTabId(null);
+  }
+
+  function scopeSummary(tab: typeof config.customTabs[number]): string {
+    if (tab.orgScope.length === 0 && tab.repoScope.length === 0) return "All repos";
+    const parts: string[] = [];
+    if (tab.orgScope.length > 0) {
+      parts.push(`${tab.orgScope.length} org${tab.orgScope.length !== 1 ? "s" : ""}`);
+    }
+    if (tab.repoScope.length > 0) {
+      parts.push(`${tab.repoScope.length} repo${tab.repoScope.length !== 1 ? "s" : ""}`);
+    }
+    return parts.join(", ");
+  }
+
+  const baseTypeLabel = (baseType: string) => {
+    if (baseType === "issues") return "Issues";
+    if (baseType === "pullRequests") return "PRs";
+    return "Actions";
+  };
+
+  const baseTypeBadgeClass = (baseType: string) => {
+    if (baseType === "issues") return "badge-info";
+    if (baseType === "pullRequests") return "badge-success";
+    return "badge-warning";
+  };
+
+  return (
+    <div class="flex flex-col gap-3 px-4 py-3">
+      <Show
+        when={config.customTabs.length > 0}
+        fallback={
+          <p class="text-sm text-base-content/50">
+            No custom tabs. Click + in the tab bar or the button below to create one.
+          </p>
+        }
+      >
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Scope</th>
+                <th class="text-center">Exclusive</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={config.customTabs}>
+                {(tab, index) => (
+                  <tr>
+                    <td class="font-medium truncate max-w-[150px]">{tab.name}</td>
+                    <td>
+                      <span class={`badge badge-xs ${baseTypeBadgeClass(tab.baseType)}`}>
+                        {baseTypeLabel(tab.baseType)}
+                      </span>
+                    </td>
+                    <td class="text-xs text-base-content/70">{scopeSummary(tab)}</td>
+                    <td class="text-center">
+                      {tab.exclusive ? (
+                        <svg class="h-4 w-4 text-success inline" fill="currentColor" viewBox="0 0 20 20" aria-label="Exclusive" role="img">
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                      ) : (
+                        <span class="text-base-content/30" aria-label="Not exclusive">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div class="flex items-center justify-end gap-1">
+                        {/* Reorder up */}
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs btn-circle"
+                          aria-label={`Move "${tab.name}" up`}
+                          disabled={index() === 0}
+                          onClick={() => reorderCustomTab(tab.id, "up")}
+                        >
+                          <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" />
+                          </svg>
+                        </button>
+                        {/* Reorder down */}
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs btn-circle"
+                          aria-label={`Move "${tab.name}" down`}
+                          disabled={index() === config.customTabs.length - 1}
+                          onClick={() => reorderCustomTab(tab.id, "down")}
+                        >
+                          <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                          </svg>
+                        </button>
+                        {/* Edit */}
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs btn-circle"
+                          aria-label={`Edit "${tab.name}"`}
+                          onClick={() => handleEdit(tab.id)}
+                        >
+                          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        {/* Delete */}
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs btn-circle text-error hover:bg-error/10"
+                          aria-label={`Delete "${tab.name}"`}
+                          onClick={() => handleDelete(tab.id, tab.name)}
+                        >
+                          <svg class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+      </Show>
+
+      {/* Add button */}
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline"
+          disabled={atCap()}
+          title={atCap() ? "Maximum 10 custom tabs" : undefined}
+          onClick={() => { setEditingTabId(null); setShowModal(true); }}
+        >
+          Add custom tab
+        </button>
+        <Show when={atCap()}>
+          <span class="text-xs text-base-content/50">Maximum 10 custom tabs</span>
+        </Show>
+      </div>
+
+      {/* Modal */}
+      <CustomTabModal
+        open={showModal()}
+        onClose={handleClose}
+        editingTab={editingTab()}
+        availableOrgs={props.availableOrgs}
+        availableRepos={props.availableRepos}
+      />
+    </div>
+  );
+}
