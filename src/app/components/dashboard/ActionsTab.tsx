@@ -2,6 +2,7 @@ import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { viewState, setViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
+import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -165,19 +166,13 @@ export default function ActionsTab(props: ActionsTabProps) {
   }
 
   const filteredRuns = createMemo(() => {
-    const { org, repo } = viewState.globalFilter;
-    const ignoredIds = new Set(
-      ignoredWorkflowRuns()
-        .map((i) => i.id)
-    );
+    const ignoredIds = new Set(ignoredWorkflowRuns().map((i) => i.id));
+    const globalFilter = viewState.globalFilter;
     const conclusionFilter = viewState.tabFilters.actions.conclusion;
     const eventFilter = viewState.tabFilters.actions.event;
 
     return props.workflowRuns.filter((run) => {
-      if (ignoredIds.has(run.id)) return false;
-      if (!viewState.showPrRuns && run.isPrRun) return false;
-      if (org && !run.repoFullName.startsWith(`${org}/`)) return false;
-      if (repo && run.repoFullName !== repo) return false;
+      if (!isRunVisible(run, { ignoredIds, showPrRuns: viewState.showPrRuns, globalFilter })) return false;
 
       if (conclusionFilter !== "all") {
         if (conclusionFilter === "running") {

@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo } from "../../src/app/stores/config";
+import {
+  ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
+  addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
+} from "../../src/app/stores/config";
+import type { CustomTab } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 
@@ -598,8 +602,17 @@ describe("ConfigSchema — enableTracking", () => {
     expect(result.defaultTab).toBe("tracked");
   });
 
-  it("defaultTab rejects invalid value", () => {
-    expect(() => ConfigSchema.parse({ defaultTab: "invalid" })).toThrow();
+  it("defaultTab rejects empty string", () => {
+    expect(() => ConfigSchema.parse({ defaultTab: "" })).toThrow();
+  });
+
+  it("defaultTab rejects string longer than 50 chars", () => {
+    expect(() => ConfigSchema.parse({ defaultTab: "a".repeat(51) })).toThrow();
+  });
+
+  it("defaultTab accepts custom tab ID strings", () => {
+    const result = ConfigSchema.parse({ defaultTab: "abc12345" });
+    expect(result.defaultTab).toBe("abc12345");
   });
 });
 
@@ -622,5 +635,277 @@ describe("ConfigSchema — monitoredRepos max constraint", () => {
     }));
     const result = ConfigSchema.safeParse({ monitoredRepos: repos });
     expect(result.success).toBe(true);
+  });
+});
+
+// ── Custom Tab helpers (addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab) ─────
+
+function makeTab(overrides: Partial<CustomTab> = {}): CustomTab {
+  return {
+    id: "tab-abc123",
+    name: "My Tab",
+    baseType: "issues",
+    orgScope: [],
+    repoScope: [],
+    filterPreset: {},
+    exclusive: false,
+    ...overrides,
+  };
+}
+
+describe("isBuiltinTab", () => {
+  it("returns true for 'issues'", () => {
+    expect(isBuiltinTab("issues")).toBe(true);
+  });
+
+  it("returns true for 'pullRequests'", () => {
+    expect(isBuiltinTab("pullRequests")).toBe(true);
+  });
+
+  it("returns true for 'actions'", () => {
+    expect(isBuiltinTab("actions")).toBe(true);
+  });
+
+  it("returns true for 'tracked'", () => {
+    expect(isBuiltinTab("tracked")).toBe(true);
+  });
+
+  it("returns false for arbitrary string", () => {
+    expect(isBuiltinTab("my-custom-tab")).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(isBuiltinTab("")).toBe(false);
+  });
+});
+
+describe("addCustomTab", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("adds a tab in the happy path", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab());
+      expect(config.customTabs).toHaveLength(1);
+      expect(config.customTabs[0].id).toBe("tab-abc123");
+      expect(config.customTabs[0].name).toBe("My Tab");
+      dispose();
+    });
+  });
+
+  it("rejects adding when at cap of 10 tabs", () => {
+    createRoot((dispose) => {
+      for (let i = 0; i < 10; i++) {
+        addCustomTab(makeTab({ id: `tab-${i}`, name: `Tab ${i}` }));
+      }
+      expect(config.customTabs).toHaveLength(10);
+      addCustomTab(makeTab({ id: "tab-overflow", name: "Overflow" }));
+      expect(config.customTabs).toHaveLength(10);
+      dispose();
+    });
+  });
+
+  it("rejects adding a tab with a duplicate ID", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-dup" }));
+      addCustomTab(makeTab({ id: "tab-dup", name: "Duplicate" }));
+      expect(config.customTabs).toHaveLength(1);
+      dispose();
+    });
+  });
+
+  it("rejects adding a tab with built-in ID 'issues'", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "issues" }));
+      expect(config.customTabs).toHaveLength(0);
+      dispose();
+    });
+  });
+
+  it("rejects adding a tab with built-in ID 'tracked'", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tracked" }));
+      expect(config.customTabs).toHaveLength(0);
+      dispose();
+    });
+  });
+
+  it("rejects adding a tab with built-in ID 'pullRequests'", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "pullRequests" }));
+      expect(config.customTabs).toHaveLength(0);
+      dispose();
+    });
+  });
+
+  it("rejects adding a tab with built-in ID 'actions'", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "actions" }));
+      expect(config.customTabs).toHaveLength(0);
+      dispose();
+    });
+  });
+});
+
+describe("updateCustomTab", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("updates the name of an existing tab (partial field update)", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1", name: "Old Name" }));
+      updateCustomTab("tab-1", { name: "New Name" });
+      expect(config.customTabs[0].name).toBe("New Name");
+      expect(config.customTabs[0].baseType).toBe("issues"); // unchanged
+      dispose();
+    });
+  });
+
+  it("updates multiple fields at once", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1", name: "Old", baseType: "issues" }));
+      updateCustomTab("tab-1", { name: "New", baseType: "pullRequests" });
+      expect(config.customTabs[0].name).toBe("New");
+      expect(config.customTabs[0].baseType).toBe("pullRequests");
+      dispose();
+    });
+  });
+
+  it("is a no-op for a nonexistent tab ID", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1", name: "Existing" }));
+      updateCustomTab("tab-nonexistent", { name: "Ghost" });
+      expect(config.customTabs).toHaveLength(1);
+      expect(config.customTabs[0].name).toBe("Existing");
+      dispose();
+    });
+  });
+});
+
+describe("removeCustomTab", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("removes an existing tab", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1" }));
+      addCustomTab(makeTab({ id: "tab-2", name: "Tab 2" }));
+      removeCustomTab("tab-1");
+      expect(config.customTabs).toHaveLength(1);
+      expect(config.customTabs[0].id).toBe("tab-2");
+      dispose();
+    });
+  });
+
+  it("resets defaultTab to 'issues' when the deleted tab was the default", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-custom" }));
+      updateConfig({ defaultTab: "tab-custom" });
+      expect(config.defaultTab).toBe("tab-custom");
+      removeCustomTab("tab-custom");
+      expect(config.defaultTab).toBe("issues");
+      dispose();
+    });
+  });
+
+  it("does not change defaultTab when a different tab is deleted", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1" }));
+      addCustomTab(makeTab({ id: "tab-2", name: "Tab 2" }));
+      updateConfig({ defaultTab: "tab-2" });
+      removeCustomTab("tab-1");
+      expect(config.defaultTab).toBe("tab-2");
+      dispose();
+    });
+  });
+
+  it("is a no-op for a nonexistent tab ID", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-1" }));
+      removeCustomTab("tab-nonexistent");
+      expect(config.customTabs).toHaveLength(1);
+      dispose();
+    });
+  });
+});
+
+describe("reorderCustomTab", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("moves a tab up by swapping with its predecessor", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-a", name: "A" }));
+      addCustomTab(makeTab({ id: "tab-b", name: "B" }));
+      addCustomTab(makeTab({ id: "tab-c", name: "C" }));
+      reorderCustomTab("tab-b", "up");
+      expect(config.customTabs[0].id).toBe("tab-b");
+      expect(config.customTabs[1].id).toBe("tab-a");
+      expect(config.customTabs[2].id).toBe("tab-c");
+      dispose();
+    });
+  });
+
+  it("moves a tab down by swapping with its successor", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-a", name: "A" }));
+      addCustomTab(makeTab({ id: "tab-b", name: "B" }));
+      addCustomTab(makeTab({ id: "tab-c", name: "C" }));
+      reorderCustomTab("tab-b", "down");
+      expect(config.customTabs[0].id).toBe("tab-a");
+      expect(config.customTabs[1].id).toBe("tab-c");
+      expect(config.customTabs[2].id).toBe("tab-b");
+      dispose();
+    });
+  });
+
+  it("is a no-op when moving the first item up", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-a", name: "A" }));
+      addCustomTab(makeTab({ id: "tab-b", name: "B" }));
+      reorderCustomTab("tab-a", "up");
+      expect(config.customTabs[0].id).toBe("tab-a");
+      expect(config.customTabs[1].id).toBe("tab-b");
+      dispose();
+    });
+  });
+
+  it("is a no-op when moving the last item down", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-a", name: "A" }));
+      addCustomTab(makeTab({ id: "tab-b", name: "B" }));
+      reorderCustomTab("tab-b", "down");
+      expect(config.customTabs[0].id).toBe("tab-a");
+      expect(config.customTabs[1].id).toBe("tab-b");
+      dispose();
+    });
+  });
+});
+
+describe("getCustomTab", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("returns the tab when found by ID", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-found", name: "Found" }));
+      const result = getCustomTab("tab-found");
+      expect(result).toBeDefined();
+      expect(result?.name).toBe("Found");
+      dispose();
+    });
+  });
+
+  it("returns undefined for a missing ID", () => {
+    createRoot((dispose) => {
+      const result = getCustomTab("tab-missing");
+      expect(result).toBeUndefined();
+      dispose();
+    });
   });
 });

@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type IssueFilterField } from "../../stores/view";
 import type { Issue, RepoRef } from "../../services/api";
+import { isIssueVisible } from "../../lib/filters";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
@@ -112,19 +113,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
   const filteredSortedWithMeta = createMemo(() => {
-    const filter = viewState.globalFilter;
     const tabFilter = viewState.tabFilters.issues;
-    const ignored = new Set(
-      ignoredIssues()
-        .map((i) => i.id)
-    );
+    const ignoredIds = new Set(ignoredIssues().map((i) => i.id));
+    const globalFilter = viewState.globalFilter;
 
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
-      if (ignored.has(issue.id)) return false;
-      if (filter.repo && issue.repoFullName !== filter.repo) return false;
-      if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
+      if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: viewState.hideDepDashboard, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
@@ -140,8 +136,6 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (tabFilter.comments === "has" && issue.comments === 0) return false;
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
       }
-
-      if (viewState.hideDepDashboard && issue.title === "Dependency Dashboard") return false;
 
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)

@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
+import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -181,19 +182,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       item.enriched !== false ? item.reviewerLogins : undefined);
 
   const filteredSortedWithMeta = createMemo(() => {
-    const filter = viewState.globalFilter;
     const tabFilters = viewState.tabFilters.pullRequests;
-    const ignored = new Set(
-      ignoredPullRequests()
-        .map((i) => i.id)
-    );
+    const ignoredIds = new Set(ignoredPullRequests().map((i) => i.id));
+    const globalFilter = viewState.globalFilter;
 
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
-      if (ignored.has(pr.id)) return false;
-      if (filter.repo && pr.repoFullName !== filter.repo) return false;
-      if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
+      if (!isPrVisible(pr, { ignoredIds, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);

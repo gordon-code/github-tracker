@@ -20,6 +20,9 @@ import {
   untrackItem,
   moveTrackedItem,
   pruneClosedTrackedItems,
+  setCustomTabFilter,
+  resetCustomTabFilters,
+  removeCustomTabState,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
 
@@ -242,8 +245,15 @@ describe("ViewStateSchema", () => {
     expect(result.ignoredItems).toEqual([]);
   });
 
-  it("safeParse returns success=false for invalid data", () => {
-    const result = ViewStateSchema.safeParse({ lastActiveTab: "invalid-tab-name" });
+  it("lastActiveTab accepts custom tab ID strings", () => {
+    const result = ViewStateSchema.safeParse({ lastActiveTab: "custom-abc123" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.lastActiveTab).toBe("custom-abc123");
+  });
+
+  it("safeParse returns success=false for truly invalid data", () => {
+    // Verify schema still rejects genuinely invalid structures
+    const result = ViewStateSchema.safeParse({ ignoredItems: "not-an-array" });
     expect(result.success).toBe(false);
   });
 
@@ -597,5 +607,141 @@ describe("tracked items", () => {
       const result = ViewStateSchema.parse({ lastActiveTab: "tracked" });
       expect(result.lastActiveTab).toBe("tracked");
     });
+  });
+});
+
+// ── Custom tab view state (setCustomTabFilter, resetCustomTabFilters, removeCustomTabState) ──
+
+describe("setCustomTabFilter", () => {
+  beforeEach(() => resetViewState());
+
+  it("writes to the correct nested key", () => {
+    setCustomTabFilter("tab-abc", "role", "author");
+    expect(viewState.customTabFilters["tab-abc"]).toBeDefined();
+    expect(viewState.customTabFilters["tab-abc"]["role"]).toBe("author");
+  });
+
+  it("initializes the nested record if the tab key is missing", () => {
+    expect(viewState.customTabFilters["tab-new"]).toBeUndefined();
+    setCustomTabFilter("tab-new", "scope", "all");
+    expect(viewState.customTabFilters["tab-new"]).toBeDefined();
+    expect(viewState.customTabFilters["tab-new"]["scope"]).toBe("all");
+  });
+
+  it("can write multiple fields independently", () => {
+    setCustomTabFilter("tab-x", "role", "assignee");
+    setCustomTabFilter("tab-x", "scope", "all");
+    expect(viewState.customTabFilters["tab-x"]["role"]).toBe("assignee");
+    expect(viewState.customTabFilters["tab-x"]["scope"]).toBe("all");
+  });
+
+  it("does not affect other tab IDs", () => {
+    setCustomTabFilter("tab-1", "role", "author");
+    setCustomTabFilter("tab-2", "role", "assignee");
+    expect(viewState.customTabFilters["tab-1"]["role"]).toBe("author");
+    expect(viewState.customTabFilters["tab-2"]["role"]).toBe("assignee");
+  });
+});
+
+describe("resetCustomTabFilters", () => {
+  beforeEach(() => resetViewState());
+
+  it("clears stored overrides to an empty object", () => {
+    setCustomTabFilter("tab-abc", "role", "author");
+    setCustomTabFilter("tab-abc", "scope", "all");
+    expect(Object.keys(viewState.customTabFilters["tab-abc"])).toHaveLength(2);
+    resetCustomTabFilters("tab-abc");
+    expect(viewState.customTabFilters["tab-abc"]).toEqual({});
+  });
+
+  it("does not affect other tab IDs when resetting one", () => {
+    setCustomTabFilter("tab-1", "role", "author");
+    setCustomTabFilter("tab-2", "role", "assignee");
+    resetCustomTabFilters("tab-1");
+    expect(viewState.customTabFilters["tab-1"]).toEqual({});
+    expect(viewState.customTabFilters["tab-2"]["role"]).toBe("assignee");
+  });
+
+  it("is safe to call when the tab has no existing filters", () => {
+    resetCustomTabFilters("tab-nonexistent");
+    expect(viewState.customTabFilters["tab-nonexistent"]).toEqual({});
+  });
+});
+
+describe("removeCustomTabState", () => {
+  beforeEach(() => resetViewState());
+
+  it("cleans customTabFilters for the given tab ID", () => {
+    setCustomTabFilter("tab-abc", "role", "author");
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.customTabFilters).toBe(false);
+  });
+
+  it("cleans expandedRepos for the given tab ID", () => {
+    toggleExpandedRepo("tab-abc", "owner/repo");
+    expect(viewState.expandedRepos["tab-abc"]).toBeDefined();
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.expandedRepos).toBe(false);
+  });
+
+  it("removes both customTabFilters and expandedRepos in a single call", () => {
+    setCustomTabFilter("tab-abc", "scope", "all");
+    toggleExpandedRepo("tab-abc", "owner/repo");
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.customTabFilters).toBe(false);
+    expect("tab-abc" in viewState.expandedRepos).toBe(false);
+  });
+
+  it("is a no-op for a nonexistent tab ID (no error thrown)", () => {
+    expect(() => removeCustomTabState("tab-never-existed")).not.toThrow();
+    expect("tab-never-existed" in viewState.customTabFilters).toBe(false);
+  });
+
+  it("does not affect state for other tab IDs", () => {
+    setCustomTabFilter("tab-1", "role", "author");
+    setCustomTabFilter("tab-2", "role", "assignee");
+    toggleExpandedRepo("tab-1", "owner/repo");
+    removeCustomTabState("tab-1");
+    expect(viewState.customTabFilters["tab-2"]["role"]).toBe("assignee");
+  });
+});
+
+describe("resetViewState — custom tab fields", () => {
+  beforeEach(() => resetViewState());
+
+  it("clears customTabFilters", () => {
+    setCustomTabFilter("tab-abc", "role", "author");
+    setCustomTabFilter("tab-xyz", "scope", "all");
+    expect(Object.keys(viewState.customTabFilters)).toHaveLength(2);
+    resetViewState();
+    expect(viewState.customTabFilters).toEqual({});
+  });
+
+  it("clears custom tab keys from expandedRepos while preserving built-in keys", () => {
+    toggleExpandedRepo("issues", "owner/repo");
+    toggleExpandedRepo("tab-custom", "owner/repo");
+    resetViewState();
+    // Built-in keys reset to empty objects (not deleted)
+    expect(viewState.expandedRepos["issues"]).toEqual({});
+    expect(viewState.expandedRepos["pullRequests"]).toEqual({});
+    expect(viewState.expandedRepos["actions"]).toEqual({});
+    // Custom key is fully deleted
+    expect("tab-custom" in viewState.expandedRepos).toBe(false);
+  });
+});
+
+describe("expandedRepos — dynamic tab keys", () => {
+  beforeEach(() => resetViewState());
+
+  it("accepts dynamic string keys for custom tab IDs", () => {
+    toggleExpandedRepo("tab-custom-123", "owner/repo");
+    expect(viewState.expandedRepos["tab-custom-123"]["owner/repo"]).toBe(true);
+  });
+
+  it("toggleExpandedRepo with a new custom tab key creates the entry", () => {
+    expect(viewState.expandedRepos["tab-new"]).toBeUndefined();
+    toggleExpandedRepo("tab-new", "owner/repo");
+    expect(viewState.expandedRepos["tab-new"]).toBeDefined();
+    expect(viewState.expandedRepos["tab-new"]["owner/repo"]).toBe(true);
   });
 });

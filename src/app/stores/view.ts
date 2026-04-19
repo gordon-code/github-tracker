@@ -49,9 +49,7 @@ export type ActionsFilters = z.infer<typeof ActionsFiltersSchema>;
 export type ActionsFilterField = keyof ActionsFilters;
 
 export const ViewStateSchema = z.object({
-  lastActiveTab: z
-    .enum(["issues", "pullRequests", "actions", "tracked"])
-    .default("issues"),
+  lastActiveTab: z.string().default("issues"),
   globalSort: z.object({
     field: z.string(),
     direction: z.enum(["asc", "desc"]),
@@ -85,11 +83,14 @@ export const ViewStateSchema = z.object({
   }),
   showPrRuns: z.boolean().default(false),
   hideDepDashboard: z.boolean().default(true),
-  expandedRepos: z.object({
-    issues: z.record(z.string(), z.boolean()).default({}),
-    pullRequests: z.record(z.string(), z.boolean()).default({}),
-    actions: z.record(z.string(), z.boolean()).default({}),
-  }).default({
+  customTabFilters: z.record(
+    z.string(),
+    z.record(z.string(), z.string())
+  ).default({}),
+  expandedRepos: z.record(
+    z.string(),
+    z.record(z.string(), z.boolean()).default({})
+  ).default({
     issues: {},
     pullRequests: {},
     actions: {},
@@ -156,22 +157,36 @@ export const [viewState, setViewState] = createStore<ViewState>(
 );
 
 export function resetViewState(): void {
-  updateViewState({
-    lastActiveTab: "issues",
-    globalSort: { field: "updatedAt", direction: "desc" },
-    ignoredItems: [],
-    globalFilter: { org: null, repo: null },
-    tabFilters: {
-      issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
-      pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
-      actions: { conclusion: "all", event: "all" },
-    },
-    showPrRuns: false,
-    hideDepDashboard: true,
-    expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-    lockedRepos: [],
-    trackedItems: [],
-  });
+  setViewState(
+    produce((draft) => {
+      // Delete dynamic custom tab keys that Object.assign wouldn't clear
+      for (const key of Object.keys(draft.expandedRepos)) {
+        if (!["issues", "pullRequests", "actions"].includes(key)) {
+          delete draft.expandedRepos[key];
+        }
+      }
+      for (const key of Object.keys(draft.customTabFilters)) {
+        delete draft.customTabFilters[key];
+      }
+      Object.assign(draft, {
+        lastActiveTab: "issues",
+        globalSort: { field: "updatedAt", direction: "desc" },
+        ignoredItems: [],
+        globalFilter: { org: null, repo: null },
+        tabFilters: {
+          issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
+          pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
+          actions: { conclusion: "all", event: "all" },
+        },
+        showPrRuns: false,
+        hideDepDashboard: true,
+        customTabFilters: {},
+        expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
+        lockedRepos: [],
+        trackedItems: [],
+      });
+    })
+  );
 }
 
 export function updateViewState(partial: Partial<ViewState>): void {
@@ -273,11 +288,12 @@ export function resetAllTabFilters(
 }
 
 export function toggleExpandedRepo(
-  tab: keyof ViewState["expandedRepos"],
+  tab: string,
   repoFullName: string
 ): void {
   setViewState(
     produce((draft) => {
+      if (!draft.expandedRepos[tab]) draft.expandedRepos[tab] = {};
       if (draft.expandedRepos[tab][repoFullName]) {
         delete draft.expandedRepos[tab][repoFullName];
       } else {
@@ -288,12 +304,13 @@ export function toggleExpandedRepo(
 }
 
 export function setAllExpanded(
-  tab: keyof ViewState["expandedRepos"],
+  tab: string,
   repoFullNames: string[],
   expanded: boolean
 ): void {
   setViewState(
     produce((draft) => {
+      if (!draft.expandedRepos[tab]) draft.expandedRepos[tab] = {};
       if (expanded) {
         for (const name of repoFullNames) {
           draft.expandedRepos[tab][name] = true;
@@ -308,19 +325,46 @@ export function setAllExpanded(
 }
 
 export function pruneExpandedRepos(
-  tab: keyof ViewState["expandedRepos"],
+  tab: string,
   activeRepoNames: string[]
 ): void {
-  const currentKeys = untrack(() => Object.keys(viewState.expandedRepos[tab]));
+  const currentKeys = untrack(() => Object.keys(viewState.expandedRepos[tab] ?? {}));
   if (currentKeys.length === 0) return;
   const activeSet = new Set(activeRepoNames);
   const staleKeys = currentKeys.filter((k) => !activeSet.has(k));
   if (staleKeys.length === 0) return;
   setViewState(
     produce((draft) => {
+      if (!draft.expandedRepos[tab]) return;
       for (const key of staleKeys) {
         delete draft.expandedRepos[tab][key];
       }
+    })
+  );
+}
+
+export function setCustomTabFilter(tabId: string, field: string, value: string): void {
+  setViewState(
+    produce((draft) => {
+      if (!draft.customTabFilters[tabId]) draft.customTabFilters[tabId] = {};
+      draft.customTabFilters[tabId][field] = value;
+    })
+  );
+}
+
+export function resetCustomTabFilters(tabId: string): void {
+  setViewState(
+    produce((draft) => {
+      draft.customTabFilters[tabId] = {};
+    })
+  );
+}
+
+export function removeCustomTabState(tabId: string): void {
+  setViewState(
+    produce((draft) => {
+      delete draft.customTabFilters[tabId];
+      delete draft.expandedRepos[tabId];
     })
   );
 }

@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -8,8 +8,8 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems } from "../../stores/view";
+import { config, setConfig, getCustomTab, isBuiltinTab, type TrackedUser } from "../../stores/config";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -30,6 +30,7 @@ import { formatCount } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
+import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
 
 const globalSortOptions: SortOption[] = [
   { label: "Repo", field: "repo", type: "text" },
@@ -303,21 +304,35 @@ export default function DashboardPage() {
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
+    // Validate custom tab still exists; fall back to "issues" if stale
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
   }
 
   const [activeTab, setActiveTab] = createSignal<TabId>(resolveInitialTab());
 
   function handleTabChange(tab: TabId) {
+    // Reject invalid tab IDs to prevent persisting stale state
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
 
   const [clockTick, setClockTick] = createSignal(0);
+  const [showCustomTabModal, setShowCustomTabModal] = createSignal(false);
+  const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
 
   // Redirect away from tracked tab when tracking is disabled at runtime
   createEffect(() => {
     if (!config.enableTracking && activeTab() === "tracked") {
+      handleTabChange("issues");
+    }
+  });
+
+  // Redirect away from a custom tab that was deleted while active
+  createEffect(() => {
+    const tab = activeTab();
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) {
       handleTabChange("issues");
     }
   });
@@ -448,6 +463,67 @@ export default function DashboardPage() {
 
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
+  // Eagerly compute scoped data for ALL custom tabs (not just the active one).
+  // exclusiveOwnership depends on customTabData for all exclusive tabs — lazy
+  // per-active-tab computation would break exclusivity.
+  const customTabData = createMemo(() => {
+    const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
+    for (const tab of config.customTabs) {
+      const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
+      const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName)) : null;
+      const matchesScope = (repoFullName: string) => {
+        if (repoSet && repoSet.has(repoFullName)) return true;
+        if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
+        return !orgSet && !repoSet; // no scope = all repos
+      };
+      result[tab.id] = {
+        issues: dashboardData.issues.filter((i) => matchesScope(i.repoFullName)),
+        pullRequests: dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)),
+        workflowRuns: dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)),
+      };
+    }
+    return result;
+  });
+
+  // Item-level exclusive ownership: first exclusive tab claiming an item wins.
+  // Only claims items matching the tab's baseType (an exclusive Issues tab must
+  // not hide PRs or workflow runs from their respective tabs).
+  const exclusiveOwnership = createMemo(() => {
+    const issueOwner = new Map<number, string>();
+    const prOwner = new Map<number, string>();
+    const runOwner = new Map<number, string>();
+    for (const tab of config.customTabs) {
+      if (!tab.exclusive) continue;
+      const data = customTabData()[tab.id];
+      if (!data) continue;
+      if (tab.baseType === "issues") {
+        for (const i of data.issues) if (!issueOwner.has(i.id)) issueOwner.set(i.id, tab.id);
+      } else if (tab.baseType === "pullRequests") {
+        for (const p of data.pullRequests) if (!prOwner.has(p.id)) prOwner.set(p.id, tab.id);
+      } else {
+        for (const w of data.workflowRuns) if (!runOwner.has(w.id)) runOwner.set(w.id, tab.id);
+      }
+    }
+    return { issues: issueOwner, pullRequests: prOwner, actions: runOwner };
+  });
+
+  function isItemVisibleOnTab(ownerMap: Map<number, string>, itemId: number, viewingTabId: string): boolean {
+    const owner = ownerMap.get(itemId);
+    if (!owner) return true; // not claimed by any exclusive tab
+    return owner === viewingTabId; // only visible on its owning tab
+  }
+
+  // Visible data for built-in tabs — filters out exclusively-owned items
+  const visibleIssues = createMemo(() =>
+    dashboardData.issues.filter((i) => isItemVisibleOnTab(exclusiveOwnership().issues, i.id, "issues"))
+  );
+  const visiblePullRequests = createMemo(() =>
+    dashboardData.pullRequests.filter((p) => isItemVisibleOnTab(exclusiveOwnership().pullRequests, p.id, "pullRequests"))
+  );
+  const visibleWorkflowRuns = createMemo(() =>
+    dashboardData.workflowRuns.filter((w) => isItemVisibleOnTab(exclusiveOwnership().actions, w.id, "actions"))
+  );
+
   const tabCounts = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
     const ignoredByType = (type: string) =>
@@ -456,30 +532,64 @@ export default function DashboardPage() {
     const ignoredIssues = ignoredByType("issue");
     const ignoredPRs = ignoredByType("pullRequest");
     const ignoredRuns = ignoredByType("workflowRun");
+    const ownership = exclusiveOwnership();
+
+    const builtinFilter = { org, repo };
+    const customCounts: Record<string, number> = {};
+    for (const tab of config.customTabs) {
+      const data = customTabData()[tab.id];
+      if (!data) continue;
+      if (tab.baseType === "issues") {
+        customCounts[tab.id] = data.issues.filter((i) =>
+          isItemVisibleOnTab(ownership.issues, i.id, tab.id) &&
+          isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })
+        ).length;
+      } else if (tab.baseType === "pullRequests") {
+        customCounts[tab.id] = data.pullRequests.filter((p) =>
+          isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id) &&
+          isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })
+        ).length;
+      } else {
+        customCounts[tab.id] = data.workflowRuns.filter((w) =>
+          isItemVisibleOnTab(ownership.actions, w.id, tab.id) &&
+          isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })
+        ).length;
+      }
+    }
 
     return {
-      issues: dashboardData.issues.filter((i) => {
-        if (ignoredIssues.has(i.id)) return false;
-        if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") return false;
-        if (repo && i.repoFullName !== repo) return false;
-        if (org && !i.repoFullName.startsWith(org + "/")) return false;
-        return true;
-      }).length,
-      pullRequests: dashboardData.pullRequests.filter((p) => {
-        if (ignoredPRs.has(p.id)) return false;
-        if (repo && p.repoFullName !== repo) return false;
-        if (org && !p.repoFullName.startsWith(org + "/")) return false;
-        return true;
-      }).length,
-      actions: dashboardData.workflowRuns.filter((w) => {
-        if (ignoredRuns.has(w.id)) return false;
-        if (!viewState.showPrRuns && w.isPrRun) return false;
-        if (repo && w.repoFullName !== repo) return false;
-        if (org && !w.repoFullName.startsWith(org + "/")) return false;
-        return true;
-      }).length,
+      issues: visibleIssues().filter((i) =>
+        isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: builtinFilter })
+      ).length,
+      pullRequests: visiblePullRequests().filter((p) =>
+        isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: builtinFilter })
+      ).length,
+      actions: visibleWorkflowRuns().filter((w) =>
+        isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
+      ).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
+      ...customCounts,
     };
+  });
+
+  // Reactive cleanup: prune orphaned view state when customTabs list changes
+  createEffect(() => {
+    const activeIds = new Set(config.customTabs.map((t) => t.id));
+    const staleIds = untrack(() => {
+      const keys = new Set([
+        ...Object.keys(viewState.customTabFilters),
+        ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k)),
+      ]);
+      return [...keys].filter((id) => !activeIds.has(id));
+    });
+    for (const id of staleIds) removeCustomTabState(id);
+  });
+
+  // Memo for the active custom tab definition (null when a built-in tab is active)
+  const activeCustomTab = createMemo(() => {
+    const id = activeTab();
+    if (isBuiltinTab(id)) return null;
+    return getCustomTab(id) ?? null;
   });
 
   // Push dashboard data into the MCP relay snapshot on each full refresh.
@@ -531,6 +641,9 @@ export default function DashboardPage() {
               onTabChange={handleTabChange}
               counts={tabCounts()}
               enableTracking={config.enableTracking}
+              customTabs={config.customTabs.map((t) => ({ id: t.id, name: t.name }))}
+              onAddTab={() => setShowCustomTabModal(true)}
+              onEditTab={(id) => { setEditingTabId(id); setShowCustomTabModal(true); }}
             />
 
             <FilterBar
@@ -541,6 +654,7 @@ export default function DashboardPage() {
               sortValue={viewState.globalSort.field}
               sortDirection={viewState.globalSort.direction}
               onSortChange={(field, dir) => setSortPreference(field, dir)}
+              hideOrgRepo={!isBuiltinTab(activeTab())}
             />
           </div>
 
@@ -548,7 +662,7 @@ export default function DashboardPage() {
             <Switch>
               <Match when={activeTab() === "issues"}>
                 <IssuesTab
-                  issues={dashboardData.issues}
+                  issues={visibleIssues()}
                   loading={dashboardData.loading}
                   userLogin={userLogin()}
                   allUsers={allUsers()}
@@ -560,7 +674,7 @@ export default function DashboardPage() {
               </Match>
               <Match when={activeTab() === "pullRequests"}>
                 <PullRequestsTab
-                  pullRequests={dashboardData.pullRequests}
+                  pullRequests={visiblePullRequests()}
                   loading={dashboardData.loading}
                   userLogin={userLogin()}
                   allUsers={allUsers()}
@@ -572,6 +686,7 @@ export default function DashboardPage() {
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
+                {/* TrackedTab intentionally receives unfiltered dashboardData — it bypasses exclusivity */}
                 <TrackedTab
                   issues={dashboardData.issues}
                   pullRequests={dashboardData.pullRequests}
@@ -582,7 +697,7 @@ export default function DashboardPage() {
               </Match>
               <Match when={activeTab() === "actions"}>
                 <ActionsTab
-                  workflowRuns={dashboardData.workflowRuns}
+                  workflowRuns={visibleWorkflowRuns()}
                   loading={dashboardData.loading}
                   hasUpstreamRepos={config.upstreamRepos.length > 0}
                   configRepoNames={configRepoNames()}
@@ -590,8 +705,68 @@ export default function DashboardPage() {
                   hotPollingRunIds={hotPollingRunIds()}
                 />
               </Match>
+              <Match when={activeCustomTab()}>
+                {(tab) => {
+                  // Apply exclusivity: exclude items owned by OTHER exclusive tabs
+                  const data = createMemo(() => {
+                    const raw = customTabData()[tab().id];
+                    if (!raw) return { issues: [] as typeof dashboardData.issues, pullRequests: [] as typeof dashboardData.pullRequests, workflowRuns: [] as typeof dashboardData.workflowRuns };
+                    const ownership = exclusiveOwnership();
+                    return {
+                      issues: raw.issues.filter((i) => isItemVisibleOnTab(ownership.issues, i.id, tab().id)),
+                      pullRequests: raw.pullRequests.filter((p) => isItemVisibleOnTab(ownership.pullRequests, p.id, tab().id)),
+                      workflowRuns: raw.workflowRuns.filter((w) => isItemVisibleOnTab(ownership.actions, w.id, tab().id)),
+                    };
+                  });
+                  return (
+                    <Switch>
+                      <Match when={tab().baseType === "issues"}>
+                        <IssuesTab
+                          issues={data().issues}
+                          loading={dashboardData.loading}
+                          userLogin={userLogin()}
+                          allUsers={allUsers()}
+                          trackedUsers={config.trackedUsers}
+                          monitoredRepos={config.monitoredRepos}
+                          configRepoNames={configRepoNames()}
+                          refreshTick={refreshTick()}
+                        />
+                      </Match>
+                      <Match when={tab().baseType === "pullRequests"}>
+                        <PullRequestsTab
+                          pullRequests={data().pullRequests}
+                          loading={dashboardData.loading}
+                          userLogin={userLogin()}
+                          allUsers={allUsers()}
+                          trackedUsers={config.trackedUsers}
+                          hotPollingPRIds={hotPollingPRIds()}
+                          monitoredRepos={config.monitoredRepos}
+                          configRepoNames={configRepoNames()}
+                          refreshTick={refreshTick()}
+                        />
+                      </Match>
+                      <Match when={tab().baseType === "actions"}>
+                        <ActionsTab
+                          workflowRuns={data().workflowRuns}
+                          loading={dashboardData.loading}
+                          hasUpstreamRepos={config.upstreamRepos.length > 0}
+                          configRepoNames={configRepoNames()}
+                          refreshTick={refreshTick()}
+                          hotPollingRunIds={hotPollingRunIds()}
+                        />
+                      </Match>
+                    </Switch>
+                  );
+                }}
+              </Match>
             </Switch>
           </main>
+
+          {/* CustomTabModal — placeholder until Task 6 implements the component.
+              editingTabId() is read here to wire modal data; Task 6 replaces this div. */}
+          <Show when={showCustomTabModal()}>
+            <div data-editing-tab={editingTabId() ?? ""} />
+          </Show>
         </div>
 
         <footer class="app-footer fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">

@@ -1,12 +1,16 @@
 import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
-import { ConfigSchema, RepoRefSchema, THEME_OPTIONS } from "../../shared/schemas";
-import type { Config, ThemeId } from "../../shared/schemas";
+import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS } from "../../shared/schemas";
+import type { Config, ThemeId, CustomTab } from "../../shared/schemas";
 import { z } from "zod";
 
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
-export { ConfigSchema, RepoRefSchema, TrackedUserSchema, THEME_OPTIONS, type Config, type TrackedUser, type ThemeId } from "../../shared/schemas";
+export {
+  ConfigSchema, RepoRefSchema, TrackedUserSchema, THEME_OPTIONS,
+  CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab,
+  type Config, type TrackedUser, type ThemeId, type CustomTab, type BuiltinTabId,
+} from "../../shared/schemas";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
 
@@ -91,6 +95,57 @@ export function setMcpRelayPort(port: number): void {
 export function resetConfig(): void {
   const defaults = ConfigSchema.parse({});
   setConfig(defaults);
+}
+
+export function getCustomTab(id: string): CustomTab | undefined {
+  return config.customTabs.find((t) => t.id === id);
+}
+
+export function addCustomTab(tab: CustomTab): void {
+  setConfig(
+    produce((draft) => {
+      if (draft.customTabs.length >= 10) return;
+      if (draft.customTabs.some((t) => t.id === tab.id)) return;
+      // Prevent routing collision with built-in tab IDs
+      if ((BUILTIN_TAB_IDS as readonly string[]).includes(tab.id)) return;
+      draft.customTabs.push(tab);
+    })
+  );
+}
+
+export function updateCustomTab(id: string, updates: Partial<CustomTab>): void {
+  setConfig(
+    produce((draft) => {
+      const idx = draft.customTabs.findIndex((t) => t.id === id);
+      if (idx === -1) return;
+      Object.assign(draft.customTabs[idx], updates);
+    })
+  );
+}
+
+export function removeCustomTab(id: string): void {
+  setConfig(
+    produce((draft) => {
+      draft.customTabs = draft.customTabs.filter((t) => t.id !== id);
+      if (draft.defaultTab === id) {
+        draft.defaultTab = "issues";
+      }
+    })
+  );
+}
+
+export function reorderCustomTab(id: string, direction: "up" | "down"): void {
+  setConfig(
+    produce((draft) => {
+      const idx = draft.customTabs.findIndex((t) => t.id === id);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= draft.customTabs.length) return;
+      const tmp = draft.customTabs[idx];
+      draft.customTabs[idx] = draft.customTabs[targetIdx];
+      draft.customTabs[targetIdx] = tmp;
+    })
+  );
 }
 
 export function initConfigPersistence(): void {

@@ -29,6 +29,27 @@ export const TrackedUserSchema = z.object({
 
 export type TrackedUser = z.infer<typeof TrackedUserSchema>;
 
+export const BUILTIN_TAB_IDS = ["issues", "pullRequests", "actions", "tracked"] as const;
+export type BuiltinTabId = (typeof BUILTIN_TAB_IDS)[number];
+
+export const CustomTabBaseType = z.enum(["issues", "pullRequests", "actions"]);
+
+export const CustomTabSchema = z.object({
+  id: z.string().min(1).max(50),
+  name: z.string().min(1).max(30),
+  baseType: CustomTabBaseType,
+  orgScope: z.array(z.string()).default([]),
+  repoScope: z.array(RepoRefSchema).default([]),
+  filterPreset: z.record(z.string(), z.string()).default({}),
+  exclusive: z.boolean().default(false),
+});
+
+export type CustomTab = z.infer<typeof CustomTabSchema>;
+
+export function isBuiltinTab(id: string): id is BuiltinTabId {
+  return (BUILTIN_TAB_IDS as readonly string[]).includes(id);
+}
+
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
@@ -50,11 +71,12 @@ export const ConfigSchema = z.object({
   theme: z.enum(THEME_OPTIONS).default("auto"),
   viewDensity: z.enum(["compact", "comfortable"]).default("comfortable"),
   itemsPerPage: z.number().min(10).max(100).default(25),
-  defaultTab: z.enum(["issues", "pullRequests", "actions", "tracked"]).default("issues"),
+  defaultTab: z.string().min(1).max(50).default("issues"),
   rememberLastTab: z.boolean().default(true),
   onboardingComplete: z.boolean().default(false),
   authMethod: z.enum(["oauth", "pat"]).default("oauth"),
   enableTracking: z.boolean().default(false),
+  customTabs: z.array(CustomTabSchema).max(10).default([]),
   mcpRelayEnabled: z.boolean().default(false),
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
 });
