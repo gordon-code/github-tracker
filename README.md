@@ -73,6 +73,10 @@ Shimmer animations on items being updated by the hot poll, flash highlights when
 
 Star counts appear in repo group headers, fetched as part of the standard data refresh.
 
+### Custom Tabs
+
+Create named filtered views over the existing Issues, PRs, and Actions data. Each custom tab has a name, a base type (Issues, PRs, or Actions), an optional org/repo scope, and optional filter presets. An "exclusive" toggle hides matching items from the standard tabs so they only appear in the custom tab. Up to 10 custom tabs can be created. Manage them via the "+" button in the tab bar or in **Settings > Custom Tabs**.
+
 ### Themes
 
 9 themes: auto (follows system), corporate, cupcake, light, nord, dim, dracula, dark, forest. Theme is applied immediately on selection with no page reload.
