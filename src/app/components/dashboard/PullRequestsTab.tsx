@@ -17,7 +17,7 @@ import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, ensureLockedRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 import RepoLockControls from "../shared/RepoLockControls";
@@ -288,9 +288,15 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const prMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() =>
-    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
-  );
+  const repoGroups = createMemo(() => {
+    const groups = groupByRepo(filteredSorted());
+    const withLocked = ensureLockedRepoGroups(
+      groups,
+      viewState.lockedRepos,
+      (name) => ({ repoFullName: name, items: [] as typeof groups[0]["items"] }),
+    );
+    return orderRepoGroups(withLocked, viewState.lockedRepos);
+  });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -428,7 +434,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <div class="divide-y divide-base-300">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isExpanded = () => !!viewState.expandedRepos.pullRequests[repoGroup.repoFullName];
+                const isEmpty = () => repoGroup.items.length === 0;
+                const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.pullRequests[repoGroup.repoFullName];
 
                 const summaryMeta = createMemo(() => {
                   const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };
@@ -457,13 +464,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 });
 
                 return (
-                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+                  <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
                     <RepoGroupHeader
                       repoFullName={repoGroup.repoFullName}
                       starCount={repoGroup.starCount}
                       isExpanded={isExpanded()}
                       isHighlighted={highlightedReposPRs().has(repoGroup.repoFullName)}
-                      onToggle={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                      onToggle={() => { if (!isEmpty()) toggleExpandedRepo("pullRequests", repoGroup.repoFullName); }}
                       badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
@@ -478,6 +485,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         </>
                       }
                       collapsedSummary={
+                        <Show
+                          when={!isEmpty()}
+                          fallback={
+                            <span class="ml-auto text-xs font-normal italic text-base-content/40">
+                              No items match current filters
+                            </span>
+                          }
+                        >
                         <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60 shrink-0">
                           <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "PR" : "PRs"}</span>
                           <Show when={summaryMeta().checks.success > 0}>
@@ -534,6 +549,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                             )}
                           </For>
                         </span>
+                        </Show>
                       }
                     />
                     <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>

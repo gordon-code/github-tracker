@@ -11,7 +11,7 @@ import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
-import { orderRepoGroups } from "../../lib/grouping";
+import { orderRepoGroups, ensureLockedRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
 
@@ -201,9 +201,15 @@ export default function ActionsTab(props: ActionsTabProps) {
     });
   });
 
-  const repoGroups = createMemo(() =>
-    orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos)
-  );
+  const repoGroups = createMemo(() => {
+    const groups = groupRuns(filteredRuns());
+    const withLocked = ensureLockedRepoGroups(
+      groups,
+      viewState.lockedRepos,
+      (name) => ({ repoFullName: name, workflows: [] }),
+    );
+    return orderRepoGroups(withLocked, viewState.lockedRepos);
+  });
 
   createEffect(() => {
     const names = activeRepoNames();
@@ -271,7 +277,8 @@ export default function ActionsTab(props: ActionsTabProps) {
       <Show when={repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
-            const isExpanded = () => !!viewState.expandedRepos.actions[repoGroup.repoFullName];
+            const isEmpty = () => repoGroup.workflows.length === 0;
+            const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.actions[repoGroup.repoFullName];
 
             const sortedWorkflows = createMemo(() =>
               sortWorkflowsByStatus(repoGroup.workflows)
@@ -293,12 +300,12 @@ export default function ActionsTab(props: ActionsTabProps) {
             });
 
             return (
-              <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+              <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
                 <RepoGroupHeader
                   repoFullName={repoGroup.repoFullName}
                   isExpanded={isExpanded()}
                   isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
-                  onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                  onToggle={() => { if (!isEmpty()) toggleExpandedRepo("actions", repoGroup.repoFullName); }}
                   trailing={
                     <>
                       <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
@@ -306,6 +313,14 @@ export default function ActionsTab(props: ActionsTabProps) {
                     </>
                   }
                   collapsedSummary={
+                    <Show
+                      when={!isEmpty()}
+                      fallback={
+                        <span class="ml-auto text-xs font-normal italic text-base-content/40">
+                          No items match current filters
+                        </span>
+                      }
+                    >
                     <span class="ml-auto text-xs font-normal text-base-content/60">
                       {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
                       <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
@@ -327,6 +342,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                         </Show>
                       </Show>
                     </span>
+                    </Show>
                   }
                 />
                 <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>

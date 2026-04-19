@@ -50,6 +50,17 @@ export function slicePageGroups<T>(
   return groups.slice(start, end);
 }
 
+export function ensureLockedRepoGroups<G extends { repoFullName: string }>(
+  groups: G[],
+  lockedOrder: readonly string[],
+  emptyFactory: (repoFullName: string) => G,
+): G[] {
+  const present = new Set(groups.map(g => g.repoFullName));
+  const missing = lockedOrder.filter(name => !present.has(name));
+  if (missing.length === 0) return groups;
+  return [...groups, ...missing.map(emptyFactory)];
+}
+
 export function orderRepoGroups<G extends { repoFullName: string }>(
   groups: G[],
   lockedOrder: string[]

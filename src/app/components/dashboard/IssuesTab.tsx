@@ -13,7 +13,7 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, ensureLockedRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
@@ -191,9 +191,15 @@ export default function IssuesTab(props: IssuesTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() =>
-    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
-  );
+  const repoGroups = createMemo(() => {
+    const groups = groupByRepo(filteredSorted());
+    const withLocked = ensureLockedRepoGroups(
+      groups,
+      viewState.lockedRepos,
+      (name) => ({ repoFullName: name, items: [] as typeof groups[0]["items"] }),
+    );
+    return orderRepoGroups(withLocked, viewState.lockedRepos);
+  });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -334,7 +340,8 @@ export default function IssuesTab(props: IssuesTabProps) {
           <div class="divide-y divide-base-300">
             <For each={pageGroups()}>
               {(repoGroup) => {
-                const isExpanded = () => !!viewState.expandedRepos.issues[repoGroup.repoFullName];
+                const isEmpty = () => repoGroup.items.length === 0;
+                const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.issues[repoGroup.repoFullName];
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};
@@ -350,13 +357,13 @@ export default function IssuesTab(props: IssuesTabProps) {
                 });
 
                 return (
-                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+                  <div class={`bg-base-100 ${isEmpty() ? "opacity-50" : ""}`} data-repo-group={repoGroup.repoFullName}>
                     <RepoGroupHeader
                       repoFullName={repoGroup.repoFullName}
                       starCount={repoGroup.starCount}
                       isExpanded={isExpanded()}
                       isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
-                      onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
+                      onToggle={() => { if (!isEmpty()) toggleExpandedRepo("issues", repoGroup.repoFullName); }}
                       badges={
                         <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                           <Tooltip content="Showing all activity, not just yours" focusable>
@@ -371,20 +378,29 @@ export default function IssuesTab(props: IssuesTabProps) {
                         </>
                       }
                       collapsedSummary={
-                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                          <For each={roleSummary()}>
-                            {([role, count]) => (
-                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                role === "author" ? "bg-primary/10 text-primary" :
-                                role === "assignee" ? "bg-secondary/10 text-secondary" :
-                                "bg-base-300 text-base-content/70"
-                              }`}>
-                                {role} ×{count}
-                              </span>
-                            )}
-                          </For>
-                        </span>
+                        <Show
+                          when={!isEmpty()}
+                          fallback={
+                            <span class="ml-auto text-xs font-normal italic text-base-content/40">
+                              No items match current filters
+                            </span>
+                          }
+                        >
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                            <For each={roleSummary()}>
+                              {([role, count]) => (
+                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                  role === "author" ? "bg-primary/10 text-primary" :
+                                  role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                  "bg-base-300 text-base-content/70"
+                                }`}>
+                                  {role} ×{count}
+                                </span>
+                              )}
+                            </For>
+                          </span>
+                        </Show>
                       }
                     />
                     <Show when={isExpanded()}>
