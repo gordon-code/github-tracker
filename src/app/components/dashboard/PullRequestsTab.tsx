@@ -291,6 +291,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const repoGroups = createMemo(() =>
     orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
   );
+  const visibleLockedRepos = createMemo(() => {
+    const rendered = new Set(repoGroups().map(g => g.repoFullName));
+    return viewState.lockedRepos.filter(name => rendered.has(name));
+  });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -474,7 +478,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                       trailing={
                         <>
                           <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
-                          <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                          <RepoLockControls repoFullName={repoGroup.repoFullName} visibleLockedRepos={visibleLockedRepos()} />
                         </>
                       }
                       collapsedSummary={

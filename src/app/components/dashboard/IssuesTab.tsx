@@ -194,6 +194,10 @@ export default function IssuesTab(props: IssuesTabProps) {
   const repoGroups = createMemo(() =>
     orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
   );
+  const visibleLockedRepos = createMemo(() => {
+    const rendered = new Set(repoGroups().map(g => g.repoFullName));
+    return viewState.lockedRepos.filter(name => rendered.has(name));
+  });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -367,7 +371,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                       trailing={
                         <>
                           <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                          <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                          <RepoLockControls repoFullName={repoGroup.repoFullName} visibleLockedRepos={visibleLockedRepos()} />
                         </>
                       }
                       collapsedSummary={

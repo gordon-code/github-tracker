@@ -10,7 +10,7 @@ beforeEach(() => {
 describe("RepoLockControls", () => {
   it("renders unlock (pin) icon when repo is not locked", () => {
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={[]} />
     ));
     expect(screen.getByLabelText("Pin owner/repo to top of list")).toBeTruthy();
   });
@@ -18,7 +18,7 @@ describe("RepoLockControls", () => {
   it("renders lock icon + chevrons when repo IS locked", () => {
     lockRepo("owner/repo");
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
     ));
     expect(screen.getByLabelText("Unpin owner/repo")).toBeTruthy();
     expect(screen.getByLabelText("Move owner/repo up")).toBeTruthy();
@@ -27,7 +27,7 @@ describe("RepoLockControls", () => {
 
   it("click pin icon → locks the repo", () => {
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={[]} />
     ));
     fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
     expect(viewState.lockedRepos).toContain("owner/repo");
@@ -36,7 +36,7 @@ describe("RepoLockControls", () => {
   it("click lock icon → unlocks the repo", () => {
     lockRepo("owner/repo");
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
     ));
     fireEvent.click(screen.getByLabelText("Unpin owner/repo"));
     expect(viewState.lockedRepos).not.toContain("owner/repo");
@@ -46,7 +46,7 @@ describe("RepoLockControls", () => {
     lockRepo("owner/a");
     lockRepo("owner/b");
     render(() => (
-      <RepoLockControls repoFullName="owner/b" />
+      <RepoLockControls repoFullName="owner/b" visibleLockedRepos={["owner/a", "owner/b"]} />
     ));
     fireEvent.click(screen.getByLabelText("Move owner/b up"));
     expect(viewState.lockedRepos[0]).toBe("owner/b");
@@ -57,7 +57,7 @@ describe("RepoLockControls", () => {
     lockRepo("owner/a");
     lockRepo("owner/b");
     render(() => (
-      <RepoLockControls repoFullName="owner/a" />
+      <RepoLockControls repoFullName="owner/a" visibleLockedRepos={["owner/a", "owner/b"]} />
     ));
     fireEvent.click(screen.getByLabelText("Move owner/a down"));
     expect(viewState.lockedRepos[0]).toBe("owner/b");
@@ -67,7 +67,7 @@ describe("RepoLockControls", () => {
   it("up button is disabled when repo is first in locked list", () => {
     lockRepo("owner/repo");
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
     ));
     const upBtn = screen.getByLabelText("Move owner/repo up") as HTMLButtonElement;
     expect(upBtn.disabled).toBe(true);
@@ -76,10 +76,45 @@ describe("RepoLockControls", () => {
   it("down button is disabled when repo is last in locked list", () => {
     lockRepo("owner/repo");
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
     ));
     const downBtn = screen.getByLabelText("Move owner/repo down") as HTMLButtonElement;
     expect(downBtn.disabled).toBe(true);
+  });
+
+  it("up button disabled when first in visibleLockedRepos even if hidden repos precede it", () => {
+    lockRepo("owner/hidden");
+    lockRepo("owner/a");
+    lockRepo("owner/b");
+    render(() => (
+      <RepoLockControls repoFullName="owner/a" visibleLockedRepos={["owner/a", "owner/b"]} />
+    ));
+    const upBtn = screen.getByLabelText("Move owner/a up") as HTMLButtonElement;
+    expect(upBtn.disabled).toBe(true);
+  });
+
+  it("down button disabled when last in visibleLockedRepos even if hidden repos follow it", () => {
+    lockRepo("owner/a");
+    lockRepo("owner/b");
+    lockRepo("owner/hidden");
+    render(() => (
+      <RepoLockControls repoFullName="owner/b" visibleLockedRepos={["owner/a", "owner/b"]} />
+    ));
+    const downBtn = screen.getByLabelText("Move owner/b down") as HTMLButtonElement;
+    expect(downBtn.disabled).toBe(true);
+  });
+
+  it("up/down buttons enabled when repo has visible neighbors", () => {
+    lockRepo("owner/a");
+    lockRepo("owner/b");
+    lockRepo("owner/c");
+    render(() => (
+      <RepoLockControls repoFullName="owner/b" visibleLockedRepos={["owner/a", "owner/b", "owner/c"]} />
+    ));
+    const upBtn = screen.getByLabelText("Move owner/b up") as HTMLButtonElement;
+    const downBtn = screen.getByLabelText("Move owner/b down") as HTMLButtonElement;
+    expect(upBtn.disabled).toBe(false);
+    expect(downBtn.disabled).toBe(false);
   });
 
   it("stopPropagation — parent click NOT triggered on locked button click", () => {
@@ -87,7 +122,7 @@ describe("RepoLockControls", () => {
     const parentClick = vi.fn();
     render(() => (
       <div onClick={parentClick}>
-        <RepoLockControls repoFullName="owner/repo" />
+        <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
       </div>
     ));
     fireEvent.click(screen.getByLabelText("Unpin owner/repo"));
@@ -98,7 +133,7 @@ describe("RepoLockControls", () => {
     const parentClick = vi.fn();
     render(() => (
       <div onClick={parentClick}>
-        <RepoLockControls repoFullName="owner/repo" />
+        <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={[]} />
       </div>
     ));
     fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
@@ -123,7 +158,7 @@ describe("RepoLockControls — scroll preservation", () => {
 
   it("preserves scroll position when locking a repo", () => {
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={[]} />
     ));
     fireEvent.click(screen.getByLabelText("Pin owner/repo to top of list"));
     expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
@@ -132,7 +167,7 @@ describe("RepoLockControls — scroll preservation", () => {
   it("preserves scroll position when unlocking a repo", () => {
     lockRepo("owner/repo");
     render(() => (
-      <RepoLockControls repoFullName="owner/repo" />
+      <RepoLockControls repoFullName="owner/repo" visibleLockedRepos={["owner/repo"]} />
     ));
     fireEvent.click(screen.getByLabelText("Unpin owner/repo"));
     expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
@@ -142,7 +177,7 @@ describe("RepoLockControls — scroll preservation", () => {
     lockRepo("owner/a");
     lockRepo("owner/b");
     render(() => (
-      <RepoLockControls repoFullName="owner/b" />
+      <RepoLockControls repoFullName="owner/b" visibleLockedRepos={["owner/a", "owner/b"]} />
     ));
     fireEvent.click(screen.getByLabelText("Move owner/b up"));
     expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
@@ -152,7 +187,7 @@ describe("RepoLockControls — scroll preservation", () => {
     lockRepo("owner/a");
     lockRepo("owner/b");
     render(() => (
-      <RepoLockControls repoFullName="owner/a" />
+      <RepoLockControls repoFullName="owner/a" visibleLockedRepos={["owner/a", "owner/b"]} />
     ));
     fireEvent.click(screen.getByLabelText("Move owner/a down"));
     expect(window.scrollTo).toHaveBeenCalledWith(0, 500);

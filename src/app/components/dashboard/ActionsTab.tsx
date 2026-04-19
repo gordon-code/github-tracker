@@ -204,6 +204,10 @@ export default function ActionsTab(props: ActionsTabProps) {
   const repoGroups = createMemo(() =>
     orderRepoGroups(groupRuns(filteredRuns()), viewState.lockedRepos)
   );
+  const visibleLockedRepos = createMemo(() => {
+    const rendered = new Set(repoGroups().map(g => g.repoFullName));
+    return viewState.lockedRepos.filter(name => rendered.has(name));
+  });
 
   createEffect(() => {
     const names = activeRepoNames();
@@ -302,7 +306,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                   trailing={
                     <>
                       <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                      <RepoLockControls repoFullName={repoGroup.repoFullName} visibleLockedRepos={visibleLockedRepos()} />
                     </>
                   }
                   collapsedSummary={
