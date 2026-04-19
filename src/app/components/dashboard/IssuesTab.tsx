@@ -361,7 +361,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                     when={!isEmpty()}
                     fallback={
                       <div class="group/repo-header flex items-center border-y border-base-300 bg-base-200/30 opacity-40" data-repo-group={repoGroup.repoFullName}>
-                        <span class="flex-1 flex items-center gap-2 px-4 py-1">
+                        <span class="flex-1 flex items-center gap-2 px-4 py-1.5 compact:py-0.5">
                           <span class="h-3.5 w-3.5 shrink-0" />
                           <span class="text-sm text-base-content/60">{repoGroup.repoFullName}</span>
                         </span>
