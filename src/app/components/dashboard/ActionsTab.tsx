@@ -6,7 +6,7 @@ import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import type { FilterChipGroupDef } from "../shared/filterTypes";
+import { actionsFilterGroups } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
@@ -103,29 +103,6 @@ function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
 const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
 const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
 
-const actionsFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Result",
-    field: "conclusion",
-    options: [
-      { value: "success", label: "Success" },
-      { value: "failure", label: "Failure" },
-      { value: "cancelled", label: "Cancelled" },
-      { value: "running", label: "Running" },
-      { value: "other", label: "Other" },
-    ],
-  },
-  {
-    label: "Trigger",
-    field: "event",
-    options: [
-      { value: "push", label: "Push" },
-      { value: "pull_request", label: "PR" },
-      { value: "schedule", label: "Schedule" },
-      { value: "workflow_dispatch", label: "Manual" },
-    ],
-  },
-];
 
 export default function ActionsTab(props: ActionsTabProps) {
   const [expandedWorkflows, setExpandedWorkflows] = createStore<Record<string, boolean>>({});

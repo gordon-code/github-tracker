@@ -31,6 +31,7 @@ import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
 import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
+import CustomTabModal from "../shared/CustomTabModal";
 
 const globalSortOptions: SortOption[] = [
   { label: "Repo", field: "repo", type: "text" },
@@ -768,11 +769,13 @@ export default function DashboardPage() {
             </Switch>
           </main>
 
-          {/* CustomTabModal — placeholder until Task 6 implements the component.
-              editingTabId() is read here to wire modal data; Task 6 replaces this div. */}
-          <Show when={showCustomTabModal()}>
-            <div data-editing-tab={editingTabId() ?? ""} />
-          </Show>
+          <CustomTabModal
+            open={showCustomTabModal()}
+            onClose={() => { setShowCustomTabModal(false); setEditingTabId(null); }}
+            editingTab={editingTabId() ? getCustomTab(editingTabId()!) : undefined}
+            availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
+            availableRepos={config.selectedRepos}
+          />
         </div>
 
         <footer class="app-footer fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">

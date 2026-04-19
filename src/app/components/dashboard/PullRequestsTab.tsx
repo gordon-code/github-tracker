@@ -11,7 +11,7 @@ import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import PaginationControls from "../shared/PaginationControls";
-import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import { scopeFilterGroup, prFilterGroups, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
@@ -69,58 +69,6 @@ function reviewDecisionOrder(decision: PullRequest["reviewDecision"]): number {
   }
 }
 
-const prFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Role",
-    field: "role",
-    options: [
-      { value: "author", label: "Author" },
-      { value: "reviewer", label: "Reviewer" },
-      { value: "assignee", label: "Assignee" },
-    ],
-  },
-  {
-    label: "Review",
-    field: "reviewDecision",
-    options: [
-      { value: "APPROVED", label: "Approved" },
-      { value: "CHANGES_REQUESTED", label: "Changes" },
-      { value: "REVIEW_REQUIRED", label: "Needs review" },
-      { value: "mergeable", label: "Mergeable" },
-    ],
-  },
-  {
-    label: "Status",
-    field: "draft",
-    options: [
-      { value: "draft", label: "Draft" },
-      { value: "ready", label: "Ready" },
-    ],
-  },
-  {
-    label: "Checks",
-    field: "checkStatus",
-    options: [
-      { value: "success", label: "Passing" },
-      { value: "failure", label: "Failing" },
-      { value: "pending", label: "Pending" },
-      { value: "conflict", label: "Conflict" },
-      { value: "blocked", label: "Blocked" },
-      { value: "none", label: "No CI" },
-    ],
-  },
-  {
-    label: "Size",
-    field: "sizeCategory",
-    options: [
-      { value: "XS", label: "XS" },
-      { value: "S", label: "S" },
-      { value: "M", label: "M" },
-      { value: "L", label: "L" },
-      { value: "XL", label: "XL" },
-    ],
-  },
-];
 
 
 export default function PullRequestsTab(props: PullRequestsTabProps) {

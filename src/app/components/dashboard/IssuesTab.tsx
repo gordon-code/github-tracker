@@ -7,7 +7,7 @@ import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
 import PaginationControls from "../shared/PaginationControls";
-import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import { scopeFilterGroup, issueFilterGroups, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -34,25 +34,6 @@ export interface IssuesTabProps {
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
-
-const issueFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Role",
-    field: "role",
-    options: [
-      { value: "author", label: "Author" },
-      { value: "assignee", label: "Assignee" },
-    ],
-  },
-  {
-    label: "Comments",
-    field: "comments",
-    options: [
-      { value: "has", label: "Has comments" },
-      { value: "none", label: "No comments" },
-    ],
-  },
-];
 
 
 export default function IssuesTab(props: IssuesTabProps) {
