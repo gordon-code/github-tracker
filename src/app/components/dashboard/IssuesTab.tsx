@@ -360,9 +360,11 @@ export default function IssuesTab(props: IssuesTabProps) {
                   <Show
                     when={!isEmpty()}
                     fallback={
-                      <div class="group/repo-header flex items-center border-y border-base-300 bg-base-200/30 px-4 py-1 gap-2 opacity-40" data-repo-group={repoGroup.repoFullName}>
-                        <span class="h-3.5 w-3.5 shrink-0" />
-                        <span class="flex-1 text-sm text-base-content/60">{repoGroup.repoFullName}</span>
+                      <div class="group/repo-header flex items-center border-y border-base-300 bg-base-200/30 opacity-40" data-repo-group={repoGroup.repoFullName}>
+                        <span class="flex-1 flex items-center gap-2 px-4 py-1">
+                          <span class="h-3.5 w-3.5 shrink-0" />
+                          <span class="text-sm text-base-content/60">{repoGroup.repoFullName}</span>
+                        </span>
                         <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
                         <RepoLockControls repoFullName={repoGroup.repoFullName} />
                       </div>
