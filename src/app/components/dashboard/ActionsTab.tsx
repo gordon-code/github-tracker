@@ -11,6 +11,7 @@ import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
+import EmptyLockedRepoRow from "../shared/EmptyLockedRepoRow";
 import { orderRepoGroups, ensureLockedRepoGroups } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import { createFlashDetection } from "../../lib/flashDetection";
@@ -303,89 +304,82 @@ export default function ActionsTab(props: ActionsTabProps) {
               <Show
                 when={!isEmpty()}
                 fallback={
-                  <div class="group/repo-header flex items-center border-y border-base-300 bg-base-200/30 opacity-40" data-repo-group={repoGroup.repoFullName}>
-                    <span class="flex-1 flex items-center gap-2 px-4 py-1.5 compact:py-0.5">
-                      <span class="h-3.5 w-3.5 shrink-0" />
-                      <span class="text-sm text-base-content/60">{repoGroup.repoFullName}</span>
-                    </span>
-                    <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                    <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                  </div>
+                  <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="actions" />
                 }
               >
-              <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
-                <RepoGroupHeader
-                  repoFullName={repoGroup.repoFullName}
-                  isExpanded={isExpanded()}
-                  isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
-                  onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
-                  trailing={
-                    <>
-                      <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                      <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                    </>
-                  }
-                  collapsedSummary={
-                    <span class="ml-auto text-xs font-normal text-base-content/60">
-                      {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
-                      <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
-                        {": "}
-                        <Show when={workflowCounts().passed > 0}>
-                          <span>{workflowCounts().passed} passed</span>
+                <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+                  <RepoGroupHeader
+                    repoFullName={repoGroup.repoFullName}
+                    isExpanded={isExpanded()}
+                    isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
+                    onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                    trailing={
+                      <>
+                        <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
+                        <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                      </>
+                    }
+                    collapsedSummary={
+                      <span class="ml-auto text-xs font-normal text-base-content/60">
+                        {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
+                        <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
+                          {": "}
+                          <Show when={workflowCounts().passed > 0}>
+                            <span>{workflowCounts().passed} passed</span>
+                          </Show>
+                          <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0)}>
+                            {", "}
+                          </Show>
+                          <Show when={workflowCounts().failed > 0}>
+                            <span class="text-error font-medium">{workflowCounts().failed} failed</span>
+                          </Show>
+                          <Show when={workflowCounts().failed > 0 && workflowCounts().running > 0}>
+                            {", "}
+                          </Show>
+                          <Show when={workflowCounts().running > 0}>
+                            <span>{workflowCounts().running} running</span>
+                          </Show>
                         </Show>
-                        <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0)}>
-                          {", "}
-                        </Show>
-                        <Show when={workflowCounts().failed > 0}>
-                          <span class="text-error font-medium">{workflowCounts().failed} failed</span>
-                        </Show>
-                        <Show when={workflowCounts().failed > 0 && workflowCounts().running > 0}>
-                          {", "}
-                        </Show>
-                        <Show when={workflowCounts().running > 0}>
-                          <span>{workflowCounts().running} running</span>
-                        </Show>
-                      </Show>
-                    </span>
-                  }
-                />
-                <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
-                  {(peek) => (
-                    <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
-                      <span class="loading loading-spinner loading-xs text-primary/60" />
-                      <span class="truncate flex-1">{peek().itemLabel}</span>
-                      <span class="badge badge-xs badge-primary">{peek().newStatus}</span>
+                      </span>
+                    }
+                  />
+                  <Show when={!isExpanded() && peekUpdates().get(repoGroup.repoFullName)}>
+                    {(peek) => (
+                      <div class="animate-flash flex items-center gap-2 text-xs text-base-content/70 px-4 py-1.5 border-b border-base-300 bg-base-100">
+                        <span class="loading loading-spinner loading-xs text-primary/60" />
+                        <span class="truncate flex-1">{peek().itemLabel}</span>
+                        <span class="badge badge-xs badge-primary">{peek().newStatus}</span>
+                      </div>
+                    )}
+                  </Show>
+
+                  {/* Workflow cards grid */}
+                  <Show when={isExpanded()}>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
+                      <For each={sortedWorkflows()}>
+                        {(wfGroup) => {
+                          const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
+                          const isWfExpanded = () => !!expandedWorkflows[wfKey];
+
+                          return (
+                            <div class={isWfExpanded() ? "col-span-full" : ""}>
+                              <WorkflowSummaryCard
+                                workflowName={wfGroup.workflowName}
+                                runs={wfGroup.runs}
+                                expanded={isWfExpanded()}
+                                onToggle={() => toggleWorkflow(wfKey)}
+                                onIgnoreRun={handleIgnore}
+                                refreshTick={props.refreshTick}
+                                hotPollingRunIds={props.hotPollingRunIds}
+                                flashingRunIds={flashingRunIds()}
+                              />
+                            </div>
+                          );
+                        }}
+                      </For>
                     </div>
-                  )}
-                </Show>
-
-                {/* Workflow cards grid */}
-                <Show when={isExpanded()}>
-                  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
-                    <For each={sortedWorkflows()}>
-                      {(wfGroup) => {
-                        const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
-                        const isWfExpanded = () => !!expandedWorkflows[wfKey];
-
-                        return (
-                          <div class={isWfExpanded() ? "col-span-full" : ""}>
-                            <WorkflowSummaryCard
-                              workflowName={wfGroup.workflowName}
-                              runs={wfGroup.runs}
-                              expanded={isWfExpanded()}
-                              onToggle={() => toggleWorkflow(wfKey)}
-                              onIgnoreRun={handleIgnore}
-                              refreshTick={props.refreshTick}
-                              hotPollingRunIds={props.hotPollingRunIds}
-                              flashingRunIds={flashingRunIds()}
-                            />
-                          </div>
-                        );
-                      }}
-                    </For>
-                  </div>
-                </Show>
-              </div>
+                  </Show>
+                </div>
               </Show>
             );
           }}

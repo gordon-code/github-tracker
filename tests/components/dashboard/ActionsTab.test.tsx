@@ -104,6 +104,43 @@ describe("ActionsTab — empty-repo state preservation", () => {
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
   });
+
+  it("renders compact stub row for a locked repo with no workflow runs", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[makeWorkflowRun({ repoFullName: "owner/active-repo" })]}
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.textContent).toContain("owner/locked-empty");
+    const headerBtn = stub?.querySelector('[aria-expanded]');
+    expect(headerBtn).toBeNull();
+  });
+
+  it("does not expand a locked repo with no workflow runs even when expandedRepos is set", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+      s.expandedRepos.actions["owner/locked-empty"] = true;
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[makeWorkflowRun({ repoFullName: "owner/active-repo" })]}
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.querySelector('[aria-expanded]')).toBeNull();
+  });
 });
 
 // ── ActionsTab — RepoGroupHeader integration ──────────────────────────────────
