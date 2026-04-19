@@ -48,10 +48,9 @@ export default function TabBar(props: TabBarProps) {
                   </Show>
                 </Tabs.Trigger>
               </Show>
-              {/* NOTE: Each custom tab trigger is wrapped in a <div> for the hover-reveal edit pencil.
-                  Kobalte Tabs uses roving tabindex for keyboard nav (Arrow Left/Right). If Kobalte
-                  queries direct children of Tabs.List for triggers, this wrapper div may break
-                  keyboard navigation between custom tabs. Requires manual browser testing to verify. */}
+              {/* Wrapper <div> around custom tab triggers is safe for Kobalte keyboard nav:
+                  Kobalte uses querySelector('[data-key="..."]') for focus management and a
+                  Collection-based delegate for Arrow Left/Right — neither depend on direct children. */}
               <For each={props.customTabs}>
                 {(tab) => (
                   <div class="relative group/tab flex items-center">
