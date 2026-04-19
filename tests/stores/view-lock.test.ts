@@ -90,6 +90,64 @@ describe("view lock store", () => {
       moveLockedRepo("org/repo-z", "up");
       expect(viewState.lockedRepos).toEqual(["org/repo-a"]);
     });
+
+    describe("with visibleRepoNames", () => {
+      it("skips one invisible repo when moving up", () => {
+        lockRepo("org/a");
+        lockRepo("org/hidden");
+        lockRepo("org/c");
+        moveLockedRepo("org/c", "up", new Set(["org/a", "org/c"]));
+        expect(viewState.lockedRepos).toEqual(["org/c", "org/a", "org/hidden"]);
+      });
+
+      it("skips one invisible repo when moving down", () => {
+        lockRepo("org/a");
+        lockRepo("org/hidden");
+        lockRepo("org/c");
+        moveLockedRepo("org/a", "down", new Set(["org/a", "org/c"]));
+        expect(viewState.lockedRepos).toEqual(["org/hidden", "org/c", "org/a"]);
+      });
+
+      it("skips multiple invisible repos", () => {
+        lockRepo("org/a");
+        lockRepo("org/h1");
+        lockRepo("org/h2");
+        lockRepo("org/d");
+        moveLockedRepo("org/d", "up", new Set(["org/a", "org/d"]));
+        expect(viewState.lockedRepos).toEqual(["org/d", "org/a", "org/h1", "org/h2"]);
+      });
+
+      it("no-op when already first visible and moving up", () => {
+        lockRepo("org/h1");
+        lockRepo("org/a");
+        lockRepo("org/b");
+        moveLockedRepo("org/a", "up", new Set(["org/a", "org/b"]));
+        expect(viewState.lockedRepos).toEqual(["org/h1", "org/a", "org/b"]);
+      });
+
+      it("no-op when already last visible and moving down", () => {
+        lockRepo("org/a");
+        lockRepo("org/b");
+        lockRepo("org/h1");
+        moveLockedRepo("org/b", "down", new Set(["org/a", "org/b"]));
+        expect(viewState.lockedRepos).toEqual(["org/a", "org/b", "org/h1"]);
+      });
+
+      it("falls back to adjacent swap when visibleRepoNames is undefined", () => {
+        lockRepo("org/a");
+        lockRepo("org/b");
+        lockRepo("org/c");
+        moveLockedRepo("org/c", "up");
+        expect(viewState.lockedRepos).toEqual(["org/a", "org/c", "org/b"]);
+      });
+
+      it("no-op when visibleRepoNames is empty set", () => {
+        lockRepo("org/a");
+        lockRepo("org/b");
+        moveLockedRepo("org/a", "down", new Set());
+        expect(viewState.lockedRepos).toEqual(["org/a", "org/b"]);
+      });
+    });
   });
 
   describe("pruneLockedRepos", () => {

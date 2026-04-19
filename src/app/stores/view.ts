@@ -341,17 +341,42 @@ export function unlockRepo(repoFullName: string): void {
 
 export function moveLockedRepo(
   repoFullName: string,
-  direction: "up" | "down"
+  direction: "up" | "down",
+  visibleRepoNames?: ReadonlySet<string>
 ): void {
   setViewState(produce((draft) => {
     const arr = draft.lockedRepos;
     const idx = arr.indexOf(repoFullName);
     if (idx === -1) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= arr.length) return;
-    const tmp = arr[idx];
-    arr[idx] = arr[targetIdx];
-    arr[targetIdx] = tmp;
+
+    if (!visibleRepoNames) {
+      // Backward-compatible adjacent swap
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
+      return;
+    }
+
+    // Find the next visible repo in the given direction
+    const step = direction === "up" ? -1 : 1;
+    let targetIdx = -1;
+    for (let i = idx + step; i >= 0 && i < arr.length; i += step) {
+      if (visibleRepoNames.has(arr[i])) {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx === -1) return;
+
+    // Remove from old position and insert adjacent to target
+    arr.splice(idx, 1);
+    // After removal, targetIdx shifts if source was before it
+    const insertIdx = direction === "up"
+      ? targetIdx - (idx < targetIdx ? 1 : 0)
+      : targetIdx - (idx < targetIdx ? 1 : 0) + 1;
+    arr.splice(insertIdx, 0, repoFullName);
   }));
 }
 
