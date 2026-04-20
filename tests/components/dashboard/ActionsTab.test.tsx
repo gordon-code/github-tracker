@@ -160,6 +160,26 @@ describe("ActionsTab — empty-repo state preservation", () => {
     // Empty-state message does NOT render alongside the stub
     expect(screen.queryByText("No workflow runs found.")).toBeNull();
   });
+
+  it("hides locked stubs during initial load (no skeleton + stub double render)", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[]}
+        loading={true}
+        configRepoNames={["owner/locked-empty"]}
+      />
+    ));
+
+    // Loading skeleton shows (label is aria-label, not visible text)
+    screen.getByRole("status", { name: "Loading workflow runs" });
+    // Locked stub does NOT render alongside the skeleton
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).toBeNull();
+  });
 });
 
 // ── ActionsTab — RepoGroupHeader integration ──────────────────────────────────
