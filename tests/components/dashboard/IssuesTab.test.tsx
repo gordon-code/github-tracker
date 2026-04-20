@@ -740,4 +740,59 @@ describe("IssuesTab — empty-repo state preservation", () => {
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
   });
+
+  it("renders compact stub row for a locked repo with no issues", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={[makeIssue({ id: 1, repoFullName: "owner/active-repo", surfacedBy: ["me"] })]}
+        userLogin="me"
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.textContent).toContain("owner/locked-empty");
+    const headerBtn = stub?.querySelector('[aria-expanded]');
+    expect(headerBtn).toBeNull();
+  });
+
+  it("does not expand a locked repo with no issues even when expandedRepos is set", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+      s.expandedRepos.issues["owner/locked-empty"] = true;
+    }));
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={[makeIssue({ id: 1, repoFullName: "owner/active-repo", surfacedBy: ["me"] })]}
+        userLogin="me"
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.querySelector('[aria-expanded]')).toBeNull();
+  });
+
+  it("hides empty-state message when only locked stubs exist (no double render)", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    render(() => (
+      <IssuesTab
+        issues={[]}
+        userLogin="me"
+        configRepoNames={["owner/locked-empty"]}
+      />
+    ));
+
+    expect(screen.queryByText(/No open issues/i)).toBeNull();
+  });
 });

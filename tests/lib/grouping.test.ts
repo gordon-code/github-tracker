@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, type RepoGroup } from "../../src/app/lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, ensureLockedRepoGroups, type RepoGroup } from "../../src/app/lib/grouping";
 
 interface Item {
   repoFullName: string;
@@ -222,5 +222,68 @@ describe("slicePageGroups", () => {
     expect(result).toHaveLength(2);
     expect(result[0].repoFullName).toBe("org/a");
     expect(result[1].repoFullName).toBe("org/b");
+  });
+});
+
+describe("ensureLockedRepoGroups", () => {
+  const emptyFactory = (name: string): RepoGroup<Item> => ({
+    repoFullName: name,
+    items: [],
+  });
+
+  it("returns groups unchanged when all locked repos are present", () => {
+    const groups = [makeGroup("org/a", 3), makeGroup("org/b", 2)];
+    const result = ensureLockedRepoGroups(groups, ["org/a", "org/b"], emptyFactory);
+    expect(result).toBe(groups); // same reference — no copy
+  });
+
+  it("injects empty stubs for missing locked repos", () => {
+    const groups = [makeGroup("org/a", 3)];
+    const result = ensureLockedRepoGroups(groups, ["org/a", "org/b", "org/c"], emptyFactory);
+    expect(result).toHaveLength(3);
+    expect(result[0].repoFullName).toBe("org/a");
+    expect(result[0].items).toHaveLength(3);
+    expect(result[1].repoFullName).toBe("org/b");
+    expect(result[1].items).toHaveLength(0);
+    expect(result[2].repoFullName).toBe("org/c");
+    expect(result[2].items).toHaveLength(0);
+  });
+
+  it("preserves existing groups in original order with stubs appended", () => {
+    const groups = [makeGroup("org/x", 1), makeGroup("org/y", 2)];
+    const result = ensureLockedRepoGroups(groups, ["org/missing"], emptyFactory);
+    expect(result).toHaveLength(3);
+    expect(result[0].repoFullName).toBe("org/x");
+    expect(result[1].repoFullName).toBe("org/y");
+    expect(result[2].repoFullName).toBe("org/missing");
+  });
+
+  it("no-op when lockedOrder is empty", () => {
+    const groups = [makeGroup("org/a", 3)];
+    const result = ensureLockedRepoGroups(groups, [], emptyFactory);
+    expect(result).toBe(groups);
+  });
+
+  it("no-op when groups is empty and lockedOrder is empty", () => {
+    const result = ensureLockedRepoGroups([], [], emptyFactory);
+    expect(result).toEqual([]);
+  });
+
+  it("injects all locked repos when groups is empty", () => {
+    const result = ensureLockedRepoGroups([], ["org/a", "org/b"], emptyFactory);
+    expect(result).toHaveLength(2);
+    expect(result[0].repoFullName).toBe("org/a");
+    expect(result[0].items).toHaveLength(0);
+    expect(result[1].repoFullName).toBe("org/b");
+    expect(result[1].items).toHaveLength(0);
+  });
+
+  it("works with custom factory for different group shapes", () => {
+    interface WfGroup { repoFullName: string; workflows: string[] }
+    const wfFactory = (name: string): WfGroup => ({ repoFullName: name, workflows: [] });
+    const groups: WfGroup[] = [{ repoFullName: "org/a", workflows: ["ci"] }];
+    const result = ensureLockedRepoGroups(groups, ["org/a", "org/b"], wfFactory);
+    expect(result).toHaveLength(2);
+    expect(result[1].workflows).toEqual([]);
   });
 });

@@ -13,10 +13,11 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, isUserInvolved } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, ensureLockedRepoGroups, isUserInvolved } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
+import EmptyLockedRepoRow from "../shared/EmptyLockedRepoRow";
 import { Tooltip } from "../shared/Tooltip";
 
 export interface IssuesTabProps {
@@ -191,9 +192,15 @@ export default function IssuesTab(props: IssuesTabProps) {
   const filteredSorted = createMemo(() => filteredSortedWithMeta().items);
   const issueMeta = createMemo(() => filteredSortedWithMeta().meta);
 
-  const repoGroups = createMemo(() =>
-    orderRepoGroups(groupByRepo(filteredSorted()), viewState.lockedRepos)
-  );
+  const repoGroups = createMemo(() => {
+    const groups = groupByRepo(filteredSorted());
+    const withLocked = ensureLockedRepoGroups(
+      groups,
+      viewState.lockedRepos,
+      (name) => ({ repoFullName: name, items: [] as typeof groups[0]["items"] }),
+    );
+    return orderRepoGroups(withLocked, viewState.lockedRepos);
+  });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
   const pageGroups = createMemo(() =>
@@ -300,41 +307,41 @@ export default function IssuesTab(props: IssuesTabProps) {
         <SkeletonRows label="Loading issues" />
       </Show>
 
+      {/* Empty — only when no groups exist at all (locked stubs are handled by EmptyLockedRepoRow) */}
+      <Show when={(!props.loading || props.issues.length > 0) && pageGroups().length === 0}>
+        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
+          <svg
+            class="h-10 w-10 opacity-40"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          <p class="text-sm font-medium">
+            {viewState.tabFilters.issues.scope === "all" ? "No open issues found" : "No open issues involving you"}
+          </p>
+          <p class="text-xs">
+            {viewState.tabFilters.issues.scope === "all"
+              ? "No issues match your current filters."
+              : "Issues where you are the author, assignee, or mentioned will appear here."}
+          </p>
+        </div>
+      </Show>
+
       {/* Issue rows */}
-      <Show when={!props.loading || props.issues.length > 0}>
-        <Show
-          when={pageGroups().length > 0}
-          fallback={
-            <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
-              <svg
-                class="h-10 w-10 opacity-40"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                />
-              </svg>
-              <p class="text-sm font-medium">
-                {viewState.tabFilters.issues.scope === "all" ? "No open issues found" : "No open issues involving you"}
-              </p>
-              <p class="text-xs">
-                {viewState.tabFilters.issues.scope === "all"
-                  ? "No issues match your current filters."
-                  : "Issues where you are the author, assignee, or mentioned will appear here."}
-              </p>
-            </div>
-          }
-        >
-          <div class="divide-y divide-base-300">
-            <For each={pageGroups()}>
-              {(repoGroup) => {
-                const isExpanded = () => !!viewState.expandedRepos.issues[repoGroup.repoFullName];
+      <Show when={(!props.loading || props.issues.length > 0) && pageGroups().length > 0}>
+        <div class="divide-y divide-base-300">
+          <For each={pageGroups()}>
+            {(repoGroup) => {
+                const isEmpty = () => repoGroup.items.length === 0;
+                const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.issues[repoGroup.repoFullName];
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};
@@ -350,89 +357,95 @@ export default function IssuesTab(props: IssuesTabProps) {
                 });
 
                 return (
-                  <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
-                    <RepoGroupHeader
-                      repoFullName={repoGroup.repoFullName}
-                      starCount={repoGroup.starCount}
-                      isExpanded={isExpanded()}
-                      isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
-                      onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
-                      badges={
-                        <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
-                          <Tooltip content="Showing all activity, not just yours" focusable>
-                            <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
-                          </Tooltip>
-                        </Show>
-                      }
-                      trailing={
-                        <>
-                          <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                          <RepoLockControls repoFullName={repoGroup.repoFullName} />
-                        </>
-                      }
-                      collapsedSummary={
-                        <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                          <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
-                          <For each={roleSummary()}>
-                            {([role, count]) => (
-                              <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                                role === "author" ? "bg-primary/10 text-primary" :
-                                role === "assignee" ? "bg-secondary/10 text-secondary" :
-                                "bg-base-300 text-base-content/70"
-                              }`}>
-                                {role} ×{count}
-                              </span>
+                  <Show
+                    when={!isEmpty()}
+                    fallback={
+                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="issues" />
+                    }
+                  >
+                    <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+                      <RepoGroupHeader
+                        repoFullName={repoGroup.repoFullName}
+                        starCount={repoGroup.starCount}
+                        isExpanded={isExpanded()}
+                        isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
+                        onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
+                        badges={
+                          <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
+                            <Tooltip content="Showing all activity, not just yours" focusable>
+                              <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
+                            </Tooltip>
+                          </Show>
+                        }
+                        trailing={
+                          <>
+                            <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
+                            <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                          </>
+                        }
+                        collapsedSummary={
+                          <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
+                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                            <For each={roleSummary()}>
+                              {([role, count]) => (
+                                <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                                  role === "author" ? "bg-primary/10 text-primary" :
+                                  role === "assignee" ? "bg-secondary/10 text-secondary" :
+                                  "bg-base-300 text-base-content/70"
+                                }`}>
+                                  {role} ×{count}
+                                </span>
+                              )}
+                            </For>
+                          </span>
+                        }
+                      />
+                      <Show when={isExpanded()}>
+                        <div role="list" class="divide-y divide-base-300">
+                          <For each={repoGroup.items}>
+                            {(issue) => (
+                              <div role="listitem" class={
+                                viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
+                                  ? "border-l-2 border-l-primary"
+                                  : undefined
+                              }>
+                                <ItemRow
+                                  hideRepo={true}
+                                  repo={issue.repoFullName}
+                                  number={issue.number}
+                                  title={issue.title}
+                                  author={issue.userLogin}
+                                  createdAt={issue.createdAt}
+                                  updatedAt={issue.updatedAt}
+                                  refreshTick={props.refreshTick}
+                                  url={issue.htmlUrl}
+                                  labels={issue.labels}
+                                  onIgnore={() => handleIgnore(issue)}
+                                  onTrack={config.enableTracking ? () => handleTrack(issue) : undefined}
+                                  isTracked={config.enableTracking ? trackedIssueIds().has(issue.id) : undefined}
+                                  commentCount={issue.comments}
+                                  surfacedByBadge={
+                                    props.trackedUsers && props.trackedUsers.length > 0
+                                      ? <UserAvatarBadge
+                                          users={buildSurfacedByUsers(issue.surfacedBy, trackedUserMap())}
+                                          currentUserLogin={props.userLogin}
+                                        />
+                                      : undefined
+                                  }
+                                >
+                                  <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
+                                </ItemRow>
+                              </div>
                             )}
                           </For>
-                        </span>
-                      }
-                    />
-                    <Show when={isExpanded()}>
-                      <div role="list" class="divide-y divide-base-300">
-                        <For each={repoGroup.items}>
-                          {(issue) => (
-                            <div role="listitem" class={
-                              viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
-                                ? "border-l-2 border-l-primary"
-                                : undefined
-                            }>
-                              <ItemRow
-                                hideRepo={true}
-                                repo={issue.repoFullName}
-                                number={issue.number}
-                                title={issue.title}
-                                author={issue.userLogin}
-                                createdAt={issue.createdAt}
-                                updatedAt={issue.updatedAt}
-                                refreshTick={props.refreshTick}
-                                url={issue.htmlUrl}
-                                labels={issue.labels}
-                                onIgnore={() => handleIgnore(issue)}
-                                onTrack={config.enableTracking ? () => handleTrack(issue) : undefined}
-                                isTracked={config.enableTracking ? trackedIssueIds().has(issue.id) : undefined}
-                                commentCount={issue.comments}
-                                surfacedByBadge={
-                                  props.trackedUsers && props.trackedUsers.length > 0
-                                    ? <UserAvatarBadge
-                                        users={buildSurfacedByUsers(issue.surfacedBy, trackedUserMap())}
-                                        currentUserLogin={props.userLogin}
-                                      />
-                                    : undefined
-                                }
-                              >
-                                <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
-                              </ItemRow>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </div>
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
                 );
-              }}
-            </For>
-          </div>
-        </Show>
+            }}
+          </For>
+        </div>
       </Show>
 
       <Show when={!props.loading || props.issues.length > 0}>
