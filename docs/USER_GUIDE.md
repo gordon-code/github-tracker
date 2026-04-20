@@ -350,7 +350,7 @@ The Tracked tab lets you pin issues and PRs into a personal TODO list that you c
 
 ## Repo Pinning
 
-Each repo group header has a pin (lock) control, visible on hover on desktop and always visible on mobile. Pinning a repo keeps it at the top of the list on all tabs regardless of sort order or how recently it was updated.
+Each repo group header has a pin (lock) control, visible on hover on desktop and always visible on mobile. Pinning a repo keeps it at the top of the list on all tabs regardless of sort order or how recently it was updated. Pinned repos remain visible even when filters exclude all their items — they appear as compact, de-emphasized rows with the repo name and pin controls still accessible.
 
 - Click the pin icon to pin a repo to the top.
 - Click it again to unpin.
