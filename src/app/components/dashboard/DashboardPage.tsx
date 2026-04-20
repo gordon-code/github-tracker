@@ -26,13 +26,12 @@ import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../s
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { formatCount } from "../../lib/format";
+import { formatCount, prSizeCategory } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
 import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
-import { prSizeCategory } from "../../lib/format";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
 

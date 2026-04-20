@@ -16,8 +16,7 @@ export function createTabFilterHandlers(
       setCustomTabFilter(customTabId, field, value);
     } else {
       // Field is known-valid at each call site; generic variance prevents static proof
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (setTabFilter as any)(builtinTab, field, value);
+      (setTabFilter as (tab: BuiltinTabKey, field: string, value: string) => void)(builtinTab, field, value);
     }
   }
 
