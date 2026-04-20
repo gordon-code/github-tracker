@@ -88,6 +88,11 @@ export const prFilterGroups: FilterChipGroupDef[] = [
   },
 ];
 
+// Concrete conclusion/event values used for "other" exclusion logic.
+// Shared between ActionsTab (rendering) and DashboardPage (badge counts).
+export const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"] as const;
+export const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"] as const;
+
 export const actionsFilterGroups: FilterChipGroupDef[] = [
   {
     label: "Result",

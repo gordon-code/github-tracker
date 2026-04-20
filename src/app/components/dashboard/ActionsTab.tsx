@@ -7,7 +7,7 @@ import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import { actionsFilterGroups } from "../shared/filterTypes";
+import { actionsFilterGroups, KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
@@ -101,8 +101,6 @@ function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
   });
 }
 
-const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
-const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
 
 const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
@@ -174,7 +172,7 @@ export default function ActionsTab(props: ActionsTabProps) {
         if (conclusionFilter === "running") {
           if (run.status !== "in_progress") return false;
         } else if (conclusionFilter === "other") {
-          if (run.conclusion === null || KNOWN_CONCLUSIONS.includes(run.conclusion)) return false;
+          if (run.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)) return false;
         } else {
           if (run.conclusion !== conclusionFilter) return false;
         }
@@ -182,7 +180,7 @@ export default function ActionsTab(props: ActionsTabProps) {
 
       if (eventFilter !== "all") {
         if (eventFilter === "other") {
-          if (KNOWN_EVENTS.includes(run.event)) return false;
+          if ((KNOWN_EVENTS as readonly string[]).includes(run.event)) return false;
         } else {
           if (run.event !== eventFilter) return false;
         }

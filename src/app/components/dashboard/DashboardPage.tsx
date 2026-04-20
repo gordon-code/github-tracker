@@ -31,6 +31,9 @@ import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
 import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
+import { isUserInvolved } from "../../lib/grouping";
+import { prSizeCategory } from "../../lib/format";
+import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
 
 const globalSortOptions: SortOption[] = [
@@ -479,6 +482,14 @@ export default function DashboardPage() {
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
   const userLogin = createMemo(() => user()?.login ?? "");
+  const allUsers = createMemo(() => {
+    const login = userLogin().toLowerCase();
+    if (!login) return [];
+    return [
+      { login, label: "Me" },
+      ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
+    ];
+  });
 
   // Eagerly compute scoped data for exclusive custom tabs (needed by exclusiveOwnership).
   // Non-exclusive tabs only compute when they are the active tab.
@@ -562,6 +573,8 @@ export default function DashboardPage() {
 
     const builtinFilter = { org, repo };
     const login = userLogin().toLowerCase();
+    const monitoredSet = new Set((config.monitoredRepos ?? []).map((r) => r.fullName));
+    const users = allUsers();
     const issueDefaults = IssueFiltersSchema.parse({});
     const prDefaults = PullRequestFiltersSchema.parse({});
     const actionsDefaults = ActionsFiltersSchema.parse({});
@@ -595,10 +608,18 @@ export default function DashboardPage() {
         customCounts[tab.id] = data.issues.filter((i) => {
           if (!isItemVisibleOnTab(ownership.issues, i.id, tab.id)) return false;
           if (!isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })) return false;
+          if (f.scope === "involves_me" && !isUserInvolved(i, login, monitoredSet)) return false;
           if (f.role === "author" && i.userLogin.toLowerCase() !== login) return false;
           if (f.role === "assignee" && !i.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
           if (f.comments === "has" && (i.comments ?? 0) === 0) return false;
           if (f.comments === "none" && (i.comments ?? 0) > 0) return false;
+          if (f.user !== "all") {
+            const validUser = !users.length || users.some((u) => u.login === f.user);
+            if (validUser && !monitoredSet.has(i.repoFullName)) {
+              const surfacedBy = i.surfacedBy ?? [login];
+              if (!surfacedBy.includes(f.user)) return false;
+            }
+          }
           return true;
         }).length;
       } else if (tab.baseType === "pullRequests") {
@@ -609,12 +630,13 @@ export default function DashboardPage() {
         customCounts[tab.id] = data.pullRequests.filter((p) => {
           if (!isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id)) return false;
           if (!isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })) return false;
+          if (f.scope === "involves_me" && !isUserInvolved(p, login, monitoredSet, p.enriched !== false ? p.reviewerLogins : undefined)) return false;
           if (f.role === "author" && p.userLogin.toLowerCase() !== login) return false;
           if (f.role === "reviewer" && !p.reviewerLogins?.some((r) => r.toLowerCase() === login)) return false;
           if (f.role === "assignee" && !p.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
           if (f.draft === "draft" && !p.draft) return false;
           if (f.draft === "ready" && p.draft) return false;
-          if (f.checkStatus !== "all") {
+          if (f.checkStatus !== "all" && p.enriched !== false) {
             if (f.checkStatus === "none") { if (p.checkStatus !== null) return false; }
             else if (f.checkStatus === "blocked") { if (p.checkStatus !== "failure" && p.checkStatus !== "conflict") return false; }
             else if (p.checkStatus !== f.checkStatus) return false;
@@ -623,6 +645,16 @@ export default function DashboardPage() {
             if (f.reviewDecision === "mergeable") {
               if (p.reviewDecision !== "APPROVED" && p.reviewDecision !== null) return false;
             } else if (p.reviewDecision !== f.reviewDecision) return false;
+          }
+          if (f.sizeCategory !== "all" && p.enriched !== false) {
+            if (prSizeCategory(p.additions, p.deletions) !== f.sizeCategory) return false;
+          }
+          if (f.user !== "all") {
+            const validUser = !users.length || users.some((u) => u.login === f.user);
+            if (validUser && !monitoredSet.has(p.repoFullName)) {
+              const surfacedBy = p.surfacedBy ?? [login];
+              if (!surfacedBy.includes(f.user)) return false;
+            }
           }
           return true;
         }).length;
@@ -635,11 +667,11 @@ export default function DashboardPage() {
           if (!isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })) return false;
           if (f.conclusion !== "all") {
             if (f.conclusion === "running") { if (w.status !== "in_progress") return false; }
-            else if (f.conclusion === "other") { if (w.conclusion === null || ["success", "failure", "cancelled"].includes(w.conclusion)) return false; }
+            else if (f.conclusion === "other") { if (w.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(w.conclusion)) return false; }
             else if (w.conclusion !== f.conclusion) return false;
           }
           if (f.event !== "all") {
-            if (f.event === "other") { if (["push", "pull_request", "schedule", "workflow_dispatch"].includes(w.event)) return false; }
+            if (f.event === "other") { if ((KNOWN_EVENTS as readonly string[]).includes(w.event)) return false; }
             else if (w.event !== f.event) return false;
           }
           return true;
@@ -695,15 +727,6 @@ export default function DashboardPage() {
       workflowRuns: d.workflowRuns,
       lastUpdatedAt: Date.now(),
     });
-  });
-
-  const allUsers = createMemo(() => {
-    const login = userLogin().toLowerCase();
-    if (!login) return [];
-    return [
-      { login, label: "Me" },
-      ...config.trackedUsers.map((u: TrackedUser) => ({ login: u.login, label: u.login })),
-    ];
   });
 
   const configRepoNames = createMemo(() =>

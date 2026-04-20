@@ -253,6 +253,30 @@ describe("loadConfig", () => {
     expect(cfg.refreshInterval).toBe(300);
     expect(cfg.theme).toBe("auto");
   });
+
+  it("resets stale defaultTab to 'issues' when the custom tab no longer exists", () => {
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        defaultTab: "deleted-tab-id",
+        customTabs: [{ id: "other-tab", name: "Other", baseType: "issues", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false }],
+      })
+    );
+    const cfg = loadConfig();
+    expect(cfg.defaultTab).toBe("issues");
+  });
+
+  it("preserves defaultTab when the custom tab still exists", () => {
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        defaultTab: "my-tab",
+        customTabs: [{ id: "my-tab", name: "My Tab", baseType: "issues", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false }],
+      })
+    );
+    const cfg = loadConfig();
+    expect(cfg.defaultTab).toBe("my-tab");
+  });
 });
 
 // Tests SolidJS store merge mechanics in isolation (does NOT exercise the real
