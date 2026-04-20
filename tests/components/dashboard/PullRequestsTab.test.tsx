@@ -31,7 +31,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import { produce } from "solid-js/store";
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
-import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
+import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState, setCustomTabFilter } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 
@@ -710,5 +710,69 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
+  });
+});
+
+// ── customTabId filter preset ────────────────────────────────────────────────
+
+describe("PullRequestsTab — customTabId filter preset", () => {
+  it("applies filterPreset role:author — shows only author PRs", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+      makePullRequest({ id: 2, title: "Other PR", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("custom-pr-tab-1", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        customTabId="custom-pr-tab-1"
+        filterPreset={{ role: "author", scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My PR");
+    expect(screen.queryByText("Other PR")).toBeNull();
+  });
+
+  it("stored customTabFilters override the preset", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+      makePullRequest({ id: 2, title: "Other PR", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
+    ];
+    setCustomTabFilter("custom-pr-tab-3", "role", "all");
+    setAllExpanded("custom-pr-tab-3", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        customTabId="custom-pr-tab-3"
+        filterPreset={{ role: "author", scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My PR");
+    screen.getByText("Other PR");
+  });
+
+  it("does not use global tabFilters.pullRequests when customTabId is set", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "My PR", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+    ];
+    setTabFilter("pullRequests", "role", "assignee");
+    setAllExpanded("custom-pr-tab-5", ["org/repo"], true);
+
+    render(() => (
+      <PullRequestsTab
+        pullRequests={prs}
+        userLogin="me"
+        customTabId="custom-pr-tab-5"
+        filterPreset={{ scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My PR");
   });
 });

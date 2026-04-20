@@ -1,7 +1,7 @@
 import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
-import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS } from "../../shared/schemas";
+import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
 import type { Config, ThemeId, CustomTab } from "../../shared/schemas";
 import { z } from "zod";
 
@@ -37,7 +37,15 @@ export function loadConfig(): Config {
       }
     }
     const result = ConfigSchema.safeParse(parsed);
-    if (result.success) return result.data;
+    if (result.success) {
+      const data = result.data;
+      // Clean up stale defaultTab pointing to a deleted custom tab
+      const validTabIds = new Set<string>([...BUILTIN_TAB_IDS, ...data.customTabs.map((t) => t.id)]);
+      if (!validTabIds.has(data.defaultTab)) {
+        return { ...data, defaultTab: "issues" };
+      }
+      return data;
+    }
     return ConfigSchema.parse({});
   } catch {
     return ConfigSchema.parse({});
@@ -119,7 +127,10 @@ export function updateCustomTab(id: string, updates: Partial<CustomTab>): void {
       const idx = draft.customTabs.findIndex((t) => t.id === id);
       if (idx === -1) return;
       const { id: _ignored, ...safeUpdates } = updates;
-      Object.assign(draft.customTabs[idx], safeUpdates);
+      const merged = { ...draft.customTabs[idx], ...safeUpdates };
+      const parsed = CustomTabSchema.safeParse(merged);
+      if (!parsed.success) return;
+      Object.assign(draft.customTabs[idx], parsed.data);
     })
   );
 }

@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, setCustomTabFilter, resetCustomTabFilters, PullRequestFiltersSchema, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, PullRequestFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers } from "../../lib/tabFilters";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
@@ -71,8 +72,6 @@ function reviewDecisionOrder(decision: PullRequest["reviewDecision"]): number {
   }
 }
 
-
-
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
 
@@ -130,30 +129,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
-  function handleFilterChange(field: string, value: string) {
-    if (props.customTabId) {
-      setCustomTabFilter(props.customTabId, field, value);
-    } else {
-      setTabFilter("pullRequests", field as PullRequestFilterField, value);
-    }
-  }
-
-  function handleResetFilters() {
-    if (props.customTabId) {
-      resetCustomTabFilters(props.customTabId);
-    } else {
-      resetAllTabFilters("pullRequests");
-    }
-  }
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("pullRequests", () => props.customTabId);
 
   // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && activeFilters().scope !== "involves_me") {
-      if (props.customTabId) {
-        setCustomTabFilter(props.customTabId, "scope", "involves_me");
-      } else {
-        setTabFilter("pullRequests", "scope", "involves_me");
-      }
+      handleFilterChange("scope", "involves_me");
     }
   });
 
@@ -161,11 +142,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   createEffect(() => {
     const users = props.allUsers;
     if ((!users || users.length <= 1) && activeFilters().user !== "all") {
-      if (props.customTabId) {
-        setCustomTabFilter(props.customTabId, "user", "all");
-      } else {
-        setTabFilter("pullRequests", "user", "all");
-      }
+      handleFilterChange("user", "all");
     }
   });
 

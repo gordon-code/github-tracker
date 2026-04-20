@@ -1,7 +1,8 @@
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
-import { viewState, setViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, setCustomTabFilter, resetCustomTabFilters, ActionsFiltersSchema, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers } from "../../lib/tabFilters";
 import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
@@ -133,21 +134,7 @@ export default function ActionsTab(props: ActionsTabProps) {
     return viewState.tabFilters.actions;
   });
 
-  function handleFilterChange(field: string, value: string) {
-    if (props.customTabId) {
-      setCustomTabFilter(props.customTabId, field, value);
-    } else {
-      setTabFilter("actions", field as ActionsFilterField, value);
-    }
-  }
-
-  function handleResetFilters() {
-    if (props.customTabId) {
-      resetCustomTabFilters(props.customTabId);
-    } else {
-      resetAllTabFilters("actions");
-    }
-  }
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("actions", () => props.customTabId);
 
   createEffect(() => {
     const names = activeRepoNames();

@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -322,6 +322,11 @@ export default function DashboardPage() {
   const [clockTick, setClockTick] = createSignal(0);
   const [showCustomTabModal, setShowCustomTabModal] = createSignal(false);
   const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
+  const editingTab = createMemo(() => {
+    const id = editingTabId();
+    if (!id) return undefined;
+    return getCustomTab(id);
+  });
 
   // Redirect away from tracked tab when tracking is disabled at runtime
   createEffect(() => {
@@ -473,16 +478,19 @@ export default function DashboardPage() {
 
   const refreshTick = createMemo(() => (dashboardData.lastRefreshedAt?.getTime() ?? 0) + clockTick());
 
-  // Eagerly compute scoped data for ALL custom tabs (not just the active one).
-  // exclusiveOwnership depends on customTabData for all exclusive tabs — lazy
-  // per-active-tab computation would break exclusivity.
+  const userLogin = createMemo(() => user()?.login ?? "");
+
+  // Eagerly compute scoped data for exclusive custom tabs (needed by exclusiveOwnership).
+  // Non-exclusive tabs only compute when they are the active tab.
   const customTabData = createMemo(() => {
+    const currentTabId = activeTab();
     const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
     for (const tab of config.customTabs) {
+      if (!tab.exclusive && tab.id !== currentTabId) continue;
       const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
-      const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName)) : null;
+      const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
       const matchesScope = (repoFullName: string) => {
-        if (repoSet && repoSet.has(repoFullName)) return true;
+        if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
         if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
         return !orgSet && !repoSet; // no scope = all repos
       };
@@ -524,46 +532,118 @@ export default function DashboardPage() {
   }
 
   // Visible data for built-in tabs — filters out exclusively-owned items
-  const visibleIssues = createMemo(() =>
-    dashboardData.issues.filter((i) => isItemVisibleOnTab(exclusiveOwnership().issues, i.id, "issues"))
-  );
-  const visiblePullRequests = createMemo(() =>
-    dashboardData.pullRequests.filter((p) => isItemVisibleOnTab(exclusiveOwnership().pullRequests, p.id, "pullRequests"))
-  );
-  const visibleWorkflowRuns = createMemo(() =>
-    dashboardData.workflowRuns.filter((w) => isItemVisibleOnTab(exclusiveOwnership().actions, w.id, "actions"))
-  );
+  const visibleIssues = createMemo(() => {
+    const map = exclusiveOwnership().issues;
+    if (map.size === 0) return dashboardData.issues;
+    return dashboardData.issues.filter((i) => isItemVisibleOnTab(map, i.id, "issues"));
+  });
+  const visiblePullRequests = createMemo(() => {
+    const map = exclusiveOwnership().pullRequests;
+    if (map.size === 0) return dashboardData.pullRequests;
+    return dashboardData.pullRequests.filter((p) => isItemVisibleOnTab(map, p.id, "pullRequests"));
+  });
+  const visibleWorkflowRuns = createMemo(() => {
+    const map = exclusiveOwnership().actions;
+    if (map.size === 0) return dashboardData.workflowRuns;
+    return dashboardData.workflowRuns.filter((w) => isItemVisibleOnTab(map, w.id, "actions"));
+  });
 
   const tabCounts = createMemo(() => {
     const { org, repo } = viewState.globalFilter;
-    const ignoredByType = (type: string) =>
-      new Set(viewState.ignoredItems.filter((i) => i.type === type).map((i) => i.id));
-
-    const ignoredIssues = ignoredByType("issue");
-    const ignoredPRs = ignoredByType("pullRequest");
-    const ignoredRuns = ignoredByType("workflowRun");
+    const ignoredIssues = new Set<number>();
+    const ignoredPRs = new Set<number>();
+    const ignoredRuns = new Set<number>();
+    for (const item of viewState.ignoredItems) {
+      if (item.type === "issue") ignoredIssues.add(item.id);
+      else if (item.type === "pullRequest") ignoredPRs.add(item.id);
+      else ignoredRuns.add(item.id);
+    }
     const ownership = exclusiveOwnership();
 
     const builtinFilter = { org, repo };
+    const login = userLogin().toLowerCase();
+    const issueDefaults = IssueFiltersSchema.parse({});
+    const prDefaults = PullRequestFiltersSchema.parse({});
+    const actionsDefaults = ActionsFiltersSchema.parse({});
     const customCounts: Record<string, number> = {};
     for (const tab of config.customTabs) {
-      const data = customTabData()[tab.id];
-      if (!data) continue;
+      // customTabData skips non-exclusive inactive tabs (perf optimization),
+      // so compute scope inline for tabs absent from the memo.
+      let data = customTabData()[tab.id];
+      if (!data) {
+        const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
+        const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
+        const matchesScope = (repoFullName: string) => {
+          if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
+          if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
+          return !orgSet && !repoSet;
+        };
+        data = {
+          issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
+          pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
+          workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
+        };
+      }
+      // Merge filter chain: schema defaults → preset → stored overrides (same as tab components)
+      const stored = viewState.customTabFilters[tab.id] ?? {};
+      const preset = tab.filterPreset ?? {};
       if (tab.baseType === "issues") {
-        customCounts[tab.id] = data.issues.filter((i) =>
-          isItemVisibleOnTab(ownership.issues, i.id, tab.id) &&
-          isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })
-        ).length;
+        const defaults = issueDefaults;
+        const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
+        if (merged["user"] === "_self") merged["user"] = login || "all";
+        const f = IssueFiltersSchema.safeParse(merged).data ?? defaults;
+        customCounts[tab.id] = data.issues.filter((i) => {
+          if (!isItemVisibleOnTab(ownership.issues, i.id, tab.id)) return false;
+          if (!isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })) return false;
+          if (f.role === "author" && i.userLogin.toLowerCase() !== login) return false;
+          if (f.role === "assignee" && !i.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
+          if (f.comments === "has" && (i.comments ?? 0) === 0) return false;
+          if (f.comments === "none" && (i.comments ?? 0) > 0) return false;
+          return true;
+        }).length;
       } else if (tab.baseType === "pullRequests") {
-        customCounts[tab.id] = data.pullRequests.filter((p) =>
-          isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id) &&
-          isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })
-        ).length;
+        const defaults = prDefaults;
+        const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
+        if (merged["user"] === "_self") merged["user"] = login || "all";
+        const f = PullRequestFiltersSchema.safeParse(merged).data ?? defaults;
+        customCounts[tab.id] = data.pullRequests.filter((p) => {
+          if (!isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id)) return false;
+          if (!isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })) return false;
+          if (f.role === "author" && p.userLogin.toLowerCase() !== login) return false;
+          if (f.role === "reviewer" && !p.reviewerLogins?.some((r) => r.toLowerCase() === login)) return false;
+          if (f.role === "assignee" && !p.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
+          if (f.draft === "draft" && !p.draft) return false;
+          if (f.draft === "ready" && p.draft) return false;
+          if (f.checkStatus !== "all") {
+            if (f.checkStatus === "none") { if (p.checkStatus !== null) return false; }
+            else if (f.checkStatus === "blocked") { if (p.checkStatus !== "failure" && p.checkStatus !== "conflict") return false; }
+            else if (p.checkStatus !== f.checkStatus) return false;
+          }
+          if (f.reviewDecision !== "all") {
+            if (f.reviewDecision === "mergeable") {
+              if (p.reviewDecision !== "APPROVED" && p.reviewDecision !== null) return false;
+            } else if (p.reviewDecision !== f.reviewDecision) return false;
+          }
+          return true;
+        }).length;
       } else {
-        customCounts[tab.id] = data.workflowRuns.filter((w) =>
-          isItemVisibleOnTab(ownership.actions, w.id, tab.id) &&
-          isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })
-        ).length;
+        const defaults = actionsDefaults;
+        const merged = { ...defaults, ...preset, ...stored };
+        const f = ActionsFiltersSchema.safeParse(merged).data ?? defaults;
+        customCounts[tab.id] = data.workflowRuns.filter((w) => {
+          if (!isItemVisibleOnTab(ownership.actions, w.id, tab.id)) return false;
+          if (!isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })) return false;
+          if (f.conclusion !== "all") {
+            if (f.conclusion === "running") { if (w.status !== "in_progress") return false; }
+            else if (f.conclusion === "other") { if (w.conclusion === null || ["success", "failure", "cancelled"].includes(w.conclusion)) return false; }
+            else if (w.conclusion !== f.conclusion) return false;
+          }
+          if (f.event !== "all") {
+            if (f.event === "other") { if (["push", "pull_request", "schedule", "workflow_dispatch"].includes(w.event)) return false; }
+            else if (w.event !== f.event) return false;
+          }
+          return true;
+        }).length;
       }
     }
 
@@ -617,7 +697,6 @@ export default function DashboardPage() {
     });
   });
 
-  const userLogin = createMemo(() => user()?.login ?? "");
   const allUsers = createMemo(() => {
     const login = userLogin().toLowerCase();
     if (!login) return [];
@@ -781,7 +860,7 @@ export default function DashboardPage() {
           <CustomTabModal
             open={showCustomTabModal()}
             onClose={() => { setShowCustomTabModal(false); setEditingTabId(null); }}
-            editingTab={editingTabId() ? getCustomTab(editingTabId()!) : undefined}
+            editingTab={editingTab()}
             availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
             availableRepos={config.selectedRepos}
           />

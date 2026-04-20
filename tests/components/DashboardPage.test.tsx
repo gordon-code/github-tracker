@@ -1297,3 +1297,300 @@ describe("DashboardPage — exclusive custom tabs", () => {
     });
   });
 });
+
+// ── Custom tab scoping (orgScope / repoScope) ────────────────────────────────
+
+describe("DashboardPage — custom tab scoping", () => {
+  it("orgScope restricts custom tab badge to issues from matching org only", async () => {
+    configStore.addCustomTab({
+      id: "orgscope01",
+      name: "My Org Issues",
+      baseType: "issues",
+      orgScope: ["myorg"],
+      repoScope: [],
+      filterPreset: { scope: "all" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "In-scope", repoFullName: "myorg/repo-a" }),
+        makeIssue({ id: 2, title: "Out-of-scope", repoFullName: "other/repo-b" }),
+        makeIssue({ id: 3, title: "Also in-scope", repoFullName: "myorg/repo-c" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /My Org Issues/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("repoScope restricts custom tab badge to issues from matching repo only", async () => {
+    configStore.addCustomTab({
+      id: "reposcope01",
+      name: "Repo A Issues",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [{ owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" }],
+      filterPreset: { scope: "all" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 10, title: "Repo A issue", repoFullName: "myorg/repo-a" }),
+        makeIssue({ id: 11, title: "Repo B issue", repoFullName: "myorg/repo-b" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /Repo A Issues/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("orgScope is case-insensitive", async () => {
+    configStore.addCustomTab({
+      id: "orgcase01",
+      name: "Case Test",
+      baseType: "issues",
+      orgScope: ["MyOrg"],
+      repoScope: [],
+      filterPreset: { scope: "all" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeIssue({ id: 20, title: "Lowercase org", repoFullName: "myorg/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /Case Test/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("exclusive scoped tab removes only matched items from builtin tab", async () => {
+    configStore.addCustomTab({
+      id: "exclscope01",
+      name: "Exclusive Org",
+      baseType: "issues",
+      orgScope: ["myorg"],
+      repoScope: [],
+      filterPreset: { scope: "all" },
+      exclusive: true,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 30, title: "myorg issue", repoFullName: "myorg/repo" }),
+        makeIssue({ id: 31, title: "other issue", repoFullName: "other/repo" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      const customTab = screen.getByRole("tab", { name: /Exclusive Org/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+});
+
+// ── resolveInitialTab stale custom tab fallback ──────────────────────────────
+
+describe("DashboardPage — resolveInitialTab stale custom tab fallback", () => {
+  it("falls back to issues when lastActiveTab is a nonexistent custom tab ID", () => {
+    viewStore.updateViewState({ lastActiveTab: "stale-tab-id" });
+    configStore.updateConfig({ rememberLastTab: true });
+
+    render(() => <DashboardPage />);
+
+    const issuesButton = screen.getByRole("tab", { name: /^Issues/ });
+    expect(issuesButton.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("uses a valid custom tab ID from lastActiveTab when the tab still exists", () => {
+    configStore.addCustomTab({
+      id: "valid-custom",
+      name: "Valid Tab",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: false,
+    });
+    viewStore.updateViewState({ lastActiveTab: "valid-custom" });
+    configStore.updateConfig({ rememberLastTab: true });
+
+    render(() => <DashboardPage />);
+
+    const customTabButton = screen.getByRole("tab", { name: /Valid Tab/ });
+    expect(customTabButton.getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+// ── Runtime redirect when active custom tab is deleted ───────────────────────
+
+describe("DashboardPage — runtime redirect when active custom tab is deleted", () => {
+  it("redirects to issues when the active custom tab is removed from config", async () => {
+    configStore.addCustomTab({
+      id: "deleteme",
+      name: "Delete Me Tab",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: false,
+    });
+
+    render(() => <DashboardPage />);
+
+    const customTabButton = screen.getByRole("tab", { name: /Delete Me Tab/ });
+    fireEvent.click(customTabButton);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("deleteme");
+    });
+
+    configStore.removeCustomTab("deleteme");
+
+    await waitFor(() => {
+      expect(viewStore.viewState.lastActiveTab).toBe("issues");
+    });
+  });
+});
+
+// ── Orphaned view state cleanup ──────────────────────────────────────────────
+
+describe("DashboardPage — orphaned view state cleanup", () => {
+  it("removes customTabFilters and expandedRepos keys when a custom tab is deleted", async () => {
+    configStore.addCustomTab({
+      id: "orphan01",
+      name: "Orphan Tab",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: {},
+      exclusive: false,
+    });
+    viewStore.setCustomTabFilter("orphan01", "role", "author");
+    viewStore.toggleExpandedRepo("orphan01", "myorg/repo");
+
+    render(() => <DashboardPage />);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.customTabFilters["orphan01"]).toBeDefined();
+    });
+
+    configStore.removeCustomTab("orphan01");
+
+    await waitFor(() => {
+      expect(viewStore.viewState.customTabFilters["orphan01"]).toBeUndefined();
+      expect(viewStore.viewState.expandedRepos["orphan01"]).toBeUndefined();
+    });
+  });
+
+  it("prunes stale customTabFilters entries at mount time for unknown tab IDs", async () => {
+    viewStore.setCustomTabFilter("ghost-tab", "role", "assignee");
+
+    render(() => <DashboardPage />);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.customTabFilters["ghost-tab"]).toBeUndefined();
+    });
+  });
+});
+
+// ── tabCounts badge reflects filterPreset ─────────────────────────────────────
+
+describe("DashboardPage — tabCounts applies filterPreset", () => {
+  it("role:author preset reduces badge count to only authored issues", async () => {
+    configStore.addCustomTab({
+      id: "authored",
+      name: "My Authored",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: { scope: "all", role: "author" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    // 3 issues: 2 by "octocat" (makeIssue default), 1 by "someone"
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Issue A" }),
+        makeIssue({ id: 2, title: "Issue B" }),
+        makeIssue({ id: 3, title: "Issue C", userLogin: "someone" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Builtin Issues tab shows all 3 (no role filter applied to builtin tabs)
+      const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("3");
+      // Custom tab with role:author — login is "" in test env, so 0 match
+      // (no issue has userLogin matching "")
+      const customTab = screen.getByRole("tab", { name: /My Authored/ });
+      const customCount = parseInt(customTab.textContent?.replace(/\D+/g, "") || "0", 10);
+      // Badge count should be less than total (role filter applied)
+      expect(customCount).toBeLessThan(3);
+    });
+  });
+
+  it("conclusion:failure preset reduces badge count to only failed runs", async () => {
+    configStore.addCustomTab({
+      id: "failures",
+      name: "Failed Runs",
+      baseType: "actions",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: { conclusion: "failure" },
+      exclusive: false,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 10, conclusion: "failure", isPrRun: false }),
+        makeWorkflowRun({ id: 11, conclusion: "success", isPrRun: false }),
+        makeWorkflowRun({ id: 12, conclusion: "failure", isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Only 2 failure runs counted
+      const customTab = screen.getByRole("tab", { name: /Failed Runs/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+});

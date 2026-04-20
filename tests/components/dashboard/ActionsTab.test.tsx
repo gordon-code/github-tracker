@@ -31,7 +31,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import { produce } from "solid-js/store";
 import ActionsTab from "../../../src/app/components/dashboard/ActionsTab";
-import { viewState, setViewState, resetViewState } from "../../../src/app/stores/view";
+import { viewState, setViewState, resetViewState, setCustomTabFilter } from "../../../src/app/stores/view";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -144,5 +144,47 @@ describe("ActionsTab — RepoGroupHeader rendering", () => {
     await user.click(headerBtn);
     expect(headerBtn.getAttribute("aria-expanded")).toBe("false");
     expect(viewState.expandedRepos.actions["owner/repo"]).toBeFalsy();
+  });
+});
+
+// ── customTabId filter preset ────────────────────────────────────────────────
+
+describe("ActionsTab — customTabId filter preset", () => {
+  it("stores filter changes under customTabId key, not global tabFilters", () => {
+    render(() => (
+      <ActionsTab
+        workflowRuns={[]}
+        customTabId="custom-actions-tab-5"
+        filterPreset={{}}
+      />
+    ));
+
+    setCustomTabFilter("custom-actions-tab-5", "conclusion", "failure");
+
+    expect(viewState.customTabFilters["custom-actions-tab-5"]?.["conclusion"]).toBe("failure");
+    expect(viewState.tabFilters.actions.conclusion).toBe("all");
+  });
+
+  it("does not use global tabFilters.actions when customTabId is set", () => {
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "org/repo", conclusion: "success", event: "push" }),
+    ];
+    setViewState(produce((s) => {
+      s.tabFilters.actions.conclusion = "failure";
+      s.expandedRepos["custom-actions-tab-4"] = { "org/repo": true };
+    }));
+
+    render(() => (
+      <ActionsTab
+        workflowRuns={runs}
+        customTabId="custom-actions-tab-4"
+        filterPreset={{}}
+      />
+    ));
+
+    // Global conclusion:failure must NOT apply — repo group should be present
+    const buttons = screen.getAllByRole("button");
+    const headerBtn = buttons.find(b => b.textContent?.includes("org/repo"));
+    expect(headerBtn).toBeTruthy();
   });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
+  CustomTabSchema,
 } from "../../src/app/stores/config";
 import type { CustomTab } from "../../src/app/stores/config";
 import { createRoot } from "solid-js";
@@ -782,6 +783,16 @@ describe("updateCustomTab", () => {
       dispose();
     });
   });
+
+  it("ignores id field in updates — tab id remains unchanged", () => {
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-orig", name: "Original" }));
+      updateCustomTab("tab-orig", { id: "new-id", name: "Renamed" });
+      expect(config.customTabs[0].id).toBe("tab-orig");
+      expect(config.customTabs[0].name).toBe("Renamed");
+      dispose();
+    });
+  });
 });
 
 describe("removeCustomTab", () => {
@@ -907,5 +918,53 @@ describe("getCustomTab", () => {
       expect(result).toBeUndefined();
       dispose();
     });
+  });
+});
+
+describe("CustomTabSchema — field validation", () => {
+  it("rejects id with spaces", () => {
+    expect(CustomTabSchema.safeParse({ id: "bad id", name: "Tab", baseType: "issues" }).success).toBe(false);
+  });
+
+  it("rejects id longer than 50 characters", () => {
+    expect(CustomTabSchema.safeParse({ id: "a".repeat(51), name: "Tab", baseType: "issues" }).success).toBe(false);
+  });
+
+  it("accepts id at max length (50 chars)", () => {
+    expect(CustomTabSchema.safeParse({ id: "a".repeat(50), name: "Tab", baseType: "issues" }).success).toBe(true);
+  });
+
+  it("rejects empty name", () => {
+    expect(CustomTabSchema.safeParse({ id: "tab-valid", name: "", baseType: "issues" }).success).toBe(false);
+  });
+
+  it("rejects name longer than 30 characters", () => {
+    expect(CustomTabSchema.safeParse({ id: "tab-valid", name: "a".repeat(31), baseType: "issues" }).success).toBe(false);
+  });
+
+  it("accepts name at max length (30 chars)", () => {
+    expect(CustomTabSchema.safeParse({ id: "tab-valid", name: "a".repeat(30), baseType: "issues" }).success).toBe(true);
+  });
+
+  it("rejects orgScope with more than 100 entries", () => {
+    expect(CustomTabSchema.safeParse({
+      id: "tab-valid", name: "Tab", baseType: "issues",
+      orgScope: Array.from({ length: 101 }, (_, i) => `org${i}`),
+    }).success).toBe(false);
+  });
+
+  it("rejects invalid baseType", () => {
+    expect(CustomTabSchema.safeParse({ id: "tab-valid", name: "Tab", baseType: "tracked" }).success).toBe(false);
+  });
+
+  it("applies defaults for optional fields", () => {
+    const result = CustomTabSchema.safeParse({ id: "tab-valid", name: "Tab", baseType: "pullRequests" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.orgScope).toEqual([]);
+      expect(result.data.repoScope).toEqual([]);
+      expect(result.data.filterPreset).toEqual({});
+      expect(result.data.exclusive).toBe(false);
+    }
   });
 });

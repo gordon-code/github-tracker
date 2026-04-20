@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, setCustomTabFilter, resetCustomTabFilters, IssueFiltersSchema, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers } from "../../lib/tabFilters";
 import type { Issue, RepoRef } from "../../services/api";
 import { isIssueVisible } from "../../lib/filters";
 import ItemRow from "./ItemRow";
@@ -95,30 +96,12 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
-  function handleFilterChange(field: string, value: string) {
-    if (props.customTabId) {
-      setCustomTabFilter(props.customTabId, field, value);
-    } else {
-      setTabFilter("issues", field as IssueFilterField, value);
-    }
-  }
-
-  function handleResetFilters() {
-    if (props.customTabId) {
-      resetCustomTabFilters(props.customTabId);
-    } else {
-      resetAllTabFilters("issues");
-    }
-  }
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("issues", () => props.customTabId);
 
   // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
     if (!showScopeFilter() && activeFilters().scope !== "involves_me") {
-      if (props.customTabId) {
-        setCustomTabFilter(props.customTabId, "scope", "involves_me");
-      } else {
-        setTabFilter("issues", "scope", "involves_me");
-      }
+      handleFilterChange("scope", "involves_me");
     }
   });
 
@@ -126,11 +109,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   createEffect(() => {
     const users = props.allUsers;
     if ((!users || users.length <= 1) && activeFilters().user !== "all") {
-      if (props.customTabId) {
-        setCustomTabFilter(props.customTabId, "user", "all");
-      } else {
-        setTabFilter("issues", "user", "all");
-      }
+      handleFilterChange("user", "all");
     }
   });
 

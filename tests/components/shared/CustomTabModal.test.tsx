@@ -375,3 +375,96 @@ describe("CustomTabModal — filter preset", () => {
     expect(Object.keys(arg.filterPreset)).toHaveLength(0);
   });
 });
+
+// ── Scope accordion ──────────────────────────────────────────────────────────
+
+describe("CustomTabModal — scope accordion", () => {
+  it("scope accordion is closed by default", () => {
+    renderModal(true);
+    expect(document.getElementById("custom-tab-scope-panel")).toBeNull();
+  });
+
+  it("clicking Scope button opens the accordion", () => {
+    renderModal(true);
+    const scopeBtn = screen.getByRole("button", { name: /scope/i });
+    fireEvent.click(scopeBtn);
+    expect(document.getElementById("custom-tab-scope-panel")).not.toBeNull();
+  });
+
+  it("checking an org adds it to orgScope on save", () => {
+    renderModal(true);
+    const input = screen.getByRole("textbox");
+    fireEvent.input(input, { target: { value: "Scoped Tab" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /scope/i }));
+
+    const orgCheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("myorg"));
+    fireEvent.click(orgCheckbox!);
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    const arg = mockAddCustomTab.mock.calls[0][0] as CustomTab;
+    expect(arg.orgScope).toEqual(["myorg"]);
+    expect(arg.repoScope).toEqual([]);
+  });
+
+  it("individual repo selection is reflected in repoScope on save", () => {
+    renderModal(true);
+    const input = screen.getByRole("textbox");
+    fireEvent.input(input, { target: { value: "Repo Scoped" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /scope/i }));
+
+    const repoCheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("repo1"));
+    fireEvent.click(repoCheckbox!);
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    const arg = mockAddCustomTab.mock.calls[0][0] as CustomTab;
+    expect(arg.orgScope).toEqual([]);
+    expect(arg.repoScope).toEqual([{ owner: "myorg", name: "repo1", fullName: "myorg/repo1" }]);
+  });
+
+  it("deselecting org removes repos from that org cascade", () => {
+    // Render with two orgs
+    const [open] = createSignal(true);
+    render(() => (
+      <CustomTabModal
+        open={open()}
+        onClose={vi.fn()}
+        availableOrgs={["orgA", "orgB"]}
+        availableRepos={[
+          { owner: "orgA", name: "repoA1", fullName: "orgA/repoA1" },
+          { owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" },
+        ]}
+      />
+    ));
+    const input = screen.getByRole("textbox");
+    fireEvent.input(input, { target: { value: "Cascade Test" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /scope/i }));
+
+    // Select repoB1 individually
+    const repoBCheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("repoB1"));
+    fireEvent.click(repoBCheckbox!);
+
+    // Select orgA then deselect it — should not affect repoB1
+    const orgACheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("orgA"));
+    fireEvent.click(orgACheckbox!); // select
+    fireEvent.click(orgACheckbox!); // deselect (cascade)
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    const arg = mockAddCustomTab.mock.calls[0][0] as CustomTab;
+    expect(arg.orgScope).toEqual([]);
+    expect(arg.repoScope).toEqual([{ owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" }]);
+  });
+});

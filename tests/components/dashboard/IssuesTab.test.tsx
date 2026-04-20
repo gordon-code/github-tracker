@@ -31,7 +31,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import { produce } from "solid-js/store";
 import IssuesTab from "../../../src/app/components/dashboard/IssuesTab";
-import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState } from "../../../src/app/stores/view";
+import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState, setCustomTabFilter } from "../../../src/app/stores/view";
 import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 import type { TrackedUser } from "../../../src/app/stores/config";
 
@@ -739,5 +739,90 @@ describe("IssuesTab — empty-repo state preservation", () => {
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
+  });
+});
+
+// ── customTabId filter preset ────────────────────────────────────────────────
+
+describe("IssuesTab — customTabId filter preset", () => {
+  it("applies filterPreset role:author — shows only author issues", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("custom-tab-1", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        customTabId="custom-tab-1"
+        filterPreset={{ role: "author", scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My issue");
+    expect(screen.queryByText("Other issue")).toBeNull();
+  });
+
+  it("stored customTabFilters override the preset", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
+    ];
+    setCustomTabFilter("custom-tab-3", "role", "all");
+    setAllExpanded("custom-tab-3", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        customTabId="custom-tab-3"
+        filterPreset={{ role: "author", scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My issue");
+    screen.getByText("Other issue");
+  });
+
+  it("resolves _self sentinel to userLogin in preset user filter", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
+    ];
+    setAllExpanded("custom-tab-4", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        customTabId="custom-tab-4"
+        filterPreset={{ scope: "all", user: "_self" }}
+        allUsers={[{ login: "me", label: "Me" }, { login: "other", label: "other" }]}
+      />
+    ));
+
+    screen.getByText("My issue");
+    expect(screen.queryByText("Other issue")).toBeNull();
+  });
+
+  it("does not use global tabFilters.issues when customTabId is set", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
+    ];
+    setTabFilter("issues", "role", "assignee");
+    setAllExpanded("custom-tab-5", ["org/repo"], true);
+
+    render(() => (
+      <IssuesTab
+        issues={issues}
+        userLogin="me"
+        customTabId="custom-tab-5"
+        filterPreset={{ scope: "all" }}
+      />
+    ));
+
+    screen.getByText("My issue");
   });
 });

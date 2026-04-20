@@ -2,6 +2,21 @@ import { createSignal, createMemo, For, Show } from "solid-js";
 import { config, removeCustomTab, reorderCustomTab } from "../../stores/config";
 import type { RepoRef } from "../../services/api";
 import CustomTabModal from "../shared/CustomTabModal";
+import { formatScopeSummary } from "../../lib/format";
+
+type BaseType = "issues" | "pullRequests" | "actions";
+
+function baseTypeLabel(baseType: BaseType): string {
+  if (baseType === "issues") return "Issues";
+  if (baseType === "pullRequests") return "PRs";
+  return "Actions";
+}
+
+function baseTypeBadgeClass(baseType: BaseType): string {
+  if (baseType === "issues") return "badge-info";
+  if (baseType === "pullRequests") return "badge-success";
+  return "badge-warning";
+}
 
 interface CustomTabsSectionProps {
   availableOrgs: string[];
@@ -36,30 +51,6 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
     setEditingTabId(null);
   }
 
-  function scopeSummary(tab: typeof config.customTabs[number]): string {
-    if (tab.orgScope.length === 0 && tab.repoScope.length === 0) return "All repos";
-    const parts: string[] = [];
-    if (tab.orgScope.length > 0) {
-      parts.push(`${tab.orgScope.length} org${tab.orgScope.length !== 1 ? "s" : ""}`);
-    }
-    if (tab.repoScope.length > 0) {
-      parts.push(`${tab.repoScope.length} repo${tab.repoScope.length !== 1 ? "s" : ""}`);
-    }
-    return parts.join(", ");
-  }
-
-  const baseTypeLabel = (baseType: string) => {
-    if (baseType === "issues") return "Issues";
-    if (baseType === "pullRequests") return "PRs";
-    return "Actions";
-  };
-
-  const baseTypeBadgeClass = (baseType: string) => {
-    if (baseType === "issues") return "badge-info";
-    if (baseType === "pullRequests") return "badge-success";
-    return "badge-warning";
-  };
-
   return (
     <div class="flex flex-col gap-3 px-4 py-3">
       <Show
@@ -91,7 +82,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
                         {baseTypeLabel(tab.baseType)}
                       </span>
                     </td>
-                    <td class="text-xs text-base-content/70">{scopeSummary(tab)}</td>
+                    <td class="text-xs text-base-content/70">{formatScopeSummary(tab.orgScope.length, tab.repoScope.length, true)}</td>
                     <td class="text-center">
                       {tab.exclusive ? (
                         <svg class="h-4 w-4 text-success inline" fill="currentColor" viewBox="0 0 20 20" aria-label="Exclusive" role="img">

@@ -4,6 +4,7 @@ import { addCustomTab, updateCustomTab, config } from "../../stores/config";
 import type { CustomTab } from "../../stores/config";
 import { resetCustomTabFilters } from "../../stores/view";
 import type { RepoRef } from "../../services/api";
+import { formatScopeSummary } from "../../lib/format";
 import {
   scopeFilterGroup,
   issueFilterGroups,
@@ -21,7 +22,7 @@ interface CustomTabModalProps {
 }
 
 // Filter groups per base type — scope is included for issues/PRs since custom tabs always show it
-const filterGroupsByType: Record<string, FilterChipGroupDef[]> = {
+const filterGroupsByType: Record<"issues" | "pullRequests" | "actions", FilterChipGroupDef[]> = {
   issues: [scopeFilterGroup, ...issueFilterGroups],
   pullRequests: [scopeFilterGroup, ...prFilterGroups],
   actions: actionsFilterGroups,
@@ -78,7 +79,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
 
   // Filter groups for the active base type, plus user field for issues/PRs
   const activeFilterGroups = createMemo((): FilterChipGroupDef[] => {
-    const base = filterGroupsByType[baseType()] ?? [];
+    const base = filterGroupsByType[baseType()];
     if (baseType() === "issues" || baseType() === "pullRequests") {
       return [...base, userFieldGroup()];
     }
@@ -261,9 +262,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
               >
                 <span>Scope</span>
                 <span class="text-base-content/50 text-xs">
-                  {selectedOrgs().size > 0 || selectedRepos().size > 0
-                    ? `${selectedOrgs().size} org${selectedOrgs().size !== 1 ? "s" : ""}, ${selectedRepos().size} repo${selectedRepos().size !== 1 ? "s" : ""}`
-                    : "All repos"}
+                  {formatScopeSummary(selectedOrgs().size, selectedRepos().size)}
                   <span class="ml-2">{scopeOpen() ? "▲" : "▼"}</span>
                 </span>
               </button>
