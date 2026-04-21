@@ -221,7 +221,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                 id="custom-tab-name"
                 type="text"
                 class="input input-bordered input-sm w-full"
-                placeholder="e.g., My OSAC PRs"
+                placeholder="e.g., Needs Review"
                 maxLength={30}
                 value={name()}
                 onInput={(e) => setName(e.currentTarget.value)}

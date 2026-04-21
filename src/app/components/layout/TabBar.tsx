@@ -1,5 +1,6 @@
 import { Tabs } from "@kobalte/core/tabs";
 import { For, Show } from "solid-js";
+import { Tooltip } from "../shared/Tooltip";
 
 export type TabId = string;
 
@@ -61,28 +62,35 @@ export default function TabBar(props: TabBarProps) {
                       </Show>
                     </Tabs.Trigger>
                     <Show when={props.onEditTab}>
-                      <button
-                        type="button"
-                        class="absolute -right-1 top-0 opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100 text-base-content/40 hover:text-base-content text-xs hidden md:inline-flex"
-                        aria-label={`Edit ${tab.name}`}
-                        onClick={() => props.onEditTab?.(tab.id)}
-                      >
-                        ✎
-                      </button>
+                      <Tooltip content={`Edit ${tab.name}`}>
+                        <button
+                          type="button"
+                          class="absolute -right-1 top-0 opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100 text-base-content/40 hover:text-base-content hidden md:inline-flex"
+                          aria-label={`Edit ${tab.name}`}
+                          onClick={() => props.onEditTab?.(tab.id)}
+                        >
+                          <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width={2} viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                        </button>
+                      </Tooltip>
                     </Show>
                   </div>
                 )}
               </For>
             </Tabs.List>
             <Show when={props.onAddTab}>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm text-base-content/50 hover:text-base-content ml-1 hidden md:inline-flex"
-                aria-label="Add custom tab"
-                onClick={() => props.onAddTab?.()}
-              >
-                +
-              </button>
+              <Tooltip content="Add custom tab">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm text-base-content/50 hover:text-base-content ml-1 hidden md:inline-flex"
+                  aria-label="Add custom tab"
+                  onClick={() => props.onAddTab?.()}
+                >
+                  +
+                </button>
+              </Tooltip>
             </Show>
           </div>
         </div>
