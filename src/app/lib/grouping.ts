@@ -50,6 +50,23 @@ export function slicePageGroups<T>(
   return groups.slice(start, end);
 }
 
+/**
+ * Ensures every locked repo has a group entry, appending empty stubs for any
+ * that are absent from the current data. The stubs land at the tail on purpose:
+ * the caller must pipe the result through orderRepoGroups, which promotes all
+ * locked groups to the front in the correct order.
+ */
+export function ensureLockedRepoGroups<G extends { repoFullName: string }>(
+  groups: G[],
+  lockedOrder: readonly string[],
+  emptyFactory: (repoFullName: string) => G,
+): G[] {
+  const present = new Set(groups.map(g => g.repoFullName));
+  const missing = lockedOrder.filter(name => !present.has(name));
+  if (missing.length === 0) return groups;
+  return [...groups, ...missing.map(emptyFactory)];
+}
+
 export function orderRepoGroups<G extends { repoFullName: string }>(
   groups: G[],
   lockedOrder: string[]

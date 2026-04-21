@@ -104,6 +104,82 @@ describe("ActionsTab — empty-repo state preservation", () => {
     // With empty items and no configRepoNames, guard returns early — no pruning
     expect(viewState.lockedRepos).toEqual([]);
   });
+
+  it("renders compact stub row for a locked repo with no workflow runs", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[makeWorkflowRun({ repoFullName: "owner/active-repo" })]}
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.textContent).toContain("owner/locked-empty");
+    const headerBtn = stub?.querySelector('[aria-expanded]');
+    expect(headerBtn).toBeNull();
+  });
+
+  it("does not expand a locked repo with no workflow runs even when expandedRepos is set", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+      s.expandedRepos.actions["owner/locked-empty"] = true;
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[makeWorkflowRun({ repoFullName: "owner/active-repo" })]}
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.querySelector('[aria-expanded]')).toBeNull();
+  });
+
+  it("hides empty-state message when only locked stubs exist (no double render)", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[]}
+        configRepoNames={["owner/locked-empty"]}
+      />
+    ));
+
+    // Locked stub renders
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    // Empty-state message does NOT render alongside the stub
+    expect(screen.queryByText("No workflow runs found.")).toBeNull();
+  });
+
+  it("hides locked stubs during initial load (no skeleton + stub double render)", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <ActionsTab
+        workflowRuns={[]}
+        loading={true}
+        configRepoNames={["owner/locked-empty"]}
+      />
+    ));
+
+    // Loading skeleton shows (label is aria-label, not visible text)
+    screen.getByRole("status", { name: "Loading workflow runs" });
+    // Locked stub does NOT render alongside the skeleton
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).toBeNull();
+  });
 });
 
 // ── ActionsTab — RepoGroupHeader integration ──────────────────────────────────
