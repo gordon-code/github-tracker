@@ -97,7 +97,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
                         when={confirmingDeleteId() === tab.id}
                         fallback={
                           <div class="flex items-center justify-end gap-1">
-                            <Tooltip content="Move up">
+                            <Tooltip content={index() === 0 ? "Already at top" : "Move up"}>
                               <button
                                 type="button"
                                 class="btn btn-ghost btn-xs btn-circle"
@@ -110,7 +110,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
                                 </svg>
                               </button>
                             </Tooltip>
-                            <Tooltip content="Move down">
+                            <Tooltip content={index() === config.customTabs.length - 1 ? "Already at bottom" : "Move down"}>
                               <button
                                 type="button"
                                 class="btn btn-ghost btn-xs btn-circle"
