@@ -123,7 +123,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
                                 </svg>
                               </button>
                             </Tooltip>
-                            <Tooltip content="Edit">
+                            <Tooltip content={`Edit "${tab.name}"`}>
                               <button
                                 type="button"
                                 class="btn btn-ghost btn-xs btn-circle"
@@ -135,7 +135,7 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
                                 </svg>
                               </button>
                             </Tooltip>
-                            <Tooltip content="Delete">
+                            <Tooltip content={`Delete "${tab.name}"`}>
                               <button
                                 type="button"
                                 class="btn btn-ghost btn-xs btn-circle text-error hover:bg-error/10"
