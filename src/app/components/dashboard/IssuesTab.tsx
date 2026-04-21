@@ -1,12 +1,14 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type IssueFilterField } from "../../stores/view";
+import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import type { Issue, RepoRef } from "../../services/api";
+import { isIssueVisible } from "../../lib/filters";
 import ItemRow from "./ItemRow";
 import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge";
 import IgnoreBadge from "./IgnoreBadge";
 import PaginationControls from "../shared/PaginationControls";
-import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import { scopeFilterGroup, issueFilterGroups, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -29,32 +31,19 @@ export interface IssuesTabProps {
   monitoredRepos?: RepoRef[];
   configRepoNames?: string[];
   refreshTick?: number;
+  customTabId?: string;
+  filterPreset?: Record<string, string>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
 
-const issueFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Role",
-    field: "role",
-    options: [
-      { value: "author", label: "Author" },
-      { value: "assignee", label: "Assignee" },
-    ],
-  },
-  {
-    label: "Comments",
-    field: "comments",
-    options: [
-      { value: "has", label: "Has comments" },
-      { value: "none", label: "No comments" },
-    ],
-  },
-];
+const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
 
 
 export default function IssuesTab(props: IssuesTabProps) {
   const [page, setPage] = createSignal(0);
+
+  const tabKey = () => props.customTabId ?? "issues";
 
   const trackedUserMap = createMemo(() =>
     new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
@@ -70,12 +59,21 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
 
-  const showScopeFilter = createMemo(() =>
-    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
-  );
+  const showScopeFilter = createMemo(() => {
+    if (props.customTabId) return true;
+    return (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1;
+  });
 
   const ignoredIssues = createMemo(() =>
     viewState.ignoredItems.filter(i => i.type === "issue")
+  );
+
+  // Merge chain: schema defaults → preset → stored runtime overrides
+  const activeFilters = createMemo(() =>
+    mergeActiveFilters(IssueFiltersSchema, ISSUE_FILTER_DEFAULTS, props.customTabId, viewState.tabFilters.issues, {
+      preset: props.filterPreset,
+      resolveLogin: props.userLogin,
+    })
   );
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
@@ -94,18 +92,20 @@ export default function IssuesTab(props: IssuesTabProps) {
     ];
   });
 
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("issues", () => props.customTabId);
+
   // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
-    if (!showScopeFilter() && viewState.tabFilters.issues.scope !== "involves_me") {
-      setTabFilter("issues", "scope", "involves_me");
+    if (!showScopeFilter() && activeFilters().scope !== "involves_me") {
+      handleFilterChange("scope", "involves_me");
     }
   });
 
   // Auto-reset user filter when User filter group is hidden
   createEffect(() => {
     const users = props.allUsers;
-    if ((!users || users.length <= 1) && viewState.tabFilters.issues.user !== "all") {
-      setTabFilter("issues", "user", "all");
+    if ((!users || users.length <= 1) && activeFilters().user !== "all") {
+      handleFilterChange("user", "all");
     }
   });
 
@@ -113,19 +113,14 @@ export default function IssuesTab(props: IssuesTabProps) {
     isUserInvolved(item, userLoginLower(), monitoredRepoNameSet());
 
   const filteredSortedWithMeta = createMemo(() => {
-    const filter = viewState.globalFilter;
-    const tabFilter = viewState.tabFilters.issues;
-    const ignored = new Set(
-      ignoredIssues()
-        .map((i) => i.id)
-    );
+    const tabFilter = activeFilters();
+    const ignoredIds = new Set(ignoredIssues().map((i) => i.id));
+    const globalFilter = props.customTabId ? null : viewState.globalFilter;
 
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
-      if (ignored.has(issue.id)) return false;
-      if (filter.repo && issue.repoFullName !== filter.repo) return false;
-      if (filter.org && !issue.repoFullName.startsWith(filter.org + "/")) return false;
+      if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: viewState.hideDepDashboard, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
@@ -141,8 +136,6 @@ export default function IssuesTab(props: IssuesTabProps) {
         if (tabFilter.comments === "has" && issue.comments === 0) return false;
         if (tabFilter.comments === "none" && issue.comments > 0) return false;
       }
-
-      if (viewState.hideDepDashboard && issue.title === "Dependency Dashboard") return false;
 
       if (tabFilter.user !== "all") {
         // Items from monitored repos bypass the surfacedBy filter (all activity is shown)
@@ -219,7 +212,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneExpandedRepos("issues", names);
+    pruneExpandedRepos(tabKey(), names);
   });
 
   createEffect(() => {
@@ -238,7 +231,9 @@ export default function IssuesTab(props: IssuesTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos,
     () => ignoredIssues().length,
-    () => JSON.stringify(viewState.tabFilters.issues),
+    () => JSON.stringify(props.customTabId
+      ? (viewState.customTabFilters[props.customTabId] ?? {})
+      : viewState.tabFilters.issues),
   );
 
   function handleIgnore(issue: Issue) {
@@ -267,13 +262,13 @@ export default function IssuesTab(props: IssuesTabProps) {
         <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
-            values={viewState.tabFilters.issues}
+            values={activeFilters()}
             onChange={(f, v) => {
-              setTabFilter("issues", f as IssueFilterField, v);
+              handleFilterChange(f, v);
               setPage(0);
             }}
             onResetAll={() => {
-              resetAllTabFilters("issues");
+              handleResetFilters();
               setPage(0);
             }}
           />
@@ -292,8 +287,8 @@ export default function IssuesTab(props: IssuesTabProps) {
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded("issues", repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
             items={ignoredIssues()}
@@ -325,10 +320,10 @@ export default function IssuesTab(props: IssuesTabProps) {
             />
           </svg>
           <p class="text-sm font-medium">
-            {viewState.tabFilters.issues.scope === "all" ? "No open issues found" : "No open issues involving you"}
+            {activeFilters().scope === "all" ? "No open issues found" : "No open issues involving you"}
           </p>
           <p class="text-xs">
-            {viewState.tabFilters.issues.scope === "all"
+            {activeFilters().scope === "all"
               ? "No issues match your current filters."
               : "Issues where you are the author, assignee, or mentioned will appear here."}
           </p>
@@ -341,7 +336,7 @@ export default function IssuesTab(props: IssuesTabProps) {
           <For each={pageGroups()}>
             {(repoGroup) => {
                 const isEmpty = () => repoGroup.items.length === 0;
-                const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.issues[repoGroup.repoFullName];
+                const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};
@@ -369,7 +364,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                         starCount={repoGroup.starCount}
                         isExpanded={isExpanded()}
                         isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
-                        onToggle={() => toggleExpandedRepo("issues", repoGroup.repoFullName)}
+                        onToggle={() => toggleExpandedRepo(tabKey(), repoGroup.repoFullName)}
                         badges={
                           <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                             <Tooltip content="Showing all activity, not just yours" focusable>
@@ -405,7 +400,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                           <For each={repoGroup.items}>
                             {(issue) => (
                               <div role="listitem" class={
-                                viewState.tabFilters.issues.scope === "all" && isInvolvedItem(issue)
+                                activeFilters().scope === "all" && isInvolvedItem(issue)
                                   ? "border-l-2 border-l-primary"
                                   : undefined
                               }>

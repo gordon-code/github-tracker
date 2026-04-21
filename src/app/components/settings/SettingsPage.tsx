@@ -20,6 +20,7 @@ import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
 import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
+import CustomTabsSection from "./CustomTabsSection";
 import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
 
@@ -169,6 +170,7 @@ export default function SettingsPage() {
         defaultTab: config.defaultTab,
         rememberLastTab: config.rememberLastTab,
         enableTracking: config.enableTracking,
+        customTabs: config.customTabs,
       },
       null,
       2
@@ -211,10 +213,11 @@ export default function SettingsPage() {
   ];
 
   const tabOptions = createMemo(() => [
-    { value: "issues" as const, label: "Issues" },
-    { value: "pullRequests" as const, label: "Pull Requests" },
-    { value: "actions" as const, label: "GitHub Actions" },
-    ...(config.enableTracking ? [{ value: "tracked" as const, label: "Tracked Items" }] : []),
+    { value: "issues", label: "Issues" },
+    { value: "pullRequests", label: "Pull Requests" },
+    { value: "actions", label: "GitHub Actions" },
+    ...(config.enableTracking ? [{ value: "tracked", label: "Tracked Items" }] : []),
+    ...config.customTabs.map((t) => ({ value: t.id, label: t.name })),
   ]);
 
 
@@ -688,7 +691,15 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 8: MCP Server Relay */}
+        {/* Section 8: Custom Tabs */}
+        <Section title="Custom Tabs" description="Create custom views with saved filters and scoping">
+          <CustomTabsSection
+            availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
+            availableRepos={config.selectedRepos}
+          />
+        </Section>
+
+        {/* Section 9: MCP Server Relay */}
         <Section
           title="MCP Server Relay"
           description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
@@ -743,7 +754,7 @@ export default function SettingsPage() {
           </Show>
         </Section>
 
-        {/* Section 9: Data */}
+        {/* Section 10: Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow

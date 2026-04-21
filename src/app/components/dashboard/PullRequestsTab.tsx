@@ -1,6 +1,8 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, setTabFilter, resetAllTabFilters, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, type PullRequestFilterField } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, PullRequestFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
+import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
@@ -10,7 +12,7 @@ import UserAvatarBadge, { buildSurfacedByUsers } from "../shared/UserAvatarBadge
 import StatusDot from "../shared/StatusDot";
 import IgnoreBadge from "./IgnoreBadge";
 import PaginationControls from "../shared/PaginationControls";
-import { scopeFilterGroup, type FilterChipGroupDef } from "../shared/filterTypes";
+import { scopeFilterGroup, prFilterGroups, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
 import SizeBadge from "../shared/SizeBadge";
@@ -35,9 +37,13 @@ export interface PullRequestsTabProps {
   monitoredRepos?: RepoRef[];
   configRepoNames?: string[];
   refreshTick?: number;
+  customTabId?: string;
+  filterPreset?: Record<string, string>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
+
+const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
 
 function checkStatusOrder(status: PullRequest["checkStatus"]): number {
   switch (status) {
@@ -67,62 +73,10 @@ function reviewDecisionOrder(decision: PullRequest["reviewDecision"]): number {
   }
 }
 
-const prFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Role",
-    field: "role",
-    options: [
-      { value: "author", label: "Author" },
-      { value: "reviewer", label: "Reviewer" },
-      { value: "assignee", label: "Assignee" },
-    ],
-  },
-  {
-    label: "Review",
-    field: "reviewDecision",
-    options: [
-      { value: "APPROVED", label: "Approved" },
-      { value: "CHANGES_REQUESTED", label: "Changes" },
-      { value: "REVIEW_REQUIRED", label: "Needs review" },
-      { value: "mergeable", label: "Mergeable" },
-    ],
-  },
-  {
-    label: "Status",
-    field: "draft",
-    options: [
-      { value: "draft", label: "Draft" },
-      { value: "ready", label: "Ready" },
-    ],
-  },
-  {
-    label: "Checks",
-    field: "checkStatus",
-    options: [
-      { value: "success", label: "Passing" },
-      { value: "failure", label: "Failing" },
-      { value: "pending", label: "Pending" },
-      { value: "conflict", label: "Conflict" },
-      { value: "blocked", label: "Blocked" },
-      { value: "none", label: "No CI" },
-    ],
-  },
-  {
-    label: "Size",
-    field: "sizeCategory",
-    options: [
-      { value: "XS", label: "XS" },
-      { value: "S", label: "S" },
-      { value: "M", label: "M" },
-      { value: "L", label: "L" },
-      { value: "XL", label: "XL" },
-    ],
-  },
-];
-
-
 export default function PullRequestsTab(props: PullRequestsTabProps) {
   const [page, setPage] = createSignal(0);
+
+  const tabKey = () => props.customTabId ?? "pullRequests";
 
   const trackedUserMap = createMemo(() =>
     new Map(props.trackedUsers?.map(u => [u.login, u]) ?? [])
@@ -138,12 +92,21 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const userLoginLower = createMemo(() => props.userLogin.toLowerCase());
 
-  const showScopeFilter = createMemo(() =>
-    (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1
-  );
+  const showScopeFilter = createMemo(() => {
+    if (props.customTabId) return true;
+    return (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1;
+  });
 
   const ignoredPullRequests = createMemo(() =>
     viewState.ignoredItems.filter(i => i.type === "pullRequest")
+  );
+
+  // Merge chain: schema defaults → preset → stored runtime overrides
+  const activeFilters = createMemo(() =>
+    mergeActiveFilters(PullRequestFiltersSchema, PR_FILTER_DEFAULTS, props.customTabId, viewState.tabFilters.pullRequests, {
+      preset: props.filterPreset,
+      resolveLogin: props.userLogin,
+    })
   );
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
@@ -162,18 +125,20 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     ];
   });
 
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("pullRequests", () => props.customTabId);
+
   // Auto-reset scope to default when scope toggle is hidden (localStorage hygiene)
   createEffect(() => {
-    if (!showScopeFilter() && viewState.tabFilters.pullRequests.scope !== "involves_me") {
-      setTabFilter("pullRequests", "scope", "involves_me");
+    if (!showScopeFilter() && activeFilters().scope !== "involves_me") {
+      handleFilterChange("scope", "involves_me");
     }
   });
 
   // Auto-reset user filter when User filter group is hidden
   createEffect(() => {
     const users = props.allUsers;
-    if ((!users || users.length <= 1) && viewState.tabFilters.pullRequests.user !== "all") {
-      setTabFilter("pullRequests", "user", "all");
+    if ((!users || users.length <= 1) && activeFilters().user !== "all") {
+      handleFilterChange("user", "all");
     }
   });
 
@@ -182,19 +147,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       item.enriched !== false ? item.reviewerLogins : undefined);
 
   const filteredSortedWithMeta = createMemo(() => {
-    const filter = viewState.globalFilter;
-    const tabFilters = viewState.tabFilters.pullRequests;
-    const ignored = new Set(
-      ignoredPullRequests()
-        .map((i) => i.id)
-    );
+    const tabFilters = activeFilters();
+    const ignoredIds = new Set(ignoredPullRequests().map((i) => i.id));
+    const globalFilter = props.customTabId ? null : viewState.globalFilter;
 
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
-      if (ignored.has(pr.id)) return false;
-      if (filter.repo && pr.repoFullName !== filter.repo) return false;
-      if (filter.org && !pr.repoFullName.startsWith(filter.org + "/")) return false;
+      if (!isPrVisible(pr, { ignoredIds, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));
       const sizeCategory = prSizeCategory(pr.additions, pr.deletions);
@@ -316,7 +276,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneExpandedRepos("pullRequests", names);
+    pruneExpandedRepos(tabKey(), names);
   });
 
   createEffect(() => {
@@ -328,7 +288,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
     getItems: () => props.pullRequests,
     getHotIds: () => props.hotPollingPRIds,
-    getExpandedRepos: () => viewState.expandedRepos.pullRequests,
+    getExpandedRepos: () => viewState.expandedRepos[tabKey()] ?? {},
     trackKey: (pr) => `${pr.checkStatus}|${pr.reviewDecision}`,
     itemLabel: (pr) => `#${pr.number} ${pr.title}`,
     itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
@@ -344,7 +304,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos,
     () => ignoredPullRequests().length,
-    () => JSON.stringify(viewState.tabFilters.pullRequests),
+    () => JSON.stringify(props.customTabId
+      ? (viewState.customTabFilters[props.customTabId] ?? {})
+      : viewState.tabFilters.pullRequests),
   );
 
   function handleIgnore(pr: PullRequest) {
@@ -373,21 +335,21 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
-            values={viewState.tabFilters.pullRequests}
+            values={activeFilters()}
             onChange={(f, v) => {
-              setTabFilter("pullRequests", f as PullRequestFilterField, v);
+              handleFilterChange(f, v);
               setPage(0);
             }}
             onResetAll={() => {
-              resetAllTabFilters("pullRequests");
+              handleResetFilters();
               setPage(0);
             }}
           />
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded("pullRequests", repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
             items={ignoredPullRequests()}
@@ -419,10 +381,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
             />
           </svg>
           <p class="text-sm font-medium">
-            {viewState.tabFilters.pullRequests.scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
+            {activeFilters().scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
           </p>
           <p class="text-xs">
-            {viewState.tabFilters.pullRequests.scope === "all"
+            {activeFilters().scope === "all"
               ? "No pull requests match your current filters."
               : "PRs where you are the author, assignee, or reviewer will appear here."}
           </p>
@@ -435,7 +397,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <For each={pageGroups()}>
             {(repoGroup) => {
                 const isEmpty = () => repoGroup.items.length === 0;
-                const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.pullRequests[repoGroup.repoFullName];
+                const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
 
                 const summaryMeta = createMemo(() => {
                   const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };
@@ -476,7 +438,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         starCount={repoGroup.starCount}
                         isExpanded={isExpanded()}
                         isHighlighted={highlightedReposPRs().has(repoGroup.repoFullName)}
-                        onToggle={() => toggleExpandedRepo("pullRequests", repoGroup.repoFullName)}
+                        onToggle={() => toggleExpandedRepo(tabKey(), repoGroup.repoFullName)}
                         badges={
                           <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
                             <Tooltip content="Showing all activity, not just yours" focusable>
@@ -563,7 +525,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                           <For each={repoGroup.items}>
                             {(pr) => (
                             <div role="listitem" class={
-                              viewState.tabFilters.pullRequests.scope === "all" && isInvolvedItem(pr)
+                              activeFilters().scope === "all" && isInvolvedItem(pr)
                                 ? "border-l-2 border-l-primary"
                                 : undefined
                             }>

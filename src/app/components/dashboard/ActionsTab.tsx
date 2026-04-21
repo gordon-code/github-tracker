@@ -1,11 +1,13 @@
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
-import { viewState, setViewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, type ActionsFilterField } from "../../stores/view";
+import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
+import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
+import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
-import type { FilterChipGroupDef } from "../shared/filterTypes";
+import { actionsFilterGroups, KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
@@ -23,6 +25,8 @@ interface ActionsTabProps {
   configRepoNames?: string[];
   refreshTick?: number;
   hotPollingRunIds?: ReadonlySet<number>;
+  customTabId?: string;
+  filterPreset?: Record<string, string>;
 }
 
 interface WorkflowGroup {
@@ -98,35 +102,13 @@ function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
   });
 }
 
-const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"];
-const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"];
 
-const actionsFilterGroups: FilterChipGroupDef[] = [
-  {
-    label: "Result",
-    field: "conclusion",
-    options: [
-      { value: "success", label: "Success" },
-      { value: "failure", label: "Failure" },
-      { value: "cancelled", label: "Cancelled" },
-      { value: "running", label: "Running" },
-      { value: "other", label: "Other" },
-    ],
-  },
-  {
-    label: "Trigger",
-    field: "event",
-    options: [
-      { value: "push", label: "Push" },
-      { value: "pull_request", label: "PR" },
-      { value: "schedule", label: "Schedule" },
-      { value: "workflow_dispatch", label: "Manual" },
-    ],
-  },
-];
+const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
 export default function ActionsTab(props: ActionsTabProps) {
   const [expandedWorkflows, setExpandedWorkflows] = createStore<Record<string, boolean>>({});
+
+  const tabKey = () => props.customTabId ?? "actions";
 
   function toggleWorkflow(key: string) {
     setExpandedWorkflows(key, (v) => !v);
@@ -140,16 +122,25 @@ export default function ActionsTab(props: ActionsTabProps) {
     viewState.ignoredItems.filter(i => i.type === "workflowRun")
   );
 
+  // Merge chain: schema defaults → preset → stored runtime overrides
+  const activeFilters = createMemo(() =>
+    mergeActiveFilters(ActionsFiltersSchema, ACTIONS_FILTER_DEFAULTS, props.customTabId, viewState.tabFilters.actions, {
+      preset: props.filterPreset,
+    })
+  );
+
+  const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("actions", () => props.customTabId);
+
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneExpandedRepos("actions", names);
+    pruneExpandedRepos(tabKey(), names);
   });
 
   const { flashingIds: flashingRunIds, peekUpdates } = createFlashDetection({
     getItems: () => props.workflowRuns,
     getHotIds: () => props.hotPollingRunIds,
-    getExpandedRepos: () => viewState.expandedRepos.actions,
+    getExpandedRepos: () => viewState.expandedRepos[tabKey()] ?? {},
     trackKey: (run) => `${run.status}|${run.conclusion}`,
     itemLabel: (run) => run.name,
     itemStatus: (run) => run.conclusion ?? run.status,
@@ -166,25 +157,19 @@ export default function ActionsTab(props: ActionsTabProps) {
   }
 
   const filteredRuns = createMemo(() => {
-    const { org, repo } = viewState.globalFilter;
-    const ignoredIds = new Set(
-      ignoredWorkflowRuns()
-        .map((i) => i.id)
-    );
-    const conclusionFilter = viewState.tabFilters.actions.conclusion;
-    const eventFilter = viewState.tabFilters.actions.event;
+    const ignoredIds = new Set(ignoredWorkflowRuns().map((i) => i.id));
+    const globalFilter = props.customTabId ? null : viewState.globalFilter;
+    const conclusionFilter = activeFilters().conclusion;
+    const eventFilter = activeFilters().event;
 
     return props.workflowRuns.filter((run) => {
-      if (ignoredIds.has(run.id)) return false;
-      if (!viewState.showPrRuns && run.isPrRun) return false;
-      if (org && !run.repoFullName.startsWith(`${org}/`)) return false;
-      if (repo && run.repoFullName !== repo) return false;
+      if (!isRunVisible(run, { ignoredIds, showPrRuns: viewState.showPrRuns, globalFilter })) return false;
 
       if (conclusionFilter !== "all") {
         if (conclusionFilter === "running") {
           if (run.status !== "in_progress") return false;
         } else if (conclusionFilter === "other") {
-          if (run.conclusion === null || KNOWN_CONCLUSIONS.includes(run.conclusion)) return false;
+          if (run.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)) return false;
         } else {
           if (run.conclusion !== conclusionFilter) return false;
         }
@@ -192,7 +177,7 @@ export default function ActionsTab(props: ActionsTabProps) {
 
       if (eventFilter !== "all") {
         if (eventFilter === "other") {
-          if (KNOWN_EVENTS.includes(run.event)) return false;
+          if ((KNOWN_EVENTS as readonly string[]).includes(run.event)) return false;
         } else {
           if (run.event !== eventFilter) return false;
         }
@@ -222,7 +207,9 @@ export default function ActionsTab(props: ActionsTabProps) {
     () => repoGroups().map(g => g.repoFullName),
     () => viewState.lockedRepos,
     () => ignoredWorkflowRuns().length,
-    () => JSON.stringify(viewState.tabFilters.actions),
+    () => JSON.stringify(props.customTabId
+      ? (viewState.customTabFilters[props.customTabId] ?? {})
+      : viewState.tabFilters.actions),
   );
 
   return (
@@ -241,15 +228,15 @@ export default function ActionsTab(props: ActionsTabProps) {
           </label>
           <FilterToolbar
             groups={actionsFilterGroups}
-            values={viewState.tabFilters.actions}
-            onChange={(f, v) => setTabFilter("actions", f as ActionsFilterField, v)}
-            onResetAll={() => resetAllTabFilters("actions")}
+            values={activeFilters()}
+            onChange={(f, v) => handleFilterChange(f, v)}
+            onResetAll={() => handleResetFilters()}
           />
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded("actions", repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
           />
           <IgnoreBadge
             items={ignoredWorkflowRuns()}
@@ -279,7 +266,7 @@ export default function ActionsTab(props: ActionsTabProps) {
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isEmpty = () => repoGroup.workflows.length === 0;
-            const isExpanded = () => !isEmpty() && !!viewState.expandedRepos.actions[repoGroup.repoFullName];
+            const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
 
             const sortedWorkflows = createMemo(() =>
               sortWorkflowsByStatus(repoGroup.workflows)
@@ -312,7 +299,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                     repoFullName={repoGroup.repoFullName}
                     isExpanded={isExpanded()}
                     isHighlighted={highlightedReposActions().has(repoGroup.repoFullName)}
-                    onToggle={() => toggleExpandedRepo("actions", repoGroup.repoFullName)}
+                    onToggle={() => toggleExpandedRepo(tabKey(), repoGroup.repoFullName)}
                     trailing={
                       <>
                         <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />

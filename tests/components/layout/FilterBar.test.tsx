@@ -190,4 +190,16 @@ describe("FilterBar", () => {
     await user.click(allOrgsOption);
     expect(viewStore.setGlobalFilter).toHaveBeenCalledWith(null, null);
   });
+
+  it("hides org and repo selectors when hideOrgRepo={true}", () => {
+    render(() => <FilterBar {...defaultSortProps} hideOrgRepo={true} />);
+    expect(screen.queryByLabelText("Filter by organization")).toBeNull();
+    expect(screen.queryByLabelText("Filter by repository")).toBeNull();
+  });
+
+  it("shows org and repo selectors when hideOrgRepo={false}", () => {
+    render(() => <FilterBar {...defaultSortProps} hideOrgRepo={false} />);
+    screen.getByLabelText("Filter by organization");
+    screen.getByLabelText("Filter by repository");
+  });
 });

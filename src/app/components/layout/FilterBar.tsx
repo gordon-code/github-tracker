@@ -13,6 +13,7 @@ interface FilterBarProps {
   sortValue?: string;
   sortDirection?: "asc" | "desc";
   onSortChange?: (field: string, direction: "asc" | "desc") => void;
+  hideOrgRepo?: boolean;
 }
 
 export default function FilterBar(props: FilterBarProps) {
@@ -62,55 +63,57 @@ export default function FilterBar(props: FilterBarProps) {
 
   return (
     <div class="flex items-center gap-3 px-4 py-2 compact:py-1 bg-base-100 border-b border-base-300 shadow-sm">
-      <Select<string>
-        value={viewState.globalFilter.org ?? ""}
-        onChange={handleOrgChange}
-        options={["", ...orgs()]}
-        itemComponent={(itemProps) => (
-          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
-            <Select.ItemLabel>
-              {itemProps.item.rawValue === "" ? "All orgs" : itemProps.item.rawValue}
-            </Select.ItemLabel>
-          </Select.Item>
-        )}
-      >
-        <Select.Trigger
-          class="btn btn-outline btn-sm compact:btn-xs"
-          aria-label="Filter by organization"
+      <Show when={!props.hideOrgRepo}>
+        <Select<string>
+          value={viewState.globalFilter.org ?? ""}
+          onChange={handleOrgChange}
+          options={["", ...orgs()]}
+          itemComponent={(itemProps) => (
+            <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
+              <Select.ItemLabel>
+                {itemProps.item.rawValue === "" ? "All orgs" : itemProps.item.rawValue}
+              </Select.ItemLabel>
+            </Select.Item>
+          )}
         >
-          {viewState.globalFilter.org ?? "All orgs"}
-        </Select.Trigger>
-        <Select.Portal>
-          <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50">
-            <Select.Listbox />
-          </Select.Content>
-        </Select.Portal>
-      </Select>
+          <Select.Trigger
+            class="btn btn-outline btn-sm compact:btn-xs"
+            aria-label="Filter by organization"
+          >
+            {viewState.globalFilter.org ?? "All orgs"}
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50">
+              <Select.Listbox />
+            </Select.Content>
+          </Select.Portal>
+        </Select>
 
-      <Select<string>
-        value={viewState.globalFilter.repo ?? ""}
-        onChange={handleRepoChange}
-        options={["", ...repos().map((r) => r.fullName)]}
-        itemComponent={(itemProps) => (
-          <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
-            <Select.ItemLabel>
-              {itemProps.item.rawValue === "" ? "All repos" : itemProps.item.rawValue}
-            </Select.ItemLabel>
-          </Select.Item>
-        )}
-      >
-        <Select.Trigger
-          class="btn btn-outline btn-sm compact:btn-xs"
-          aria-label="Filter by repository"
+        <Select<string>
+          value={viewState.globalFilter.repo ?? ""}
+          onChange={handleRepoChange}
+          options={["", ...repos().map((r) => r.fullName)]}
+          itemComponent={(itemProps) => (
+            <Select.Item item={itemProps.item} class="px-3 py-1.5 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 text-sm">
+              <Select.ItemLabel>
+                {itemProps.item.rawValue === "" ? "All repos" : itemProps.item.rawValue}
+              </Select.ItemLabel>
+            </Select.Item>
+          )}
         >
-          {viewState.globalFilter.repo ?? "All repos"}
-        </Select.Trigger>
-        <Select.Portal>
-          <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50">
-            <Select.Listbox />
-          </Select.Content>
-        </Select.Portal>
-      </Select>
+          <Select.Trigger
+            class="btn btn-outline btn-sm compact:btn-xs"
+            aria-label="Filter by repository"
+          >
+            {viewState.globalFilter.repo ?? "All repos"}
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50">
+              <Select.Listbox />
+            </Select.Content>
+          </Select.Portal>
+        </Select>
+      </Show>
 
       <Show when={props.sortOptions && props.sortValue != null && props.sortDirection && props.onSortChange}>
         <SortDropdown

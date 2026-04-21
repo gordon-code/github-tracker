@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, formatScopeSummary } from "../../src/app/lib/format";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -346,6 +346,36 @@ describe("formatCount", () => {
 
   it("returns '10k' for 10000", () => {
     expect(formatCount(10000)).toBe("10k");
+  });
+});
+
+describe("formatScopeSummary", () => {
+  it("returns 'All repos' when both orgCount and repoCount are 0", () => {
+    expect(formatScopeSummary(0, 0)).toBe("All repos");
+  });
+
+  it("elideZero=true with only orgCount returns '1 org'", () => {
+    expect(formatScopeSummary(1, 0, true)).toBe("1 org");
+  });
+
+  it("elideZero=true with only repoCount returns '1 repo'", () => {
+    expect(formatScopeSummary(0, 1, true)).toBe("1 repo");
+  });
+
+  it("elideZero=true with both nonzero returns '2 orgs, 3 repos'", () => {
+    expect(formatScopeSummary(2, 3, true)).toBe("2 orgs, 3 repos");
+  });
+
+  it("elideZero=false (default) with orgCount=1 returns '1 org, 0 repos'", () => {
+    expect(formatScopeSummary(1, 0, false)).toBe("1 org, 0 repos");
+  });
+
+  it("elideZero=false with repoCount=1 returns '0 orgs, 1 repo'", () => {
+    expect(formatScopeSummary(0, 1, false)).toBe("0 orgs, 1 repo");
+  });
+
+  it("elideZero=false with both nonzero returns '2 orgs, 3 repos'", () => {
+    expect(formatScopeSummary(2, 3, false)).toBe("2 orgs, 3 repos");
   });
 });
 

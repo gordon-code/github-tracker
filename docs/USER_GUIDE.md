@@ -11,6 +11,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Organization Access](#organization-access)
 - [Dashboard Overview](#dashboard-overview)
   - [Tab Structure](#tab-structure)
+  - [Custom Tabs](#custom-tabs)
   - [Personal Summary Strip](#personal-summary-strip)
   - [Repo Grouping and Expand/Collapse](#repo-grouping-and-expandcollapse)
   - [Scope Filter](#scope-filter)
@@ -73,7 +74,7 @@ OAuth sign-in uses your existing GitHub org memberships. If a private organizati
 
 ### Tab Structure
 
-The dashboard has three tabs by default, with an optional fourth:
+The dashboard has three built-in tabs by default, with optional additional tabs:
 
 | Tab | Contents |
 |-----|----------|
@@ -81,8 +82,24 @@ The dashboard has three tabs by default, with an optional fourth:
 | **Pull Requests** | Open PRs where you are the author, reviewer, or assignee |
 | **Actions** | Recent workflow runs for your selected repos |
 | **Tracked** | Manually pinned issues and PRs (opt-in via Settings) |
+| **Custom tabs** | Named filtered views you define (up to 10, see [Custom Tabs](#custom-tabs)) |
 
 The active tab is remembered across page loads by default. You can set a fixed default tab in Settings.
+
+### Custom Tabs
+
+Custom tabs let you create named, filtered views over the Issues, PRs, or Actions data. For example, you could create a "My PRs" tab showing only PRs you authored, or a "Needs review" tab scoped to a single org.
+
+**Creating a tab:** Click the **+** button at the right end of the tab bar (desktop) or go to **Settings > Custom Tabs** (mobile or desktop). Each tab requires:
+
+- **Name** — displayed in the tab bar
+- **Base type** — Issues, Pull Requests, or Actions
+- **Scope** (optional) — restrict to a specific org or repo
+- **Filter presets** (optional) — pre-apply one or more filters (e.g., Role: Author, Checks: Failing). Filters use the same options as the corresponding built-in tab. The value `_self` in user-based filters resolves to your authenticated login at runtime.
+
+**Exclusive toggle:** When enabled, items that match the custom tab's scope and filters are hidden from the standard Issues, Pull Requests, or Actions tab. They appear only in the custom tab. Items in the Tracked tab are never hidden by exclusivity.
+
+**Managing tabs:** In **Settings > Custom Tabs** you can edit, reorder, and delete custom tabs. Up to 10 custom tabs are supported.
 
 ### Personal Summary Strip
 
