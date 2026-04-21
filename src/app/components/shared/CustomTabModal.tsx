@@ -139,13 +139,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     });
   }
 
-  function getPresetValue(field: string): string {
-    const stored = filterPreset()[field];
-    if (stored !== undefined) return stored;
-    const group = activeFilterGroups().find((g) => g.field === field);
-    return group?.defaultValue ?? "all";
-  }
-
   function buildRepoScope(): RepoRef[] {
     return props.availableRepos.filter((r) => selectedRepos().has(r.fullName));
   }
@@ -157,9 +150,10 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     // Only store keys the user explicitly set (not defaults)
     const preset = { ...filterPreset() };
 
-    if (isEdit() && props.editingTab) {
-      const prevType = props.editingTab.baseType;
-      updateCustomTab(props.editingTab.id, {
+    const editTab = props.editingTab;
+    if (editTab) {
+      const prevType = editTab.baseType;
+      updateCustomTab(editTab.id, {
         name: name().trim(),
         baseType: baseType(),
         orgScope: [...selectedOrgs()],
@@ -169,7 +163,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
       });
       // If base type changed, clear stale runtime filter state
       if (prevType !== baseType()) {
-        resetCustomTabFilters(props.editingTab.id);
+        resetCustomTabFilters(editTab.id);
       }
     } else {
       if (config.customTabs.length >= 10) {
@@ -336,15 +330,14 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                       <select
                         class="select select-bordered select-xs flex-1"
                         aria-label={group.label}
-                        value={getPresetValue(group.field)}
+                        value={filterPreset()[group.field] ?? group.defaultValue ?? "all"}
                         onChange={(e) => handlePresetChange(group.field, e.currentTarget.value)}
                       >
-                        <option value={group.defaultValue ?? "all"}>
-                          {group.defaultValue === "involves_me" ? "Involves me (default)" : "All (default)"}
-                        </option>
                         <For each={group.options}>
                           {(opt) => (
-                            <option value={opt.value}>{opt.label}</option>
+                            <option value={opt.value}>
+                              {opt.label}{opt.value === (group.defaultValue ?? "all") ? " (default)" : ""}
+                            </option>
                           )}
                         </For>
                       </select>

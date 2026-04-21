@@ -765,6 +765,76 @@ describe("SettingsPage — enableTracking toggle", () => {
   });
 });
 
+describe("SettingsPage — custom tabs in default tab dropdown", () => {
+  beforeEach(() => {
+    // Ensure custom tabs are cleared before each test in this block
+    updateConfig({ customTabs: [] });
+  });
+
+  it("custom tab name appears as an option in the default tab select", () => {
+    updateConfig({
+      customTabs: [{
+        id: "custom-tab-1",
+        name: "My Custom Tab",
+        baseType: "issues" as const,
+        orgScope: [],
+        repoScope: [],
+        filterPreset: {},
+        exclusive: false,
+      }],
+    });
+    renderSettings();
+    screen.getByRole("option", { name: "My Custom Tab" });
+  });
+
+  it("multiple custom tabs all appear in the default tab select", () => {
+    updateConfig({
+      customTabs: [
+        {
+          id: "tab-a",
+          name: "Alpha Tab",
+          baseType: "issues" as const,
+          orgScope: [],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: false,
+        },
+        {
+          id: "tab-b",
+          name: "Beta Tab",
+          baseType: "pullRequests" as const,
+          orgScope: [],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: false,
+        },
+      ],
+    });
+    renderSettings();
+    screen.getByRole("option", { name: "Alpha Tab" });
+    screen.getByRole("option", { name: "Beta Tab" });
+  });
+
+  it("selecting a custom tab as default updates config.defaultTab to its id", async () => {
+    const user = userEvent.setup();
+    updateConfig({
+      customTabs: [{
+        id: "my-tab",
+        name: "My Tab",
+        baseType: "issues" as const,
+        orgScope: [],
+        repoScope: [],
+        filterPreset: {},
+        exclusive: false,
+      }],
+    });
+    renderSettings();
+    const tabSelect = screen.getByDisplayValue("Issues");
+    await user.selectOptions(tabSelect, "my-tab");
+    expect(config.defaultTab).toBe("my-tab");
+  });
+});
+
 describe("SettingsPage — monitor toggle wiring", () => {
   it("shows monitored repos indicator when repos are monitored", () => {
     updateConfig({

@@ -691,7 +691,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 7b: Custom Tabs */}
+        {/* Section 8: Custom Tabs */}
         <Section title="Custom Tabs" description="Create custom views with saved filters and scoping">
           <CustomTabsSection
             availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
@@ -699,7 +699,7 @@ export default function SettingsPage() {
           />
         </Section>
 
-        {/* Section 8: MCP Server Relay */}
+        {/* Section 9: MCP Server Relay */}
         <Section
           title="MCP Server Relay"
           description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
@@ -754,7 +754,7 @@ export default function SettingsPage() {
           </Show>
         </Section>
 
-        {/* Section 9: Data */}
+        {/* Section 10: Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow

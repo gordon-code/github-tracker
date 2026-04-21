@@ -1,18 +1,17 @@
 import { createSignal, createMemo, For, Show } from "solid-js";
 import { config, removeCustomTab, reorderCustomTab } from "../../stores/config";
+import type { CustomTab } from "../../stores/config";
 import type { RepoRef } from "../../services/api";
 import CustomTabModal from "../shared/CustomTabModal";
 import { formatScopeSummary } from "../../lib/format";
 
-type BaseType = "issues" | "pullRequests" | "actions";
-
-function baseTypeLabel(baseType: BaseType): string {
+function baseTypeLabel(baseType: CustomTab["baseType"]): string {
   if (baseType === "issues") return "Issues";
   if (baseType === "pullRequests") return "PRs";
   return "Actions";
 }
 
-function baseTypeBadgeClass(baseType: BaseType): string {
+function baseTypeBadgeClass(baseType: CustomTab["baseType"]): string {
   if (baseType === "issues") return "badge-info";
   if (baseType === "pullRequests") return "badge-success";
   return "badge-warning";

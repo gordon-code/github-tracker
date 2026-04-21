@@ -1,6 +1,7 @@
 import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
+import { viewState, updateViewState } from "./view";
 import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
 import type { Config, ThemeId, CustomTab } from "../../shared/schemas";
 import { z } from "zod";
@@ -144,6 +145,11 @@ export function removeCustomTab(id: string): void {
       }
     })
   );
+  // Clean up stale lastActiveTab in viewState (prevents next session from
+  // trying to restore a deleted tab). Only reset if it matches the deleted ID.
+  if (viewState.lastActiveTab === id) {
+    updateViewState({ lastActiveTab: "issues" });
+  }
 }
 
 export function reorderCustomTab(id: string, direction: "up" | "down"): void {

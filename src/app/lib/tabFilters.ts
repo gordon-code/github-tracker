@@ -1,6 +1,27 @@
-import { setTabFilter, resetAllTabFilters, setCustomTabFilter, resetCustomTabFilters } from "../stores/view";
+import { viewState, setTabFilter, resetAllTabFilters, setCustomTabFilter, resetCustomTabFilters } from "../stores/view";
 
 type BuiltinTabKey = "issues" | "pullRequests" | "actions";
+
+/**
+ * Merge filter state for a tab: schema defaults → preset → stored runtime overrides.
+ * Resolves the _self sentinel when resolveLogin is provided.
+ */
+export function mergeActiveFilters<T>(
+  schema: { safeParse: (v: unknown) => { success: boolean; data?: T } },
+  defaults: T,
+  customTabId: string | undefined,
+  builtinFilters: T,
+  opts: { preset?: Record<string, string>; resolveLogin?: string }
+): T {
+  if (!customTabId) return builtinFilters;
+  const stored = viewState.customTabFilters[customTabId] ?? {};
+  const preset = opts.preset ?? {};
+  const merged = { ...(defaults as Record<string, string>), ...preset, ...stored } as Record<string, string>;
+  if (opts.resolveLogin !== undefined && merged["user"] === "_self") {
+    merged["user"] = opts.resolveLogin || "all";
+  }
+  return schema.safeParse(merged).data ?? defaults;
+}
 
 /**
  * Creates filter change handlers that dispatch to either custom tab or built-in tab filter state.

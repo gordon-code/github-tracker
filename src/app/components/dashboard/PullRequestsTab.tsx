@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
 import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, PullRequestFiltersSchema } from "../../stores/view";
-import { createTabFilterHandlers } from "../../lib/tabFilters";
+import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
@@ -101,17 +101,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   );
 
   // Merge chain: schema defaults → preset → stored runtime overrides
-  const activeFilters = createMemo(() => {
-    if (props.customTabId) {
-      const stored = viewState.customTabFilters[props.customTabId] ?? {};
-      const preset = props.filterPreset ?? {};
-      const merged = { ...PR_FILTER_DEFAULTS, ...preset, ...stored } as Record<string, string>;
-      // Resolve _self sentinel: replace with actual login
-      if (merged["user"] === "_self") merged["user"] = props.userLogin || "all";
-      return PullRequestFiltersSchema.safeParse(merged).data ?? PR_FILTER_DEFAULTS;
-    }
-    return viewState.tabFilters.pullRequests;
-  });
+  const activeFilters = createMemo(() =>
+    mergeActiveFilters(PullRequestFiltersSchema, PR_FILTER_DEFAULTS, props.customTabId, viewState.tabFilters.pullRequests, {
+      preset: props.filterPreset,
+      resolveLogin: props.userLogin,
+    })
+  );
 
   const filterGroups = createMemo<FilterChipGroupDef[]>(() => {
     const users = props.allUsers;

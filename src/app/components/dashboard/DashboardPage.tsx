@@ -34,6 +34,23 @@ import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
+import type { CustomTab } from "../../stores/config";
+
+// Hoisted to module scope — these are constant values (Zod schema defaults).
+const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
+const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
+const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
+
+/** Build a scope matcher for a custom tab's org/repo scope. Shared between customTabData and tabCounts. */
+function buildTabScopeMatcher(tab: CustomTab): (repoFullName: string) => boolean {
+  const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
+  const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
+  return (repoFullName: string) => {
+    if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
+    if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
+    return !orgSet && !repoSet;
+  };
+}
 
 const globalSortOptions: SortOption[] = [
   { label: "Repo", field: "repo", type: "text" },
@@ -497,13 +514,7 @@ export default function DashboardPage() {
     const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
     for (const tab of config.customTabs) {
       if (!tab.exclusive && tab.id !== currentTabId) continue;
-      const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
-      const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
-      const matchesScope = (repoFullName: string) => {
-        if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
-        if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
-        return !orgSet && !repoSet; // no scope = all repos
-      };
+      const matchesScope = buildTabScopeMatcher(tab);
       result[tab.id] = {
         issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
         pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
@@ -574,22 +585,13 @@ export default function DashboardPage() {
     const login = userLogin().toLowerCase();
     const monitoredSet = new Set((config.monitoredRepos ?? []).map((r) => r.fullName));
     const users = allUsers();
-    const issueDefaults = IssueFiltersSchema.parse({});
-    const prDefaults = PullRequestFiltersSchema.parse({});
-    const actionsDefaults = ActionsFiltersSchema.parse({});
     const customCounts: Record<string, number> = {};
     for (const tab of config.customTabs) {
       // customTabData skips non-exclusive inactive tabs (perf optimization),
-      // so compute scope inline for tabs absent from the memo.
+      // so compute scope on demand for tabs absent from the memo.
       let data = customTabData()[tab.id];
       if (!data) {
-        const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
-        const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
-        const matchesScope = (repoFullName: string) => {
-          if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
-          if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
-          return !orgSet && !repoSet;
-        };
+        const matchesScope = buildTabScopeMatcher(tab);
         data = {
           issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
           pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
@@ -600,7 +602,7 @@ export default function DashboardPage() {
       const stored = viewState.customTabFilters[tab.id] ?? {};
       const preset = tab.filterPreset ?? {};
       if (tab.baseType === "issues") {
-        const defaults = issueDefaults;
+        const defaults = ISSUE_FILTER_DEFAULTS;
         const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
         if (merged["user"] === "_self") merged["user"] = login || "all";
         const f = IssueFiltersSchema.safeParse(merged).data ?? defaults;
@@ -622,7 +624,7 @@ export default function DashboardPage() {
           return true;
         }).length;
       } else if (tab.baseType === "pullRequests") {
-        const defaults = prDefaults;
+        const defaults = PR_FILTER_DEFAULTS;
         const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
         if (merged["user"] === "_self") merged["user"] = login || "all";
         const f = PullRequestFiltersSchema.safeParse(merged).data ?? defaults;
@@ -658,7 +660,7 @@ export default function DashboardPage() {
           return true;
         }).length;
       } else {
-        const defaults = actionsDefaults;
+        const defaults = ACTIONS_FILTER_DEFAULTS;
         const merged = { ...defaults, ...preset, ...stored };
         const f = ActionsFiltersSchema.safeParse(merged).data ?? defaults;
         customCounts[tab.id] = data.workflowRuns.filter((w) => {
@@ -741,9 +743,9 @@ export default function DashboardPage() {
         <div class="max-w-6xl mx-auto w-full bg-base-100 shadow-lg border-x border-base-300 flex-1">
           <div class="sticky top-14 z-40 bg-base-100">
             <PersonalSummaryStrip
-              issues={dashboardData.issues}
-              pullRequests={dashboardData.pullRequests}
-              workflowRuns={dashboardData.workflowRuns}
+              issues={visibleIssues()}
+              pullRequests={visiblePullRequests()}
+              workflowRuns={visibleWorkflowRuns()}
               userLogin={userLogin()}
               onTabChange={handleTabChange}
             />

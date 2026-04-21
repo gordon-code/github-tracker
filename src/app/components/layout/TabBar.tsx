@@ -24,27 +24,27 @@ export default function TabBar(props: TabBarProps) {
             <Tabs.List class="tabs tabs-border flex-1 overflow-x-auto">
               <Tabs.Trigger value="issues" class="tab compact:tab-sm data-[selected]:tab-active">
                 Issues
-                <Show when={props.counts?.["issues"] !== undefined}>
-                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.["issues"]}</span>
+                <Show when={props.counts?.issues !== undefined}>
+                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.issues}</span>
                 </Show>
               </Tabs.Trigger>
               <Tabs.Trigger value="pullRequests" class="tab compact:tab-sm data-[selected]:tab-active">
                 Pull Requests
-                <Show when={props.counts?.["pullRequests"] !== undefined}>
-                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.["pullRequests"]}</span>
+                <Show when={props.counts?.pullRequests !== undefined}>
+                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.pullRequests}</span>
                 </Show>
               </Tabs.Trigger>
               <Tabs.Trigger value="actions" class="tab compact:tab-sm data-[selected]:tab-active">
                 Actions
-                <Show when={props.counts?.["actions"] !== undefined}>
-                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.["actions"]}</span>
+                <Show when={props.counts?.actions !== undefined}>
+                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.actions}</span>
                 </Show>
               </Tabs.Trigger>
               <Show when={props.enableTracking}>
                 <Tabs.Trigger value="tracked" class="tab compact:tab-sm data-[selected]:tab-active">
                   Tracked
-                  <Show when={props.counts?.["tracked"] !== undefined}>
-                    <span class="badge badge-sm badge-neutral ml-1">{props.counts?.["tracked"]}</span>
+                  <Show when={props.counts?.tracked !== undefined}>
+                    <span class="badge badge-sm badge-neutral ml-1">{props.counts?.tracked}</span>
                   </Show>
                 </Tabs.Trigger>
               </Show>

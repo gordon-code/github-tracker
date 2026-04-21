@@ -2,7 +2,7 @@ import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
-import { createTabFilterHandlers } from "../../lib/tabFilters";
+import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
@@ -122,15 +122,11 @@ export default function ActionsTab(props: ActionsTabProps) {
   );
 
   // Merge chain: schema defaults → preset → stored runtime overrides
-  const activeFilters = createMemo(() => {
-    if (props.customTabId) {
-      const stored = viewState.customTabFilters[props.customTabId] ?? {};
-      const preset = props.filterPreset ?? {};
-      const merged = { ...ACTIONS_FILTER_DEFAULTS, ...preset, ...stored };
-      return ActionsFiltersSchema.safeParse(merged).data ?? ACTIONS_FILTER_DEFAULTS;
-    }
-    return viewState.tabFilters.actions;
-  });
+  const activeFilters = createMemo(() =>
+    mergeActiveFilters(ActionsFiltersSchema, ACTIONS_FILTER_DEFAULTS, props.customTabId, viewState.tabFilters.actions, {
+      preset: props.filterPreset,
+    })
+  );
 
   const { handleFilterChange, handleResetFilters } = createTabFilterHandlers("actions", () => props.customTabId);
 

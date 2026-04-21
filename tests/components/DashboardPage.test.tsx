@@ -1386,6 +1386,37 @@ describe("DashboardPage — custom tab scoping", () => {
     });
   });
 
+  it("orgScope and repoScope use OR semantics — item matching either is included", async () => {
+    configStore.addCustomTab({
+      id: "orscope01",
+      name: "OR Scope Test",
+      baseType: "issues",
+      orgScope: ["testorg"],
+      repoScope: [{ owner: "other", name: "specific-repo", fullName: "other/specific-repo" }],
+      filterPreset: { scope: "all" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 40, title: "Matches orgScope", repoFullName: "testorg/any-repo" }),
+        makeIssue({ id: 41, title: "Matches repoScope", repoFullName: "other/specific-repo" }),
+        makeIssue({ id: 42, title: "Matches neither", repoFullName: "unrelated/repo" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /OR Scope Test/ });
+      // Both the orgScope match (id 40) and repoScope match (id 41) should be counted
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
   it("exclusive scoped tab removes only matched items from builtin tab", async () => {
     configStore.addCustomTab({
       id: "exclscope01",
@@ -1559,8 +1590,45 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       // (no issue has userLogin matching "")
       const customTab = screen.getByRole("tab", { name: /My Authored/ });
       const customCount = parseInt(customTab.textContent?.replace(/\D+/g, "") || "0", 10);
-      // Badge count should be less than total (role filter applied)
-      expect(customCount).toBeLessThan(3);
+      // In test env user login is "testuser" (auth mock), no issue has userLogin="testuser",
+      // so _self resolves to "testuser" but no issue surfacedBy includes "testuser"
+      // and role:author checks userLogin === login — no match → count = 0
+      expect(customCount).toBe(0);
+    });
+  });
+
+  it("user:_self sentinel resolves to authenticated user login for badge count", async () => {
+    // The auth mock returns user().login === "testuser"
+    configStore.addCustomTab({
+      id: "selfuser",
+      name: "My Items",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: { scope: "all", user: "_self" },
+      exclusive: false,
+    });
+    viewStore.updateViewState({ hideDepDashboard: false });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        // surfacedBy includes testuser — should be counted
+        makeIssue({ id: 50, title: "Surfaced by self", surfacedBy: ["testuser"] }),
+        // surfacedBy does not include testuser — should NOT be counted
+        makeIssue({ id: 51, title: "Surfaced by other", surfacedBy: ["octocat"] }),
+        // surfacedBy includes testuser alongside others — should be counted
+        makeIssue({ id: 52, title: "Surfaced by self and others", surfacedBy: ["octocat", "testuser"] }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /My Items/ });
+      // Only issues 50 and 52 have testuser in surfacedBy
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
     });
   });
 
