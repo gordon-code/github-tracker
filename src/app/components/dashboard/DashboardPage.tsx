@@ -34,6 +34,7 @@ import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
+import { mergeActiveFilters } from "../../lib/tabFilters";
 import type { CustomTab } from "../../stores/config";
 
 // Hoisted to module scope — these are constant values (Zod schema defaults).
@@ -598,14 +599,12 @@ export default function DashboardPage() {
           workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
         };
       }
-      // Merge filter chain: schema defaults → preset → stored overrides (same as tab components)
-      const stored = viewState.customTabFilters[tab.id] ?? {};
-      const preset = tab.filterPreset ?? {};
+      // Merge filter chain via shared helper (same as tab components)
+      const preset = tab.filterPreset;
       if (tab.baseType === "issues") {
-        const defaults = ISSUE_FILTER_DEFAULTS;
-        const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
-        if (merged["user"] === "_self") merged["user"] = login || "all";
-        const f = IssueFiltersSchema.safeParse(merged).data ?? defaults;
+        const f = mergeActiveFilters(IssueFiltersSchema, ISSUE_FILTER_DEFAULTS, tab.id, ISSUE_FILTER_DEFAULTS, {
+          preset, resolveLogin: login,
+        });
         customCounts[tab.id] = data.issues.filter((i) => {
           if (!isItemVisibleOnTab(ownership.issues, i.id, tab.id)) return false;
           if (!isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })) return false;
@@ -624,17 +623,21 @@ export default function DashboardPage() {
           return true;
         }).length;
       } else if (tab.baseType === "pullRequests") {
-        const defaults = PR_FILTER_DEFAULTS;
-        const merged = { ...defaults, ...preset, ...stored } as Record<string, string>;
-        if (merged["user"] === "_self") merged["user"] = login || "all";
-        const f = PullRequestFiltersSchema.safeParse(merged).data ?? defaults;
+        const f = mergeActiveFilters(PullRequestFiltersSchema, PR_FILTER_DEFAULTS, tab.id, PR_FILTER_DEFAULTS, {
+          preset, resolveLogin: login,
+        });
         customCounts[tab.id] = data.pullRequests.filter((p) => {
           if (!isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id)) return false;
           if (!isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })) return false;
           if (f.scope === "involves_me" && !isUserInvolved(p, login, monitoredSet, p.enriched !== false ? p.reviewerLogins : undefined)) return false;
-          if (f.role === "author" && p.userLogin.toLowerCase() !== login) return false;
-          if (f.role === "reviewer" && !p.reviewerLogins?.some((r) => r.toLowerCase() === login)) return false;
-          if (f.role === "assignee" && !p.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
+          // Guard role filter on enriched: light-phase PRs have empty reviewerLogins/assigneeLogins
+          if (p.enriched !== false) {
+            if (f.role === "author" && p.userLogin.toLowerCase() !== login) return false;
+            if (f.role === "reviewer" && !p.reviewerLogins?.some((r) => r.toLowerCase() === login)) return false;
+            if (f.role === "assignee" && !p.assigneeLogins?.some((a) => a.toLowerCase() === login)) return false;
+          } else {
+            if (f.role === "author" && p.userLogin.toLowerCase() !== login) return false;
+          }
           if (f.draft === "draft" && !p.draft) return false;
           if (f.draft === "ready" && p.draft) return false;
           if (f.checkStatus !== "all" && p.enriched !== false) {
@@ -660,9 +663,7 @@ export default function DashboardPage() {
           return true;
         }).length;
       } else {
-        const defaults = ACTIONS_FILTER_DEFAULTS;
-        const merged = { ...defaults, ...preset, ...stored };
-        const f = ActionsFiltersSchema.safeParse(merged).data ?? defaults;
+        const f = mergeActiveFilters(ActionsFiltersSchema, ACTIONS_FILTER_DEFAULTS, tab.id, ACTIONS_FILTER_DEFAULTS, { preset });
         customCounts[tab.id] = data.workflowRuns.filter((w) => {
           if (!isItemVisibleOnTab(ownership.actions, w.id, tab.id)) return false;
           if (!isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })) return false;

@@ -333,10 +333,13 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                         value={filterPreset()[group.field] ?? group.defaultValue ?? "all"}
                         onChange={(e) => handlePresetChange(group.field, e.currentTarget.value)}
                       >
+                        <Show when={!group.defaultValue}>
+                          <option value="all">All (default)</option>
+                        </Show>
                         <For each={group.options}>
                           {(opt) => (
                             <option value={opt.value}>
-                              {opt.label}{opt.value === (group.defaultValue ?? "all") ? " (default)" : ""}
+                              {opt.label}{opt.value === group.defaultValue ? " (default)" : ""}
                             </option>
                           )}
                         </For>

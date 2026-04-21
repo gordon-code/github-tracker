@@ -865,6 +865,30 @@ describe("removeCustomTab", () => {
       dispose();
     });
   });
+
+  it("resets viewState.lastActiveTab when it matches the deleted tab", async () => {
+    const { viewState, updateViewState } = await import("../../src/app/stores/view");
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-del" }));
+      updateViewState({ lastActiveTab: "tab-del" });
+      expect(viewState.lastActiveTab).toBe("tab-del");
+      removeCustomTab("tab-del");
+      expect(viewState.lastActiveTab).toBe("issues");
+      dispose();
+    });
+  });
+
+  it("preserves viewState.lastActiveTab when it does not match the deleted tab", async () => {
+    const { viewState, updateViewState } = await import("../../src/app/stores/view");
+    createRoot((dispose) => {
+      addCustomTab(makeTab({ id: "tab-keep" }));
+      addCustomTab(makeTab({ id: "tab-other", name: "Other" }));
+      updateViewState({ lastActiveTab: "tab-other" });
+      removeCustomTab("tab-keep");
+      expect(viewState.lastActiveTab).toBe("tab-other");
+      dispose();
+    });
+  });
 });
 
 describe("reorderCustomTab", () => {
