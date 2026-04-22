@@ -133,8 +133,9 @@ function loadViewState(): ViewState {
       for (const [key, val] of Object.entries(record)) {
         if (!Array.isArray(val)) {
           delete record[key];
-        } else if (val.length > LOCKED_REPOS_CAP) {
-          record[key] = val.slice(0, LOCKED_REPOS_CAP);
+        } else {
+          const filtered = val.filter((item): item is string => typeof item === "string");
+          record[key] = filtered.length > LOCKED_REPOS_CAP ? filtered.slice(0, LOCKED_REPOS_CAP) : filtered;
         }
       }
     }

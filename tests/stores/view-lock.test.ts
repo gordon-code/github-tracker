@@ -197,6 +197,14 @@ describe("view lock store (per-tab)", () => {
       expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
       expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/repo-a"]);
     });
+
+    it("prunes custom tab lock list correctly", () => {
+      lockRepo("custom-tab-1", "org/repo-a");
+      lockRepo("custom-tab-1", "org/repo-b");
+      lockRepo("custom-tab-1", "org/repo-c");
+      pruneLockedRepos("custom-tab-1", ["org/repo-a", "org/repo-c"]);
+      expect(viewState.lockedRepos["custom-tab-1"]).toEqual(["org/repo-a", "org/repo-c"]);
+    });
   });
 
   describe("schema — lockedRepos defaults", () => {
@@ -245,6 +253,14 @@ describe("view lock store (per-tab)", () => {
     it("passes through existing per-tab record unchanged", () => {
       const record = { issues: ["org/a"], pullRequests: ["org/b"], actions: [] };
       expect(migrateLockedRepos(record)).toEqual(record);
+    });
+
+    it("passes through partial object (missing built-in keys remain absent)", () => {
+      const partial = { issues: ["org/a"] };
+      const migrated = migrateLockedRepos(partial) as Record<string, string[]>;
+      expect(migrated["issues"]).toEqual(["org/a"]);
+      expect(migrated["pullRequests"]).toBeUndefined();
+      expect(migrated["actions"]).toBeUndefined();
     });
 
     it("returns default record for undefined/null", () => {
