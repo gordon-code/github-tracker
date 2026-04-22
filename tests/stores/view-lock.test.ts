@@ -261,6 +261,13 @@ describe("view lock store (per-tab)", () => {
       expect(result["actions"].length).toBe(50);
     });
 
+    it("creates independent array copies per tab (no shared references)", () => {
+      const result = migrateLockedRepos(["org/a"]) as Record<string, string[]>;
+      expect(result["issues"]).not.toBe(result["pullRequests"]);
+      expect(result["issues"]).not.toBe(result["actions"]);
+      expect(result["pullRequests"]).not.toBe(result["actions"]);
+    });
+
     it("returns default record for non-array, non-object inputs", () => {
       expect(migrateLockedRepos(42)).toEqual({ issues: [], pullRequests: [], actions: [] });
       expect(migrateLockedRepos("bad")).toEqual({ issues: [], pullRequests: [], actions: [] });
