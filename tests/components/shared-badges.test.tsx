@@ -67,9 +67,9 @@ describe("SizeBadge", () => {
     screen.getByText("1 file");
   });
 
-  it("renders XL badge for large changes", () => {
+  it("renders XXL badge for large changes", () => {
     render(() => <SizeBadge additions={800} deletions={500} changedFiles={42} />);
-    screen.getByText("XL");
+    screen.getByText("XXL");
     screen.getByText("+800");
     screen.getByText("-500");
     screen.getByText("42 files");

@@ -166,10 +166,9 @@ describe("PullRequestsTab", () => {
     const pr = makePullRequest({ id: 1, title: "Big PR", additions: 300, deletions: 100, repoFullName: "org/repo-a" });
     setAllExpanded("pullRequests", ["org/repo-a"], true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
-    // prSizeCategory(300, 100) = 400 total -> M
-    // "M" appears as a size badge
-    const mEls = screen.getAllByText("M");
-    const badgeEl = mEls.find((el) => el.tagName.toLowerCase() === "span");
+    // prSizeCategory(300, 100) = 400 total -> L
+    const lEls = screen.getAllByText("L");
+    const badgeEl = lEls.find((el) => el.tagName.toLowerCase() === "span");
     expect(badgeEl).toBeDefined();
   });
 
