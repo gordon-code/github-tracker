@@ -107,7 +107,7 @@ export function migrateLockedRepos(raw: unknown): unknown {
   if (Array.isArray(raw)) {
     // Flat array → copy to all 3 built-in tabs
     const arr = raw.filter((item): item is string => typeof item === "string").slice(0, LOCKED_REPOS_CAP);
-    return { issues: arr, pullRequests: arr, actions: arr };
+    return { issues: [...arr], pullRequests: [...arr], actions: [...arr] };
   }
   if (typeof raw === "object") {
     // Object → pass through as-is (already per-tab record shape)
