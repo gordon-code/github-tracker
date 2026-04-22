@@ -10,197 +10,278 @@ import {
   ViewStateSchema,
 } from "../../src/app/stores/view";
 
-describe("view lock store", () => {
+describe("view lock store (per-tab)", () => {
   beforeEach(() => {
     resetViewState();
   });
 
   describe("lockRepo", () => {
-    it("locks a repo", () => {
-      lockRepo("org/repo-a");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a"]);
+    it("locks a repo in the given tab", () => {
+      lockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
     });
 
-    it("appends to end", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-b"]);
+    it("appends to end within the same tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a", "org/repo-b"]);
     });
 
-    it("deduplicates", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-a");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a"]);
+    it("deduplicates within the same tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
     });
 
-    it("accumulates locks from multiple lockRepo calls", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-b"]);
+    it("does not affect other tabs", () => {
+      lockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["pullRequests"]).toEqual([]);
+      expect(viewState.lockedRepos["actions"]).toEqual([]);
+    });
+
+    it("locks independently in each tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("pullRequests", "org/repo-b");
+      lockRepo("actions", "org/repo-c");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
+      expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/repo-b"]);
+      expect(viewState.lockedRepos["actions"]).toEqual(["org/repo-c"]);
+    });
+
+    it("same repo can be locked in multiple tabs independently", () => {
+      lockRepo("issues", "org/shared");
+      lockRepo("pullRequests", "org/shared");
+      expect(viewState.lockedRepos["issues"]).toContain("org/shared");
+      expect(viewState.lockedRepos["pullRequests"]).toContain("org/shared");
+    });
+
+    it("creates the tab key if absent (custom tab)", () => {
+      lockRepo("custom-tab-1", "org/repo-a");
+      expect(viewState.lockedRepos["custom-tab-1"]).toEqual(["org/repo-a"]);
+    });
+
+    it("silently no-ops when at LOCKED_REPOS_CAP for that tab", () => {
+      for (let i = 0; i < 50; i++) {
+        lockRepo("issues", `org/repo-${i}`);
+      }
+      expect(viewState.lockedRepos["issues"].length).toBe(50);
+      lockRepo("issues", "org/repo-overflow");
+      expect(viewState.lockedRepos["issues"].length).toBe(50);
+      expect(viewState.lockedRepos["issues"]).not.toContain("org/repo-overflow");
+    });
+
+    it("cap is per-tab — reaching cap in one tab does not block another", () => {
+      for (let i = 0; i < 50; i++) {
+        lockRepo("issues", `org/repo-${i}`);
+      }
+      lockRepo("pullRequests", "org/repo-a");
+      expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/repo-a"]);
     });
   });
 
   describe("unlockRepo", () => {
-    it("removes from locked array", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      unlockRepo("org/repo-a");
-      expect(viewState.lockedRepos).toEqual(["org/repo-b"]);
+    it("removes from locked array for the given tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      unlockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-b"]);
     });
 
-    it("no-op if not locked", () => {
-      unlockRepo("org/repo-a");
-      expect(viewState.lockedRepos).toEqual([]);
+    it("no-op if not locked in that tab", () => {
+      unlockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["issues"]).toEqual([]);
+    });
+
+    it("no-op if tab key is absent", () => {
+      expect(() => unlockRepo("nonexistent-tab", "org/repo-a")).not.toThrow();
+    });
+
+    it("does not affect other tabs", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("pullRequests", "org/repo-a");
+      unlockRepo("issues", "org/repo-a");
+      expect(viewState.lockedRepos["issues"]).toEqual([]);
+      expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/repo-a"]);
     });
   });
 
   describe("moveLockedRepo", () => {
-    it("swaps with neighbor up", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      lockRepo("org/repo-c");
-      moveLockedRepo("org/repo-b", "up");
-      expect(viewState.lockedRepos).toEqual(["org/repo-b", "org/repo-a", "org/repo-c"]);
+    it("swaps with neighbor up within the given tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      lockRepo("issues", "org/repo-c");
+      moveLockedRepo("issues", "org/repo-b", "up");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-b", "org/repo-a", "org/repo-c"]);
     });
 
-    it("swaps with neighbor down", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      lockRepo("org/repo-c");
-      moveLockedRepo("org/repo-b", "down");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-c", "org/repo-b"]);
+    it("swaps with neighbor down within the given tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      lockRepo("issues", "org/repo-c");
+      moveLockedRepo("issues", "org/repo-b", "down");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a", "org/repo-c", "org/repo-b"]);
     });
 
     it("no-op at top boundary", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      moveLockedRepo("org/repo-a", "up");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-b"]);
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      moveLockedRepo("issues", "org/repo-a", "up");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a", "org/repo-b"]);
     });
 
     it("no-op at bottom boundary", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      moveLockedRepo("org/repo-b", "down");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-b"]);
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      moveLockedRepo("issues", "org/repo-b", "down");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a", "org/repo-b"]);
     });
 
-    it("no-op if not locked", () => {
-      lockRepo("org/repo-a");
-      moveLockedRepo("org/repo-z", "up");
-      expect(viewState.lockedRepos).toEqual(["org/repo-a"]);
+    it("no-op if repo not locked in that tab", () => {
+      lockRepo("issues", "org/repo-a");
+      moveLockedRepo("issues", "org/repo-z", "up");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
+    });
+
+    it("no-op if tab key is absent", () => {
+      expect(() => moveLockedRepo("nonexistent-tab", "org/repo-a", "up")).not.toThrow();
+    });
+
+    it("does not affect other tabs", () => {
+      lockRepo("issues", "org/a");
+      lockRepo("issues", "org/b");
+      lockRepo("pullRequests", "org/a");
+      lockRepo("pullRequests", "org/b");
+      moveLockedRepo("issues", "org/b", "up");
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/b", "org/a"]);
+      expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/a", "org/b"]);
     });
   });
 
   describe("pruneLockedRepos", () => {
-    it("removes stale names", () => {
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      lockRepo("org/repo-c");
-      pruneLockedRepos(["org/repo-a", "org/repo-c"]);
-      expect(viewState.lockedRepos).toEqual(["org/repo-a", "org/repo-c"]);
+    it("removes stale names for the given tab", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      lockRepo("issues", "org/repo-c");
+      pruneLockedRepos("issues", ["org/repo-a", "org/repo-c"]);
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a", "org/repo-c"]);
     });
 
-    it("preserves order of active repos", () => {
-      lockRepo("org/repo-c");
-      lockRepo("org/repo-a");
-      lockRepo("org/repo-b");
-      pruneLockedRepos(["org/repo-b", "org/repo-c"]);
-      expect(viewState.lockedRepos).toEqual(["org/repo-c", "org/repo-b"]);
+    it("preserves lock order of active repos", () => {
+      lockRepo("issues", "org/repo-c");
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      pruneLockedRepos("issues", ["org/repo-b", "org/repo-c"]);
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-c", "org/repo-b"]);
     });
 
-    it("no-op when empty", () => {
-      pruneLockedRepos(["org/repo-a"]);
-      expect(viewState.lockedRepos).toEqual([]);
+    it("no-op when tab is empty", () => {
+      pruneLockedRepos("issues", ["org/repo-a"]);
+      expect(viewState.lockedRepos["issues"]).toEqual([]);
     });
 
     it("no-op when all active", () => {
-      lockRepo("org/repo-a");
-      pruneLockedRepos(["org/repo-a", "org/repo-b"]);
-      expect(viewState.lockedRepos).toEqual(["org/repo-a"]);
+      lockRepo("issues", "org/repo-a");
+      pruneLockedRepos("issues", ["org/repo-a", "org/repo-b"]);
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
+    });
+
+    it("no-op if tab key is absent", () => {
+      expect(() => pruneLockedRepos("nonexistent-tab", ["org/repo-a"])).not.toThrow();
+    });
+
+    it("does not affect other tabs", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("issues", "org/repo-b");
+      lockRepo("pullRequests", "org/repo-a");
+      pruneLockedRepos("issues", ["org/repo-a"]);
+      expect(viewState.lockedRepos["issues"]).toEqual(["org/repo-a"]);
+      expect(viewState.lockedRepos["pullRequests"]).toEqual(["org/repo-a"]);
     });
   });
 
-  describe("schema migration", () => {
-    it("defaults lockedRepos when absent", () => {
+  describe("schema — lockedRepos defaults", () => {
+    it("defaults lockedRepos to per-tab record with empty arrays", () => {
       const result = ViewStateSchema.safeParse({});
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lockedRepos).toEqual([]);
+        expect(result.data.lockedRepos).toEqual({ issues: [], pullRequests: [], actions: [] });
       }
     });
 
-    it("preserves existing data without lockedRepos", () => {
+    it("accepts a per-tab record shape", () => {
       const result = ViewStateSchema.safeParse({
-        lastActiveTab: "issues",
-        expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
+        lockedRepos: { issues: ["org/a"], pullRequests: [], actions: ["org/b"] },
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lastActiveTab).toBe("issues");
-        expect(result.data.lockedRepos).toEqual([]);
+        expect(result.data.lockedRepos["issues"]).toEqual(["org/a"]);
+        expect(result.data.lockedRepos["actions"]).toEqual(["org/b"]);
+      }
+    });
+
+    it("preserves other state fields when lockedRepos is present", () => {
+      const result = ViewStateSchema.safeParse({
+        lastActiveTab: "pullRequests",
+        lockedRepos: { issues: ["org/a"], pullRequests: [], actions: [] },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.lastActiveTab).toBe("pullRequests");
+        expect(result.data.lockedRepos["issues"]).toEqual(["org/a"]);
       }
     });
   });
 
   describe("migrateLockedRepos", () => {
-    it("deduplicates with issues-first default", () => {
-      expect(migrateLockedRepos({ issues: ["a"], pullRequests: ["b"], actions: ["a"] }))
-        .toEqual(["a", "b"]);
+    it("converts flat array to per-tab record (same list in all 3 tabs)", () => {
+      const result = migrateLockedRepos(["org/a", "org/b"]);
+      expect(result).toEqual({
+        issues: ["org/a", "org/b"],
+        pullRequests: ["org/a", "org/b"],
+        actions: ["org/a", "org/b"],
+      });
     });
 
-    it("uses lastActiveTab for precedence", () => {
-      expect(migrateLockedRepos({ issues: ["a"], pullRequests: ["b"], actions: ["a"] }, "pullRequests"))
-        .toEqual(["b", "a"]);
+    it("passes through existing per-tab record unchanged", () => {
+      const record = { issues: ["org/a"], pullRequests: ["org/b"], actions: [] };
+      expect(migrateLockedRepos(record)).toEqual(record);
     });
 
-    it("handles partial object", () => {
-      expect(migrateLockedRepos({ issues: ["a"], pullRequests: ["b"] }))
-        .toEqual(["a", "b"]);
+    it("returns default record for undefined/null", () => {
+      expect(migrateLockedRepos(undefined)).toEqual({ issues: [], pullRequests: [], actions: [] });
+      expect(migrateLockedRepos(null)).toEqual({ issues: [], pullRequests: [], actions: [] });
     });
 
-    it("returns array unchanged", () => {
-      expect(migrateLockedRepos(["a", "b"])).toEqual(["a", "b"]);
+    it("caps flat array at LOCKED_REPOS_CAP (50) before copying", () => {
+      const bigArr = Array.from({ length: 60 }, (_, i) => `org/repo-${i}`);
+      const result = migrateLockedRepos(bigArr) as Record<string, string[]>;
+      expect(Array.isArray(result["issues"])).toBe(true);
+      expect(result["issues"].length).toBe(50);
+      expect(result["pullRequests"].length).toBe(50);
+      expect(result["actions"].length).toBe(50);
     });
 
-    it("returns undefined unchanged", () => {
-      expect(migrateLockedRepos(undefined)).toBeUndefined();
-    });
-
-    it("uses actions tab for precedence when lastActiveTab is actions", () => {
-      expect(migrateLockedRepos(
-        { issues: ["a"], pullRequests: ["b"], actions: ["c", "a"] },
-        "actions"
-      )).toEqual(["c", "a", "b"]);
-    });
-
-    it("caps output at LOCKED_REPOS_CAP when merging exceeds limit", () => {
-      // 20 unique per tab × 3 tabs = 60 unique entries, exceeds cap of 50
-      const issues = Array.from({ length: 20 }, (_, i) => `org/issue-${i}`);
-      const prs = Array.from({ length: 20 }, (_, i) => `org/pr-${i}`);
-      const actions = Array.from({ length: 20 }, (_, i) => `org/action-${i}`);
-      const result = migrateLockedRepos({ issues, pullRequests: prs, actions });
-      expect(Array.isArray(result)).toBe(true);
-      expect((result as string[]).length).toBe(50);
-      // First 20 should be issues (default preferred), then first 20 PRs, then first 10 actions
-      expect((result as string[])[0]).toBe("org/issue-0");
-      expect((result as string[])[20]).toBe("org/pr-0");
-      expect((result as string[])[40]).toBe("org/action-0");
-      expect((result as string[])[49]).toBe("org/action-9");
+    it("returns default record for non-array, non-object inputs", () => {
+      expect(migrateLockedRepos(42)).toEqual({ issues: [], pullRequests: [], actions: [] });
+      expect(migrateLockedRepos("bad")).toEqual({ issues: [], pullRequests: [], actions: [] });
     });
   });
 
-  describe("lockRepo cap enforcement", () => {
-    it("silently no-ops when at LOCKED_REPOS_CAP", () => {
-      // Fill to cap
-      for (let i = 0; i < 50; i++) {
-        lockRepo(`org/repo-${i}`);
-      }
-      expect(viewState.lockedRepos.length).toBe(50);
-      // Attempt to add one more
-      lockRepo("org/repo-overflow");
-      expect(viewState.lockedRepos.length).toBe(50);
-      expect(viewState.lockedRepos).not.toContain("org/repo-overflow");
+  describe("resetViewState — lockedRepos", () => {
+    it("clears all per-tab locked arrays", () => {
+      lockRepo("issues", "org/repo-a");
+      lockRepo("pullRequests", "org/repo-b");
+      lockRepo("actions", "org/repo-c");
+      resetViewState();
+      expect(viewState.lockedRepos["issues"]).toEqual([]);
+      expect(viewState.lockedRepos["pullRequests"]).toEqual([]);
+      expect(viewState.lockedRepos["actions"]).toEqual([]);
+    });
+
+    it("clears custom tab lock lists as well", () => {
+      lockRepo("custom-tab-1", "org/repo-a");
+      resetViewState();
+      expect(viewState.lockedRepos["custom-tab-1"]).toBeUndefined();
     });
   });
 });

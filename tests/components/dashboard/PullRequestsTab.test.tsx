@@ -685,7 +685,7 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
     setViewState(produce((s) => {
       s.expandedRepos.pullRequests["owner/empty-repo"] = true;
       s.expandedRepos.pullRequests["owner/stale-repo"] = true;
-      s.lockedRepos = ["owner/empty-repo", "owner/stale-repo"];
+      s.lockedRepos.pullRequests = ["owner/empty-repo", "owner/stale-repo"];
     }));
 
     render(() => (
@@ -698,10 +698,10 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
 
     // Empty repo preserved (in configRepoNames but no items)
     expect(viewState.expandedRepos.pullRequests["owner/empty-repo"]).toBe(true);
-    expect(viewState.lockedRepos).toContain("owner/empty-repo");
+    expect(viewState.lockedRepos["pullRequests"]).toContain("owner/empty-repo");
     // Stale repo pruned (not in configRepoNames)
     expect(viewState.expandedRepos.pullRequests["owner/stale-repo"]).toBeUndefined();
-    expect(viewState.lockedRepos).not.toContain("owner/stale-repo");
+    expect(viewState.lockedRepos["pullRequests"]).not.toContain("owner/stale-repo");
   });
 
   it("falls back to item-derived names when configRepoNames not provided", () => {
@@ -709,12 +709,12 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
       <PullRequestsTab pullRequests={[]} userLogin="me" />
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
-    expect(viewState.lockedRepos).toEqual([]);
+    expect(viewState.lockedRepos["pullRequests"]).toEqual([]);
   });
 
   it("renders compact stub row for a locked repo with no pull requests", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.pullRequests = ["owner/locked-empty"];
     }));
 
     const { container } = render(() => (
@@ -734,7 +734,7 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
 
   it("does not expand a locked repo with no pull requests even when expandedRepos is set", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.pullRequests = ["owner/locked-empty"];
       s.expandedRepos.pullRequests["owner/locked-empty"] = true;
     }));
 
@@ -753,7 +753,7 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
 
   it("hides empty-state message when only locked stubs exist (no double render)", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.pullRequests = ["owner/locked-empty"];
     }));
 
     render(() => (

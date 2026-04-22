@@ -367,13 +367,13 @@ The Tracked tab lets you pin issues and PRs into a personal TODO list that you c
 
 ## Repo Pinning
 
-Each repo group header has a pin (lock) control, visible on hover on desktop and always visible on mobile. Pinning a repo keeps it at the top of the list on all tabs regardless of sort order or how recently it was updated. Pinned repos remain visible even when filters exclude all their items — they appear as compact, de-emphasized rows with the repo name and pin controls still accessible.
+Each repo group header has a pin (lock) control, visible on hover on desktop and always visible on mobile. Pinning a repo keeps it at the top of the list regardless of sort order or how recently it was updated. Pinned repos remain visible even when filters exclude all their items — they appear as compact, de-emphasized rows with the repo name and pin controls still accessible.
 
 - Click the pin icon to pin a repo to the top.
 - Click it again to unpin.
 - Use the up/down arrows (visible when pinned) to reorder pinned repos relative to each other.
 
-Pin state is shared across all tabs — pinning a repo on the Issues tab also pins it on Pull Requests and Actions.
+Pin state is per-tab — pinning a repo on the Issues tab does not pin it on Pull Requests or Actions. Each tab maintains its own independent pin list and ordering.
 
 ---
 
@@ -455,7 +455,7 @@ These are UI preferences that persist across sessions but are not included in th
 | Show PR runs (Actions) | Off | Whether to show workflow runs triggered by pull request events. |
 | Hide Dependency Dashboard | On | Whether to hide the Renovate Dependency Dashboard issue. |
 | Sort preferences | Updated (desc) | Sort field and direction per tab, remembered across sessions. |
-| Pinned repos | (none) | Repos pinned to the top of the list across all tabs. |
+| Pinned repos | (none) | Repos pinned to the top of the list, stored per tab independently. |
 | Tracked items | (none) | Issues and PRs pinned to the Tracked tab (max 200). |
 
 ---

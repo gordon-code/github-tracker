@@ -703,6 +703,7 @@ export default function DashboardPage() {
       const keys = new Set([
         ...Object.keys(viewState.customTabFilters),
         ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k)),
+        ...Object.keys(viewState.lockedRepos).filter((k) => !isBuiltinTab(k)),
       ]);
       return [...keys].filter((id) => !activeIds.has(id));
     });

@@ -23,6 +23,7 @@ import {
   setCustomTabFilter,
   resetCustomTabFilters,
   removeCustomTabState,
+  lockRepo,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
 
@@ -692,6 +693,13 @@ describe("removeCustomTabState", () => {
     expect("tab-abc" in viewState.expandedRepos).toBe(false);
   });
 
+  it("cleans lockedRepos for the given tab ID", () => {
+    lockRepo("tab-abc", "owner/repo");
+    expect(viewState.lockedRepos["tab-abc"]).toContain("owner/repo");
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.lockedRepos).toBe(false);
+  });
+
   it("is a no-op for a nonexistent tab ID (no error thrown)", () => {
     expect(() => removeCustomTabState("tab-never-existed")).not.toThrow();
     expect("tab-never-existed" in viewState.customTabFilters).toBe(false);
@@ -727,6 +735,18 @@ describe("resetViewState — custom tab fields", () => {
     expect(viewState.expandedRepos["actions"]).toEqual({});
     // Custom key is fully deleted
     expect("tab-custom" in viewState.expandedRepos).toBe(false);
+  });
+
+  it("clears custom tab keys from lockedRepos and resets built-in keys to []", () => {
+    lockRepo("issues", "owner/repo");
+    lockRepo("tab-custom", "owner/repo");
+    resetViewState();
+    // Built-in keys reset to empty arrays
+    expect(viewState.lockedRepos["issues"]).toEqual([]);
+    expect(viewState.lockedRepos["pullRequests"]).toEqual([]);
+    expect(viewState.lockedRepos["actions"]).toEqual([]);
+    // Custom key is fully deleted
+    expect("tab-custom" in viewState.lockedRepos).toBe(false);
   });
 });
 

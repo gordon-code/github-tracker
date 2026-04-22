@@ -4,6 +4,7 @@ import RepoLockControls from "./RepoLockControls";
 export default function EmptyLockedRepoRow(props: {
   repoFullName: string;
   section: "issues" | "pulls" | "actions";
+  tabKey: string;
 }) {
   return (
     <div
@@ -15,7 +16,7 @@ export default function EmptyLockedRepoRow(props: {
         <span class="text-sm text-base-content/60">{props.repoFullName}</span>
       </span>
       <RepoGitHubLink repoFullName={props.repoFullName} section={props.section} />
-      <RepoLockControls repoFullName={props.repoFullName} />
+      <RepoLockControls repoFullName={props.repoFullName} tabKey={props.tabKey} />
     </div>
   );
 }

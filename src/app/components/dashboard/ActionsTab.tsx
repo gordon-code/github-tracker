@@ -189,23 +189,24 @@ export default function ActionsTab(props: ActionsTabProps) {
 
   const repoGroups = createMemo(() => {
     const groups = groupRuns(filteredRuns());
+    const lockedForTab = viewState.lockedRepos[tabKey()] ?? [];
     const withLocked = ensureLockedRepoGroups(
       groups,
-      viewState.lockedRepos,
+      lockedForTab,
       (name) => ({ repoFullName: name, workflows: [] }),
     );
-    return orderRepoGroups(withLocked, viewState.lockedRepos);
+    return orderRepoGroups(withLocked, lockedForTab);
   });
 
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos(names);
+    pruneLockedRepos(tabKey(), names);
   });
 
   const highlightedReposActions = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos,
+    () => viewState.lockedRepos[tabKey()] ?? [],
     () => ignoredWorkflowRuns().length,
     () => JSON.stringify(props.customTabId
       ? (viewState.customTabFilters[props.customTabId] ?? {})
@@ -291,7 +292,7 @@ export default function ActionsTab(props: ActionsTabProps) {
               <Show
                 when={!isEmpty()}
                 fallback={
-                  <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="actions" />
+                  <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="actions" tabKey={tabKey()} />
                 }
               >
                 <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
@@ -303,7 +304,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                     trailing={
                       <>
                         <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="actions" />
-                        <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                        <RepoLockControls repoFullName={repoGroup.repoFullName} tabKey={tabKey()} />
                       </>
                     }
                     collapsedSummary={

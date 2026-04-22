@@ -714,7 +714,7 @@ describe("IssuesTab — empty-repo state preservation", () => {
     setViewState(produce((s) => {
       s.expandedRepos.issues["owner/empty-repo"] = true;
       s.expandedRepos.issues["owner/stale-repo"] = true;
-      s.lockedRepos = ["owner/empty-repo", "owner/stale-repo"];
+      s.lockedRepos.issues = ["owner/empty-repo", "owner/stale-repo"];
     }));
 
     render(() => (
@@ -727,10 +727,10 @@ describe("IssuesTab — empty-repo state preservation", () => {
 
     // Empty repo preserved (in configRepoNames but no items)
     expect(viewState.expandedRepos.issues["owner/empty-repo"]).toBe(true);
-    expect(viewState.lockedRepos).toContain("owner/empty-repo");
+    expect(viewState.lockedRepos["issues"]).toContain("owner/empty-repo");
     // Stale repo pruned (not in configRepoNames)
     expect(viewState.expandedRepos.issues["owner/stale-repo"]).toBeUndefined();
-    expect(viewState.lockedRepos).not.toContain("owner/stale-repo");
+    expect(viewState.lockedRepos["issues"]).not.toContain("owner/stale-repo");
   });
 
   it("falls back to item-derived names when configRepoNames not provided", () => {
@@ -738,12 +738,12 @@ describe("IssuesTab — empty-repo state preservation", () => {
       <IssuesTab issues={[]} userLogin="me" />
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
-    expect(viewState.lockedRepos).toEqual([]);
+    expect(viewState.lockedRepos["issues"]).toEqual([]);
   });
 
   it("renders compact stub row for a locked repo with no issues", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.issues = ["owner/locked-empty"];
     }));
 
     const { container } = render(() => (
@@ -763,7 +763,7 @@ describe("IssuesTab — empty-repo state preservation", () => {
 
   it("does not expand a locked repo with no issues even when expandedRepos is set", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.issues = ["owner/locked-empty"];
       s.expandedRepos.issues["owner/locked-empty"] = true;
     }));
 
@@ -782,7 +782,7 @@ describe("IssuesTab — empty-repo state preservation", () => {
 
   it("hides empty-state message when only locked stubs exist (no double render)", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.issues = ["owner/locked-empty"];
     }));
 
     render(() => (
