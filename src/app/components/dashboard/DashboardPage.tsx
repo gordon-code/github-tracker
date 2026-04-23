@@ -925,7 +925,7 @@ export default function DashboardPage() {
                 {(rl) => (
                   <div onPointerEnter={fetchAndSetRlDetail} onFocusIn={fetchAndSetRlDetail}>
                     <Tooltip content={rlDetail()} placement="left" focusable contentClass="whitespace-pre font-mono text-xs">
-                      <span class={`tabular-nums ${rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
+                      <span class={`tabular-nums ${rl().remaining === 0 ? "text-error" : rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
                         API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
                       </span>
                     </Tooltip>
