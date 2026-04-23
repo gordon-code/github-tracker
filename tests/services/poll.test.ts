@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
+import * as githubMod from "../../src/app/services/github";
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
@@ -32,7 +33,7 @@ vi.mock("../../src/app/lib/notifications", () => ({
   _resetNotificationState: vi.fn(),
 }));
 
-// Mock github module — fetchRateLimitDetails adds an async boundary in doFetch
+// Mock github module — fetchRateLimitDetails runs concurrently (fire-and-forget) in doFetch
 vi.mock("../../src/app/services/github", () => ({
   getClient: vi.fn(() => null),
   fetchRateLimitDetails: vi.fn(() => Promise.resolve(null)),
@@ -50,7 +51,7 @@ vi.mock("../../src/app/stores/config", () => ({
 }));
 
 async function flushPromises(): Promise<void> {
-  // doFetch() has multiple await points (fetchRateLimitDetails + fetchAll);
+  // doFetch() awaits fetchAll and fires fetchRateLimitDetails concurrently;
   // 10 iterations ensures all chained microtasks settle regardless of depth.
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
@@ -367,7 +368,7 @@ describe("createPollCoordinator", () => {
       // During the in-flight fetch, isRefreshing should be true
       expect(coordinator.isRefreshing()).toBe(true);
 
-      await Promise.resolve(); // wait for fetchRateLimitDetails to resolve so fetchAll is called
+      await Promise.resolve(); // flush microtasks so fetchAll is called
       resolvePromise();
       await Promise.resolve();
       await Promise.resolve(); // allow finally block to run
@@ -438,7 +439,7 @@ describe("createPollCoordinator", () => {
 
       // First fetch is in-flight (unresolved)
       expect(coordinator.isRefreshing()).toBe(true);
-      await Promise.resolve(); // wait for fetchRateLimitDetails so fetchAll is called
+      await Promise.resolve(); // flush microtasks so fetchAll is called
       expect(fetchAll).toHaveBeenCalledTimes(1);
 
       // Trigger a second fetch while the first is still in-flight
@@ -658,6 +659,21 @@ describe("createPollCoordinator", () => {
       await Promise.resolve();
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
+      dispose();
+    });
+  });
+
+  it("fetchRateLimitDetails is called exactly once per doFetch cycle", async () => {
+    const fetchRateLimitDetailsSpy = vi.mocked(githubMod.fetchRateLimitDetails);
+    fetchRateLimitDetailsSpy.mockClear();
+
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchRateLimitDetailsSpy).toHaveBeenCalledTimes(1);
       dispose();
     });
   });

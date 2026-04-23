@@ -154,10 +154,11 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
         let resetEpochMs: number | null = null;
         const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
         if (errResetHeader) resetEpochMs = parseInt(errResetHeader, 10) * 1000;
+        // Octokit errors store data in two shapes: err.data has the unwrapped GraphQL
+        // data object, while errResponse.data is the raw HTTP body (GraphQL envelope)
         const errGraphqlCost = isGraphql
           ? ((err as { data?: { rateLimit?: { cost?: number } } }).data?.rateLimit?.cost
-            ?? (errResponse as { data?: { data?: { rateLimit?: { cost?: number } } } } | undefined)?.data?.data?.rateLimit?.cost
-            ?? undefined)
+            ?? (errResponse as { data?: { data?: { rateLimit?: { cost?: number } } } } | undefined)?.data?.data?.rateLimit?.cost)
           : undefined;
         const info: ApiRequestInfo = {
           url: options.url, method, status, isGraphql, apiSource, resetEpochMs, graphqlCost: errGraphqlCost,
@@ -312,13 +313,15 @@ let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = n
  * GET /rate_limit is free — not counted against rate limits by GitHub.
  * Returns null if client unavailable or request fails.
  */
-export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
+export async function fetchRateLimitDetails(clientOverride?: GitHubOctokitInstance): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
   // Return cached result within 5-second staleness window
   if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
+    _setCoreRateLimit(_lastFetchResult.core);
+    _setGraphqlRateLimit(_lastFetchResult.graphql);
     return { ..._lastFetchResult };
   }
 
-  const client = getClient();
+  const client = clientOverride ?? getClient();
   if (!client) return null;
 
   try {

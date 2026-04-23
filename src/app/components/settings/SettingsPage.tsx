@@ -514,7 +514,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 5: Notifications */}
+        {/* Section 6: Notifications */}
         <Section title="Notifications">
           <SettingRow
             label="Enable notifications"
@@ -606,7 +606,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 6: Appearance */}
+        {/* Section 7: Appearance */}
         <Section title="Appearance">
           <div class="px-4 py-2 border-b border-base-300">
             <p class="text-sm font-medium text-base-content mb-2">Theme</p>
@@ -634,7 +634,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 7: Tabs */}
+        {/* Section 8: Tabs */}
         <Section title="Tabs">
           <SettingRow
             label="Default tab"
@@ -691,7 +691,7 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 8: Custom Tabs */}
+        {/* Section 9: Custom Tabs */}
         <Section title="Custom Tabs" description="Create custom views with saved filters and scoping">
           <CustomTabsSection
             availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
@@ -699,7 +699,7 @@ export default function SettingsPage() {
           />
         </Section>
 
-        {/* Section 9: MCP Server Relay */}
+        {/* Section 10: MCP Server Relay */}
         <Section
           title="MCP Server Relay"
           description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
@@ -754,7 +754,7 @@ export default function SettingsPage() {
           </Show>
         </Section>
 
-        {/* Section 10: Data */}
+        {/* Section 11: Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow

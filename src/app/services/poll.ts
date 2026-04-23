@@ -357,7 +357,9 @@ export function createPollCoordinator(
     if (destroyed || isRefreshing()) return;
     checkAndResetIfExpired();
     setIsRefreshing(true);
-    await fetchRateLimitDetails();
+    // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
+    // resolves after a GraphQL response, the footer briefly shows pre-query remaining (cosmetic).
+    void fetchRateLimitDetails();
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(

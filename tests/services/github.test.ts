@@ -751,6 +751,34 @@ describe("hook.wrap — rate limit signal routing", () => {
     expect(capturedInfo!.graphqlCost).toBeUndefined();
     expect(capturedInfo!.isGraphql).toBe(false);
   });
+
+  it("GraphQL error response with rateLimit.cost in body exposes graphqlCost in ApiRequestInfo callback", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: { rateLimit: { cost: 7, limit: 5000, remaining: 4800, resetAt: new Date(resetEpoch * 1000).toISOString() } },
+        errors: [{ message: "resolver blew up" }],
+      }), {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "4800",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    let capturedInfo: ApiRequestInfo | null = null;
+    onApiRequest((info) => { capturedInfo = info; });
+
+    const client = createGitHubClient("test-token");
+    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow();
+
+    expect(capturedInfo).not.toBeNull();
+    expect(capturedInfo!.isGraphql).toBe(true);
+    expect(capturedInfo!.graphqlCost).toBe(7);
+  });
 });
 
 // ── fetchRateLimitDetails ────────────────────────────────────────────────────
@@ -758,7 +786,7 @@ describe("hook.wrap — rate limit signal routing", () => {
 // (_client) that is only non-null after auth token is set. These tests exercise
 // the null-client fast-path and the signal-preservation guarantee on failure.
 // Signal update tests (setCoreRateLimit / setGraphqlRateLimit) are covered by the
-// hook.wrap tests above which exercise the same signal setters via real HTTP responses.
+// hook.wrap tests above and the cache-hit path adds identical setters (same references).
 
 describe("fetchRateLimitDetails", () => {
   afterEach(() => {
@@ -787,5 +815,50 @@ describe("fetchRateLimitDetails", () => {
 
     expect(getCoreRateLimit()!.remaining).toBe(1111);
     expect(getGraphqlRateLimit()!.remaining).toBe(2222);
+  });
+});
+
+// ── fetchRateLimitDetails — client override + cache behavior ─────────────────
+
+describe("fetchRateLimitDetails — signal updates with client override", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("successful call updates both signals and cache-hit restores them", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    const mockClient = {
+      request: vi.fn().mockResolvedValue({
+        data: {
+          resources: {
+            core: { limit: 5000, remaining: 3000, reset: resetEpoch },
+            graphql: { limit: 5000, remaining: 2500, reset: resetEpoch },
+          },
+        },
+      }),
+    };
+
+    // Fresh call: seeds cache and updates signals
+    const result = await fetchRateLimitDetails(mockClient as never);
+    expect(result).not.toBeNull();
+    expect(result!.core.remaining).toBe(3000);
+    expect(result!.graphql.remaining).toBe(2500);
+    expect(getCoreRateLimit()!.remaining).toBe(3000);
+    expect(getGraphqlRateLimit()!.remaining).toBe(2500);
+
+    // Overwrite signals (simulates hook.wrap updating mid-cycle)
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "999",
+      "x-ratelimit-reset": String(resetEpoch),
+      "x-ratelimit-limit": "5000",
+    });
+    expect(getCoreRateLimit()!.remaining).toBe(999);
+
+    // Cache-hit within 5s: restores authoritative values, no HTTP call
+    const cached = await fetchRateLimitDetails(mockClient as never);
+    expect(cached).not.toBeNull();
+    expect(getCoreRateLimit()!.remaining).toBe(3000);
+    expect(getGraphqlRateLimit()!.remaining).toBe(2500);
+    expect(mockClient.request).toHaveBeenCalledTimes(1);
   });
 });

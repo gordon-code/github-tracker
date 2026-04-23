@@ -26,7 +26,7 @@ import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../s
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { formatCount, prSizeCategory } from "../../lib/format";
+import { formatCount, prSizeCategory, rateLimitCssClass } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
@@ -925,7 +925,7 @@ export default function DashboardPage() {
                 {(rl) => (
                   <div onPointerEnter={fetchAndSetRlDetail} onFocusIn={fetchAndSetRlDetail}>
                     <Tooltip content={rlDetail()} placement="left" focusable contentClass="whitespace-pre font-mono text-xs">
-                      <span class={`tabular-nums ${rl().remaining === 0 ? "text-error" : rl().remaining < rl().limit * 0.1 ? "text-warning" : ""}`}>
+                      <span class={`tabular-nums ${rateLimitCssClass(rl().remaining, rl().limit)}`}>
                         API RL: {rl().remaining.toLocaleString()}/{formatCount(rl().limit)}/hr
                       </span>
                     </Tooltip>
