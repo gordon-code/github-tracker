@@ -244,6 +244,18 @@ describe("PullRequestsTab", () => {
     expect(screen.queryByText("Large PR")).toBeNull();
   });
 
+  it("filters by sizeCategory 'XXL' tab filter", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Huge PR", additions: 800, deletions: 500, repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Medium PR", additions: 30, deletions: 20, repoFullName: "org/repo-a" }),
+    ];
+    viewStore.setTabFilter("pullRequests", "sizeCategory", "XXL");
+    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+    screen.getByText("Huge PR");
+    expect(screen.queryByText("Medium PR")).toBeNull();
+  });
+
   it("groups PRs by repo with collapsible headers", () => {
     const prs = [
       makePullRequest({ id: 1, title: "PR in repo A", repoFullName: "org/repo-a" }),
