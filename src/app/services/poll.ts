@@ -1,6 +1,6 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import * as Sentry from "@sentry/solid";
-import { getClient } from "./github";
+import { getClient, fetchRateLimitDetails } from "./github";
 import { config } from "../stores/config";
 import { user, onAuthCleared } from "../stores/auth";
 import { checkAndResetIfExpired } from "./api-usage";
@@ -357,6 +357,9 @@ export function createPollCoordinator(
     if (destroyed || isRefreshing()) return;
     checkAndResetIfExpired();
     setIsRefreshing(true);
+    // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
+    // resolves after a GraphQL response, the footer briefly shows pre-query remaining (cosmetic).
+    void fetchRateLimitDetails();
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(

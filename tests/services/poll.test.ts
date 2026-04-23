@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
+import * as githubMod from "../../src/app/services/github";
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
@@ -32,6 +33,14 @@ vi.mock("../../src/app/lib/notifications", () => ({
   _resetNotificationState: vi.fn(),
 }));
 
+// Mock github module — fetchRateLimitDetails runs concurrently (fire-and-forget) in doFetch
+vi.mock("../../src/app/services/github", () => ({
+  getClient: vi.fn(() => null),
+  fetchRateLimitDetails: vi.fn(() => Promise.resolve(null)),
+  onApiRequest: vi.fn(),
+  initClientWatcher: vi.fn(),
+}));
+
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
 vi.mock("../../src/app/stores/config", () => ({
   config: {
@@ -40,6 +49,12 @@ vi.mock("../../src/app/stores/config", () => ({
     maxRunsPerWorkflow: 3,
   },
 }));
+
+async function flushPromises(): Promise<void> {
+  // doFetch() awaits fetchAll and fires fetchRateLimitDetails concurrently;
+  // 10 iterations ensures all chained microtasks settle regardless of depth.
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,12 +123,12 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       // Advance 1 full interval (with jitter ±30s, 60s is within [30s, 90s])
       // Use 90s to be safe and hit the interval regardless of jitter
       vi.advanceTimersByTime(90_000);
-      await Promise.resolve();
+      await flushPromises();
 
       expect(fetchAll.mock.calls.length).toBeGreaterThanOrEqual(2);
       dispose();
@@ -126,7 +141,7 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
@@ -135,7 +150,7 @@ describe("createPollCoordinator", () => {
 
       // Advance past the interval (60s with 0 jitter)
       vi.advanceTimersByTime(61_000);
-      await Promise.resolve();
+      await flushPromises();
 
       // Should have fetched while hidden (background refresh)
       expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
@@ -150,7 +165,7 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       createPollCoordinator(makeGetInterval(300), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
@@ -162,7 +177,7 @@ describe("createPollCoordinator", () => {
 
       // Restore visibility
       setDocumentVisible(true);
-      await Promise.resolve();
+      await flushPromises();
 
       // Should have triggered at least a catch-up fetch on re-visible
       // (background polls may also have fired if interval < hidden duration)
@@ -230,21 +245,21 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
       // Hide for >2 min — background polls fire at 60s and 120s
       setDocumentVisible(false);
       vi.advanceTimersByTime(130_000);
-      await Promise.resolve();
+      await flushPromises();
 
       const callsWhileHidden = fetchAll.mock.calls.length;
       expect(callsWhileHidden).toBeGreaterThan(callsAfterInit);
 
       // Restore visibility — catch-up fetch fires + timer resets
       setDocumentVisible(true);
-      await Promise.resolve();
+      await flushPromises();
 
       const callsAfterRevisible = fetchAll.mock.calls.length;
       expect(callsAfterRevisible).toBeGreaterThan(callsWhileHidden);
@@ -256,7 +271,7 @@ describe("createPollCoordinator", () => {
 
       // Advance another 31s (61s from reset) — timer fires
       vi.advanceTimersByTime(31_000);
-      await Promise.resolve();
+      await flushPromises();
       expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterRevisible);
 
       dispose();
@@ -270,12 +285,12 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
       coordinator.manualRefresh();
-      await Promise.resolve();
+      await flushPromises();
 
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit + 1);
       dispose();
@@ -353,6 +368,7 @@ describe("createPollCoordinator", () => {
       // During the in-flight fetch, isRefreshing should be true
       expect(coordinator.isRefreshing()).toBe(true);
 
+      await Promise.resolve(); // flush microtasks so fetchAll is called
       resolvePromise();
       await Promise.resolve();
       await Promise.resolve(); // allow finally block to run
@@ -423,6 +439,7 @@ describe("createPollCoordinator", () => {
 
       // First fetch is in-flight (unresolved)
       expect(coordinator.isRefreshing()).toBe(true);
+      await Promise.resolve(); // flush microtasks so fetchAll is called
       expect(fetchAll).toHaveBeenCalledTimes(1);
 
       // Trigger a second fetch while the first is still in-flight
@@ -599,13 +616,13 @@ describe("createPollCoordinator", () => {
 
     await createRoot(async (dispose) => {
       createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
+      await flushPromises(); // initial fetch
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
       // Advance exactly past the deterministic 30s interval
       vi.advanceTimersByTime(30_001);
-      await Promise.resolve();
+      await flushPromises();
 
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit + 1);
       dispose();
@@ -642,6 +659,21 @@ describe("createPollCoordinator", () => {
       await Promise.resolve();
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
+      dispose();
+    });
+  });
+
+  it("fetchRateLimitDetails is called exactly once per doFetch cycle", async () => {
+    const fetchRateLimitDetailsSpy = vi.mocked(githubMod.fetchRateLimitDetails);
+    fetchRateLimitDetailsSpy.mockClear();
+
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchRateLimitDetailsSpy).toHaveBeenCalledTimes(1);
       dispose();
     });
   });

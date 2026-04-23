@@ -12,6 +12,7 @@ export type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, Che
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface GraphQLRateLimit {
+  cost?: number;
   limit: number;
   remaining: number;
   resetAt: string;
@@ -226,7 +227,7 @@ const ISSUES_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
 `;
@@ -287,7 +288,7 @@ const LIGHT_COMBINED_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
@@ -318,7 +319,7 @@ const UNFILTERED_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
@@ -350,7 +351,7 @@ const LIGHT_PR_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_PR_FRAGMENT}
 `;
@@ -395,7 +396,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
 `;
 
@@ -417,7 +418,7 @@ const HOT_PR_STATUS_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
 `;
 
@@ -673,7 +674,7 @@ async function runForkPRFallback(
       );
     }
 
-    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
+    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { cost limit remaining resetAt }\n}`;
 
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, request: { apiSource: "forkCheck" } });
@@ -688,9 +689,13 @@ async function runForkPRFallback(
         if (pr) pr.checkStatus = mapCheckStatus(state);
       }
     } catch (err) {
-      const partialData = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-        ? err.data as Record<string, ForkRepoResult | null | undefined>
+      const errDataRaw = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+        ? err.data as Record<string, unknown>
         : null;
+      if (errDataRaw?.rateLimit) {
+        updateGraphqlRateLimit(errDataRaw.rateLimit as GraphQLRateLimit);
+      }
+      const partialData = errDataRaw as Record<string, ForkRepoResult | null | undefined> | null;
 
       if (partialData) {
         for (let i = 0; i < forkChunk.length; i++) {
@@ -1130,6 +1135,12 @@ export async function fetchPREnrichment(
         });
       }
     } catch (err) {
+      const partialErr = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+        ? err.data as Partial<HeavyBackfillResponse>
+        : null;
+      if (partialErr?.rateLimit) {
+        updateGraphqlRateLimit(partialErr.rateLimit);
+      }
       const { statusCode, message } = extractRejectionError(err);
       errors.push({
         repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
@@ -1686,6 +1697,13 @@ export async function fetchHotPRStatus(
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
       Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
+      const reason = s.reason;
+      const partialErr = (reason && typeof reason === "object" && "data" in reason && reason.data && typeof reason.data === "object")
+        ? reason.data as Partial<HotPRStatusResponse>
+        : null;
+      if (partialErr?.rateLimit) {
+        updateGraphqlRateLimit(partialErr.rateLimit);
+      }
     }
   }
 
