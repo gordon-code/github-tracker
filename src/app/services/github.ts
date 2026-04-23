@@ -167,7 +167,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
             if (remaining !== undefined && reset !== undefined) {
               _setGraphqlRateLimit({
                 limit: safePositiveNumber(limit !== undefined ? parseInt(limit, 10) : NaN, _graphqlRateLimit()?.limit ?? 5000),
-                remaining: parseInt(remaining, 10),
+                remaining: Number.isFinite(parseInt(remaining, 10)) ? parseInt(remaining, 10) : 0,
                 resetAt: new Date(parseInt(reset, 10) * 1000),
               });
             }
@@ -305,8 +305,6 @@ let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = n
 export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
   // Return cached result within 5-second staleness window
   if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
-    _setCoreRateLimit(_lastFetchResult.core);
-    _setGraphqlRateLimit(_lastFetchResult.graphql);
     return { ..._lastFetchResult };
   }
 

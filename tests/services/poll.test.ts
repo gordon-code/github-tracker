@@ -50,6 +50,8 @@ vi.mock("../../src/app/stores/config", () => ({
 }));
 
 async function flushPromises(): Promise<void> {
+  // doFetch() has multiple await points (fetchRateLimitDetails + fetchAll);
+  // 10 iterations ensures all chained microtasks settle regardless of depth.
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
