@@ -5,6 +5,8 @@ import {
   fetchRepos,
   fetchWorkflowRuns,
   validateGitHubUser,
+  fetchPREnrichment,
+  fetchHotPRStatus,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
@@ -1135,5 +1137,76 @@ describe("fetchIssuesAndPullRequests — onLightData suppression when all monito
     // But final result still has the issue
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].id).toBe(5001);
+  });
+});
+
+// ── Error-path rateLimit extraction calls updateGraphqlRateLimit ──────────────
+
+describe("error-path rateLimit extraction — updateGraphqlRateLimit called", () => {
+  const mockResetAt = "2026-04-23T12:00:00Z";
+
+  function makeGraphqlError(rateLimitOverride?: object) {
+    const rateLimit = rateLimitOverride ?? { limit: 5000, remaining: 100, resetAt: mockResetAt };
+    return Object.assign(new Error("GraphQL partial error"), {
+      data: { rateLimit },
+    });
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("fetchPREnrichment error with partial rateLimit calls updateGraphqlRateLimit", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    const updateSpy = vi.spyOn(githubModule, "updateGraphqlRateLimit");
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => { throw makeGraphqlError(); }
+    );
+
+    await fetchPREnrichment(
+      octokit as never,
+      ["PR_kwDOtest001"]
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5000, remaining: 100, resetAt: mockResetAt })
+    );
+  });
+
+  it("fetchHotPRStatus rejected batch with rateLimit calls updateGraphqlRateLimit", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    const updateSpy = vi.spyOn(githubModule, "updateGraphqlRateLimit");
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => { throw makeGraphqlError(); }
+    );
+
+    await fetchHotPRStatus(
+      octokit as never,
+      ["PR_kwDOtest001"]
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5000, remaining: 100, resetAt: mockResetAt })
+    );
+  });
+
+  it("fetchPREnrichment second batch error with rateLimit calls updateGraphqlRateLimit", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    const updateSpy = vi.spyOn(githubModule, "updateGraphqlRateLimit");
+
+    const singleErrOctokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => { throw makeGraphqlError({ limit: 5000, remaining: 42, resetAt: mockResetAt }); }
+    );
+
+    await fetchPREnrichment(singleErrOctokit as never, ["PR_kwDOtest002"]);
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5000, remaining: 42, resetAt: mockResetAt })
+    );
   });
 });

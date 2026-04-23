@@ -688,9 +688,13 @@ async function runForkPRFallback(
         if (pr) pr.checkStatus = mapCheckStatus(state);
       }
     } catch (err) {
-      const partialData = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-        ? err.data as Record<string, ForkRepoResult | null | undefined>
+      const errDataRaw = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+        ? err.data as Record<string, unknown>
         : null;
+      if (errDataRaw?.rateLimit) {
+        updateGraphqlRateLimit(errDataRaw.rateLimit as GraphQLRateLimit);
+      }
+      const partialData = errDataRaw as Record<string, ForkRepoResult | null | undefined> | null;
 
       if (partialData) {
         for (let i = 0; i < forkChunk.length; i++) {
@@ -1130,6 +1134,12 @@ export async function fetchPREnrichment(
         });
       }
     } catch (err) {
+      const partialErr = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
+        ? err.data as Partial<HeavyBackfillResponse>
+        : null;
+      if (partialErr?.rateLimit) {
+        updateGraphqlRateLimit(partialErr.rateLimit);
+      }
       const { statusCode, message } = extractRejectionError(err);
       errors.push({
         repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
@@ -1686,6 +1696,13 @@ export async function fetchHotPRStatus(
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
       Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
+      const reason = s.reason;
+      const partialErr = (reason && typeof reason === "object" && "data" in reason && reason.data && typeof reason.data === "object")
+        ? reason.data as Partial<HotPRStatusResponse>
+        : null;
+      if (partialErr?.rateLimit) {
+        updateGraphqlRateLimit(partialErr.rateLimit);
+      }
     }
   }
 
