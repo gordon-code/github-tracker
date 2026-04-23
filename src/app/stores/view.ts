@@ -6,7 +6,7 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
-const LOCKED_REPOS_CAP = 50;
+export const LOCKED_REPOS_CAP = 50;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -102,6 +102,8 @@ export const ViewStateSchema = z.object({
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
 
+const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions"] as const;
+
 export function migrateLockedRepos(raw: unknown): unknown {
   if (raw == null) return { issues: [], pullRequests: [], actions: [] };
   if (Array.isArray(raw)) {
@@ -110,7 +112,7 @@ export function migrateLockedRepos(raw: unknown): unknown {
     return { issues: [...arr], pullRequests: [...arr], actions: [...arr] };
   }
   if (typeof raw === "object") {
-    // Object → pass through as-is (already per-tab record shape)
+    // Object → pass through as-is; loadViewState cap-guard sanitizes malformed entries
     return raw;
   }
   return { issues: [], pullRequests: [], actions: [] };
@@ -156,7 +158,7 @@ export function resetViewState(): void {
     produce((draft) => {
       // Delete dynamic custom tab keys that Object.assign wouldn't clear
       for (const key of Object.keys(draft.expandedRepos)) {
-        if (!["issues", "pullRequests", "actions"].includes(key)) {
+        if (!(REPO_STATE_TAB_IDS as readonly string[]).includes(key)) {
           delete draft.expandedRepos[key];
         }
       }
@@ -164,7 +166,7 @@ export function resetViewState(): void {
         delete draft.customTabFilters[key];
       }
       for (const key of Object.keys(draft.lockedRepos)) {
-        if (!["issues", "pullRequests", "actions"].includes(key)) {
+        if (!(REPO_STATE_TAB_IDS as readonly string[]).includes(key)) {
           delete draft.lockedRepos[key];
         }
       }
@@ -371,20 +373,24 @@ export function removeCustomTabState(tabId: string): void {
 }
 
 export function lockRepo(tabKey: string, repoFullName: string): void {
-  setViewState(produce((draft) => {
-    if (!draft.lockedRepos[tabKey]) draft.lockedRepos[tabKey] = [];
-    const arr = draft.lockedRepos[tabKey];
-    if (!arr.includes(repoFullName) && arr.length < LOCKED_REPOS_CAP) {
-      arr.push(repoFullName);
-    }
-  }));
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) draft.lockedRepos[tabKey] = [];
+      const arr = draft.lockedRepos[tabKey];
+      if (!arr.includes(repoFullName) && arr.length < LOCKED_REPOS_CAP) {
+        arr.push(repoFullName);
+      }
+    })
+  );
 }
 
 export function unlockRepo(tabKey: string, repoFullName: string): void {
-  setViewState(produce((draft) => {
-    if (!draft.lockedRepos[tabKey]) return;
-    draft.lockedRepos[tabKey] = draft.lockedRepos[tabKey].filter(r => r !== repoFullName);
-  }));
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) return;
+      draft.lockedRepos[tabKey] = draft.lockedRepos[tabKey].filter((r) => r !== repoFullName);
+    })
+  );
 }
 
 export function moveLockedRepo(
@@ -392,17 +398,19 @@ export function moveLockedRepo(
   repoFullName: string,
   direction: "up" | "down"
 ): void {
-  setViewState(produce((draft) => {
-    if (!draft.lockedRepos[tabKey]) return;
-    const arr = draft.lockedRepos[tabKey];
-    const idx = arr.indexOf(repoFullName);
-    if (idx === -1) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= arr.length) return;
-    const tmp = arr[idx];
-    arr[idx] = arr[targetIdx];
-    arr[targetIdx] = tmp;
-  }));
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) return;
+      const arr = draft.lockedRepos[tabKey];
+      const idx = arr.indexOf(repoFullName);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
+    })
+  );
 }
 
 export function pruneLockedRepos(
@@ -412,11 +420,13 @@ export function pruneLockedRepos(
   const current = untrack(() => viewState.lockedRepos[tabKey] ?? []);
   if (current.length === 0) return;
   const activeSet = new Set(activeRepoNames);
-  const filtered = current.filter(name => activeSet.has(name));
+  const filtered = current.filter((name) => activeSet.has(name));
   if (filtered.length === current.length) return;
-  setViewState(produce((draft) => {
-    draft.lockedRepos[tabKey] = filtered;
-  }));
+  setViewState(
+    produce((draft) => {
+      draft.lockedRepos[tabKey] = filtered;
+    })
+  );
 }
 
 export function trackItem(item: TrackedItem): void {
@@ -451,16 +461,18 @@ export function moveTrackedItem(
   type: "issue" | "pullRequest",
   direction: "up" | "down"
 ): void {
-  setViewState(produce((draft) => {
-    const arr = draft.trackedItems;
-    const idx = arr.findIndex((i) => i.id === id && i.type === type);
-    if (idx === -1) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= arr.length) return;
-    const tmp = arr[idx];
-    arr[idx] = arr[targetIdx];
-    arr[targetIdx] = tmp;
-  }));
+  setViewState(
+    produce((draft) => {
+      const arr = draft.trackedItems;
+      const idx = arr.findIndex((i) => i.id === id && i.type === type);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
+    })
+  );
 }
 
 export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {

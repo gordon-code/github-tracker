@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
   viewState,
@@ -763,5 +763,48 @@ describe("expandedRepos — dynamic tab keys", () => {
     toggleExpandedRepo("tab-new", "owner/repo");
     expect(viewState.expandedRepos["tab-new"]).toBeDefined();
     expect(viewState.expandedRepos["tab-new"]["owner/repo"]).toBe(true);
+  });
+});
+
+describe("loadViewState — cap-guard integration", () => {
+  afterEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("deletes non-array lockedRepos tab values and preserves valid ones", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lastActiveTab: "actions",
+      lockedRepos: { issues: ["org/repo"], pullRequests: "bad-value" },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lastActiveTab).toBe("actions");
+    expect(mod.viewState.lockedRepos["issues"]).toEqual(["org/repo"]);
+    expect(mod.viewState.lockedRepos["pullRequests"]).toBeUndefined();
+  });
+
+  it("truncates oversized lockedRepos arrays to LOCKED_REPOS_CAP", async () => {
+    const bigArray = Array.from({ length: 60 }, (_, i) => `org/repo-${i}`);
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lockedRepos: { issues: bigArray },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lockedRepos["issues"].length).toBe(mod.LOCKED_REPOS_CAP);
+  });
+
+  it("filters non-string elements from lockedRepos arrays", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lockedRepos: { issues: [42, "org/repo", null, true, "org/other"] },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lockedRepos["issues"]).toEqual(["org/repo", "org/other"]);
   });
 });

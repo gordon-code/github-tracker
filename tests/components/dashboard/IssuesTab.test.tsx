@@ -797,6 +797,49 @@ describe("IssuesTab — empty-repo state preservation", () => {
   });
 });
 
+// ── customTabId lock mechanics ───────────────────────────────────────────────
+
+describe("IssuesTab — customTabId lock mechanics", () => {
+  it("renders stub row for a locked empty repo under a custom tab key", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos["my-tab"] = ["owner/locked-empty"];
+    }));
+
+    const { container } = render(() => (
+      <IssuesTab
+        issues={[makeIssue({ id: 1, repoFullName: "owner/active-repo", surfacedBy: ["me"] })]}
+        userLogin="me"
+        customTabId="my-tab"
+        configRepoNames={["owner/active-repo", "owner/locked-empty"]}
+      />
+    ));
+
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.textContent).toContain("owner/locked-empty");
+    expect(stub?.querySelector("[aria-expanded]")).toBeNull();
+    expect(container.querySelector('[data-repo-group="owner/active-repo"]')).not.toBeNull();
+  });
+
+  it("prunes locked repos outside configRepoNames under a custom tab key", () => {
+    setViewState(produce((s) => {
+      s.lockedRepos["my-tab"] = ["owner/kept", "owner/pruned"];
+    }));
+
+    render(() => (
+      <IssuesTab
+        issues={[makeIssue({ id: 1, repoFullName: "owner/kept", surfacedBy: ["me"] })]}
+        userLogin="me"
+        customTabId="my-tab"
+        configRepoNames={["owner/kept"]}
+      />
+    ));
+
+    expect(viewState.lockedRepos["my-tab"]).toContain("owner/kept");
+    expect(viewState.lockedRepos["my-tab"]).not.toContain("owner/pruned");
+  });
+});
+
 // ── customTabId filter preset ────────────────────────────────────────────────
 
 describe("IssuesTab — customTabId filter preset", () => {

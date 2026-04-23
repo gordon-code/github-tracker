@@ -288,6 +288,13 @@ describe("view lock store (per-tab)", () => {
       expect(migrateLockedRepos(42)).toEqual({ issues: [], pullRequests: [], actions: [] });
       expect(migrateLockedRepos("bad")).toEqual({ issues: [], pullRequests: [], actions: [] });
     });
+
+    it("filters out non-string elements from a flat mixed-type array", () => {
+      const result = migrateLockedRepos([42, "org/repo", null]) as Record<string, string[]>;
+      expect(result["issues"]).toEqual(["org/repo"]);
+      expect(result["pullRequests"]).toEqual(["org/repo"]);
+      expect(result["actions"]).toEqual(["org/repo"]);
+    });
   });
 
   describe("resetViewState — lockedRepos", () => {
