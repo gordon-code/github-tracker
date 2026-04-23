@@ -32,7 +32,7 @@ export const PullRequestFiltersSchema = z.object({
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
   draft: z.enum(["all", "draft", "ready"]).default("all"),
   checkStatus: z.enum(["all", "success", "failure", "pending", "conflict", "blocked", "none"]).default("all"),
-  sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL"]).default("all"),
+  sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL", "XXL"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 

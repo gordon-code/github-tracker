@@ -238,20 +238,24 @@ describe("prSizeCategory", () => {
     expect(prSizeCategory(3, 2)).toBe("XS");
   });
 
-  it("returns S for total 10-99", () => {
-    expect(prSizeCategory(50, 30)).toBe("S");
+  it("returns S for total 10-29", () => {
+    expect(prSizeCategory(10, 5)).toBe("S");
   });
 
-  it("returns M for total 100-499", () => {
-    expect(prSizeCategory(200, 100)).toBe("M");
+  it("returns M for total 30-99", () => {
+    expect(prSizeCategory(50, 30)).toBe("M");
   });
 
-  it("returns L for total 500-999", () => {
-    expect(prSizeCategory(600, 200)).toBe("L");
+  it("returns L for total 100-499", () => {
+    expect(prSizeCategory(200, 100)).toBe("L");
   });
 
-  it("returns XL for total >= 1000", () => {
-    expect(prSizeCategory(800, 500)).toBe("XL");
+  it("returns XL for total 500-999", () => {
+    expect(prSizeCategory(600, 200)).toBe("XL");
+  });
+
+  it("returns XXL for total >= 1000", () => {
+    expect(prSizeCategory(800, 500)).toBe("XXL");
   });
 
   it("returns XS for (0, 0)", () => {
@@ -266,12 +270,36 @@ describe("prSizeCategory", () => {
     expect(prSizeCategory(5, 5)).toBe("S");
   });
 
-  it("returns L for total 999 (boundary below 1000)", () => {
-    expect(prSizeCategory(500, 499)).toBe("L");
+  it("returns S for total 29 (boundary below 30)", () => {
+    expect(prSizeCategory(15, 14)).toBe("S");
   });
 
-  it("returns XL for total 1000 (boundary at 1000)", () => {
-    expect(prSizeCategory(500, 500)).toBe("XL");
+  it("returns M for total 30 (boundary at 30)", () => {
+    expect(prSizeCategory(15, 15)).toBe("M");
+  });
+
+  it("returns M for total 99 (boundary below 100)", () => {
+    expect(prSizeCategory(50, 49)).toBe("M");
+  });
+
+  it("returns L for total 100 (boundary at 100)", () => {
+    expect(prSizeCategory(50, 50)).toBe("L");
+  });
+
+  it("returns L for total 499 (boundary below 500)", () => {
+    expect(prSizeCategory(250, 249)).toBe("L");
+  });
+
+  it("returns XL for total 500 (boundary at 500)", () => {
+    expect(prSizeCategory(250, 250)).toBe("XL");
+  });
+
+  it("returns XL for total 999 (boundary below 1000)", () => {
+    expect(prSizeCategory(500, 499)).toBe("XL");
+  });
+
+  it("returns XXL for total 1000 (boundary at 1000)", () => {
+    expect(prSizeCategory(500, 500)).toBe("XXL");
   });
 
   it("handles NaN/undefined gracefully — defaults to XS", () => {

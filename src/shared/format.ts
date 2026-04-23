@@ -83,13 +83,14 @@ export function formatDuration(startedAt: string, completedAt: string | null): s
 /**
  * Categorizes a PR by size based on total lines changed.
  */
-export function prSizeCategory(additions: number, deletions: number): "XS" | "S" | "M" | "L" | "XL" {
+export function prSizeCategory(additions: number, deletions: number): "XS" | "S" | "M" | "L" | "XL" | "XXL" {
   const total = (additions || 0) + (deletions || 0);
   if (total < 10) return "XS";
-  if (total < 100) return "S";
-  if (total < 500) return "M";
-  if (total < 1000) return "L";
-  return "XL";
+  if (total < 30) return "S";
+  if (total < 100) return "M";
+  if (total < 500) return "L";
+  if (total < 1000) return "XL";
+  return "XXL";
 }
 
 /**

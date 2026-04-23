@@ -6,7 +6,7 @@ interface SizeBadgeProps {
   additions: number;
   deletions: number;
   changedFiles: number;
-  category?: "XS" | "S" | "M" | "L" | "XL";
+  category?: "XS" | "S" | "M" | "L" | "XL" | "XXL";
   filesUrl?: string;
 }
 
@@ -16,14 +16,16 @@ const SIZE_CONFIG = {
   M: "badge badge-warning badge-sm",
   L: "badge badge-error badge-sm",
   XL: "badge badge-error badge-sm",
+  XXL: "badge badge-error badge-sm",
 } as const;
 
-const SIZE_TOOLTIP: Record<"XS" | "S" | "M" | "L" | "XL", string> = {
+const SIZE_TOOLTIP: Record<"XS" | "S" | "M" | "L" | "XL" | "XXL", string> = {
   XS: "XS: <10 lines changed",
-  S: "S: 10–99 lines changed",
-  M: "M: 100–499 lines changed",
-  L: "L: 500–999 lines changed",
-  XL: "XL: 1000+ lines changed",
+  S: "S: 10–29 lines changed",
+  M: "M: 30–99 lines changed",
+  L: "L: 100–499 lines changed",
+  XL: "XL: 500–999 lines changed",
+  XXL: "XXL: 1000+ lines changed",
 };
 
 export default function SizeBadge(props: SizeBadgeProps) {
