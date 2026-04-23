@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
   viewState,
@@ -23,6 +23,7 @@ import {
   setCustomTabFilter,
   resetCustomTabFilters,
   removeCustomTabState,
+  lockRepo,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
 
@@ -692,6 +693,13 @@ describe("removeCustomTabState", () => {
     expect("tab-abc" in viewState.expandedRepos).toBe(false);
   });
 
+  it("cleans lockedRepos for the given tab ID", () => {
+    lockRepo("tab-abc", "owner/repo");
+    expect(viewState.lockedRepos["tab-abc"]).toContain("owner/repo");
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.lockedRepos).toBe(false);
+  });
+
   it("is a no-op for a nonexistent tab ID (no error thrown)", () => {
     expect(() => removeCustomTabState("tab-never-existed")).not.toThrow();
     expect("tab-never-existed" in viewState.customTabFilters).toBe(false);
@@ -728,6 +736,18 @@ describe("resetViewState — custom tab fields", () => {
     // Custom key is fully deleted
     expect("tab-custom" in viewState.expandedRepos).toBe(false);
   });
+
+  it("clears custom tab keys from lockedRepos and resets built-in keys to []", () => {
+    lockRepo("issues", "owner/repo");
+    lockRepo("tab-custom", "owner/repo");
+    resetViewState();
+    // Built-in keys reset to empty arrays
+    expect(viewState.lockedRepos["issues"]).toEqual([]);
+    expect(viewState.lockedRepos["pullRequests"]).toEqual([]);
+    expect(viewState.lockedRepos["actions"]).toEqual([]);
+    // Custom key is fully deleted
+    expect("tab-custom" in viewState.lockedRepos).toBe(false);
+  });
 });
 
 describe("expandedRepos — dynamic tab keys", () => {
@@ -743,5 +763,48 @@ describe("expandedRepos — dynamic tab keys", () => {
     toggleExpandedRepo("tab-new", "owner/repo");
     expect(viewState.expandedRepos["tab-new"]).toBeDefined();
     expect(viewState.expandedRepos["tab-new"]["owner/repo"]).toBe(true);
+  });
+});
+
+describe("loadViewState — cap-guard integration", () => {
+  afterEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("deletes non-array lockedRepos tab values and preserves valid ones", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lastActiveTab: "actions",
+      lockedRepos: { issues: ["org/repo"], pullRequests: "bad-value" },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lastActiveTab).toBe("actions");
+    expect(mod.viewState.lockedRepos["issues"]).toEqual(["org/repo"]);
+    expect(mod.viewState.lockedRepos["pullRequests"]).toBeUndefined();
+  });
+
+  it("truncates oversized lockedRepos arrays to LOCKED_REPOS_CAP", async () => {
+    const bigArray = Array.from({ length: 60 }, (_, i) => `org/repo-${i}`);
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lockedRepos: { issues: bigArray },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lockedRepos["issues"].length).toBe(mod.LOCKED_REPOS_CAP);
+  });
+
+  it("filters non-string elements from lockedRepos arrays", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lockedRepos: { issues: [42, "org/repo", null, true, "org/other"] },
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.lockedRepos["issues"]).toEqual(["org/repo", "org/other"]);
   });
 });

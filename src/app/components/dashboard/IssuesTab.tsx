@@ -187,12 +187,13 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const repoGroups = createMemo(() => {
     const groups = groupByRepo(filteredSorted());
+    const lockedForTab = viewState.lockedRepos[tabKey()] ?? [];
     const withLocked = ensureLockedRepoGroups(
       groups,
-      viewState.lockedRepos,
+      lockedForTab,
       (name) => ({ repoFullName: name, items: [] as typeof groups[0]["items"] }),
     );
-    return orderRepoGroups(withLocked, viewState.lockedRepos);
+    return orderRepoGroups(withLocked, lockedForTab);
   });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
@@ -218,7 +219,7 @@ export default function IssuesTab(props: IssuesTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos(names);
+    pruneLockedRepos(tabKey(), names);
   });
 
   const trackedIssueIds = createMemo(() =>
@@ -229,7 +230,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
   const highlightedReposIssues = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos,
+    () => viewState.lockedRepos[tabKey()] ?? [],
     () => ignoredIssues().length,
     () => JSON.stringify(props.customTabId
       ? (viewState.customTabFilters[props.customTabId] ?? {})
@@ -355,7 +356,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                   <Show
                     when={!isEmpty()}
                     fallback={
-                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="issues" />
+                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="issues" tabKey={tabKey()} />
                     }
                   >
                     <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
@@ -375,7 +376,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                         trailing={
                           <>
                             <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                            <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                            <RepoLockControls repoFullName={repoGroup.repoFullName} tabKey={tabKey()} />
                           </>
                         }
                         collapsedSummary={

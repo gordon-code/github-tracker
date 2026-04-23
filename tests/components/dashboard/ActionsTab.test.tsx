@@ -79,7 +79,7 @@ describe("ActionsTab — empty-repo state preservation", () => {
     setViewState(produce((s) => {
       s.expandedRepos.actions["owner/empty-repo"] = true;
       s.expandedRepos.actions["owner/stale-repo"] = true;
-      s.lockedRepos = ["owner/empty-repo", "owner/stale-repo"];
+      s.lockedRepos.actions = ["owner/empty-repo", "owner/stale-repo"];
     }));
 
     render(() => (
@@ -91,10 +91,10 @@ describe("ActionsTab — empty-repo state preservation", () => {
 
     // Empty repo preserved (in configRepoNames but no items)
     expect(viewState.expandedRepos.actions["owner/empty-repo"]).toBe(true);
-    expect(viewState.lockedRepos).toContain("owner/empty-repo");
+    expect(viewState.lockedRepos["actions"]).toContain("owner/empty-repo");
     // Stale repo pruned (not in configRepoNames)
     expect(viewState.expandedRepos.actions["owner/stale-repo"]).toBeUndefined();
-    expect(viewState.lockedRepos).not.toContain("owner/stale-repo");
+    expect(viewState.lockedRepos["actions"]).not.toContain("owner/stale-repo");
   });
 
   it("falls back to item-derived names when configRepoNames not provided", () => {
@@ -102,12 +102,12 @@ describe("ActionsTab — empty-repo state preservation", () => {
       <ActionsTab workflowRuns={[]} />
     ));
     // With empty items and no configRepoNames, guard returns early — no pruning
-    expect(viewState.lockedRepos).toEqual([]);
+    expect(viewState.lockedRepos["actions"]).toEqual([]);
   });
 
   it("renders compact stub row for a locked repo with no workflow runs", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.actions = ["owner/locked-empty"];
     }));
 
     const { container } = render(() => (
@@ -126,7 +126,7 @@ describe("ActionsTab — empty-repo state preservation", () => {
 
   it("does not expand a locked repo with no workflow runs even when expandedRepos is set", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.actions = ["owner/locked-empty"];
       s.expandedRepos.actions["owner/locked-empty"] = true;
     }));
 
@@ -144,7 +144,7 @@ describe("ActionsTab — empty-repo state preservation", () => {
 
   it("hides empty-state message when only locked stubs exist (no double render)", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.actions = ["owner/locked-empty"];
     }));
 
     const { container } = render(() => (
@@ -163,7 +163,7 @@ describe("ActionsTab — empty-repo state preservation", () => {
 
   it("hides locked stubs during initial load (no skeleton + stub double render)", () => {
     setViewState(produce((s) => {
-      s.lockedRepos = ["owner/locked-empty"];
+      s.lockedRepos.actions = ["owner/locked-empty"];
     }));
 
     const { container } = render(() => (

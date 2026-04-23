@@ -6,7 +6,7 @@ import { pushNotification } from "../lib/errors";
 export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
-const LOCKED_REPOS_CAP = 50;
+export const LOCKED_REPOS_CAP = 50;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -95,38 +95,27 @@ export const ViewStateSchema = z.object({
     pullRequests: {},
     actions: {},
   }),
-  lockedRepos: z.array(z.string().max(200)).max(LOCKED_REPOS_CAP).default([]),
+  lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
 
-export function migrateLockedRepos(raw: unknown, lastActiveTab?: unknown): unknown {
-  if (Array.isArray(raw) || raw == null) return raw;
-  if (typeof raw !== "object") return raw;
-  const obj = raw as Record<string, unknown>;
-  if (!("issues" in obj || "pullRequests" in obj || "actions" in obj)) return raw;
-  const tabs = ["issues", "pullRequests", "actions"] as const;
-  const preferred = (typeof lastActiveTab === "string" && tabs.includes(lastActiveTab as typeof tabs[number]))
-    ? lastActiveTab as typeof tabs[number]
-    : "issues";
-  const remaining = tabs.filter(t => t !== preferred);
-  const all = [preferred, ...remaining];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const tab of all) {
-    const arr = obj[tab];
-    if (Array.isArray(arr)) {
-      for (const item of arr) {
-        if (typeof item === "string" && !seen.has(item)) {
-          seen.add(item);
-          result.push(item);
-        }
-      }
-    }
+const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions"] as const;
+
+export function migrateLockedRepos(raw: unknown): unknown {
+  if (raw == null) return { issues: [], pullRequests: [], actions: [] };
+  if (Array.isArray(raw)) {
+    // Flat array → copy to all 3 built-in tabs
+    const arr = raw.filter((item): item is string => typeof item === "string").slice(0, LOCKED_REPOS_CAP);
+    return { issues: [...arr], pullRequests: [...arr], actions: [...arr] };
   }
-  return result.slice(0, LOCKED_REPOS_CAP);
+  if (typeof raw === "object") {
+    // Object → pass through as-is; loadViewState cap-guard sanitizes malformed entries
+    return raw;
+  }
+  return { issues: [], pullRequests: [], actions: [] };
 }
 
 function loadViewState(): ViewState {
@@ -138,11 +127,19 @@ function loadViewState(): ViewState {
       return ViewStateSchema.parse({});
     }
     const obj = parsed as Record<string, unknown>;
-    obj.lockedRepos = migrateLockedRepos(obj.lockedRepos, obj.lastActiveTab);
-    // Cap lockedRepos before Zod validates — an oversized array would fail
-    // .max(LOCKED_REPOS_CAP) and reject the ENTIRE ViewState, wiping all settings.
-    if (Array.isArray(obj.lockedRepos) && obj.lockedRepos.length > LOCKED_REPOS_CAP) {
-      obj.lockedRepos = obj.lockedRepos.slice(0, LOCKED_REPOS_CAP);
+    obj.lockedRepos = migrateLockedRepos(obj.lockedRepos);
+    // Cap lockedRepos entries before Zod validates — a corrupt or oversized entry would
+    // fail .max(LOCKED_REPOS_CAP) and reject the ENTIRE ViewState, wiping all settings.
+    if (typeof obj.lockedRepos === "object" && obj.lockedRepos !== null && !Array.isArray(obj.lockedRepos)) {
+      const record = obj.lockedRepos as Record<string, unknown>;
+      for (const [key, val] of Object.entries(record)) {
+        if (!Array.isArray(val)) {
+          delete record[key];
+        } else {
+          const filtered = val.filter((item): item is string => typeof item === "string");
+          record[key] = filtered.length > LOCKED_REPOS_CAP ? filtered.slice(0, LOCKED_REPOS_CAP) : filtered;
+        }
+      }
     }
     const result = ViewStateSchema.safeParse(parsed);
     if (result.success) return result.data;
@@ -161,12 +158,17 @@ export function resetViewState(): void {
     produce((draft) => {
       // Delete dynamic custom tab keys that Object.assign wouldn't clear
       for (const key of Object.keys(draft.expandedRepos)) {
-        if (!["issues", "pullRequests", "actions"].includes(key)) {
+        if (!(REPO_STATE_TAB_IDS as readonly string[]).includes(key)) {
           delete draft.expandedRepos[key];
         }
       }
       for (const key of Object.keys(draft.customTabFilters)) {
         delete draft.customTabFilters[key];
+      }
+      for (const key of Object.keys(draft.lockedRepos)) {
+        if (!(REPO_STATE_TAB_IDS as readonly string[]).includes(key)) {
+          delete draft.lockedRepos[key];
+        }
       }
       Object.assign(draft, {
         lastActiveTab: "issues",
@@ -182,7 +184,7 @@ export function resetViewState(): void {
         hideDepDashboard: true,
         customTabFilters: {},
         expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-        lockedRepos: [],
+        lockedRepos: { issues: [], pullRequests: [], actions: [] },
         trackedItems: [],
       });
     })
@@ -365,51 +367,66 @@ export function removeCustomTabState(tabId: string): void {
     produce((draft) => {
       delete draft.customTabFilters[tabId];
       delete draft.expandedRepos[tabId];
+      delete draft.lockedRepos[tabId];
     })
   );
 }
 
-export function lockRepo(repoFullName: string): void {
-  setViewState(produce((draft) => {
-    if (!draft.lockedRepos.includes(repoFullName) && draft.lockedRepos.length < LOCKED_REPOS_CAP) {
-      draft.lockedRepos.push(repoFullName);
-    }
-  }));
+export function lockRepo(tabKey: string, repoFullName: string): void {
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) draft.lockedRepos[tabKey] = [];
+      const arr = draft.lockedRepos[tabKey];
+      if (!arr.includes(repoFullName) && arr.length < LOCKED_REPOS_CAP) {
+        arr.push(repoFullName);
+      }
+    })
+  );
 }
 
-export function unlockRepo(repoFullName: string): void {
-  setViewState(produce((draft) => {
-    draft.lockedRepos = draft.lockedRepos.filter(r => r !== repoFullName);
-  }));
+export function unlockRepo(tabKey: string, repoFullName: string): void {
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) return;
+      draft.lockedRepos[tabKey] = draft.lockedRepos[tabKey].filter((r) => r !== repoFullName);
+    })
+  );
 }
 
 export function moveLockedRepo(
+  tabKey: string,
   repoFullName: string,
   direction: "up" | "down"
 ): void {
-  setViewState(produce((draft) => {
-    const arr = draft.lockedRepos;
-    const idx = arr.indexOf(repoFullName);
-    if (idx === -1) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= arr.length) return;
-    const tmp = arr[idx];
-    arr[idx] = arr[targetIdx];
-    arr[targetIdx] = tmp;
-  }));
+  setViewState(
+    produce((draft) => {
+      if (!draft.lockedRepos[tabKey]) return;
+      const arr = draft.lockedRepos[tabKey];
+      const idx = arr.indexOf(repoFullName);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
+    })
+  );
 }
 
 export function pruneLockedRepos(
+  tabKey: string,
   activeRepoNames: string[]
 ): void {
-  const current = untrack(() => viewState.lockedRepos);
+  const current = untrack(() => viewState.lockedRepos[tabKey] ?? []);
   if (current.length === 0) return;
   const activeSet = new Set(activeRepoNames);
-  const filtered = current.filter(name => activeSet.has(name));
+  const filtered = current.filter((name) => activeSet.has(name));
   if (filtered.length === current.length) return;
-  setViewState(produce((draft) => {
-    draft.lockedRepos = filtered;
-  }));
+  setViewState(
+    produce((draft) => {
+      draft.lockedRepos[tabKey] = filtered;
+    })
+  );
 }
 
 export function trackItem(item: TrackedItem): void {
@@ -444,16 +461,18 @@ export function moveTrackedItem(
   type: "issue" | "pullRequest",
   direction: "up" | "down"
 ): void {
-  setViewState(produce((draft) => {
-    const arr = draft.trackedItems;
-    const idx = arr.findIndex((i) => i.id === id && i.type === type);
-    if (idx === -1) return;
-    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= arr.length) return;
-    const tmp = arr[idx];
-    arr[idx] = arr[targetIdx];
-    arr[targetIdx] = tmp;
-  }));
+  setViewState(
+    produce((draft) => {
+      const arr = draft.trackedItems;
+      const idx = arr.findIndex((i) => i.id === id && i.type === type);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
+    })
+  );
 }
 
 export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {

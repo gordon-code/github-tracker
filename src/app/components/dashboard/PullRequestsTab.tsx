@@ -251,12 +251,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const repoGroups = createMemo(() => {
     const groups = groupByRepo(filteredSorted());
+    const lockedForTab = viewState.lockedRepos[tabKey()] ?? [];
     const withLocked = ensureLockedRepoGroups(
       groups,
-      viewState.lockedRepos,
+      lockedForTab,
       (name) => ({ repoFullName: name, items: [] as typeof groups[0]["items"] }),
     );
-    return orderRepoGroups(withLocked, viewState.lockedRepos);
+    return orderRepoGroups(withLocked, lockedForTab);
   });
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), config.itemsPerPage));
   const pageCount = createMemo(() => pageLayout().pageCount);
@@ -282,7 +283,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   createEffect(() => {
     const names = activeRepoNames();
     if (names.length === 0) return;
-    pruneLockedRepos(names);
+    pruneLockedRepos(tabKey(), names);
   });
 
   const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
@@ -302,7 +303,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
 
   const highlightedReposPRs = createReorderHighlight(
     () => repoGroups().map(g => g.repoFullName),
-    () => viewState.lockedRepos,
+    () => viewState.lockedRepos[tabKey()] ?? [],
     () => ignoredPullRequests().length,
     () => JSON.stringify(props.customTabId
       ? (viewState.customTabFilters[props.customTabId] ?? {})
@@ -429,7 +430,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                   <Show
                     when={!isEmpty()}
                     fallback={
-                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="pulls" />
+                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="pulls" tabKey={tabKey()} />
                     }
                   >
                     <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
@@ -449,7 +450,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                         trailing={
                           <>
                             <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="pulls" />
-                            <RepoLockControls repoFullName={repoGroup.repoFullName} />
+                            <RepoLockControls repoFullName={repoGroup.repoFullName} tabKey={tabKey()} />
                           </>
                         }
                         collapsedSummary={
