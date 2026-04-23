@@ -422,7 +422,7 @@ export default function SettingsPage() {
                     <tr>
                       <th>Source</th>
                       <th>Pool</th>
-                      <th>Calls</th>
+                      <th>Usage</th>
                       <th>Last Called</th>
                     </tr>
                   </thead>
@@ -468,7 +468,7 @@ export default function SettingsPage() {
                 onClick={() => resetUsageData()}
                 class="btn btn-xs btn-ghost"
               >
-                Reset counts
+                Reset usage
               </button>
             </div>
           </div>

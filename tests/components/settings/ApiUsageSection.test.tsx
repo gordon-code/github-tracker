@@ -274,18 +274,18 @@ describe("ApiUsageSection — reset button", () => {
     mockGetUsageResetAt.mockReturnValue(null);
   });
 
-  it("renders the 'Reset counts' button", () => {
+  it("renders the 'Reset usage' button", () => {
     renderSettings();
-    expect(screen.getByText("Reset counts")).toBeTruthy();
+    expect(screen.getByText("Reset usage")).toBeTruthy();
   });
 
-  it("calls resetUsageData() when 'Reset counts' button is clicked", () => {
+  it("calls resetUsageData() when 'Reset usage' button is clicked", () => {
     // Wire the mock to clear snapshot on reset, simulating real behavior
     mockResetUsageData.mockImplementation(() => {
       mockGetUsageSnapshot.mockReturnValue([]);
     });
     renderSettings();
-    const btn = screen.getByText("Reset counts");
+    const btn = screen.getByText("Reset usage");
     fireEvent.click(btn);
     expect(mockResetUsageData).toHaveBeenCalledOnce();
   });

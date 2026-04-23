@@ -224,7 +224,7 @@ export function deriveSource(info: ApiRequestInfo): ApiCallSource {
 onApiRequest((info) => {
   const source = deriveSource(info);
   const pool: ApiPool = info.isGraphql ? "graphql" : "core";
-  trackApiCall(source, pool);
+  trackApiCall(source, pool, info.graphqlCost ?? 1);
   // Both pools tracked — Math.max keeps latest; may delay reset of the earlier pool's records
   if (info.resetEpochMs !== null) updateResetAt(info.resetEpochMs);
 });

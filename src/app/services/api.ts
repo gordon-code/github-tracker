@@ -12,6 +12,7 @@ export type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, Che
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface GraphQLRateLimit {
+  cost?: number;
   limit: number;
   remaining: number;
   resetAt: string;
@@ -226,7 +227,7 @@ const ISSUES_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
 `;
@@ -287,7 +288,7 @@ const LIGHT_COMBINED_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
@@ -318,7 +319,7 @@ const UNFILTERED_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_ISSUE_FRAGMENT}
   ${LIGHT_PR_FRAGMENT}
@@ -350,7 +351,7 @@ const LIGHT_PR_SEARCH_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
   ${LIGHT_PR_FRAGMENT}
 `;
@@ -395,7 +396,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
 `;
 
@@ -417,7 +418,7 @@ const HOT_PR_STATUS_QUERY = `
         }
       }
     }
-    rateLimit { limit remaining resetAt }
+    rateLimit { cost limit remaining resetAt }
   }
 `;
 
@@ -673,7 +674,7 @@ async function runForkPRFallback(
       );
     }
 
-    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { limit remaining resetAt }\n}`;
+    const forkQuery = `query(${varDefs.join(", ")}) {\n${fragments.join("\n")}\nrateLimit { cost limit remaining resetAt }\n}`;
 
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, request: { apiSource: "forkCheck" } });

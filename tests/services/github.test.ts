@@ -697,6 +697,60 @@ describe("hook.wrap — rate limit signal routing", () => {
     const graphqlRl = getGraphqlRateLimit();
     expect(graphqlRl!.remaining).toBe(4321);
   });
+
+  it("successful GraphQL request exposes rateLimit.cost in ApiRequestInfo callback", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: {
+          viewer: { login: "test" },
+          rateLimit: { cost: 42, limit: 5000, remaining: 4900, resetAt: new Date(resetEpoch * 1000).toISOString() },
+        },
+      }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "4900",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    let capturedInfo: ApiRequestInfo | null = null;
+    onApiRequest((info) => { capturedInfo = info; });
+
+    const client = createGitHubClient("test-token");
+    await client.graphql("{ viewer { login } }");
+
+    expect(capturedInfo).not.toBeNull();
+    expect(capturedInfo!.graphqlCost).toBe(42);
+    expect(capturedInfo!.isGraphql).toBe(true);
+  });
+
+  it("REST request has undefined graphqlCost in ApiRequestInfo callback", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "4999",
+          "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    let capturedInfo: ApiRequestInfo | null = null;
+    onApiRequest((info) => { capturedInfo = info; });
+
+    const client = createGitHubClient("test-token");
+    await client.request("GET /user");
+
+    expect(capturedInfo).not.toBeNull();
+    expect(capturedInfo!.graphqlCost).toBeUndefined();
+    expect(capturedInfo!.isGraphql).toBe(false);
+  });
 });
 
 // ── fetchRateLimitDetails ────────────────────────────────────────────────────

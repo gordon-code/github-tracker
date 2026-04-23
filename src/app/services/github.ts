@@ -67,6 +67,8 @@ export interface ApiRequestInfo {
   apiSource?: string;
   /** x-ratelimit-reset converted to ms, or null if unavailable */
   resetEpochMs: number | null;
+  /** GraphQL query point cost from response body, or undefined for REST */
+  graphqlCost?: number;
 }
 
 const _requestCallbacks: Array<(info: ApiRequestInfo) => void> = [];
@@ -152,8 +154,13 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
         let resetEpochMs: number | null = null;
         const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
         if (errResetHeader) resetEpochMs = parseInt(errResetHeader, 10) * 1000;
+        const errGraphqlCost = isGraphql
+          ? ((err as { data?: { rateLimit?: { cost?: number } } }).data?.rateLimit?.cost
+            ?? (errResponse as { data?: { data?: { rateLimit?: { cost?: number } } } } | undefined)?.data?.data?.rateLimit?.cost
+            ?? undefined)
+          : undefined;
         const info: ApiRequestInfo = {
-          url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+          url: options.url, method, status, isGraphql, apiSource, resetEpochMs, graphqlCost: errGraphqlCost,
         };
         for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
       }
@@ -183,8 +190,11 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     const headers = (response.headers ?? {}) as Record<string, string>;
     const resetHeader = headers["x-ratelimit-reset"];
     const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
+    const graphqlCost = isGraphql
+      ? (response.data as { data?: { rateLimit?: { cost?: number } } })?.data?.rateLimit?.cost ?? undefined
+      : undefined;
     const info: ApiRequestInfo = {
-      url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
+      url: options.url, method, status, isGraphql, apiSource, resetEpochMs, graphqlCost,
     };
     for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
 
