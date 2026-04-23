@@ -147,15 +147,34 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       // Fire callbacks even on errors — these are real API calls.
       // Octokit's RequestError includes response.headers for HTTP errors (403, 404, etc.)
       // so we can still extract x-ratelimit-reset when available.
+      const errResponse = (err as { response?: { headers?: Record<string, string> } }).response;
       if (status > 0) {
         let resetEpochMs: number | null = null;
-        const errResponse = (err as { response?: { headers?: Record<string, string> } }).response;
         const errResetHeader = errResponse?.headers?.["x-ratelimit-reset"];
         if (errResetHeader) resetEpochMs = parseInt(errResetHeader, 10) * 1000;
         const info: ApiRequestInfo = {
           url: options.url, method, status, isGraphql, apiSource, resetEpochMs,
         };
         for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
+      }
+      const errHeaders = errResponse?.headers as Record<string, string> | undefined;
+      if (errHeaders) {
+        try {
+          if (isGraphql) {
+            const remaining = errHeaders["x-ratelimit-remaining"];
+            const reset = errHeaders["x-ratelimit-reset"];
+            const limit = errHeaders["x-ratelimit-limit"];
+            if (remaining !== undefined && reset !== undefined) {
+              _setGraphqlRateLimit({
+                limit: safePositiveNumber(limit !== undefined ? parseInt(limit, 10) : NaN, _graphqlRateLimit()?.limit ?? 5000),
+                remaining: parseInt(remaining, 10),
+                resetAt: new Date(parseInt(reset, 10) * 1000),
+              });
+            }
+          } else {
+            updateRateLimitFromHeaders(errHeaders);
+          }
+        } catch { /* never mask the original error */ }
       }
       throw err;
     }
@@ -169,7 +188,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     };
     for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
 
-    if (response.headers) {
+    if (response.headers && !isGraphql) {
       updateRateLimitFromHeaders(response.headers as Record<string, string>);
     }
 
@@ -286,6 +305,8 @@ let _lastFetchResult: { core: RateLimitInfo; graphql: RateLimitInfo } | null = n
 export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; graphql: RateLimitInfo } | null> {
   // Return cached result within 5-second staleness window
   if (_lastFetchResult !== null && Date.now() - _lastFetchTime < 5000) {
+    _setCoreRateLimit(_lastFetchResult.core);
+    _setGraphqlRateLimit(_lastFetchResult.graphql);
     return { ..._lastFetchResult };
   }
 
@@ -310,6 +331,8 @@ export async function fetchRateLimitDetails(): Promise<{ core: RateLimitInfo; gr
     };
     _lastFetchTime = Date.now();
     _lastFetchResult = result;
+    _setCoreRateLimit(result.core);
+    _setGraphqlRateLimit(result.graphql);
     return { ...result };
   } catch {
     return null;

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, onApiRequest, type ApiRequestInfo } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -567,5 +567,171 @@ describe("hook.wrap — request tracking callbacks", () => {
     // Should not throw despite the callback throwing
     await expect(client.request("GET /user")).resolves.toBeDefined();
     expect(cbSpy).toHaveBeenCalled();
+  });
+});
+
+// ── hook.wrap — rate limit signal routing ────────────────────────────────────
+
+describe("hook.wrap — rate limit signal routing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Use status 500 (not 403/429) to avoid the throttle plugin's onRateLimit callback,
+  // which would schedule a real retry delay. hook.wrap extracts x-ratelimit-* headers
+  // for any error status, so 500 exercises the same signal-update code path.
+  it("GraphQL error response with rate limit headers updates _graphqlRateLimit", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "internal server error" }), {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "100",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow();
+
+    const rl = getGraphqlRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.remaining).toBe(100);
+    expect(rl!.limit).toBe(5000);
+    expect(rl!.resetAt).toBeInstanceOf(Date);
+    expect(rl!.resetAt.getTime()).toBe(resetEpoch * 1000);
+  });
+
+  it("REST error response with rate limit headers updates _coreRateLimit", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "internal server error" }), {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "100",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow();
+
+    const rl = getCoreRateLimit();
+    expect(rl).not.toBeNull();
+    expect(rl!.remaining).toBe(100);
+    expect(rl!.limit).toBe(5000);
+  });
+
+  it("error response without rate limit headers does not crash", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    // Must reject with the original error only, not an additional crash
+    await expect(client.request("GET /user")).rejects.toBeDefined();
+  });
+
+  it("successful GraphQL request does NOT update _coreRateLimit", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    // Seed _coreRateLimit to a known value
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "1234",
+      "x-ratelimit-reset": String(resetEpoch),
+      "x-ratelimit-limit": "5000",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { viewer: { login: "test" } } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "9999",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.graphql("{ viewer { login } }");
+
+    // _coreRateLimit must remain at seeded value — GraphQL success must not contaminate it
+    const rl = getCoreRateLimit();
+    expect(rl!.remaining).toBe(1234);
+  });
+
+  it("successful REST request updates _coreRateLimit but NOT _graphqlRateLimit", async () => {
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    // Seed _graphqlRateLimit to a known value
+    updateGraphqlRateLimit({ limit: 5000, remaining: 4321, resetAt: new Date(resetEpoch * 1000).toISOString() });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "test" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-ratelimit-remaining": "4888",
+          "x-ratelimit-reset": String(resetEpoch),
+          "x-ratelimit-limit": "5000",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await client.request("GET /user");
+
+    const coreRl = getCoreRateLimit();
+    expect(coreRl!.remaining).toBe(4888);
+
+    // _graphqlRateLimit must be unchanged at seeded value
+    const graphqlRl = getGraphqlRateLimit();
+    expect(graphqlRl!.remaining).toBe(4321);
+  });
+});
+
+// ── fetchRateLimitDetails ────────────────────────────────────────────────────
+// fetchRateLimitDetails calls getClient() which reads an internal SolidJS signal
+// (_client) that is only non-null after auth token is set. These tests exercise
+// the null-client fast-path and the signal-preservation guarantee on failure.
+// Signal update tests (setCoreRateLimit / setGraphqlRateLimit) are covered by the
+// hook.wrap tests above which exercise the same signal setters via real HTTP responses.
+
+describe("fetchRateLimitDetails", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null immediately when no client is available", async () => {
+    // No auth token is set in tests, so getClient() returns null → fetchRateLimitDetails returns null.
+    const result = await fetchRateLimitDetails();
+    expect(result).toBeNull();
+  });
+
+  it("failure does not clear existing signals", async () => {
+    // Seed signals to known values using the exported update functions.
+    const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
+    updateRateLimitFromHeaders({
+      "x-ratelimit-remaining": "1111",
+      "x-ratelimit-reset": String(resetEpoch),
+      "x-ratelimit-limit": "5000",
+    });
+    updateGraphqlRateLimit({ limit: 5000, remaining: 2222, resetAt: new Date(resetEpoch * 1000).toISOString() });
+
+    // fetchRateLimitDetails returns null (no client) — signals must be unaffected.
+    const result = await fetchRateLimitDetails();
+    expect(result).toBeNull();
+
+    expect(getCoreRateLimit()!.remaining).toBe(1111);
+    expect(getGraphqlRateLimit()!.remaining).toBe(2222);
   });
 });
