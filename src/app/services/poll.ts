@@ -654,6 +654,10 @@ export async function fetchTargetedRepoData(
     entries = entries.slice(0, MAX_TARGETED_REPOS);
   }
 
+  if (entries.length === 0) {
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+  }
+
   // Record cooldown timestamps
   for (const [key] of entries) {
     _repoLastTargeted.set(key, now);
