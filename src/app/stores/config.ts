@@ -42,8 +42,7 @@ export function loadConfig(): Config {
     if (result.success) {
       const data = result.data;
       // Clean up stale defaultTab pointing to a deleted custom tab
-      // "jiraAssigned" is always valid — hidden by UI when Jira is disabled
-      const validTabIds = new Set<string>([...BUILTIN_TAB_IDS, "jiraAssigned", ...data.customTabs.map((t) => t.id)]);
+      const validTabIds = new Set<string>([...BUILTIN_TAB_IDS, ...data.customTabs.map((t) => t.id)]);
       if (!validTabIds.has(data.defaultTab)) {
         return { ...data, defaultTab: "issues" };
       }

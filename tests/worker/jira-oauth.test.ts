@@ -833,6 +833,42 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
     expect(json["error"]).toBe("jira_proxy_error");
   });
 
+  it("accepts email of exactly 254 characters", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], total: 0, maxResults: 10, startAt: 0 }), { status: 200 })
+    );
+    const email254 = "a".repeat(242) + "@example.com";
+    expect(email254.length).toBe(254);
+
+    const req = makeJiraProxyRequest({
+      endpoint: "search",
+      cloudId: VALID_CLOUD_ID,
+      email: email254,
+      sealed: sealedToken,
+      params: { jql: "assignee = currentUser()", maxResults: 10 },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects email of 255 characters", async () => {
+    globalThis.fetch = vi.fn();
+    const email255 = "a".repeat(243) + "@example.com";
+    expect(email255.length).toBe(255);
+
+    const req = makeJiraProxyRequest({
+      endpoint: "search",
+      cloudId: VALID_CLOUD_ID,
+      email: email255,
+      sealed: sealedToken,
+      params: { jql: "assignee = me", maxResults: 10 },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
   it("returns 429 when durable rate limiter denies", async () => {
     globalThis.fetch = vi.fn();
     const req = makeJiraProxyRequest({

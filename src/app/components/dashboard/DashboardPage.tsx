@@ -333,10 +333,11 @@ export default function DashboardPage() {
       // Auto-prune tracked Jira items absent from fresh fetch (done, unassigned, deleted)
       if (config.enableTracking && viewState.trackedItems.length > 0) {
         const liveKeys = new Set(result.issues.map((i) => i.key));
-        for (const item of viewState.trackedItems) {
-          if (item.source === "jira" && item.jiraKey && !liveKeys.has(item.jiraKey)) {
-            untrackJiraItem(item.jiraKey);
-          }
+        const keysToPrune = viewState.trackedItems
+          .filter((item) => item.source === "jira" && item.jiraKey && !liveKeys.has(item.jiraKey))
+          .map((item) => item.jiraKey!);
+        for (const jiraKey of keysToPrune) {
+          untrackJiraItem(jiraKey);
         }
       }
     } catch (err) {
@@ -401,7 +402,7 @@ export default function DashboardPage() {
     if (tab === "tracked" && !config.enableTracking) return "issues";
     if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
-    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) return "issues";
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
   }
 
@@ -409,7 +410,7 @@ export default function DashboardPage() {
 
   function handleTabChange(tab: TabId) {
     // Reject invalid tab IDs to prevent persisting stale state
-    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) return;
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
@@ -440,7 +441,7 @@ export default function DashboardPage() {
   // Redirect away from a custom tab that was deleted while active
   createEffect(() => {
     const tab = activeTab();
-    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) {
+    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) {
       handleTabChange("issues");
     }
   });
@@ -786,8 +787,8 @@ export default function DashboardPage() {
     const staleIds = untrack(() => {
       const keys = new Set([
         ...Object.keys(viewState.customTabFilters),
-        ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k) && k !== "jiraAssigned"),
-        ...Object.keys(viewState.lockedRepos).filter((k) => !isBuiltinTab(k) && k !== "jiraAssigned"),
+        ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k)),
+        ...Object.keys(viewState.lockedRepos).filter((k) => !isBuiltinTab(k)),
       ]);
       return [...keys].filter((id) => !activeIds.has(id));
     });

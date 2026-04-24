@@ -184,7 +184,9 @@ export class JiraProxyClient implements IJiraClient {
     if (result.issues.length === 0) return null;
     const hasError = result.errors?.some((e) => e.issueIdsOrKeys.includes(key));
     if (hasError) return null;
-    return result.issues[0] ?? null;
+    const issue = result.issues[0] ?? null;
+    if (issue && issue.key !== key) return null;
+    return issue;
   }
 
   async searchJql(

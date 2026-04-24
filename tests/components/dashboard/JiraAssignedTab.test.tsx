@@ -4,12 +4,13 @@ import { render, screen } from "@solidjs/testing-library";
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
 let mockTrackedItems: Array<{ source: string; jiraKey?: string }> = [];
+let mockJiraFilters: { statusCategory: string; priority: string } = { statusCategory: "all", priority: "all" };
 
 vi.mock("../../../src/app/stores/view", () => ({
   viewState: new Proxy({} as { trackedItems: typeof mockTrackedItems; tabFilters: Record<string, unknown> }, {
     get(_t, key: string) {
       if (key === "trackedItems") return mockTrackedItems;
-      if (key === "tabFilters") return {};
+      if (key === "tabFilters") return { jiraAssigned: mockJiraFilters };
       return undefined;
     },
   }),
@@ -66,6 +67,7 @@ const SITE_URL = "https://mysite.atlassian.net";
 describe("JiraAssignedTab", () => {
   beforeEach(() => {
     mockTrackedItems = [];
+    mockJiraFilters = { statusCategory: "all", priority: "all" };
     vi.clearAllMocks();
   });
 
@@ -143,17 +145,44 @@ describe("JiraAssignedTab", () => {
 
   // ── Filter by statusCategory ─────────────────────────────────────────────
 
-  it("shows 'No issues match current filters' when filters are active and nothing matches", async () => {
-    // Mock filters() to return an active status filter
-    const { resetAllTabFilters, setTabFilter } = await import("../../../src/app/stores/view");
-    vi.mocked(setTabFilter).mockImplementation(() => {});
-    vi.mocked(resetAllTabFilters).mockImplementation(() => {});
-
+  it("shows all issues when no filters are active (default all/all)", () => {
     const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate")];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
 
-    // With default filters (all), all issues show
     expect(screen.getByText("PROJ-1")).toBeTruthy();
+  });
+
+  it("filters out issues that do not match active statusCategory filter", () => {
+    mockJiraFilters = { statusCategory: "new", priority: "all" };
+    const issues = [
+      makeIssue("PROJ-1", "PROJ", "new"),
+      makeIssue("PROJ-2", "PROJ", "indeterminate"),
+    ];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    expect(screen.getByText("PROJ-1")).toBeTruthy();
+    expect(screen.queryByText("PROJ-2")).toBeNull();
+  });
+
+  it("filters out issues that do not match active priority filter", () => {
+    mockJiraFilters = { statusCategory: "all", priority: "High" };
+    const issues = [
+      makeIssue("PROJ-1", "PROJ", "indeterminate", "High"),
+      makeIssue("PROJ-2", "PROJ", "indeterminate", "Medium"),
+    ];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    expect(screen.getByText("PROJ-1")).toBeTruthy();
+    expect(screen.queryByText("PROJ-2")).toBeNull();
+  });
+
+  it("shows empty state when active filter matches nothing", () => {
+    mockJiraFilters = { statusCategory: "new", priority: "all" };
+    const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    expect(screen.queryByText("PROJ-1")).toBeNull();
+    expect(screen.getByText(/No issues match current filters/i)).toBeTruthy();
   });
 
   it("shows 'No assigned Jira issues' when no filters active and list is empty", () => {

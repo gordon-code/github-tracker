@@ -904,6 +904,77 @@ describe("ensureJiraTokenValid", () => {
     expect(result).toBe(false);
     expect(mod.jiraAuth()?.accessToken).toBe("expired-access-tok");
   });
+
+  it("uses fallback expiresAt of 3600s when refresh response expires_in is 0", async () => {
+    setExpiredOAuthJiraAuth();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "new-access-tok",
+        sealed_refresh_token: "new-sealed",
+        expires_in: 0,
+      }),
+    }));
+
+    const before = Date.now();
+    const result = await mod.ensureJiraTokenValid();
+    const after = Date.now();
+
+    expect(result).toBe(true);
+    expect(mod.jiraAuth()?.accessToken).toBe("new-access-tok");
+    expect(mod.jiraAuth()?.sealedRefreshToken).toBe("new-sealed");
+    const expiresAt = mod.jiraAuth()!.expiresAt;
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 3600_000);
+    expect(expiresAt).toBeLessThanOrEqual(after + 3600_000);
+  });
+
+  it("uses fallback expiresAt of 3600s when refresh response expires_in is negative", async () => {
+    setExpiredOAuthJiraAuth();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "new-access-tok",
+        sealed_refresh_token: "new-sealed",
+        expires_in: -1,
+      }),
+    }));
+
+    const before = Date.now();
+    const result = await mod.ensureJiraTokenValid();
+    const after = Date.now();
+
+    expect(result).toBe(true);
+    expect(mod.jiraAuth()?.accessToken).toBe("new-access-tok");
+    expect(mod.jiraAuth()?.sealedRefreshToken).toBe("new-sealed");
+    const expiresAt = mod.jiraAuth()!.expiresAt;
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 3600_000);
+    expect(expiresAt).toBeLessThanOrEqual(after + 3600_000);
+  });
+
+  it("uses fallback expiresAt of 3600s when refresh response expires_in is missing", async () => {
+    setExpiredOAuthJiraAuth();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "new-access-tok",
+        sealed_refresh_token: "new-sealed",
+      }),
+    }));
+
+    const before = Date.now();
+    const result = await mod.ensureJiraTokenValid();
+    const after = Date.now();
+
+    expect(result).toBe(true);
+    expect(mod.jiraAuth()?.accessToken).toBe("new-access-tok");
+    expect(mod.jiraAuth()?.sealedRefreshToken).toBe("new-sealed");
+    const expiresAt = mod.jiraAuth()!.expiresAt;
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 3600_000);
+    expect(expiresAt).toBeLessThanOrEqual(after + 3600_000);
+  });
 });
 
 describe("cross-tab Jira auth sync", () => {

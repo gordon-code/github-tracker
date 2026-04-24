@@ -11,10 +11,14 @@ export function clearJiraKeyCache(): void {
   _jiraKeyCache = new Map();
 }
 
-function evictIfAtCap(): void {
-  if (_jiraKeyCache.size >= JIRA_KEY_CACHE_CAP) {
-    const oldest = _jiraKeyCache.keys().next().value;
-    if (oldest !== undefined) _jiraKeyCache.delete(oldest);
+// Evict oldest entries to make room — call before writing `incoming` new entries.
+function evictToFit(incoming: number): void {
+  const excess = _jiraKeyCache.size + incoming - JIRA_KEY_CACHE_CAP;
+  if (excess <= 0) return;
+  const iter = _jiraKeyCache.keys();
+  for (let i = 0; i < excess; i++) {
+    const key = iter.next().value;
+    if (key !== undefined) _jiraKeyCache.delete(key);
   }
 }
 
@@ -37,8 +41,8 @@ export async function lookupKeys(
         (result.errors ?? []).flatMap((e) => e.issueIdsOrKeys)
       );
 
+      evictToFit(uncached.length);
       for (const key of uncached) {
-        evictIfAtCap();
         if (errored.has(key)) {
           _jiraKeyCache.set(key, null);
         } else if (byKey.has(key)) {
@@ -50,8 +54,8 @@ export async function lookupKeys(
     } catch (err) {
       if (err instanceof JiraApiError) {
         // Cache null for all keys in the failed batch — don't throw, return partial map
+        evictToFit(uncached.length);
         for (const key of uncached) {
-          evictIfAtCap();
           _jiraKeyCache.set(key, null);
         }
       } else {
@@ -60,8 +64,8 @@ export async function lookupKeys(
         const results = await Promise.allSettled(
           uncached.map((k) => client.getIssue(k))
         );
+        evictToFit(uncached.length);
         for (let i = 0; i < uncached.length; i++) {
-          evictIfAtCap();
           const r = results[i];
           _jiraKeyCache.set(uncached[i], r.status === "fulfilled" ? r.value : null);
         }

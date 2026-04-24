@@ -25,6 +25,9 @@ import CustomTabsSection from "./CustomTabsSection";
 import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
 
+const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+const CLOUD_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export default function SettingsPage() {
   const navigate = useNavigate();
 
@@ -177,6 +180,7 @@ export default function SettingsPage() {
           enabled: config.jira?.enabled ?? false,
           authMethod: config.jira?.authMethod ?? "oauth",
           issueKeyDetection: config.jira?.issueKeyDetection ?? true,
+          cloudId: config.jira?.cloudId,
           siteName: config.jira?.siteName,
           siteUrl: config.jira?.siteUrl,
         },
@@ -211,10 +215,8 @@ export default function SettingsPage() {
 
   // ── Jira integration ──────────────────────────────────────────────────────
 
-  const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
-  const CLOUD_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const jiraClientId = import.meta.env.VITE_JIRA_CLIENT_ID as string | undefined;
-  const jiraEnabled = () => !!jiraClientId && VALID_JIRA_CLIENT_ID_RE.test(jiraClientId);
+  const jiraEnabled = !!jiraClientId && VALID_JIRA_CLIENT_ID_RE.test(jiraClientId);
 
   const [jiraApiEmail, setJiraApiEmail] = createSignal("");
   const [jiraApiToken, setJiraApiToken] = createSignal("");
@@ -858,7 +860,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 11: Jira Cloud Integration */}
-        <Show when={jiraEnabled()}>
+        <Show when={jiraEnabled}>
           <Section title="Jira Cloud Integration">
             <Show
               when={isJiraAuthenticated()}

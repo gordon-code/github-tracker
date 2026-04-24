@@ -204,13 +204,10 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
+const ALLOWED_SEARCH_PARAMS = new Set(["jql", "maxResults", "fields", "startAt"]);
+const ALLOWED_ISSUE_PARAMS = new Set(["issueIdsOrKeys", "fields"]);
 
-// Module-level cache for derived seal keys, keyed by purpose.
-// Invalidated on SEAL_KEY rotation via full-value fingerprint comparison.
-const _sealKeyCache = new Map<string, CryptoKey>();
-let _sealKeyFingerprint = "";
-
-// Separate cache for SEAL_KEY_NEXT-derived keys (used in token exchange, refresh, and proxy re-seal).
+// Module-level cache for derived seal keys (used in token exchange, refresh, and proxy seal/re-seal).
 // Keyed by purpose; invalidated when SEAL_KEY_NEXT changes.
 const _nextKeyCache = new Map<string, CryptoKey>();
 let _nextKeyFingerprint = "";
@@ -285,17 +282,8 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
 
   let sealed: string;
   try {
-    // Derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
-    const fingerprint = env.SEAL_KEY;
-    if (fingerprint !== _sealKeyFingerprint) {
-      _sealKeyCache.clear();
-      _sealKeyFingerprint = fingerprint;
-    }
-    let key = _sealKeyCache.get(purpose);
-    if (key === undefined) {
-      key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
-      _sealKeyCache.set(purpose, key);
-    }
+    // Use SEAL_KEY_NEXT if set (matches token exchange/refresh behavior), falling back to SEAL_KEY.
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:" + purpose);
     sealed = await sealToken(token, key);
   } catch (err) {
     // Log error server-side — do not expose crypto error details in response
@@ -1125,12 +1113,18 @@ async function handleJiraProxy(
     }
   }
 
-  // issueIdsOrKeys cap for issue/bulkfetch endpoint
+  // issueIdsOrKeys cap and per-element validation for issue/bulkfetch endpoint
   if (endpoint === "issue") {
     const issueIdsOrKeys = (params as Record<string, unknown> | null | undefined)?.["issueIdsOrKeys"];
-    if (Array.isArray(issueIdsOrKeys) && issueIdsOrKeys.length > 100) {
-      log("warn", "jira_proxy_issue_keys_exceeded", { count: issueIdsOrKeys.length, sessionId }, request);
-      return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+    if (Array.isArray(issueIdsOrKeys)) {
+      if (issueIdsOrKeys.length > 100) {
+        log("warn", "jira_proxy_issue_keys_exceeded", { count: issueIdsOrKeys.length, sessionId }, request);
+        return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+      }
+      if (!issueIdsOrKeys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 50)) {
+        log("warn", "jira_proxy_issue_keys_invalid", { sessionId }, request);
+        return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+      }
     }
   }
 
@@ -1157,11 +1151,11 @@ async function handleJiraProxy(
   let jiraInit: RequestInit;
 
   if (endpoint === "search") {
-    // GET with params as query string
+    // GET with params as query string — only allowlisted keys forwarded
     const searchParams = new URLSearchParams();
     if (params && typeof params === "object") {
       for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
-        if (v !== undefined && v !== null) searchParams.set(k, String(v));
+        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null) searchParams.set(k, String(v));
       }
     }
     jiraUrl = `${baseUrl}?${searchParams.toString()}`;
@@ -1171,7 +1165,13 @@ async function handleJiraProxy(
       redirect: "error",
     };
   } else {
-    // POST with params as JSON body
+    // POST with params as JSON body — only allowlisted keys forwarded
+    const filteredParams: Record<string, unknown> = {};
+    if (params && typeof params === "object") {
+      for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+        if (ALLOWED_ISSUE_PARAMS.has(k)) filteredParams[k] = v;
+      }
+    }
     jiraUrl = baseUrl;
     jiraInit = {
       method: "POST",
@@ -1180,7 +1180,7 @@ async function handleJiraProxy(
         "Accept": "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(params ?? {}),
+      body: JSON.stringify(filteredParams),
       redirect: "error",
     };
   }
@@ -1232,9 +1232,10 @@ async function handleJiraProxy(
     }
   }
 
-  const responseBody = resealed
-    ? { ...(responseData as Record<string, unknown>), resealed }
-    : responseData;
+  const responseBody =
+    resealed && typeof responseData === "object" && responseData !== null && !Array.isArray(responseData)
+      ? { ...(responseData as Record<string, unknown>), resealed }
+      : responseData;
 
   log("info", "jira_proxy_success", { endpoint, jira_status: jiraResp.status, sessionId }, request);
 

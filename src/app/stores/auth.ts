@@ -108,8 +108,9 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
   const auth = _jiraAuth();
   if (!auth) return false;
 
-  // API token mode: three independent guards prevent refresh (authMethod check,
-  // empty sealedRefreshToken, MAX_SAFE_INTEGER expiresAt)
+  // API token mode: two explicit guards prevent refresh (authMethod check,
+  // empty sealedRefreshToken). Token auth sets expiresAt = MAX_SAFE_INTEGER,
+  // so the expiry arithmetic below also short-circuits, but implicitly.
   if (config.jira?.authMethod === "token") return true;
   if (!auth.sealedRefreshToken) return true;
 
@@ -329,7 +330,12 @@ if (typeof window !== "undefined") {
     if (e.key === JIRA_AUTH_STORAGE_KEY) {
       try {
         const raw = e.newValue;
-        _setJiraAuth(raw ? (JSON.parse(raw) as JiraAuthState) : null);
+        if (!raw) {
+          _setJiraAuth(null);
+          return;
+        }
+        const parsed = JiraAuthStateSchema.safeParse(JSON.parse(raw) as unknown);
+        _setJiraAuth(parsed.success ? parsed.data : null);
       } catch {
         _setJiraAuth(null);
       }

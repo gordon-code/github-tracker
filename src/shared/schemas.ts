@@ -29,7 +29,7 @@ export const TrackedUserSchema = z.object({
 
 export type TrackedUser = z.infer<typeof TrackedUserSchema>;
 
-export const BUILTIN_TAB_IDS = ["issues", "pullRequests", "actions", "tracked"] as const;
+export const BUILTIN_TAB_IDS = ["issues", "pullRequests", "actions", "tracked", "jiraAssigned"] as const;
 export type BuiltinTabId = (typeof BUILTIN_TAB_IDS)[number];
 
 export const CustomTabBaseType = z.enum(["issues", "pullRequests", "actions"]);

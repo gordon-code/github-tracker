@@ -187,6 +187,21 @@ describe("JiraCallback", () => {
     });
   });
 
+  it("shows error when token exchange returns ok:true but body fails Zod schema parse", async () => {
+    setupValidState();
+    setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ invalid: "shape", no_access_token: true }),
+    }));
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to complete Jira sign in/i)).toBeTruthy();
+    });
+  });
+
   it("shows error on network error during token exchange", async () => {
     setupValidState();
     setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
@@ -259,6 +274,27 @@ describe("JiraCallback", () => {
         authMethod: "oauth",
       })
     );
+  });
+
+  it("navigates to /settings after successful single-site auto-select", async () => {
+    setupValidState();
+    setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
+    mockSuccessfulExchange();
+    vi.mocked(JiraClient.getAccessibleResources).mockResolvedValue([
+      makeResource("cloud-abc", "My Site", "https://mysite.atlassian.net"),
+    ]);
+
+    render(() => (
+      <MemoryRouter>
+        <Route path="/jira/callback" component={JiraCallback} />
+        <Route path="/settings" component={() => <div>SettingsLanded</div>} />
+        <Route path="*" component={JiraCallback} />
+      </MemoryRouter>
+    ));
+
+    await waitFor(() => {
+      expect(screen.getByText("SettingsLanded")).toBeTruthy();
+    });
   });
 
   it("exchange POST sends code in body and Turnstile token in header", async () => {

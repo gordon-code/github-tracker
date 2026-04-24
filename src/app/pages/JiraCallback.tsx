@@ -1,6 +1,6 @@
 import { createSignal, onMount, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { setJiraAuth } from "../stores/auth";
 import { updateJiraConfig } from "../stores/config";
 import { JIRA_OAUTH_STATE_KEY } from "../lib/oauth";
@@ -60,6 +60,8 @@ export default function JiraCallback() {
   const [pendingToken, setPendingToken] = createSignal<JiraTokenResponse | null>(null);
 
   async function completeSiteSelection(site: JiraAccessibleResource, tokenData: JiraTokenResponse) {
+    // email intentionally omitted: OAuth uses Bearer token, not Basic (email + API token).
+    // DashboardPage checks !auth.email to determine client mode.
     setJiraAuth({
       accessToken: tokenData.access_token,
       sealedRefreshToken: tokenData.sealed_refresh_token,
@@ -146,7 +148,7 @@ export default function JiraCallback() {
       return;
     }
 
-    if (!resources || resources.length === 0) {
+    if (resources.length === 0) {
       setError("No Jira Cloud sites found. Ensure your Atlassian account has access to at least one Jira site.");
       return;
     }
