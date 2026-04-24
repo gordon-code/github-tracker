@@ -14,9 +14,5 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["tests/worker/**"],
     passWithNoTests: true,
-    env: {
-      // Default VITE_JIRA_CLIENT_ID for tests — individual tests can override via vi.stubEnv
-      VITE_JIRA_CLIENT_ID: "",
-    },
   },
 });

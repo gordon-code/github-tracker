@@ -24,6 +24,8 @@ import {
   resetCustomTabFilters,
   removeCustomTabState,
   lockRepo,
+  untrackJiraItem,
+  moveJiraItem,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
 
@@ -420,6 +422,33 @@ describe("resetAllTabFilters — scope reset", () => {
     resetViewState();
     expect(viewState.hideDepDashboard).toBe(true);
   });
+
+  it("resets jiraAssigned filters back to defaults", () => {
+    setTabFilter("jiraAssigned", "statusCategory", "indeterminate");
+    expect(viewState.tabFilters.jiraAssigned.statusCategory).toBe("indeterminate");
+    resetAllTabFilters("jiraAssigned");
+    expect(viewState.tabFilters.jiraAssigned.statusCategory).toBe("all");
+    expect(viewState.tabFilters.jiraAssigned.priority).toBe("all");
+  });
+});
+
+describe("setTabFilter — jiraAssigned", () => {
+  it("sets jiraAssigned statusCategory filter", () => {
+    setTabFilter("jiraAssigned", "statusCategory", "new");
+    expect(viewState.tabFilters.jiraAssigned.statusCategory).toBe("new");
+  });
+
+  it("sets jiraAssigned priority filter", () => {
+    setTabFilter("jiraAssigned", "priority", "High");
+    expect(viewState.tabFilters.jiraAssigned.priority).toBe("High");
+  });
+
+  it("preserves other jiraAssigned filters when setting one", () => {
+    setTabFilter("jiraAssigned", "statusCategory", "indeterminate");
+    setTabFilter("jiraAssigned", "priority", "Medium");
+    expect(viewState.tabFilters.jiraAssigned.statusCategory).toBe("indeterminate");
+    expect(viewState.tabFilters.jiraAssigned.priority).toBe("Medium");
+  });
 });
 
 describe("tracked items", () => {
@@ -610,6 +639,92 @@ describe("tracked items", () => {
     it("accepts lastActiveTab value 'tracked'", () => {
       const result = ViewStateSchema.parse({ lastActiveTab: "tracked" });
       expect(result.lastActiveTab).toBe("tracked");
+    });
+  });
+
+  describe("Jira tracked items", () => {
+    const jiraItem: TrackedItem = {
+      id: -1234,
+      type: "jiraIssue",
+      source: "jira",
+      jiraKey: "PROJ-42",
+      jiraProjectKey: "PROJ",
+      jiraStatus: "In Progress",
+      repoFullName: "mysite.atlassian.net/PROJ",
+      title: "Fix login bug",
+      htmlUrl: "https://mysite.atlassian.net/browse/PROJ-42",
+      addedAt: 1711000003000,
+    };
+
+    const jiraItem2: TrackedItem = {
+      id: -5678,
+      type: "jiraIssue",
+      source: "jira",
+      jiraKey: "TEAM-99",
+      jiraProjectKey: "TEAM",
+      jiraStatus: "To Do",
+      repoFullName: "mysite.atlassian.net/TEAM",
+      title: "Add dashboard",
+      htmlUrl: "https://mysite.atlassian.net/browse/TEAM-99",
+      addedAt: 1711000004000,
+    };
+
+    it("trackItem adds a Jira item with source=jira", () => {
+      trackItem(jiraItem);
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].source).toBe("jira");
+      expect(viewState.trackedItems[0].jiraKey).toBe("PROJ-42");
+    });
+
+    it("trackItem deduplicates by jiraKey for source=jira (not by id)", () => {
+      trackItem(jiraItem);
+      trackItem({ ...jiraItem, id: 9999 });
+      expect(viewState.trackedItems).toHaveLength(1);
+    });
+
+    it("trackItem allows same id with different source", () => {
+      const githubItem: TrackedItem = { ...item1, id: jiraItem.id };
+      trackItem(githubItem);
+      trackItem(jiraItem);
+      expect(viewState.trackedItems).toHaveLength(2);
+    });
+
+    it("untrackJiraItem removes by jiraKey", () => {
+      trackItem(jiraItem);
+      trackItem(jiraItem2);
+      untrackJiraItem("PROJ-42");
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].jiraKey).toBe("TEAM-99");
+    });
+
+    it("untrackJiraItem does not affect GitHub items", () => {
+      trackItem(item1);
+      trackItem(jiraItem);
+      untrackJiraItem("PROJ-42");
+      expect(viewState.trackedItems).toHaveLength(1);
+      expect(viewState.trackedItems[0].source).toBe("github");
+    });
+
+    it("moveJiraItem reorders by jiraKey", () => {
+      trackItem(jiraItem);
+      trackItem(jiraItem2);
+      moveJiraItem("TEAM-99", "up");
+      expect(viewState.trackedItems[0].jiraKey).toBe("TEAM-99");
+      expect(viewState.trackedItems[1].jiraKey).toBe("PROJ-42");
+    });
+
+    it("mixed GitHub + Jira items coexist", () => {
+      trackItem(item1);
+      trackItem(jiraItem);
+      trackItem(item2);
+      trackItem(jiraItem2);
+      expect(viewState.trackedItems).toHaveLength(4);
+    });
+
+    it("items without source field default to 'github' after schema parse", () => {
+      const legacy = { id: 100, number: 10, type: "issue" as const, repoFullName: "o/r", title: "old", addedAt: 0 };
+      const parsed = ViewStateSchema.parse({ trackedItems: [legacy] });
+      expect(parsed.trackedItems[0].source).toBe("github");
     });
   });
 });
