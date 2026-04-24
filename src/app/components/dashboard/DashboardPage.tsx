@@ -442,6 +442,20 @@ export default function DashboardPage() {
           }));
           if (terminalPrIds.size > 0) {
             console.info(`[hot-poll] Spliced ${terminalPrIds.size} terminal PR(s) from store`);
+            setTimeout(() => {
+              try {
+                const cachePayload = {
+                  _v: CACHE_VERSION,
+                  issues: dashboardData.issues,
+                  pullRequests: dashboardData.pullRequests,
+                  workflowRuns: dashboardData.workflowRuns,
+                  lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString(),
+                };
+                localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
+              } catch {
+                pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
+              }
+            }, 0);
           }
           // Prune tracked PRs that became closed/merged via hot poll.
           // The auto-prune createEffect only fires when the pullRequests array
@@ -695,11 +709,9 @@ export default function DashboardPage() {
 
     return {
       issues: visibleIssues().filter((i) =>
-        i.state === "OPEN" &&
         isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: builtinFilter })
       ).length,
       pullRequests: visiblePullRequests().filter((p) =>
-        p.state === "OPEN" &&
         isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: builtinFilter })
       ).length,
       actions: visibleWorkflowRuns().filter((w) =>
