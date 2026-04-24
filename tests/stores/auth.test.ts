@@ -601,6 +601,14 @@ describe("setJiraAuth / jiraAuth signal", () => {
     const fresh = await import("../../src/app/stores/auth");
     expect(fresh.jiraAuth()).toBeNull();
   });
+
+  it("jiraAuth signal starts null and evicts localStorage when JSON is valid but wrong shape", async () => {
+    localStorageMock.setItem("github-tracker:jira-auth", JSON.stringify({ someField: "value" }));
+    vi.resetModules();
+    const fresh = await import("../../src/app/stores/auth");
+    expect(fresh.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:jira-auth")).toBeNull();
+  });
 });
 
 describe("isJiraAuthenticated", () => {

@@ -55,7 +55,8 @@ export async function lookupKeys(
           _jiraKeyCache.set(key, null);
         }
       } else {
-        // CORS or network error — fall back to concurrent individual getIssue calls
+        // Network error — fall back to concurrent individual getIssue calls
+        // (CORS for POST to api.atlassian.com with OAuth Bearer is verified working)
         const results = await Promise.allSettled(
           uncached.map((k) => client.getIssue(k))
         );

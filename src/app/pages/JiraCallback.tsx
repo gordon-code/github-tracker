@@ -17,11 +17,12 @@ const JiraAccessibleResourceSchema = z.array(z.object({
   avatarUrl: z.string().optional(),
 }));
 
-interface JiraTokenResponse {
-  access_token: string;
-  sealed_refresh_token: string;
-  expires_in: number;
-}
+const JiraTokenResponseSchema = z.object({
+  access_token: z.string(),
+  sealed_refresh_token: z.string(),
+  expires_in: z.number(),
+});
+type JiraTokenResponse = z.infer<typeof JiraTokenResponseSchema>;
 
 function JiraSitePicker(props: {
   sites: JiraAccessibleResource[];
@@ -118,11 +119,13 @@ export default function JiraCallback() {
         return;
       }
 
-      tokenData = (await resp.json()) as JiraTokenResponse;
-      if (!tokenData.access_token || !tokenData.sealed_refresh_token) {
+      const rawToken = await resp.json();
+      const tokenParsed = JiraTokenResponseSchema.safeParse(rawToken);
+      if (!tokenParsed.success) {
         setError("Failed to complete Jira sign in. Please try again.");
         return;
       }
+      tokenData = tokenParsed.data;
     } catch {
       setError("A network error occurred. Please try again.");
       return;
