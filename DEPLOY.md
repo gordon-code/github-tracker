@@ -119,13 +119,12 @@ Cloudflare Worker secrets are set. In CI, the deploy workflow runs
 
 ### Scopes
 
-The login flow requests `scope=repo read:org notifications`:
+The login flow requests `scope=repo read:org`:
 
 | Scope | Used for |
 |-------|----------|
 | `repo` | Read issues, PRs, check runs, workflow runs (includes private repos) |
 | `read:org` | `GET /user/orgs` — list user's organizations for the org selector |
-| `notifications` | `GET /notifications` — polling optimization gate (304 = skip full fetch) |
 
 **Note:** The `repo` scope grants write access to repositories, but this app never performs write operations (POST/PUT/PATCH/DELETE on repo endpoints). It is read-only by design.
 

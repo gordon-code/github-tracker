@@ -96,7 +96,7 @@ describe("trackApiCall — increment and record creation", () => {
   });
 
   it("tracks separate records for different pool types", () => {
-    mod.trackApiCall("notifications", "core");
+    mod.trackApiCall("userEvents", "core");
     mod.trackApiCall("lightSearch", "graphql");
     const snapshot = mod.getUsageSnapshot();
     expect(snapshot).toHaveLength(2);
@@ -125,7 +125,7 @@ describe("getUsageSnapshot — sorting", () => {
   });
 
   it("returns records sorted by count descending", () => {
-    mod.trackApiCall("notifications", "core", 1);
+    mod.trackApiCall("userEvents", "core", 1);
     mod.trackApiCall("lightSearch", "graphql", 5);
     mod.trackApiCall("workflowRuns", "core", 3);
     const snapshot = mod.getUsageSnapshot();
@@ -136,7 +136,7 @@ describe("getUsageSnapshot — sorting", () => {
 
   it("tiebreaks by lastCalledAt descending when counts are equal", () => {
     vi.setSystemTime(new Date("2026-01-01T10:00:00Z"));
-    mod.trackApiCall("notifications", "core", 2);
+    mod.trackApiCall("userEvents", "core", 2);
 
     vi.setSystemTime(new Date("2026-01-01T10:00:10Z"));
     mod.trackApiCall("lightSearch", "graphql", 2);
@@ -144,7 +144,7 @@ describe("getUsageSnapshot — sorting", () => {
     const snapshot = mod.getUsageSnapshot();
     // lightSearch called more recently — should be first
     expect(snapshot[0].source).toBe("lightSearch");
-    expect(snapshot[1].source).toBe("notifications");
+    expect(snapshot[1].source).toBe("userEvents");
   });
 });
 
@@ -440,8 +440,8 @@ describe("deriveSource — URL pattern matching", () => {
   }
 
   it.each([
-    ["/notifications", "notifications"],
-    ["/notifications?per_page=1", "notifications"],
+    ["/users/testuser/events", "userEvents"],
+    ["/users/testuser/events?per_page=100", "userEvents"],
     ["/users/octocat", "validateUser"],
     ["/user", "fetchOrgs"],
     ["/user/orgs", "fetchOrgs"],

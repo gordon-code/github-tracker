@@ -45,9 +45,9 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
 
 ### OAuth Sign-In
 
-OAuth is the recommended sign-in method. Click **Sign in with GitHub** on the login page and authorize the application. GitHub will redirect you back with a token that grants access to `repo`, `read:org`, and `notifications` scopes.
+OAuth is the recommended sign-in method. Click **Sign in with GitHub** on the login page and authorize the application. GitHub will redirect you back with a token that grants access to `repo` and `read:org` scopes.
 
-OAuth tokens work across all organizations you belong to and support the notifications optimization that reduces API usage in background tabs.
+OAuth tokens work across all organizations you belong to.
 
 ### Personal Access Token Sign-In
 
@@ -55,8 +55,8 @@ If you prefer not to use OAuth, you can sign in with a GitHub Personal Access To
 
 Two token formats are accepted:
 
-- **Classic tokens** (starts with `ghp_`) — recommended. Works across all organizations you belong to. Required scopes: `repo`, `read:org` (under admin:org), `notifications`.
-- **Fine-grained tokens** (starts with `github_pat_`) — also work, but have limitations: they only access one organization at a time, do not support the `notifications` scope, and therefore cannot use the background-poll optimization. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
+- **Classic tokens** (starts with `ghp_`) — recommended. Works across all organizations you belong to. Required scopes: `repo`, `read:org` (under admin:org).
+- **Fine-grained tokens** (starts with `github_pat_`) — also work, but only access one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
@@ -316,10 +316,10 @@ Hover the rate limit display in the dashboard footer to see detailed remaining c
 When the tab is hidden:
 
 - The **hot poll always pauses** (it provides only visual feedback).
-- The **full poll continues in background** when the notifications gate is available (OAuth or classic PAT with `notifications` scope). The gate uses `If-Modified-Since` headers for near-zero-cost 304 checks that do not count against your rate limit.
-- When the notifications gate is **unavailable** (fine-grained PAT or classic PAT missing the `notifications` scope), the full poll also pauses in background tabs to conserve API budget.
+- The **full refresh pauses** in background tabs — GraphQL requests have no 304 shortcut and every poll consumes real rate-limit budget.
+- The **events poll continues in background** — it uses ETag conditional requests (`If-None-Match`) that return 304 when nothing has changed, costing zero rate-limit points. When changes are detected, targeted per-repo refreshes run immediately.
 
-When you return to a tab that has been hidden for more than 2 minutes, a catch-up fetch fires immediately regardless of where the timer is in its cycle.
+When you return to a tab that has been hidden for more than 2 minutes, a catch-up full refresh fires immediately regardless of where the timer is in its cycle.
 
 ---
 
@@ -473,19 +473,19 @@ These are UI preferences that persist across sessions but are not included in th
 
 The tracker uses GitHub's GraphQL and REST APIs. Each poll cycle consumes some of your 5,000 request hourly budget. Tracking many repos, tracked users, or having a short refresh interval increases consumption. Increasing the refresh interval or reducing the number of tracked repos will reduce API usage.
 
-OAuth tokens and classic PATs use the notifications gate (304 shortcut), which significantly reduces per-cycle cost when nothing has changed. Fine-grained PATs do not support this optimization.
+A 60-second events poll uses ETag conditional requests to detect changes at near-zero cost, triggering targeted per-repo refreshes only when needed.
 
 For detailed per-source API call counts, see Settings > API Usage.
 
 **PAT vs OAuth: what is the difference?**
 
-OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features including the notifications background-poll optimization. Classic PATs with the correct scopes (`repo`, `read:org`, `notifications`) behave identically to OAuth.
+OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features. Classic PATs with the correct scopes (`repo`, `read:org`) behave identically to OAuth.
 
-Fine-grained PATs are limited to one organization at a time, do not support the `notifications` scope, and therefore cannot use the background-poll optimization — the full poll pauses in hidden tabs, and a warning appears in the notification drawer.
+Fine-grained PATs are limited to one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
 
 **Data looks stale after switching back to the tab.**
 
-When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. If the notifications gate is unavailable (fine-grained PAT), polling was paused while the tab was hidden — the catch-up fetch provides a single refresh on return. To ensure continuous background updates, use OAuth or a classic PAT with the `notifications` scope.
+When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The events poll continues running in background tabs using ETag conditional requests (zero rate-limit cost), so changes are detected even while the tab is hidden.
 
 **I want to stop tracking a repository.**
 

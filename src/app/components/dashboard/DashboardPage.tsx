@@ -16,7 +16,9 @@ import { fetchOrgs } from "../../services/api";
 import {
   createPollCoordinator,
   createHotPollCoordinator,
+  createEventsPollCoordinator,
   rebuildHotSets,
+  seedHotSetsFromTargeted,
   clearHotSets,
   getHotPollGeneration,
   fetchAllData,
@@ -24,7 +26,8 @@ import {
 } from "../../services/poll";
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
-import { pushNotification } from "../../lib/errors";
+import { pushNotification, pushError } from "../../lib/errors";
+import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { formatCount, prSizeCategory, rateLimitCssClass } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
@@ -137,6 +140,11 @@ onAuthCleared(() => {
     hotCoord.destroy();
     if (_hotCoordinator() === hotCoord) _setHotCoordinator(null);
   }
+  const eventsCoord = _eventsCoordinator();
+  if (eventsCoord) {
+    eventsCoord.destroy();
+    if (_eventsCoordinator() === eventsCoord) _setEventsCoordinator(null);
+  }
   clearHotSets();
 });
 
@@ -167,101 +175,96 @@ async function pollFetch(): Promise<DashboardData> {
         });
       }
     });
-    // When notifications gate says nothing changed, keep existing data
-    if (!data.skipped) {
-      const hasErrors = data.errors.length > 0;
-      setLastFetchHadErrors(hasErrors);
+    const hasErrors = data.errors.length > 0;
+    setLastFetchHadErrors(hasErrors);
 
-      // When the fetch had errors and returned no data, keep stale dashboard
-      // visible rather than wiping it to empty. This prevents the summary strip,
-      // tab counts, and tracked items from vanishing during rate limiting.
-      if (hasErrors && data.issues.length === 0 && data.pullRequests.length === 0 && data.workflowRuns.length === 0) {
-        setDashboardData("loading", false);
-        return data;
-      }
-
-      setHasFetchedFresh(true);
-      const now = new Date();
-
-      if (phaseOneFired) {
-        // Phase 1 fired — use fine-grained merge for the light→enriched
-        // transition. Only update heavy fields to avoid re-rendering the
-        // entire list (light fields haven't changed within this poll cycle).
-        const enrichedMap = new Map<number, PullRequest>();
-        for (const pr of data.pullRequests) enrichedMap.set(pr.id, pr);
-
-        setDashboardData(produce((state) => {
-          state.issues = data.issues;
-          state.workflowRuns = data.workflowRuns;
-          state.loading = false;
-          state.lastRefreshedAt = now;
-
-          let canMerge = state.pullRequests.length === enrichedMap.size;
-          if (canMerge) {
-            for (let i = 0; i < state.pullRequests.length; i++) {
-              if (!enrichedMap.has(state.pullRequests[i].id)) { canMerge = false; break; }
-            }
-          }
-
-          if (canMerge) {
-            for (let i = 0; i < state.pullRequests.length; i++) {
-              const e = enrichedMap.get(state.pullRequests[i].id)!;
-              const pr = state.pullRequests[i];
-              pr.headSha = e.headSha;
-              pr.assigneeLogins = e.assigneeLogins;
-              pr.reviewerLogins = e.reviewerLogins;
-              pr.checkStatus = e.checkStatus;
-              pr.additions = e.additions;
-              pr.deletions = e.deletions;
-              pr.changedFiles = e.changedFiles;
-              pr.comments = e.comments;
-              pr.reviewThreads = e.reviewThreads;
-              pr.totalReviewCount = e.totalReviewCount;
-              pr.enriched = e.enriched;
-              pr.nodeId = e.nodeId;
-              pr.surfacedBy = e.surfacedBy;
-              pr.starCount = e.starCount;
-            }
-          } else {
-            state.pullRequests = data.pullRequests;
-          }
-        }));
-      } else {
-        // Phase 1 did NOT fire (cached data existed or subsequent poll).
-        // Full atomic replacement — all fields (light + heavy) may have
-        // changed since the last cycle. Preserve scroll position: SolidJS
-        // DOM updates are synchronous within the setter, so save/restore
-        // around it to prevent scroll reset from <For> DOM rebuild.
-        withScrollLock(() => {
-          setDashboardData({
-            issues: data.issues,
-            pullRequests: data.pullRequests,
-            workflowRuns: data.workflowRuns,
-            loading: false,
-            lastRefreshedAt: now,
-          });
-        });
-      }
-      rebuildHotSets(data);
-      // Persist for stale-while-revalidate on full page reload.
-      // Errors are transient and not persisted. Deferred to avoid blocking paint.
-      const cachePayload = {
-        _v: CACHE_VERSION,
-        issues: data.issues,
-        pullRequests: data.pullRequests,
-        workflowRuns: data.workflowRuns,
-        lastRefreshedAt: now.toISOString(),
-      };
-      setTimeout(() => {
-        try {
-          localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
-        } catch {
-          pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
-        }
-      }, 0);
-    } else {
+    // When the fetch had errors and returned no data, keep stale dashboard
+    // visible rather than wiping it to empty. This prevents the summary strip,
+    // tab counts, and tracked items from vanishing during rate limiting.
+    if (hasErrors && data.issues.length === 0 && data.pullRequests.length === 0 && data.workflowRuns.length === 0) {
       setDashboardData("loading", false);
+      return data;
     }
+
+    setHasFetchedFresh(true);
+    const now = new Date();
+
+    if (phaseOneFired) {
+      // Phase 1 fired — use fine-grained merge for the light→enriched
+      // transition. Only update heavy fields to avoid re-rendering the
+      // entire list (light fields haven't changed within this poll cycle).
+      const enrichedMap = new Map<number, PullRequest>();
+      for (const pr of data.pullRequests) enrichedMap.set(pr.id, pr);
+
+      setDashboardData(produce((state) => {
+        state.issues = data.issues;
+        state.workflowRuns = data.workflowRuns;
+        state.loading = false;
+        state.lastRefreshedAt = now;
+
+        let canMerge = state.pullRequests.length === enrichedMap.size;
+        if (canMerge) {
+          for (let i = 0; i < state.pullRequests.length; i++) {
+            if (!enrichedMap.has(state.pullRequests[i].id)) { canMerge = false; break; }
+          }
+        }
+
+        if (canMerge) {
+          for (let i = 0; i < state.pullRequests.length; i++) {
+            const e = enrichedMap.get(state.pullRequests[i].id)!;
+            const pr = state.pullRequests[i];
+            pr.headSha = e.headSha;
+            pr.assigneeLogins = e.assigneeLogins;
+            pr.reviewerLogins = e.reviewerLogins;
+            pr.checkStatus = e.checkStatus;
+            pr.additions = e.additions;
+            pr.deletions = e.deletions;
+            pr.changedFiles = e.changedFiles;
+            pr.comments = e.comments;
+            pr.reviewThreads = e.reviewThreads;
+            pr.totalReviewCount = e.totalReviewCount;
+            pr.enriched = e.enriched;
+            pr.nodeId = e.nodeId;
+            pr.surfacedBy = e.surfacedBy;
+            pr.starCount = e.starCount;
+          }
+        } else {
+          state.pullRequests = data.pullRequests;
+        }
+      }));
+    } else {
+      // Phase 1 did NOT fire (cached data existed or subsequent poll).
+      // Full atomic replacement — all fields (light + heavy) may have
+      // changed since the last cycle. Preserve scroll position: SolidJS
+      // DOM updates are synchronous within the setter, so save/restore
+      // around it to prevent scroll reset from <For> DOM rebuild.
+      withScrollLock(() => {
+        setDashboardData({
+          issues: data.issues,
+          pullRequests: data.pullRequests,
+          workflowRuns: data.workflowRuns,
+          loading: false,
+          lastRefreshedAt: now,
+        });
+      });
+    }
+    rebuildHotSets(data);
+    // Persist for stale-while-revalidate on full page reload.
+    // Errors are transient and not persisted. Deferred to avoid blocking paint.
+    const cachePayload = {
+      _v: CACHE_VERSION,
+      issues: data.issues,
+      pullRequests: data.pullRequests,
+      workflowRuns: data.workflowRuns,
+      lastRefreshedAt: now.toISOString(),
+    };
+    setTimeout(() => {
+      try {
+        localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
+      } catch {
+        pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
+      }
+    }, 0);
     return data;
   } catch (err) {
     // Handle 401 auth errors
@@ -285,6 +288,97 @@ async function pollFetch(): Promise<DashboardData> {
 
 const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPollCoordinator> | null>(null);
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
+const [_eventsCoordinator, _setEventsCoordinator] = createSignal<{ destroy: () => void } | null>(null);
+
+// Mutates data.issues[].surfacedBy and data.pullRequests[].surfacedBy in-place before merging.
+function handleTargetedData(data: DashboardData, affectedRepos: string[]): void {
+  const affectedSet = new Set(affectedRepos.map(r => r.toLowerCase()));
+
+  // Build surfacedBy index from old store items BEFORE the merge
+  const oldSurfacedByIssues = new Map<number, string[]>();
+  for (const i of dashboardData.issues) {
+    if (affectedSet.has(i.repoFullName.toLowerCase()) && i.surfacedBy?.length) {
+      oldSurfacedByIssues.set(i.id, i.surfacedBy);
+    }
+  }
+  const oldSurfacedByPRs = new Map<number, string[]>();
+  for (const pr of dashboardData.pullRequests) {
+    if (affectedSet.has(pr.repoFullName.toLowerCase()) && pr.surfacedBy?.length) {
+      oldSurfacedByPRs.set(pr.id, pr.surfacedBy);
+    }
+  }
+
+  // Merge surfacedBy into targeted results before appending
+  for (const item of data.issues) {
+    const oldSb = oldSurfacedByIssues.get(item.id);
+    if (oldSb) {
+      item.surfacedBy = [...new Set([...(item.surfacedBy ?? []), ...oldSb])];
+    }
+  }
+  for (const pr of data.pullRequests) {
+    const oldSb = oldSurfacedByPRs.get(pr.id);
+    if (oldSb) {
+      pr.surfacedBy = [...new Set([...(pr.surfacedBy ?? []), ...oldSb])];
+    }
+  }
+
+  withScrollLock(() => {
+    setDashboardData(produce((state) => {
+      // ID-based merge: replace targeted items, keep unaffected + tracked-user-only items
+      const newIssueIds = new Set(data.issues.map(i => i.id));
+      state.issues = [
+        ...state.issues.filter(i =>
+          !affectedSet.has(i.repoFullName.toLowerCase()) ||
+          !newIssueIds.has(i.id)
+        ),
+        ...data.issues,
+      ];
+      const newPRIds = new Set(data.pullRequests.map(pr => pr.id));
+      state.pullRequests = [
+        ...state.pullRequests.filter(pr =>
+          !affectedSet.has(pr.repoFullName.toLowerCase()) ||
+          !newPRIds.has(pr.id)
+        ),
+        ...data.pullRequests,
+      ];
+      const newRunIds = new Set(data.workflowRuns.map(r => r.id));
+      state.workflowRuns = [
+        ...state.workflowRuns.filter(r =>
+          !affectedSet.has(r.repoFullName.toLowerCase()) ||
+          !newRunIds.has(r.id)
+        ),
+        ...data.workflowRuns,
+      ];
+    }));
+  });
+
+  for (const err of data.errors) {
+    pushError(err.repo, err.message, err.retryable);
+  }
+
+  const newItems = detectNewItems(data);
+  dispatchNotifications(newItems, config);
+
+  seedHotSetsFromTargeted(data);
+
+  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
+  // between here and the deferred setTimeout write.
+  const lastRefreshed = dashboardData.lastRefreshedAt;
+  const snapshot = {
+    _v: CACHE_VERSION,
+    issues: [...dashboardData.issues],
+    pullRequests: [...dashboardData.pullRequests],
+    workflowRuns: [...dashboardData.workflowRuns],
+    lastRefreshedAt: lastRefreshed?.toISOString() ?? null,
+  };
+  setTimeout(() => {
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Non-fatal
+    }
+  }, 0);
+}
 
 export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
@@ -404,6 +498,21 @@ export default function DashboardPage() {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
 
+    if (!_eventsCoordinator()) {
+      _setEventsCoordinator(createEventsPollCoordinator(
+        () => user()?.login ?? "",
+        () => {
+          const repos = new Set<string>();
+          for (const r of [...config.selectedRepos, ...(config.upstreamRepos ?? []), ...(config.monitoredRepos ?? [])]) {
+            repos.add(`${r.owner}/${r.name}`.toLowerCase());
+          }
+          return repos;
+        },
+        () => _coordinator()?.isRefreshing() ?? false,
+        handleTargetedData,
+      ));
+    }
+
     if (!_hotCoordinator()) {
       _setHotCoordinator(createHotPollCoordinator(
         () => config.hotPollInterval,
@@ -487,10 +596,13 @@ export default function DashboardPage() {
     onCleanup(() => {
       const coord = _coordinator();
       const hotCoord = _hotCoordinator();
+      const eventsCoord = _eventsCoordinator();
       coord?.destroy();
       if (_coordinator() === coord) _setCoordinator(null);
       hotCoord?.destroy();
       if (_hotCoordinator() === hotCoord) _setHotCoordinator(null);
+      eventsCoord?.destroy();
+      if (_eventsCoordinator() === eventsCoord) _setEventsCoordinator(null);
       clearHotSets();
       clearInterval(clockInterval);
     });

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
-import { createPollCoordinator, disableNotifGate, resetPollState, type DashboardData } from "../../src/app/services/poll";
+import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
 import * as githubMod from "../../src/app/services/github";
 
 // Mock pushError so we can spy on it
@@ -135,7 +135,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("continues polling when document is hidden (notifications gate enabled)", async () => {
+  it("pauses polling when document is hidden (no 304 shortcut for GraphQL)", async () => {
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // jitter = 0
     const fetchAll = makeFetchAll();
 
@@ -152,8 +152,8 @@ describe("createPollCoordinator", () => {
       vi.advanceTimersByTime(61_000);
       await flushPromises();
 
-      // Should have fetched while hidden (background refresh)
-      expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterInit);
+      // Should NOT have fetched — background polls skipped (no 304 shortcut)
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
       dispose();
     });
 
@@ -186,31 +186,6 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("pauses background polling when hidden and notifications gate is disabled", async () => {
-    disableNotifGate();
-    const fetchAll = makeFetchAll();
-
-    await createRoot(async (dispose) => {
-      createPollCoordinator(makeGetInterval(60), fetchAll);
-      await Promise.resolve(); // initial fetch
-
-      const callsAfterInit = fetchAll.mock.calls.length;
-
-      // Hide document
-      setDocumentVisible(false);
-
-      // Advance past the interval
-      vi.advanceTimersByTime(90_000);
-      await Promise.resolve();
-
-      // Should NOT have fetched — gate disabled means no cheap 304, skip background polls
-      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
-      dispose();
-    });
-
-    resetPollState(); // restore gate for other tests
-  });
-
   it("does NOT trigger immediate refresh on re-visible within 2 minutes", async () => {
     // Pin jitter to 0 so 300s interval is exactly 300s (no background poll in 90s)
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
@@ -238,7 +213,7 @@ describe("createPollCoordinator", () => {
     randomSpy.mockRestore();
   });
 
-  it("resets timer on re-visible after >2 min, preventing double-fire with background polls", async () => {
+  it("resets timer on re-visible after >2 min, fires catch-up then waits full interval", async () => {
     // Pin jitter to 0 so 60s interval is exactly 60s
     const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
     const fetchAll = makeFetchAll();
@@ -249,20 +224,20 @@ describe("createPollCoordinator", () => {
 
       const callsAfterInit = fetchAll.mock.calls.length;
 
-      // Hide for >2 min — background polls fire at 60s and 120s
+      // Hide for >2 min — background polls are SKIPPED (no 304 shortcut)
       setDocumentVisible(false);
       vi.advanceTimersByTime(130_000);
       await flushPromises();
 
-      const callsWhileHidden = fetchAll.mock.calls.length;
-      expect(callsWhileHidden).toBeGreaterThan(callsAfterInit);
+      // No polls while hidden
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
       // Restore visibility — catch-up fetch fires + timer resets
       setDocumentVisible(true);
       await flushPromises();
 
       const callsAfterRevisible = fetchAll.mock.calls.length;
-      expect(callsAfterRevisible).toBeGreaterThan(callsWhileHidden);
+      expect(callsAfterRevisible).toBeGreaterThan(callsAfterInit);
 
       // Advance 30s — should NOT fire (timer was reset to full 60s interval)
       vi.advanceTimersByTime(30_000);
@@ -459,68 +434,6 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  // ── qa-5: fetchAll returns skipped:true — lastRefreshAt not updated ──────────
-
-  it("does not update lastRefreshAt and does not push errors when fetchAll returns skipped:true", async () => {
-    mockPushError.mockClear();
-
-    const skippedData: DashboardData = {
-      issues: [],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-      skipped: true,
-    };
-    const fetchAll = vi.fn().mockResolvedValue(skippedData);
-
-    await createRoot(async (dispose) => {
-      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
-
-      // Wait for the in-flight fetch to settle
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // lastRefreshAt must remain null — skipped fetch should not record a refresh time
-      expect(coordinator.lastRefreshAt()).toBeNull();
-
-      // isRefreshing must be cleared — the finally block always runs
-      expect(coordinator.isRefreshing()).toBe(false);
-
-      // pushError must NOT have been called — per-repo errors are only processed on non-skipped fetches
-      expect(mockPushError).not.toHaveBeenCalled();
-
-      dispose();
-    });
-  });
-
-  // ── qa-3a: doFetch skipped path — no restore (reconciliation replaces snapshot/restore) ──
-
-  it("skipped fetch does NOT call pushError for previous errors (no restore logic)", async () => {
-    mockPushError.mockClear();
-
-    const skippedData: DashboardData = {
-      issues: [],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-      skipped: true,
-    };
-    const fetchAll = vi.fn().mockResolvedValue(skippedData);
-
-    await createRoot(async (dispose) => {
-      createPollCoordinator(makeGetInterval(0), fetchAll);
-
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // No pushError calls on skip — notifications persist naturally
-      expect(mockPushError).not.toHaveBeenCalled();
-      dispose();
-    });
-  });
-
   // ── qa-3b: reconciliation — resolved error is dismissed ───────────────────────
 
   it("dismisses resolved errors: source in previous cycle but not pushed in current cycle", async () => {
@@ -578,33 +491,6 @@ describe("createPollCoordinator", () => {
     mockEndCycleTracking.mockReturnValue(new Set());
   });
 
-  // ── qa-3d: endCycleTracking called on skipped path ────────────────────────────
-
-  it("endCycleTracking is called on skipped path (no tracking state leak)", async () => {
-    mockEndCycleTracking.mockClear();
-    mockStartCycleTracking.mockClear();
-
-    const skippedData: DashboardData = {
-      issues: [],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-      skipped: true,
-    };
-    const fetchAll = vi.fn().mockResolvedValue(skippedData);
-
-    await createRoot(async (dispose) => {
-      createPollCoordinator(makeGetInterval(0), fetchAll);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // startCycleTracking called, endCycleTracking called in finally
-      expect(mockStartCycleTracking).toHaveBeenCalled();
-      expect(mockEndCycleTracking).toHaveBeenCalled();
-      dispose();
-    });
-  });
 
   // ── qa-11: Jitter test with fixed Math.random to make interval deterministic ──
 
