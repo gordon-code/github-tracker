@@ -465,6 +465,7 @@ export function createPollCoordinator(
 
   function destroy(): void {
     destroyed = true;
+    pendingForce = false;
     clearTimer();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }

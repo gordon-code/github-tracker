@@ -566,13 +566,13 @@ export default function DashboardPage() {
   // Visible data for built-in tabs — filters out exclusively-owned items
   const visibleIssues = createMemo(() => {
     const map = exclusiveOwnership().issues;
-    if (map.size === 0) return dashboardData.issues;
-    return dashboardData.issues.filter((i) => isItemVisibleOnTab(map, i.id, "issues"));
+    if (map.size === 0) return dashboardData.issues.filter((i) => i.state === "OPEN");
+    return dashboardData.issues.filter((i) => i.state === "OPEN" && isItemVisibleOnTab(map, i.id, "issues"));
   });
   const visiblePullRequests = createMemo(() => {
     const map = exclusiveOwnership().pullRequests;
-    if (map.size === 0) return dashboardData.pullRequests;
-    return dashboardData.pullRequests.filter((p) => isItemVisibleOnTab(map, p.id, "pullRequests"));
+    if (map.size === 0) return dashboardData.pullRequests.filter((p) => p.state === "OPEN");
+    return dashboardData.pullRequests.filter((p) => p.state === "OPEN" && isItemVisibleOnTab(map, p.id, "pullRequests"));
   });
   const visibleWorkflowRuns = createMemo(() => {
     const map = exclusiveOwnership().actions;
