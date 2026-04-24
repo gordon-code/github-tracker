@@ -120,6 +120,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles> }>();
 
     let items = props.issues.filter((issue) => {
+      if (issue.state !== "OPEN") return false;
       if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: viewState.hideDepDashboard, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));

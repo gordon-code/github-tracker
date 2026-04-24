@@ -400,12 +400,12 @@ describe("createPollCoordinator", () => {
 
   // ── qa-4: Concurrent doFetch guard — second call while first is in-flight ───
 
-  it("concurrent doFetch guard: second manualRefresh while first is in-flight calls fetchAll only once", async () => {
-    let resolveFirst!: () => void;
+  it("concurrent doFetch guard: second manualRefresh while first is in-flight queues a force retry", async () => {
+    const resolvers: Array<() => void> = [];
     const fetchAll = vi.fn(
       () =>
         new Promise<DashboardData>((resolve) => {
-          resolveFirst = () => resolve(emptyData);
+          resolvers.push(() => resolve(emptyData));
         })
     );
 
@@ -421,13 +421,20 @@ describe("createPollCoordinator", () => {
       coordinator.manualRefresh();
       await Promise.resolve();
 
-      // Guard should prevent a second concurrent invocation
+      // Guard should prevent a second concurrent invocation — pendingForce queued instead
       expect(fetchAll).toHaveBeenCalledTimes(1);
 
-      // Resolve the first fetch
-      resolveFirst();
-      await Promise.resolve();
-      await Promise.resolve();
+      // Resolve the first fetch — the finally block fires the queued force retry
+      resolvers[0]();
+      await flushPromises();
+
+      // The force retry should now be in-flight (fetchAll called twice)
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+      expect(coordinator.isRefreshing()).toBe(true);
+
+      // Resolve the second (forced) fetch
+      resolvers[1]();
+      await flushPromises();
 
       expect(coordinator.isRefreshing()).toBe(false);
       dispose();
@@ -544,6 +551,37 @@ describe("createPollCoordinator", () => {
       coordinator.manualRefresh();
       await Promise.resolve();
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+
+      dispose();
+    });
+  });
+
+  it("destroy() clears pendingForce: queued retry does not fire after destroy", async () => {
+    const resolvers: Array<() => void> = [];
+    const fetchAll = vi.fn(
+      () =>
+        new Promise<DashboardData>((resolve) => {
+          resolvers.push(() => resolve(emptyData));
+        })
+    );
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      await Promise.resolve();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      coordinator.manualRefresh();
+      await Promise.resolve();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      coordinator.destroy();
+
+      resolvers[0]();
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
 
       dispose();
     });

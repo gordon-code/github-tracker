@@ -267,9 +267,14 @@ export function createPollCoordinator(
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let hiddenAt: number | null = null;
   let destroyed = false;
+  let pendingForce = false;
 
-  async function doFetch(): Promise<void> {
-    if (destroyed || isRefreshing()) return;
+  async function doFetch(force = false): Promise<void> {
+    if (destroyed) return;
+    if (isRefreshing()) {
+      if (force) pendingForce = true;
+      return;
+    }
     checkAndResetIfExpired();
     setIsRefreshing(true);
     // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
@@ -307,6 +312,10 @@ export function createPollCoordinator(
     } finally {
       endCycleTracking(); // Safe to call twice (returns empty Set if already ended)
       setIsRefreshing(false);
+      if (pendingForce) {
+        pendingForce = false;
+        void doFetch(true);
+      }
     }
   }
 
@@ -367,6 +376,7 @@ export function createPollCoordinator(
 
   function destroy(): void {
     destroyed = true;
+    pendingForce = false;
     clearTimer();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
@@ -374,7 +384,7 @@ export function createPollCoordinator(
   onCleanup(destroy);
 
   function manualRefresh(): void {
-    void doFetch();
+    void doFetch(true);
     // Reset interval timer so next auto-poll is a full interval from now
     const currentInterval = getInterval();
     if (currentInterval > 0) {

@@ -736,7 +736,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 42,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
       reviewDecision: null,
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -759,7 +759,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Simulate hot poll returning a status update (generation=0 matches default mock)
     const prUpdates = new Map([[42, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: "APPROVED" as const,
@@ -777,7 +777,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 43,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
@@ -804,7 +804,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Send update with stale generation (999 !== mock default of 0)
     const prUpdates = new Map([[43, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
@@ -860,6 +860,43 @@ describe("DashboardPage — onHotData integration", () => {
     // callback executed without error. The PR test above fully validates
     // the produce() mechanism; this confirms the run path is wired.
     expect(screen.getByText(/1 workflow/)).toBeTruthy();
+  });
+
+  it("splices terminal (MERGED) PR from store via capturedOnHotData", async () => {
+    const testPR = makePullRequest({
+      id: 99,
+      checkStatus: "pending",
+      state: "OPEN",
+      reviewDecision: null,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [testPR],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(capturedOnHotData).not.toBeNull();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("1 PR");
+    });
+
+    const prUpdates = new Map([[99, {
+      state: "MERGED" as const,
+      checkStatus: "success" as const,
+      mergeStateStatus: "CLEAN",
+      reviewDecision: null,
+    }]]);
+    capturedOnHotData!(prUpdates, new Map(), 0);
+
+    await waitFor(() => {
+      expect(screen.queryByText("1 PR")).toBeNull();
+    });
   });
 });
 
