@@ -4,10 +4,10 @@ import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP } from "../../shared/validation";
-import type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
+import type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
 // ── Re-exports from shared/types (backward compat for existing importers) ─────
-export type { Issue, PullRequest, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
+export type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -161,7 +161,7 @@ interface GraphQLIssueNode {
   databaseId: number;
   number: number;
   title: string;
-  state: string;
+  state: IssueState;
   url: string;
   createdAt: string;
   updatedAt: string;
@@ -424,7 +424,7 @@ const HOT_PR_STATUS_QUERY = `
 
 interface HotPRStatusNode {
   databaseId: number;
-  state: string;
+  state: PullRequestState;
   mergeStateStatus: string;
   reviewDecision: string | null;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
@@ -440,7 +440,7 @@ interface GraphQLLightPRNode {
   databaseId: number;
   number: number;
   title: string;
-  state: string;
+  state: PullRequestState;
   isDraft: boolean;
   url: string;
   createdAt: string;
@@ -1649,7 +1649,7 @@ export async function fetchWorkflowRuns(
 // ── Hot poll: targeted status updates ────────────────────────────────────────
 
 export interface HotPRStatusUpdate {
-  state: string;
+  state: PullRequestState;
   checkStatus: CheckStatus["status"];
   mergeStateStatus: string;
   reviewDecision: PullRequest["reviewDecision"];

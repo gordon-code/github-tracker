@@ -797,7 +797,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Simulate hot poll returning a status update (generation=0 matches default mock)
     const prUpdates = new Map([[42, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: "APPROVED" as const,
@@ -842,7 +842,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Send update with stale generation (999 !== mock default of 0)
     const prUpdates = new Map([[43, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: null,

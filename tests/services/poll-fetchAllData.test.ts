@@ -320,7 +320,7 @@ describe("fetchAllData — partial success", () => {
     vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
 
     const issues = [{
-      id: 1, number: 1, title: "Issue 1", state: "open",
+      id: 1, number: 1, title: "Issue 1", state: "OPEN" as const,
       htmlUrl: "https://github.com/o/r/issues/1",
       createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       userLogin: "octocat", userAvatarUrl: "", labels: [], assigneeLogins: [],
