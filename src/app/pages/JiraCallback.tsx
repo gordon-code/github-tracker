@@ -62,7 +62,7 @@ export default function JiraCallback() {
     setJiraAuth({
       accessToken: tokenData.access_token,
       sealedRefreshToken: tokenData.sealed_refresh_token,
-      expiresAt: Date.now() + Math.max(tokenData.expires_in, 60) * 1000,
+      expiresAt: Date.now() + (typeof tokenData.expires_in === "number" && tokenData.expires_in > 0 ? Math.max(tokenData.expires_in, 60) : 3600) * 1000,
       cloudId: site.id,
       siteUrl: site.url,
       siteName: site.name,
