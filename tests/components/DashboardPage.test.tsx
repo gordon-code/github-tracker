@@ -1651,7 +1651,7 @@ describe("DashboardPage — events poll targeted merge", () => {
     });
   });
 
-  it("merges surfacedBy annotations via union", async () => {
+  it("merges surfacedBy annotations via union for issues", async () => {
     const sharedIssue = makeIssue({ id: 50, title: "Shared", repoFullName: "org/repo", surfacedBy: ["primary", "tracked-user"] });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [sharedIssue],
@@ -1663,8 +1663,9 @@ describe("DashboardPage — events poll targeted merge", () => {
     render(() => <DashboardPage />);
     await waitFor(() => { screen.getByText("org/repo"); });
 
+    const targetedIssue = makeIssue({ id: 50, title: "Shared updated", repoFullName: "org/repo", surfacedBy: ["primary"] });
     const targetedData: DashboardData = {
-      issues: [makeIssue({ id: 50, title: "Shared updated", repoFullName: "org/repo", surfacedBy: ["primary"] })],
+      issues: [targetedIssue],
       pullRequests: [],
       workflowRuns: [],
       errors: [],
@@ -1674,6 +1675,36 @@ describe("DashboardPage — events poll targeted merge", () => {
     await waitFor(() => {
       screen.getByText("1 issue");
     });
+
+    // handleTargetedData mutates data items in-place before merging into the store
+    expect(targetedIssue.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
+    expect(targetedIssue.surfacedBy).toHaveLength(2);
+  });
+
+  it("merges surfacedBy annotations via union for pull requests", async () => {
+    const sharedPR = makePullRequest({ id: 60, repoFullName: "org/repo", surfacedBy: ["primary", "tracked-user"] });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [sharedPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+
+    const targetedPR = makePullRequest({ id: 60, repoFullName: "org/repo", surfacedBy: ["primary"] });
+    const targetedData: DashboardData = {
+      issues: [],
+      pullRequests: [targetedPR],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    // handleTargetedData mutates data items in-place before merging into the store
+    expect(targetedPR.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
+    expect(targetedPR.surfacedBy).toHaveLength(2);
   });
 
   it("calls detectNewItems and dispatchNotifications after targeted merge", async () => {

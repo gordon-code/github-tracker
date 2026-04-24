@@ -198,19 +198,26 @@ describe("fetchTargetedRepoData", () => {
     expect(mockFetchWorkflowRuns).not.toHaveBeenCalled();
   });
 
-  it("caps targeted repos at MAX_TARGETED_REPOS=10", async () => {
+  it("caps targeted repos at MAX_TARGETED_REPOS=10 and selects the 10 most recent by latestEventAt", async () => {
     mockGetClient.mockReturnValue(makeOctokit());
 
     const summaries = new Map<string, ReturnType<typeof makeRepoSummary>>();
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 12; i++) {
       const name = `owner/repo-${i}`;
-      summaries.set(name.toLowerCase(), makeRepoSummary({ repoFullName: name }));
+      const ts = i < 2
+        ? `2026-01-0${i + 1}T00:00:00Z`
+        : `2026-02-${String(i).padStart(2, "0")}T00:00:00Z`;
+      summaries.set(name.toLowerCase(), makeRepoSummary({ repoFullName: name, latestEventAt: ts }));
     }
 
     await fetchTargetedRepoData(summaries);
 
-    const calledRepos = mockFetchIssuesAndPullRequests.mock.calls[0][1] as unknown[];
-    expect(calledRepos.length).toBeLessThanOrEqual(10);
+    const calledRepos = mockFetchIssuesAndPullRequests.mock.calls[0][1] as Array<{ owner: string; name: string }>;
+    expect(calledRepos).toHaveLength(10);
+
+    const calledNames = calledRepos.map((r) => r.name);
+    expect(calledNames).not.toContain("repo-0");
+    expect(calledNames).not.toContain("repo-1");
   });
 
   it("applies per-repo cooldown: skips repos targeted within TARGETED_COOLDOWN_MS", async () => {
@@ -228,9 +235,29 @@ describe("fetchTargetedRepoData", () => {
     mockFetchIssuesAndPullRequests.mockClear();
     await fetchTargetedRepoData(summaries);
 
-    // fetchIssuesAndPullRequests called with empty repos (cooldown filters them all)
-    const secondCallRepos = mockFetchIssuesAndPullRequests.mock.calls[0]?.[1] as unknown[] | undefined;
-    expect(secondCallRepos?.length ?? 0).toBe(0);
+    // fetchTargetedRepoData returns early (entries.length === 0) without calling fetchIssuesAndPullRequests
+    expect(mockFetchIssuesAndPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("re-targets repo after TARGETED_COOLDOWN_MS has elapsed", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetClient.mockReturnValue(makeOctokit());
+      const summaries = new Map([
+        ["owner/repo", makeRepoSummary({ repoFullName: "owner/repo" })],
+      ]);
+
+      await fetchTargetedRepoData(summaries);
+      expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(Date.now() + 120_001); // TARGETED_COOLDOWN_MS + 1ms
+      mockFetchIssuesAndPullRequests.mockClear();
+
+      await fetchTargetedRepoData(summaries);
+      expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -435,6 +462,104 @@ describe("createEventsPollCoordinator", () => {
     expect(onTargetedData).not.toHaveBeenCalled();
   });
 
+  it("does NOT call parseRepoEvents when changed=true but events.length=0 (defense-in-depth)", async () => {
+    // After the fetchUserEvents fix, changed=true with empty events can't occur in production.
+    // This tests the coordinator's defensive || guard at poll.ts: if (!changed || events.length === 0).
+    mockFetchUserEvents.mockResolvedValue({ events: [], changed: true });
+
+    const onTargetedData = vi.fn();
+
+    let coordinator: { destroy: () => void };
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        () => false,
+        onTargetedData,
+      );
+      dispose();
+    });
+
+    vi.advanceTimersByTime(0);
+    await flushPromises();
+    coordinator!.destroy();
+
+    expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+    expect(mockParseRepoEvents).not.toHaveBeenCalled();
+    expect(onTargetedData).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call onTargetedData when parseRepoEvents returns empty map (untracked repos)", async () => {
+    const event = {
+      id: "300",
+      type: "IssuesEvent",
+      actor: { id: 1, login: "user" },
+      repo: { id: 1, name: "other/untracked" },
+      payload: {},
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockFetchUserEvents.mockResolvedValue({ events: [event], changed: true });
+    mockParseRepoEvents.mockReturnValue(new Map());
+
+    const onTargetedData = vi.fn();
+
+    let coordinator: { destroy: () => void };
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        () => false,
+        onTargetedData,
+      );
+      dispose();
+    });
+
+    vi.advanceTimersByTime(0);
+    await flushPromises();
+    coordinator!.destroy();
+
+    expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+    expect(mockParseRepoEvents).toHaveBeenCalledTimes(1);
+    expect(onTargetedData).not.toHaveBeenCalled();
+  });
+
+  it("skips cycle when isFullRefreshing becomes true after fetchUserEvents resolves", async () => {
+    const event = {
+      id: "200",
+      type: "IssuesEvent",
+      actor: { id: 1, login: "user" },
+      repo: { id: 1, name: "owner/repo" },
+      payload: {},
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockFetchUserEvents.mockResolvedValue({ events: [event], changed: true });
+    mockParseRepoEvents.mockReturnValue(
+      new Map([["owner/repo", makeRepoSummary({ repoFullName: "owner/repo" })]])
+    );
+
+    const isFullRefreshing = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const onTargetedData = vi.fn();
+
+    let coordinator: { destroy: () => void };
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        isFullRefreshing,
+        onTargetedData,
+      );
+      dispose();
+    });
+
+    vi.advanceTimersByTime(0);
+    await flushPromises();
+    coordinator!.destroy();
+
+    expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+    expect(mockFetchIssuesAndPullRequests).not.toHaveBeenCalled();
+    expect(onTargetedData).not.toHaveBeenCalled();
+  });
+
   it("skips cycle when isFullRefreshing=true", async () => {
     mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
 
@@ -500,7 +625,7 @@ describe("createEventsPollCoordinator", () => {
     expect(mockFetchUserEvents).not.toHaveBeenCalled();
   });
 
-  it("destroy clears the timeout and stops cycling", async () => {
+  it("destroy before first cycle fires prevents any cycle from running", async () => {
     mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
 
     let coordinator: { destroy: () => void } | null = null;
@@ -517,16 +642,38 @@ describe("createEventsPollCoordinator", () => {
 
     coordinator!.destroy();
 
-    // Advance well past the poll interval — no further cycles should fire
-    vi.advanceTimersByTime(120_000);
+    vi.advanceTimersByTime(300_000);
     await flushPromises();
 
-    // First immediate cycle may have fired, but subsequent ones should not
-    const callsAfterDestroy = mockFetchUserEvents.mock.calls.length;
-    vi.advanceTimersByTime(120_000);
+    expect(mockFetchUserEvents).not.toHaveBeenCalled();
+  });
+
+  it("destroy after initial cycle fires stops all subsequent cycles", async () => {
+    mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
+
+    let coordinator: { destroy: () => void } | null = null;
+
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        () => false,
+        vi.fn(),
+      );
+      dispose();
+    });
+
+    vi.advanceTimersByTime(0);
     await flushPromises();
 
-    expect(mockFetchUserEvents.mock.calls.length).toBe(callsAfterDestroy);
+    expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
+
+    coordinator!.destroy();
+
+    vi.advanceTimersByTime(300_000);
+    await flushPromises();
+
+    expect(mockFetchUserEvents).toHaveBeenCalledTimes(1);
   });
 
   it("applies exponential backoff after consecutive failures", async () => {
@@ -562,6 +709,89 @@ describe("createEventsPollCoordinator", () => {
     expect(mockFetchUserEvents.mock.calls.length).toBeGreaterThan(callsAtBase);
     coordinator!.destroy();
   });
+
+  it("resets backoff to base interval after a successful cycle following failures", async () => {
+    // First cycle: error → consecutiveFailures = 1
+    mockFetchUserEvents.mockRejectedValueOnce(new Error("API error"));
+    // Second cycle: success → consecutiveFailures = 0, next schedule at base interval
+    mockFetchUserEvents.mockResolvedValue({ events: [], changed: false });
+
+    let coordinator: { destroy: () => void };
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        () => false,
+        vi.fn(),
+      );
+      dispose();
+    });
+
+    // First cycle (delay=0) — errors
+    vi.advanceTimersByTime(0);
+    await flushPromises();
+    const callsAfterError = mockFetchUserEvents.mock.calls.length;
+    expect(callsAfterError).toBe(1);
+
+    // After error: backoff = 2^1 = 2x → next at 120s
+    // Advance 120s to trigger the recovery cycle
+    vi.advanceTimersByTime(120_000);
+    await flushPromises();
+    expect(mockFetchUserEvents.mock.calls.length).toBe(2);
+
+    // After success: consecutiveFailures = 0, backoff = 2^0 = 1x → next at 60s
+    const callsAfterRecovery = mockFetchUserEvents.mock.calls.length;
+    vi.advanceTimersByTime(60_000);
+    await flushPromises();
+
+    // Should fire at base interval, not backed-off interval
+    expect(mockFetchUserEvents.mock.calls.length).toBeGreaterThan(callsAfterRecovery);
+    coordinator!.destroy();
+  });
+
+  it("discards targeted data when hot poll generation changes during fetchTargetedRepoData", async () => {
+    const event = {
+      id: "400",
+      type: "IssuesEvent",
+      actor: { id: 1, login: "user" },
+      repo: { id: 1, name: "owner/repo" },
+      payload: {},
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockFetchUserEvents.mockResolvedValue({ events: [event], changed: true });
+    mockParseRepoEvents.mockReturnValue(
+      new Map([["owner/repo", makeRepoSummary({ repoFullName: "owner/repo" })]])
+    );
+    // Simulate a full refresh completing during fetchTargetedRepoData:
+    // rebuildHotSets increments _hotPollGeneration, so we call it inside
+    // the mock to simulate concurrent full refresh
+    mockFetchIssuesAndPullRequests.mockImplementation(async () => {
+      rebuildHotSets(emptyData); // increments _hotPollGeneration
+      return { issues: [], pullRequests: [], errors: [] };
+    });
+
+    const onTargetedData = vi.fn();
+
+    let coordinator: { destroy: () => void };
+    createRoot((dispose) => {
+      coordinator = createEventsPollCoordinator(
+        () => "testuser",
+        () => new Set(["owner/repo"]),
+        () => false,
+        onTargetedData,
+      );
+      dispose();
+    });
+
+    vi.advanceTimersByTime(0);
+    await flushPromises();
+    coordinator!.destroy();
+
+    // fetchTargetedRepoData ran (fetchIssuesAndPullRequests was called),
+    // but generation changed during the fetch → targeted data discarded
+    expect(mockFetchIssuesAndPullRequests).toHaveBeenCalled();
+    expect(onTargetedData).not.toHaveBeenCalled();
+  });
 });
 
 // ── Config-change effects ─────────────────────────────────────────────────────
@@ -579,6 +809,7 @@ describe("config-change effects (QA-007)", () => {
 
     // After resetPollState, the generation is 0 (resetEventsState clears ETag/lastEventId)
     expect(getHotPollGeneration()).toBe(0);
+    expect(mockResetEventsState).toHaveBeenCalled();
   });
 
   it("clearHotSets does NOT increment generation (different from rebuildHotSets)", () => {

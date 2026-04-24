@@ -90,11 +90,26 @@ onAuthCleared(resetPollState);
 // NOTE: Mount flags are intentionally permanent (module lifetime) and NOT cleared
 // by resetPollState(). The createRoot runs once at module load; the effects
 // continue tracking config changes across auth cycles without re-mounting.
+let _userLoginMounted = false;
+let _userLoginKey = "";
 let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
 let _monitoredReposMounted = false;
 let _monitoredReposKey = "";
 createRoot(() => {
+  createEffect(() => {
+    const key = user()?.login ?? "";
+    if (!_userLoginMounted) {
+      _userLoginMounted = true;
+      _userLoginKey = key;
+      return;
+    }
+    if (key !== _userLoginKey) {
+      _userLoginKey = key;
+      untrack(() => resetEventsState());
+    }
+  });
+
   createEffect(() => {
     const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
     if (!_trackedUsersMounted) {
@@ -641,14 +656,14 @@ export async function fetchTargetedRepoData(
 
   const userLogin = user()?.login ?? "";
 
-  // Filter repos on cooldown (PERF-004: prevent API amplification)
+  // Skip repos refreshed recently — prevents API amplification when multiple events fire for the same repo
   const now = Date.now();
   let entries = [...repoSummaries.entries()].filter(([key]) => {
     const lastTargeted = _repoLastTargeted.get(key);
     return !lastTargeted || (now - lastTargeted) >= TARGETED_COOLDOWN_MS;
   });
 
-  // SEC-IMPL-003: cap targeted repos, prioritize by most recent event
+  // Cap targeted repos per cycle — prioritize by most recent event to focus on active work
   if (entries.length > MAX_TARGETED_REPOS) {
     entries.sort((a, b) => b[1].latestEventAt.localeCompare(a[1].latestEventAt));
     entries = entries.slice(0, MAX_TARGETED_REPOS);
@@ -736,11 +751,13 @@ export function seedHotSetsFromTargeted(data: DashboardData): void {
 
 // ── Events poll coordinator ──────────────────────────────────────────────────
 
+// Fixed at 60s: GitHub's Events API has a ~60s server-side cache, so polling
+// more frequently returns stale data and wastes rate-limit quota.
 const EVENTS_POLL_INTERVAL_MS = 60_000;
 
 export function createEventsPollCoordinator(
   getUsername: () => string,
-  trackedRepoNames: () => Set<string>,
+  getTrackedRepoNames: () => Set<string>,
   isFullRefreshing: () => boolean,
   onTargetedData: (data: DashboardData, affectedRepos: string[]) => void,
 ): { destroy: () => void } {
@@ -769,17 +786,20 @@ export function createEventsPollCoordinator(
 
     const username = getUsername();
     if (!username) {
+      consecutiveFailures = 0;
       schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
       return;
     }
 
     const octokit = getClient();
     if (!octokit) {
+      consecutiveFailures = 0;
       schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
       return;
     }
 
     if (isFullRefreshing()) {
+      consecutiveFailures = 0;
       schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
       return;
     }
@@ -794,7 +814,7 @@ export function createEventsPollCoordinator(
         return;
       }
 
-      const repoSummaries = parseRepoEvents(events, trackedRepoNames());
+      const repoSummaries = parseRepoEvents(events, getTrackedRepoNames());
       if (repoSummaries.size === 0) {
         consecutiveFailures = 0;
         schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
@@ -802,6 +822,7 @@ export function createEventsPollCoordinator(
       }
 
       if (isFullRefreshing()) {
+        consecutiveFailures = 0;
         schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
         return;
       }
@@ -812,6 +833,13 @@ export function createEventsPollCoordinator(
       if (myGeneration !== chainGeneration) return;
 
       if (preGeneration !== getHotPollGeneration()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      if (isFullRefreshing()) {
+        consecutiveFailures = 0;
         schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
         return;
       }

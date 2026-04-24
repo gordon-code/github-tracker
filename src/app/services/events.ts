@@ -55,7 +55,7 @@ export async function fetchUserEvents(
   octokit: GitHubOctokit,
   username: string,
 ): Promise<{ events: GitHubEvent[]; changed: boolean }> {
-  // SEC-IMPL-001: guard on non-empty login
+  // Empty login would hit the public /users//events endpoint
   if (!username) {
     return { events: [], changed: false };
   }
@@ -85,7 +85,7 @@ export async function fetchUserEvents(
       if (allEvents.length > 0) {
         _lastEventId = allEvents[0].id; // events are newest-first
       }
-      return { events: allEvents, changed: true };
+      return { events: allEvents, changed: allEvents.length > 0 };
     }
 
     // Subsequent calls: filter to only events newer than _lastEventId
@@ -126,17 +126,11 @@ export function parseRepoEvents(
 ): Map<string, RepoEventSummary> {
   const result = new Map<string, RepoEventSummary>();
 
-  // Pre-lowercase the tracked set for case-insensitive comparison
-  const trackedLower = new Set<string>();
-  for (const name of trackedRepoNames) {
-    trackedLower.add(name.toLowerCase());
-  }
-
   for (const event of events) {
     if (!ACTIONABLE_SET.has(event.type)) continue;
 
     const repoNameLower = event.repo.name.toLowerCase();
-    if (!trackedLower.has(repoNameLower)) continue;
+    if (!trackedRepoNames.has(repoNameLower)) continue;
 
     // Use the canonical casing from the event payload
     const repoFullName = event.repo.name;
