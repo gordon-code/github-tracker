@@ -1,6 +1,15 @@
 // Re-exports from shared/format for backward compat with existing importers.
 export { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount } from "../../shared/format";
 
+export function jiraStatusCategoryClass(key: string): string {
+  switch (key) {
+    case "new": return "badge-info";
+    case "indeterminate": return "badge-warning";
+    case "done": return "badge-success";
+    default: return "badge-ghost";
+  }
+}
+
 export function rateLimitCssClass(remaining: number, limit: number): string {
   if (remaining === 0) return "text-error";
   if (remaining < limit * 0.1) return "text-warning";

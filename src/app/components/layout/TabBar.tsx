@@ -23,7 +23,7 @@ export default function TabBar(props: TabBarProps) {
       <div class="border-b border-base-300">
         <div class="max-w-6xl mx-auto w-full px-4">
           <div class="flex items-center">
-            <Tabs.List class="tabs tabs-border flex-1 overflow-x-auto">
+            <Tabs.List class="tabs tabs-border flex-1 overflow-x-auto" aria-label="Dashboard tabs">
               <Tabs.Trigger value="issues" class="tab compact:tab-sm data-[selected]:tab-active">
                 Issues
                 <Show when={props.counts?.issues !== undefined}>

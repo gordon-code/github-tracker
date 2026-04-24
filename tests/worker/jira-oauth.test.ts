@@ -462,7 +462,7 @@ describe("POST /api/oauth/jira/refresh — Jira token refresh", () => {
     }
 
     const env = makeEnv();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       await worker.fetch(makeFixedIpRefreshRequest(), env);
     }
     const limited = await worker.fetch(makeFixedIpRefreshRequest(), env);

@@ -5,16 +5,24 @@ import { extractJiraKeys } from "../../shared/validation";
 
 // Plain Map — not a module-level SolidJS signal (avoids cross-test pollution)
 let _jiraKeyCache = new Map<string, JiraIssue | null>();
+const JIRA_KEY_CACHE_CAP = 500;
 
 export function clearJiraKeyCache(): void {
   _jiraKeyCache = new Map();
+}
+
+function evictIfAtCap(): void {
+  if (_jiraKeyCache.size >= JIRA_KEY_CACHE_CAP) {
+    const oldest = _jiraKeyCache.keys().next().value;
+    if (oldest !== undefined) _jiraKeyCache.delete(oldest);
+  }
 }
 
 export async function lookupKeys(
   keys: string[],
   client: IJiraClient
 ): Promise<Map<string, JiraIssue | null>> {
-  if (keys.length === 0) return _jiraKeyCache;
+  if (keys.length === 0) return new Map(_jiraKeyCache);
 
   const uncached = keys.filter((k) => !_jiraKeyCache.has(k));
 
@@ -30,6 +38,7 @@ export async function lookupKeys(
       );
 
       for (const key of uncached) {
+        evictIfAtCap();
         if (errored.has(key)) {
           _jiraKeyCache.set(key, null);
         } else if (byKey.has(key)) {
@@ -42,6 +51,7 @@ export async function lookupKeys(
       if (err instanceof JiraApiError) {
         // Cache null for all keys in the failed batch — don't throw, return partial map
         for (const key of uncached) {
+          evictIfAtCap();
           _jiraKeyCache.set(key, null);
         }
       } else {
@@ -50,6 +60,7 @@ export async function lookupKeys(
           uncached.map((k) => client.getIssue(k))
         );
         for (let i = 0; i < uncached.length; i++) {
+          evictIfAtCap();
           const r = results[i];
           _jiraKeyCache.set(uncached[i], r.status === "fulfilled" ? r.value : null);
         }
@@ -57,7 +68,7 @@ export async function lookupKeys(
     }
   }
 
-  return _jiraKeyCache;
+  return new Map(_jiraKeyCache);
 }
 
 export async function detectAndLookupJiraKeys(

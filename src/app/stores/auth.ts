@@ -4,6 +4,7 @@ import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 import { pushNotification } from "../lib/errors";
+import { clearJiraKeyCache } from "../services/jira-keys";
 import type { JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
 
@@ -76,6 +77,7 @@ export function clearJiraAuth(): void {
   localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
   _setJiraAuth(null);
   updateConfig({ jira: JiraConfigSchema.parse({}) });
+  clearJiraKeyCache();
 }
 
 // ── Jira token refresh ───────────────────────────────────────────────────────

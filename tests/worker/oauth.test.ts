@@ -428,7 +428,7 @@ describe("Worker OAuth endpoint", () => {
     const res = await worker.fetch(req, makeEnv());
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
     expect(res.headers.get("Access-Control-Allow-Methods")).toBe("POST");
-    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, X-Requested-With, cf-turnstile-response");
     // No credentials header for OAuth App (no cookies)
     expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });

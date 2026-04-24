@@ -122,8 +122,9 @@ function createIpRateLimiter(limit: number, windowMs: number): { check(ip: strin
   };
 }
 
-const tokenRateLimiter = createIpRateLimiter(10, 60_000);      // token exchange: 10/min
-const jiraTokenRateLimiter = createIpRateLimiter(10, 60_000); // jira token exchange/refresh: 10/min (separate from GitHub)
+const tokenRateLimiter = createIpRateLimiter(10, 60_000);        // token exchange: 10/min
+const jiraTokenRateLimiter = createIpRateLimiter(10, 60_000);   // jira token exchange: 10/min
+const jiraRefreshRateLimiter = createIpRateLimiter(30, 60_000); // jira token refresh: 30/min (more frequent, separate bucket)
 const sentryRateLimiter = createIpRateLimiter(15, 60_000);    // sentry tunnel: 15/min
 const cspRateLimiter = createIpRateLimiter(15, 60_000);       // csp report: 15/min
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000);  // proxy pre-gate: complements CF binding
@@ -918,7 +919,7 @@ async function handleJiraTokenRefresh(
 
   const ip = getClientIp(request);
   if (!ip) return errorResponse("invalid_request", 400, cors);
-  if (!jiraTokenRateLimiter.check(ip)) {
+  if (!jiraRefreshRateLimiter.check(ip)) {
     log("warn", "jira_token_refresh_rate_limited", {}, request);
     return new Response(JSON.stringify({ error: "rate_limited" }), {
       status: 429,
@@ -1299,7 +1300,7 @@ export default Sentry.withSentry(
     async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const origin = request.headers.get("Origin");
-      const cors = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST", "Content-Type");
+      const cors = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST", "Content-Type, X-Requested-With, cf-turnstile-response");
       const corsMatched = Object.keys(cors).length > 0;
 
       // Log all API requests (skip static asset requests to reduce noise)

@@ -47,6 +47,7 @@ export class JiraClient implements IJiraClient {
     const url = `${this.baseUrl}${path}`;
     const response = await fetch(url, {
       ...init,
+      redirect: "error",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/json",
@@ -105,6 +106,7 @@ export class JiraClient implements IJiraClient {
 
   static async getAccessibleResources(accessToken: string): Promise<JiraAccessibleResource[]> {
     const response = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
+      redirect: "error",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/json",
@@ -136,7 +138,8 @@ export class JiraProxyClient implements IJiraClient {
   constructor(
     private readonly cloudId: string,
     private readonly email: string,
-    private readonly sealed: string
+    private readonly sealed: string,
+    private readonly onResealed?: (resealed: string) => void
   ) {}
 
   private async request<T>(
@@ -189,7 +192,11 @@ export class JiraProxyClient implements IJiraClient {
     opts: { maxResults?: number; fields?: string[]; startAt?: number } = {}
   ): Promise<JiraSearchResult> {
     const { maxResults = 100, fields = DEFAULT_FIELDS, startAt = 0 } = opts;
-    return this.request<JiraSearchResult>("search", { jql, maxResults, fields, startAt });
+    const result = await this.request<JiraSearchResult>("search", { jql, maxResults, fields, startAt });
+    if (result.resealed && this.onResealed) {
+      this.onResealed(result.resealed);
+    }
+    return result;
   }
 
   async bulkFetch(keys: string[], fields: string[] = DEFAULT_FIELDS): Promise<JiraBulkFetchResult> {
@@ -197,6 +204,9 @@ export class JiraProxyClient implements IJiraClient {
       issueIdsOrKeys: keys,
       fields,
     });
+    if (result.resealed && this.onResealed) {
+      this.onResealed(result.resealed);
+    }
     return { issues: result.issues, errors: result.errors };
   }
 }

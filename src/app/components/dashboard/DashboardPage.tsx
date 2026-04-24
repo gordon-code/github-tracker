@@ -22,7 +22,7 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, isJiraAuthenticated, ensureJiraTokenValid, clearJiraAuth } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, ensureJiraTokenValid, clearJiraAuth } from "../../stores/auth";
 import { JiraClient, JiraProxyClient, JiraApiError } from "../../services/jira-client";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { detectAndLookupJiraKeys } from "../../services/jira-keys";
@@ -305,20 +305,20 @@ export default function DashboardPage() {
     if (!auth) return null;
     if (method === "token") {
       if (!auth.email) return null;
-      return new JiraProxyClient(auth.cloudId, auth.email, auth.accessToken);
+      return new JiraProxyClient(auth.cloudId, auth.email, auth.accessToken, (resealed) => {
+        const cur = jiraAuth();
+        if (cur) setJiraAuth({ ...cur, accessToken: resealed });
+      });
     }
     return new JiraClient(auth.cloudId, async () => {
       await ensureJiraTokenValid();
-      return jiraAuth()!.accessToken;
+      const currentAuth = jiraAuth();
+      if (!currentAuth) throw new Error("Jira auth cleared during token refresh");
+      return currentAuth.accessToken;
     });
   });
 
   async function fetchJiraAssigned(): Promise<void> {
-    const valid = await ensureJiraTokenValid();
-    if (!valid) {
-      pushNotification("jira", "Jira token expired — reconnect in Settings", "warning");
-      return;
-    }
     const client = jiraClient();
     if (!client) return;
     try {
@@ -436,7 +436,7 @@ export default function DashboardPage() {
   // Redirect away from a custom tab that was deleted while active
   createEffect(() => {
     const tab = activeTab();
-    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) {
+    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) {
       handleTabChange("issues");
     }
   });
@@ -811,7 +811,7 @@ export default function DashboardPage() {
     ];
     void detectAndLookupJiraKeys(items, client).then((map) => {
       setJiraKeyMap(map);
-    });
+    }).catch(handleJiraError);
   });
 
   // Jira assigned issues poll: fires after each GitHub full refresh cycle

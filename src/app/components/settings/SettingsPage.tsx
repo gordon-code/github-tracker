@@ -219,6 +219,7 @@ export default function SettingsPage() {
   const [jiraApiEmail, setJiraApiEmail] = createSignal("");
   const [jiraApiToken, setJiraApiToken] = createSignal("");
   const [jiraApiCloudId, setJiraApiCloudId] = createSignal("");
+  const [jiraApiSiteUrl, setJiraApiSiteUrl] = createSignal("");
   const [jiraApiConnecting, setJiraApiConnecting] = createSignal(false);
   const [jiraApiError, setJiraApiError] = createSignal<string | null>(null);
   const [jiraApiMode, setJiraApiMode] = createSignal(false);
@@ -236,8 +237,9 @@ export default function SettingsPage() {
     const email = jiraApiEmail().trim();
     const token = jiraApiToken().trim();
     const cloudId = jiraApiCloudId().trim();
-    if (!email || !token || !cloudId) {
-      setJiraApiError("Email, API token, and Cloud ID are all required.");
+    const siteUrl = jiraApiSiteUrl().trim().replace(/\/$/, "");
+    if (!email || !token || !cloudId || !siteUrl) {
+      setJiraApiError("Email, API token, Cloud ID, and site URL are all required.");
       return;
     }
     setJiraApiConnecting(true);
@@ -261,19 +263,23 @@ export default function SettingsPage() {
         return;
       }
       // Number.MAX_SAFE_INTEGER (not Infinity — Infinity serializes to null in JSON)
+      const siteName = (() => {
+        try { return new URL(siteUrl).hostname.split(".")[0]; } catch { return cloudId; }
+      })();
       setJiraAuth({
         accessToken: sealedToken,
         sealedRefreshToken: "",
         expiresAt: Number.MAX_SAFE_INTEGER,
         cloudId,
-        siteUrl: `https://${cloudId}.atlassian.net`,
-        siteName: cloudId,
+        siteUrl,
+        siteName,
         email,
       });
       updateJiraConfig({ enabled: true, cloudId, email, authMethod: "token" });
       setJiraApiEmail("");
       setJiraApiToken("");
       setJiraApiCloudId("");
+      setJiraApiSiteUrl("");
       setJiraApiMode(false);
     } catch {
       setJiraApiError("A network error occurred. Please try again.");
@@ -896,6 +902,14 @@ export default function SettingsPage() {
                           class="input input-sm w-full"
                           aria-label="Jira Cloud ID"
                         />
+                        <input
+                          type="url"
+                          placeholder="Site URL (e.g. https://yoursite.atlassian.net)"
+                          value={jiraApiSiteUrl()}
+                          onInput={(e) => setJiraApiSiteUrl(e.currentTarget.value)}
+                          class="input input-sm w-full"
+                          aria-label="Jira site URL"
+                        />
                         <Show when={jiraApiError()}>
                           <p class="text-xs text-error">{jiraApiError()}</p>
                         </Show>
@@ -910,7 +924,7 @@ export default function SettingsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); }}
+                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSiteUrl(""); }}
                             class="btn btn-sm btn-ghost"
                           >
                             Cancel
@@ -933,6 +947,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => setJiraApiMode(true)}
+                        aria-expanded={jiraApiMode()}
                         class="btn btn-sm btn-outline"
                       >
                         Use API token

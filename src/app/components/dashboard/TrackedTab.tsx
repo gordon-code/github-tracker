@@ -117,7 +117,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                       disabled={isFirst()}
                       aria-label={`Move up: ${item.title}`}
                       onClick={() => {
-                        if (item.source === "jira") handleJiraMove(item.jiraKey!, "up");
+                        if (item.source === "jira" && item.jiraKey) handleJiraMove(item.jiraKey, "up");
                         else handleGitHubMove(item.id, item.type as "issue" | "pullRequest", "up");
                       }}
                     >
@@ -130,7 +130,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                       disabled={isLast()}
                       aria-label={`Move down: ${item.title}`}
                       onClick={() => {
-                        if (item.source === "jira") handleJiraMove(item.jiraKey!, "down");
+                        if (item.source === "jira" && item.jiraKey) handleJiraMove(item.jiraKey, "down");
                         else handleGitHubMove(item.id, item.type as "issue" | "pullRequest", "down");
                       }}
                     >
@@ -150,9 +150,10 @@ export default function TrackedTab(props: TrackedTabProps) {
                           <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 compact:gap-1 flex-wrap">
                               <a
-                                href={item.htmlUrl ?? "#"}
+                                href={item.htmlUrl ?? ""}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={(e) => { if (!item.htmlUrl) e.preventDefault(); }}
                                 class="font-mono text-xs text-primary hover:underline shrink-0"
                               >
                                 {item.jiraKey}
@@ -172,8 +173,8 @@ export default function TrackedTab(props: TrackedTabProps) {
                           <Tooltip content="Unpin Jira issue">
                             <button
                               class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
-                              aria-label={`Unpin ${item.jiraKey} ${item.title}`}
-                              onClick={() => untrackJiraItem(item.jiraKey!)}
+                              aria-label={`Unpin ${item.jiraKey ?? "Jira issue"} ${item.title}`}
+                              onClick={() => { if (item.jiraKey) untrackJiraItem(item.jiraKey); }}
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
                             </button>

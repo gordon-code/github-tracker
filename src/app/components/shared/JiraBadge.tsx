@@ -1,19 +1,11 @@
 import { Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
+import { jiraStatusCategoryClass } from "../../lib/format";
 
 interface JiraBadgeProps {
   issueKey: string;
   issue: JiraIssue | null | undefined;
   siteUrl: string;
-}
-
-function statusCategoryClass(key: string): string {
-  switch (key) {
-    case "new": return "badge-info";
-    case "indeterminate": return "badge-warning";
-    case "done": return "badge-success";
-    default: return "badge-ghost";
-  }
 }
 
 export default function JiraBadge(props: JiraBadgeProps) {
@@ -32,7 +24,7 @@ export default function JiraBadge(props: JiraBadgeProps) {
           href={`${props.siteUrl}/browse/${props.issueKey}`}
           target="_blank"
           rel="noopener noreferrer"
-          class={`badge badge-xs font-mono text-[10px] no-underline ${statusCategoryClass(props.issue!.fields.status.statusCategory.key)}`}
+          class={`badge badge-xs font-mono text-[10px] no-underline ${jiraStatusCategoryClass(props.issue!.fields.status.statusCategory.key)}`}
           title={`${props.issueKey}: ${props.issue!.fields.status.name}`}
         >
           {props.issueKey}

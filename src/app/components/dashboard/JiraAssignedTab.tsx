@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem } from "../../stores/view";
 import { config } from "../../stores/config";
+import { jiraStatusCategoryClass } from "../../lib/format";
 import PaginationControls from "../shared/PaginationControls";
 import FilterPopover from "../shared/FilterPopover";
 import LoadingSpinner from "../shared/LoadingSpinner";
@@ -9,19 +10,14 @@ import LoadingSpinner from "../shared/LoadingSpinner";
 const JIRA_FILTER_DEFAULTS = JiraFiltersSchema.parse({});
 const ITEMS_PER_PAGE = 25;
 
+function jiraHash(key: string): number {
+  return key.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+}
+
 interface JiraAssignedTabProps {
   issues: JiraIssue[];
   loading: boolean;
   siteUrl: string;
-}
-
-function statusCategoryClass(key: string): string {
-  switch (key) {
-    case "new": return "badge-info";
-    case "indeterminate": return "badge-warning";
-    case "done": return "badge-success";
-    default: return "badge-ghost";
-  }
 }
 
 const STATUS_CATEGORY_OPTIONS = [
@@ -140,8 +136,6 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                       const isPinned = () => viewState.trackedItems.some(
                         (t) => t.source === "jira" && t.jiraKey === issue.key
                       );
-                      const jiraHash = (key: string) =>
-                        key.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
                       return (
                           <div role="listitem" class="px-4 py-3 flex items-start gap-3">
                             <div class="flex-1 min-w-0">
@@ -155,7 +149,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   {issue.key}
                                 </a>
                                 <span
-                                  class={`badge badge-xs ${statusCategoryClass(issue.fields.status.statusCategory.key)}`}
+                                  class={`badge badge-xs ${jiraStatusCategoryClass(issue.fields.status.statusCategory.key)}`}
                                 >
                                   {issue.fields.status.name}
                                 </span>
