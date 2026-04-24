@@ -40,6 +40,13 @@ vi.mock("../../src/app/services/github", () => ({
   getClient: () => null,
 }));
 
+// Mock notifications lib
+vi.mock("../../src/app/lib/notifications", () => ({
+  detectNewItems: vi.fn(() => []),
+  dispatchNotifications: vi.fn(),
+  _resetNotificationState: vi.fn(),
+}));
+
 // Mock errors lib — return empty by default
 vi.mock("../../src/app/lib/errors", () => ({
   getErrors: vi.fn().mockReturnValue([]),
@@ -115,7 +122,9 @@ beforeEach(async () => {
         return { destroy: vi.fn() };
       }
     ),
+    createEventsPollCoordinator: vi.fn().mockReturnValue({ destroy: vi.fn() }),
     rebuildHotSets: vi.fn(),
+    seedHotSetsFromTargeted: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
   }));
@@ -582,61 +591,6 @@ describe("DashboardPage — data flow", () => {
     screen.getByRole("status");
   });
 
-  it("skipped fetch (notifications gate) keeps existing data", async () => {
-    const issues = [makeIssue({ id: 5, title: "Existing issue" })];
-    // First call: returns real data; subsequent calls: skipped=true
-    vi.mocked(pollService.fetchAllData)
-      .mockResolvedValueOnce({ issues, pullRequests: [], workflowRuns: [], errors: [] })
-      .mockResolvedValue({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true });
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      // Repo group header visible (collapsed — verify data reached the tab)
-      screen.getByText("owner/repo");
-      screen.getByText("1 issue");
-    });
-
-    // Trigger a second fetch via the captured callback — skipped result should not erase data
-    await capturedFetchAll?.();
-    // Data still present (collapsed repo group summary persists)
-    screen.getByText("1 issue");
-  });
-
-  it("auto-prune runs after first non-skipped poll even if a skipped poll occurred first", async () => {
-    configStore.updateConfig({
-      enableTracking: true,
-      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
-    });
-    viewStore.updateViewState({
-      trackedItems: [{
-        id: 555,
-        number: 55,
-        type: "issue" as const,
-        repoFullName: "org/repo",
-        title: "Will be pruned after non-skipped poll",
-        addedAt: Date.now(),
-      }],
-    });
-
-    // First call: skipped — hasFetchedFresh must stay false, no pruning
-    vi.mocked(pollService.fetchAllData)
-      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true })
-      // Second call: real data with empty issues — item 555 absent means closed
-      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [] });
-
-    render(() => <DashboardPage />);
-
-    // After the first (skipped) fetch, tracked item must NOT be pruned yet
-    await waitFor(() => {
-      expect(viewStore.viewState.trackedItems.length).toBe(1);
-    });
-
-    // Trigger a second fetch — non-skipped, sets hasFetchedFresh=true, triggers prune
-    await capturedFetchAll?.();
-
-    await waitFor(() => {
-      expect(viewStore.viewState.trackedItems.length).toBe(0);
-    });
-  });
 });
 
 describe("DashboardPage — auth error handling", () => {
