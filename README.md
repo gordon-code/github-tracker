@@ -59,7 +59,7 @@ A second, faster poll loop (default 30s, configurable 10–120s) targets only in
 
 ### Desktop Notifications
 
-Browser notifications for new issues, PRs, and failed runs. Per-type toggles in settings. Notification permission requested on first enable. Uses the GitHub Notifications API as a change-detection gate when the `notifications` scope is available.
+Browser notifications for new issues, PRs, and failed runs. Per-type toggles in settings. Notification permission requested on first enable. New items are detected via the Events API polling loop and full refresh cycles.
 
 ### Repo Pinning and Reordering
 

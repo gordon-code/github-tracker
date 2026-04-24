@@ -479,13 +479,13 @@ For detailed per-source API call counts, see Settings > API Usage.
 
 **PAT vs OAuth: what is the difference?**
 
-OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features including the notifications background-poll optimization. Classic PATs with the correct scopes (`repo`, `read:org`, `notifications`) behave identically to OAuth.
+OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features. Classic PATs with the correct scopes (`repo`, `read:org`) behave identically to OAuth.
 
-Fine-grained PATs are limited to one organization at a time, do not support the `notifications` scope, and therefore cannot use the background-poll optimization — the full poll pauses in hidden tabs, and a warning appears in the notification drawer.
+Fine-grained PATs are limited to one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
 
 **Data looks stale after switching back to the tab.**
 
-When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. If the notifications gate is unavailable (fine-grained PAT), polling was paused while the tab was hidden — the catch-up fetch provides a single refresh on return. To ensure continuous background updates, use OAuth or a classic PAT with the `notifications` scope.
+When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The events poll continues running in background tabs using ETag conditional requests (zero rate-limit cost), so changes are detected even while the tab is hidden.
 
 **I want to stop tracking a repository.**
 

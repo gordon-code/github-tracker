@@ -492,19 +492,21 @@ export default function DashboardPage() {
           // Seed hot sets with in-flight items from targeted data
           seedHotSetsFromTargeted(data);
 
-          // Persist cache — use existing lastRefreshedAt (targeted merge is not a full refresh)
-          const cachePayload = {
+          // Persist cache — capture snapshot eagerly (before any concurrent hot poll
+          // can mutate the store via produce), then defer the write to avoid blocking paint.
+          const lastRefreshed = dashboardData.lastRefreshedAt;
+          const snapshot = {
             _v: CACHE_VERSION,
-            issues: dashboardData.issues,
-            pullRequests: dashboardData.pullRequests,
-            workflowRuns: dashboardData.workflowRuns,
-            lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+            issues: [...dashboardData.issues],
+            pullRequests: [...dashboardData.pullRequests],
+            workflowRuns: [...dashboardData.workflowRuns],
+            lastRefreshedAt: lastRefreshed?.toISOString() ?? null,
           };
           setTimeout(() => {
             try {
-              localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
+              localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
             } catch {
-              pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
+              // Non-fatal
             }
           }, 0);
         },

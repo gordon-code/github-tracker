@@ -75,6 +75,8 @@ export function resetPollState(): void {
   _resetNotificationState();
   resetEmptyActionRepos();
   resetNotificationState();
+  resetEventsState();
+  _repoLastTargeted.clear();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
@@ -626,6 +628,8 @@ export function createHotPollCoordinator(
 // ── Targeted refresh (events-driven) ─────────────────────────────────────────
 
 const MAX_TARGETED_REPOS = 10;
+const TARGETED_COOLDOWN_MS = 2 * 60 * 1000;
+const _repoLastTargeted = new Map<string, number>();
 
 export async function fetchTargetedRepoData(
   repoSummaries: Map<string, RepoEventSummary>,
@@ -637,24 +641,40 @@ export async function fetchTargetedRepoData(
 
   const userLogin = user()?.login ?? "";
 
+  // Filter repos on cooldown (PERF-004: prevent API amplification)
+  const now = Date.now();
+  let entries = [...repoSummaries.entries()].filter(([key]) => {
+    const lastTargeted = _repoLastTargeted.get(key);
+    return !lastTargeted || (now - lastTargeted) >= TARGETED_COOLDOWN_MS;
+  });
+
   // SEC-IMPL-003: cap targeted repos, prioritize by most recent event
-  let entries = [...repoSummaries.entries()];
   if (entries.length > MAX_TARGETED_REPOS) {
     entries.sort((a, b) => b[1].latestEventAt.localeCompare(a[1].latestEventAt));
     entries = entries.slice(0, MAX_TARGETED_REPOS);
   }
 
-  const targetRepos = entries.map(([, summary]) => {
-    const parts = summary.repoFullName.split("/");
-    return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
-  });
+  // Record cooldown timestamps
+  for (const [key] of entries) {
+    _repoLastTargeted.set(key, now);
+  }
+
+  const targetRepos = entries
+    .map(([, summary]) => {
+      const parts = summary.repoFullName.split("/");
+      if (parts.length !== 2) return null;
+      return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
   const workflowRepos = entries
     .filter(([, summary]) => summary.hasWorkflowActivity)
     .map(([, summary]) => {
       const parts = summary.repoFullName.split("/");
+      if (parts.length !== 2) return null;
       return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
-    });
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
     fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),
