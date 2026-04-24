@@ -73,11 +73,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// ── qa-1: First call returns data and updates _lastSuccessfulFetch ────────────
+// ── qa-1: fetchAllData returns data ──────────────────────────────────────────
 
 describe("fetchAllData — first call", () => {
 
-  it("returns data from all fetches on first call", async () => {
+  it("returns data from all fetches", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
@@ -96,10 +96,9 @@ describe("fetchAllData — first call", () => {
     expect(result.pullRequests).toEqual([]);
     expect(result.workflowRuns).toEqual([]);
     expect(result.errors).toEqual([]);
-    expect(result.skipped).toBeUndefined();
   });
 
-  it("calls both fetch functions on first call (no notification gate)", async () => {
+  it("calls both fetch functions unconditionally on every call", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
@@ -114,9 +113,16 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    // First call: no _lastSuccessfulFetch, so notifications gate is skipped
+    // No notification gate — both data fetches always run
     expect(mockOctokit.request).not.toHaveBeenCalled();
-    // Both data fetches should run
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
+    expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
+
+    // Second call — still unconditional, no gate check
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
+    vi.mocked(fetchWorkflowRuns).mockClear();
+    await fetchAllData();
+    expect(mockOctokit.request).not.toHaveBeenCalled();
     expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
     expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
   });
@@ -145,111 +151,10 @@ describe("fetchAllData — first call", () => {
       config.maxRunsPerWorkflow
     );
   });
-
-  it("sets _lastSuccessfulFetch so second call checks notification gate", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — no gate check
-    await fetchAllData();
-    expect(mockOctokit.request).not.toHaveBeenCalled();
-
-    // Second call — _lastSuccessfulFetch is set, gate checks notifications
-    // Return 200 for notifications (something changed)
-    mockOctokit.request.mockResolvedValueOnce({
-      data: [],
-      headers: { "last-modified": "Thu, 20 Mar 2026 12:00:00 GMT" },
-    });
-
-    await fetchAllData();
-
-    expect(mockOctokit.request).toHaveBeenCalledOnce();
-    expect(mockOctokit.request).toHaveBeenCalledWith(
-      "GET /notifications",
-      expect.objectContaining({ per_page: 1 })
-    );
-  });
 });
 
-// ── qa-1: Notification gate skips full fetch when nothing changed ─────────────
 
-describe("fetchAllData — notification gate skip", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("returns { skipped: true } when hasNotificationChanges returns false (304)", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call to set _lastSuccessfulFetch
-    await fetchAllData();
-
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-    vi.mocked(fetchWorkflowRuns).mockClear();
-
-    // Simulate 304 from notifications — nothing changed
-    mockOctokit.request.mockRejectedValueOnce({ status: 304 });
-
-    const result = await fetchAllData();
-
-    expect(result.skipped).toBe(true);
-    // Data fetches should NOT have been called
-    expect(fetchIssuesAndPullRequests).not.toHaveBeenCalled();
-    expect(fetchWorkflowRuns).not.toHaveBeenCalled();
-  });
-
-  it("forces full fetch when staleness exceeds 10 minutes even if gate would skip", async () => {
-    vi.useFakeTimers();
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — sets _lastSuccessfulFetch
-    await fetchAllData();
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-
-    // Advance time past 10 minutes
-    vi.advanceTimersByTime(11 * 60 * 1000);
-
-    // Even though notifications would 304, staleness cap forces a full fetch
-    mockOctokit.request.mockRejectedValueOnce({ status: 304 });
-
-    const result = await fetchAllData();
-
-    // Should NOT be skipped — staleness cap bypasses the gate
-    expect(result.skipped).toBeUndefined();
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
-  });
-});
-
-// ── qa-1: All fetches fail — errors aggregated, _lastSuccessfulFetch not updated ──
+// ── All fetches fail — errors aggregated ─────────────────────────────────────
 
 describe("fetchAllData — all fetches fail", () => {
   it("aggregates top-level errors when all fetches reject", async () => {
@@ -275,10 +180,9 @@ describe("fetchAllData — all fetches fail", () => {
     expect(result.issues).toEqual([]);
     expect(result.pullRequests).toEqual([]);
     expect(result.workflowRuns).toEqual([]);
-    expect(result.skipped).toBeUndefined();
   });
 
-  it("does NOT update _lastSuccessfulFetch when all fetches reject", async () => {
+  it("fetches are still attempted on subsequent calls even after all fail", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
@@ -291,20 +195,18 @@ describe("fetchAllData — all fetches fail", () => {
 
     const { fetchAllData } = await import("../../src/app/services/poll");
 
-    // First call — all fail, so _lastSuccessfulFetch should NOT be set
     await fetchAllData();
 
-    // Second call — if _lastSuccessfulFetch were set, a notification request would be made
-    // Since all failed, it should NOT be set → no notification request
-    mockOctokit.request.mockClear();
+    // Second call — fetches run again (no gate to suppress them)
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
+    vi.mocked(fetchWorkflowRuns).mockClear();
     vi.mocked(fetchIssuesAndPullRequests).mockRejectedValue(new Error("fail"));
     vi.mocked(fetchWorkflowRuns).mockRejectedValue(new Error("fail"));
 
-
     await fetchAllData();
 
-    // No notification gate check — _lastSuccessfulFetch was never set
-    expect(mockOctokit.request).not.toHaveBeenCalled();
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
+    expect(fetchWorkflowRuns).toHaveBeenCalled();
   });
 });
 
@@ -362,234 +264,6 @@ describe("fetchAllData — no client", () => {
   });
 });
 
-// ── qa-4: resetPollState after logout re-enables notification gate ────────────
-
-describe("fetchAllData — resetPollState via onAuthCleared", () => {
-  it("re-enables notification gate after logout (onAuthCleared callback invocation)", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const { onAuthCleared } = await import("../../src/app/stores/auth");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    // Import poll.ts — this triggers onAuthCleared(resetPollState) at module scope.
-    // api-usage.ts also registers clearUsageData, so onAuthCleared is called multiple times.
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // onAuthCleared mock must have been called (multiple registrations expected now).
-    // Collect all callbacks and invoke them all — mirrors real clearAuth() behavior,
-    // which fires every registered callback. This avoids fragile positional indexing.
-    expect(vi.mocked(onAuthCleared)).toHaveBeenCalled();
-    const allAuthClearedCallbacks = vi.mocked(onAuthCleared).mock.calls.map((c) => c[0] as () => void);
-    const capturedAuthClearedCb = () => { for (const cb of allAuthClearedCallbacks) cb(); };
-
-    // First call — sets _lastSuccessfulFetch
-    await fetchAllData();
-
-    // Second call — gate fires a 403, which sets _notifGateDisabled = true
-    mockOctokit.request.mockRejectedValueOnce({ status: 403 });
-    await fetchAllData();
-
-    // Gate is now disabled; third call should NOT call GET /notifications
-    mockOctokit.request.mockClear();
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-    await fetchAllData();
-    expect(mockOctokit.request).not.toHaveBeenCalled();
-
-    // Invoke the logout callback — resets _notifGateDisabled and _lastSuccessfulFetch
-    capturedAuthClearedCb();
-
-    // First call after logout: _lastSuccessfulFetch is null → no gate check
-    mockOctokit.request.mockClear();
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-    await fetchAllData();
-    // No notification gate on first call after reset (no _lastSuccessfulFetch)
-    expect(mockOctokit.request).not.toHaveBeenCalled();
-
-    // Second call after logout: _lastSuccessfulFetch is now set, gate fires again
-    mockOctokit.request.mockResolvedValueOnce({
-      data: [],
-      headers: { "last-modified": "Thu, 20 Mar 2026 12:00:00 GMT" },
-    });
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-    await fetchAllData();
-    // GET /notifications was called — gate is active again (not disabled)
-    expect(mockOctokit.request).toHaveBeenCalledWith(
-      "GET /notifications",
-      expect.objectContaining({ per_page: 1 })
-    );
-  });
-});
-
-// ── qa-5: If-Modified-Since header on second notification call ────────────────
-
-describe("fetchAllData — If-Modified-Since header", () => {
-  it("sends If-Modified-Since header from first response on second GET /notifications call", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — no gate (no _lastSuccessfulFetch), sets _lastSuccessfulFetch
-    await fetchAllData();
-
-    // Second call — gate fires 200 response with last-modified header
-    const lastModified = "Fri, 21 Mar 2026 08:00:00 GMT";
-    mockOctokit.request.mockResolvedValueOnce({
-      data: [],
-      headers: { "last-modified": lastModified },
-    });
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-    await fetchAllData();
-
-    // Third call — gate should send If-Modified-Since from the second call's response
-    mockOctokit.request.mockResolvedValueOnce({
-      data: [],
-      headers: {},
-    });
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-    await fetchAllData();
-
-    // Inspect the third GET /notifications call for the If-Modified-Since header
-    const notifCalls = mockOctokit.request.mock.calls.filter(
-      (c) => c[0] === "GET /notifications"
-    );
-    expect(notifCalls.length).toBeGreaterThanOrEqual(2);
-    const thirdCallParams = (notifCalls[notifCalls.length - 1] as unknown[])[1] as Record<string, unknown>;
-    expect((thirdCallParams["headers"] as Record<string, string>)["If-Modified-Since"]).toBe(lastModified);
-  });
-});
-
-// ── qa-2: hasNotificationChanges 403 auto-disable ────────────────────────────
-
-describe("fetchAllData — notification gate 403 auto-disable", () => {
-  it("disables notification gate after 403 and skips it on subsequent calls", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const { pushNotification } = await import("../../src/app/lib/errors");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — sets _lastSuccessfulFetch
-    await fetchAllData();
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-
-    // Second call — gate checks notifications, gets 403
-    mockOctokit.request.mockRejectedValueOnce({ status: 403 });
-    await fetchAllData();
-
-    // Gate received 403 → _notifGateDisabled = true → pushNotification called
-    expect(pushNotification).toHaveBeenCalledWith(
-      "notifications",
-      expect.stringContaining("403"),
-      "warning"
-    );
-
-    // Third call — gate should be DISABLED, no notifications request
-    mockOctokit.request.mockClear();
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-    vi.mocked(fetchWorkflowRuns).mockClear();
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-    await fetchAllData();
-
-    expect(mockOctokit.request).not.toHaveBeenCalled();
-    // The data fetches still run
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
-    expect(fetchWorkflowRuns).toHaveBeenCalled();
-  });
-
-  it("still fetches data on the same call that triggers the 403", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — sets _lastSuccessfulFetch
-    await fetchAllData();
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-    vi.mocked(fetchWorkflowRuns).mockClear();
-
-    // Second call — gate returns 403; hasNotificationChanges returns true → full fetch runs
-    mockOctokit.request.mockRejectedValueOnce({ status: 403 });
-
-    const result = await fetchAllData();
-
-    expect(result.skipped).toBeUndefined();
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalled();
-    expect(fetchWorkflowRuns).toHaveBeenCalled();
-  });
-
-  it("shows PAT-specific 403 notification when authMethod is 'pat'", async () => {
-    vi.resetModules();
-
-    // Override config mock to include authMethod: "pat" for this test
-    vi.doMock("../../src/app/stores/config", () => ({
-      config: {
-        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
-        maxWorkflowsPerRepo: 5,
-        maxRunsPerWorkflow: 3,
-        authMethod: "pat",
-      },
-    }));
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const { pushNotification } = await import("../../src/app/lib/errors");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — sets _lastSuccessfulFetch
-    await fetchAllData();
-
-    // Second call — gate fires a 403
-    mockOctokit.request.mockRejectedValueOnce({ status: 403 });
-    await fetchAllData();
-
-    // PAT-specific message should mention fine-grained tokens
-    expect(pushNotification).toHaveBeenCalledWith(
-      "notifications",
-      expect.stringContaining("fine-grained tokens do not support notifications"),
-      "warning"
-    );
-  });
-});
 
 // ── Upstream repos + tracked users integration ────────────────────────────────
 
@@ -893,40 +567,6 @@ describe("fetchAllData — 401 propagation from allSettled", () => {
   });
 });
 
-// ── force bypass: { force: true } skips notification gate even after recent fetch ─
-
-describe("fetchAllData — force bypass", () => {
-  it("proceeds with full fetch when force:true even if hasNotificationChanges would skip", async () => {
-    vi.resetModules();
-
-    const { getClient } = await import("../../src/app/services/github");
-    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
-    const mockOctokit = makeMockOctokit();
-    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
-    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
-    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
-
-    const { fetchAllData } = await import("../../src/app/services/poll");
-
-    // First call — sets _lastSuccessfulFetch so the gate would normally engage
-    await fetchAllData();
-
-    vi.mocked(fetchIssuesAndPullRequests).mockClear();
-    vi.mocked(fetchWorkflowRuns).mockClear();
-    mockOctokit.request.mockClear();
-
-    // Second call with force:true — gate must be bypassed entirely (no 304 check)
-    const result = await fetchAllData(undefined, { force: true });
-
-    // Must not be skipped — force bypasses the notification gate
-    expect(result.skipped).toBeUndefined();
-    // Data fetches must have run
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
-    expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
-    // Notification API must NOT have been called (gate is skipped entirely)
-    expect(mockOctokit.request).not.toHaveBeenCalled();
-  });
-});
 
 // ── qa-4: Concurrency verification ────────────────────────────────────────────
 

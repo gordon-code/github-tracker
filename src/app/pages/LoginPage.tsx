@@ -129,7 +129,6 @@ export default function LoginPage() {
                     <ul class="list-disc list-inside space-y-0.5 text-base-content/70">
                       <li><code>repo</code></li>
                       <li><code>read:org</code> <span class="text-base-content/40">(under admin:org)</span></li>
-                      <li><code>notifications</code></li>
                     </ul>
                   </div>
 
@@ -142,7 +141,7 @@ export default function LoginPage() {
                     >
                       Fine-grained tokens
                     </a>
-                    {" "}also work, but only access one org at a time and do not support notifications. Add read-only permissions for Actions, Contents, Issues, and Pull requests.
+                    {" "}also work, but only access one org at a time. Add read-only permissions for Actions, Contents, Issues, and Pull requests.
                   </p>
                 </div>
 

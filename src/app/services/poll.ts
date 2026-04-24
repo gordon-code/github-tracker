@@ -18,8 +18,9 @@ import {
   type HotWorkflowRunUpdate,
   resetEmptyActionRepos,
 } from "./api";
+import { fetchUserEvents, parseRepoEvents, resetEventsState, type RepoEventSummary } from "./events";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, pushNotification, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
+import { pushError, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,8 +29,6 @@ export interface DashboardData {
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
   errors: ApiError[];
-  /** True when notifications gate determined nothing changed — consumer should keep existing data */
-  skipped?: boolean;
 }
 
 export interface PollCoordinator {
@@ -38,11 +37,6 @@ export interface PollCoordinator {
   manualRefresh: () => void;
   destroy: () => void;
 }
-
-// ── Notifications gate ───────────────────────────────────────────────────────
-
-let _notifLastModified: string | null = null;
-let _notifGateDisabled = false; // Disabled after 403 (notifications scope not granted)
 
 // ── Hot poll state ────────────────────────────────────────────────────────────
 
@@ -73,16 +67,7 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
-/** Simulate 403 on /notifications — disables the notifications gate.
- * Used by tests to exercise the conditional background-poll guard. */
-export function disableNotifGate(): void {
-  _notifGateDisabled = true;
-}
-
 export function resetPollState(): void {
-  _notifLastModified = null;
-  _lastSuccessfulFetch = null;
-  _notifGateDisabled = false;
   _hotPRs.clear();
   _hotPRsByDbId.clear();
   _hotRuns.clear();
@@ -90,6 +75,8 @@ export function resetPollState(): void {
   _resetNotificationState();
   resetEmptyActionRepos();
   resetNotificationState();
+  resetEventsState();
+  _repoLastTargeted.clear();
 }
 
 // Auto-reset poll state on logout (avoids circular dep with auth.ts)
@@ -103,11 +90,26 @@ onAuthCleared(resetPollState);
 // NOTE: Mount flags are intentionally permanent (module lifetime) and NOT cleared
 // by resetPollState(). The createRoot runs once at module load; the effects
 // continue tracking config changes across auth cycles without re-mounting.
+let _userLoginMounted = false;
+let _userLoginKey = "";
 let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
 let _monitoredReposMounted = false;
 let _monitoredReposKey = "";
 createRoot(() => {
+  createEffect(() => {
+    const key = user()?.login ?? "";
+    if (!_userLoginMounted) {
+      _userLoginMounted = true;
+      _userLoginKey = key;
+      return;
+    }
+    if (key !== _userLoginKey) {
+      _userLoginKey = key;
+      untrack(() => resetEventsState());
+    }
+  });
+
   createEffect(() => {
     const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
     if (!_trackedUsersMounted) {
@@ -117,8 +119,10 @@ createRoot(() => {
     }
     if (key !== _trackedUsersKey) {
       _trackedUsersKey = key;
-      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
-      untrack(() => _resetNotificationState());
+      untrack(() => {
+        _resetNotificationState();
+        resetEventsState();
+      });
     }
   });
 
@@ -131,78 +135,13 @@ createRoot(() => {
     }
     if (key !== _monitoredReposKey) {
       _monitoredReposKey = key;
-      _lastSuccessfulFetch = null; // Force next poll to bypass notifications gate
-      untrack(() => _resetNotificationState());
+      untrack(() => {
+        _resetNotificationState();
+        resetEventsState();
+      });
     }
   });
 });
-
-/**
- * Checks if anything changed since last poll using the Notifications API.
- * Returns true if there are new notifications (or first check), false if unchanged.
- * Uses If-Modified-Since for zero-cost 304 checks (doesn't count against rate limit).
- *
- * Auto-disables after a 403 (notifications scope not granted) to stop wasting
- * rate limit tokens on requests that will always fail.
- */
-async function hasNotificationChanges(): Promise<boolean> {
-  if (_notifGateDisabled) return true;
-
-  const octokit = getClient();
-  if (!octokit) return true;
-
-  try {
-    const headers: Record<string, string> = {};
-    if (_notifLastModified) {
-      headers["If-Modified-Since"] = _notifLastModified;
-    }
-
-    const response = await octokit.request("GET /notifications", {
-      per_page: 1,
-      headers,
-    });
-
-    // Store Last-Modified for next conditional request
-    const lastMod = (response.headers as Record<string, string>)["last-modified"];
-    if (lastMod) {
-      _notifLastModified = lastMod;
-    }
-
-    return true; // 200 = something changed
-  } catch (err) {
-    // 304 and 403 are still real API calls — tracked automatically by the hook
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      (err as { status?: number }).status === 304
-    ) {
-      return false; // Nothing changed since last check
-    }
-    // 403 = notifications scope not granted — disable gate permanently
-    // to stop burning rate limit tokens on every poll cycle
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      (err as { status?: number }).status === 403
-    ) {
-      console.warn("[poll] Notifications API returned 403 — disabling gate");
-      pushNotification("notifications", config.authMethod === "pat"
-        ? "Notifications API returned 403 — fine-grained tokens do not support notifications; classic tokens need the notifications scope. Background refresh in hidden tabs is disabled."
-        : "Notifications API returned 403 — check that the notifications scope is granted. Background refresh in hidden tabs is disabled.", "warning");
-      _notifGateDisabled = true;
-    }
-    return true;
-  }
-}
-
-// ── Incremental fetch timestamps ─────────────────────────────────────────────
-
-let _lastSuccessfulFetch: Date | null = null;
-
-// Force a full fetch if the notifications gate has been skipping for too long.
-// Notifications don't cover all change types (e.g., workflow runs on unwatched
-// repos, label changes without notification), so we cap staleness.
-const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
 
 // ── fetchAllData orchestrator ─────────────────────────────────────────────────
 
@@ -214,24 +153,10 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
  */
 export async function fetchAllData(
   onLightData?: (data: DashboardData) => void,
-  options?: { force?: boolean },
 ): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
-    return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
-  }
-
-  // On subsequent polls, check notifications first (free when 304)
-  if (!options?.force && _lastSuccessfulFetch) {
-    const staleness = Date.now() - _lastSuccessfulFetch.getTime();
-    if (staleness < MAX_GATE_STALENESS_MS) {
-      const changed = await hasNotificationChanges();
-      if (!changed) {
-        console.info("[poll] No notification changes — skipping full fetch");
-        return { issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true };
-      }
-    }
-    // If staleness >= MAX_GATE_STALENESS_MS, skip the gate and force a full fetch
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
   }
 
   const userLogin = user()?.login ?? "";
@@ -299,14 +224,6 @@ export async function fetchAllData(
     ...(runData?.errors ?? []),
   ];
 
-  // Only activate the notifications gate if at least one fetch succeeded.
-  // If all failed (e.g., network outage), we don't want the gate to
-  // suppress retries on the next poll cycle.
-  const anySucceeded = issuesAndPrsData !== null || runData !== null;
-  if (anySucceeded) {
-    _lastSuccessfulFetch = new Date();
-  }
-
   return {
     issues: issuesAndPrsData?.issues ?? [],
     pullRequests: issuesAndPrsData?.pullRequests ?? [],
@@ -321,7 +238,7 @@ const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // Sources managed by the poll coordinator — used for reconciliation
-const POLL_MANAGED_SOURCES = new Set(["poll", "graphql", "rate-limit", "notifications", "search/issues", "search/prs"]);
+const POLL_MANAGED_SOURCES = new Set(["poll", "graphql", "rate-limit", "search/issues", "search/prs"]);
 
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
@@ -333,10 +250,7 @@ function withJitter(intervalMs: number): number {
  * - Triggers an immediate fetch on init
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling
- * - Continues polling in background tabs when notifications gate is available
- *   (304 responses make background polls near-zero cost). When the gate is
- *   disabled (fine-grained PAT or missing notifications scope), background
- *   polling pauses to conserve API budget.
+ * - Skips background polls when hidden (GraphQL POST has no 304 shortcut)
  * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
  *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
@@ -345,7 +259,7 @@ function withJitter(intervalMs: number): number {
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: (force?: boolean) => Promise<DashboardData>
+  fetchAll: () => Promise<DashboardData>
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
@@ -376,8 +290,7 @@ export function createPollCoordinator(
     startCycleTracking();
 
     try {
-      const data = await fetchAll(force);
-      if (data.skipped) return; // finally handles endCycleTracking + setIsRefreshing
+      const data = await fetchAll();
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally
       for (const err of data.errors) {
@@ -419,20 +332,18 @@ export function createPollCoordinator(
 
     const intervalMs = withJitter(intervalSec * 1000);
     intervalId = setInterval(() => {
-      // Without the notifications gate (403 — scope not granted), every background
-      // poll is a full fetch with no 304 shortcut. Skip background polls to avoid
-      // burning API budget; the catch-up handler still fires on tab return.
-      if (document.visibilityState === "hidden" && _notifGateDisabled) return;
+      // Full refresh (GraphQL POST) has no 304 shortcut — skip background tabs
+      // to avoid burning API budget. The catch-up handler fires on tab return,
+      // and the events poll continues in background tabs (ETag 304 = zero cost).
+      if (document.visibilityState === "hidden") return;
       void doFetch();
     }, intervalMs);
   }
 
-  // Safety net for browser-level tab throttling/freezing. Background polling
-  // continues via setInterval, but browsers may throttle or freeze timers in
-  // hidden tabs (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
-  // When the tab becomes visible again after >2 min, this handler fires a
-  // catch-up fetch in case the browser suppressed scheduled polls. The
-  // notifications gate (304) makes redundant fetches near-zero cost.
+  // Safety net for browser-level tab throttling/freezing. Background polls are
+  // skipped (no 304 shortcut for GraphQL), but browsers may also freeze hidden
+  // tab timers (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
+  // When the tab becomes visible again after >2 min, fire a catch-up fetch.
   function handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
       hiddenAt = Date.now();
@@ -735,6 +646,228 @@ export function createHotPollCoordinator(
   });
 
   onCleanup(destroy);
+
+  return { destroy };
+}
+
+// ── Targeted refresh (events-driven) ─────────────────────────────────────────
+
+const MAX_TARGETED_REPOS = 10;
+const TARGETED_COOLDOWN_MS = 2 * 60 * 1000;
+const _repoLastTargeted = new Map<string, number>();
+
+export async function fetchTargetedRepoData(
+  repoSummaries: Map<string, RepoEventSummary>,
+): Promise<DashboardData> {
+  const octokit = getClient();
+  if (!octokit) {
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+  }
+
+  const userLogin = user()?.login ?? "";
+
+  // Skip repos refreshed recently — prevents API amplification when multiple events fire for the same repo
+  const now = Date.now();
+  let entries = [...repoSummaries.entries()].filter(([key]) => {
+    const lastTargeted = _repoLastTargeted.get(key);
+    return !lastTargeted || (now - lastTargeted) >= TARGETED_COOLDOWN_MS;
+  });
+
+  // Cap targeted repos per cycle — prioritize by most recent event to focus on active work
+  if (entries.length > MAX_TARGETED_REPOS) {
+    entries.sort((a, b) => b[1].latestEventAt.localeCompare(a[1].latestEventAt));
+    entries = entries.slice(0, MAX_TARGETED_REPOS);
+  }
+
+  if (entries.length === 0) {
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+  }
+
+  // Record cooldown timestamps
+  for (const [key] of entries) {
+    _repoLastTargeted.set(key, now);
+  }
+
+  const targetRepos = entries
+    .map(([, summary]) => {
+      const parts = summary.repoFullName.split("/");
+      if (parts.length !== 2) return null;
+      return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  const workflowRepos = entries
+    .filter(([, summary]) => summary.hasWorkflowActivity)
+    .map(([, summary]) => {
+      const parts = summary.repoFullName.split("/");
+      if (parts.length !== 2) return null;
+      return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  const [issuesAndPrsResult, runResult] = await Promise.allSettled([
+    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),
+    workflowRepos.length > 0
+      ? fetchWorkflowRuns(octokit, workflowRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
+      : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
+  ]);
+
+  const errors: ApiError[] = [];
+  if (issuesAndPrsResult.status === "rejected") {
+    const err = issuesAndPrsResult.reason;
+    errors.push({ repo: "targeted-issues", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+  }
+  if (runResult.status === "rejected") {
+    const err = runResult.reason;
+    errors.push({ repo: "targeted-runs", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+  }
+
+  const issuesAndPrsData = issuesAndPrsResult.status === "fulfilled" ? issuesAndPrsResult.value : null;
+  const runData = runResult.status === "fulfilled" ? runResult.value : null;
+
+  return {
+    issues: issuesAndPrsData?.issues ?? [],
+    pullRequests: issuesAndPrsData?.pullRequests ?? [],
+    workflowRuns: runData?.workflowRuns ?? [],
+    errors: [...errors, ...(issuesAndPrsData?.errors ?? []), ...(runData?.errors ?? [])],
+  };
+}
+
+// ── Hot set seeding from targeted refresh ────────────────────────────────────
+
+export function seedHotSetsFromTargeted(data: DashboardData): void {
+  for (const pr of data.pullRequests) {
+    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
+      if (_hotPRs.size >= MAX_HOT_PRS) break;
+      if (!_hotPRs.has(pr.nodeId)) {
+        _hotPRs.set(pr.nodeId, pr.id);
+        _hotPRsByDbId.set(pr.id, pr.nodeId);
+      }
+    }
+  }
+
+  for (const run of data.workflowRuns) {
+    if (run.status === "queued" || run.status === "in_progress") {
+      if (_hotRuns.size >= MAX_HOT_RUNS) break;
+      if (!_hotRuns.has(run.id)) {
+        const parts = run.repoFullName.split("/");
+        if (parts.length === 2) {
+          _hotRuns.set(run.id, { owner: parts[0], repo: parts[1] });
+        }
+      }
+    }
+  }
+}
+
+// ── Events poll coordinator ──────────────────────────────────────────────────
+
+// Fixed at 60s: GitHub's Events API has a ~60s server-side cache, so polling
+// more frequently returns stale data and wastes rate-limit quota.
+const EVENTS_POLL_INTERVAL_MS = 60_000;
+
+export function createEventsPollCoordinator(
+  getUsername: () => string,
+  getTrackedRepoNames: () => Set<string>,
+  isFullRefreshing: () => boolean,
+  onTargetedData: (data: DashboardData, affectedRepos: string[]) => void,
+): { destroy: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let chainGeneration = 0;
+  let consecutiveFailures = 0;
+  const MAX_BACKOFF_MULTIPLIER = 8;
+
+  function destroy(): void {
+    chainGeneration++;
+    consecutiveFailures = 0;
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  }
+
+  function schedule(myGeneration: number, delayMs: number): void {
+    if (myGeneration !== chainGeneration) return;
+    const backoff = Math.min(2 ** consecutiveFailures, MAX_BACKOFF_MULTIPLIER);
+    timeoutId = setTimeout(() => void cycle(myGeneration), delayMs * backoff);
+  }
+
+  async function cycle(myGeneration: number): Promise<void> {
+    if (myGeneration !== chainGeneration) return;
+
+    const username = getUsername();
+    if (!username) {
+      consecutiveFailures = 0;
+      schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+      return;
+    }
+
+    const octokit = getClient();
+    if (!octokit) {
+      consecutiveFailures = 0;
+      schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+      return;
+    }
+
+    if (isFullRefreshing()) {
+      consecutiveFailures = 0;
+      schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+      return;
+    }
+
+    try {
+      const { events, changed } = await fetchUserEvents(octokit, username);
+      if (myGeneration !== chainGeneration) return;
+
+      if (!changed || events.length === 0) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      const repoSummaries = parseRepoEvents(events, getTrackedRepoNames());
+      if (repoSummaries.size === 0) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      if (isFullRefreshing()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      const preGeneration = getHotPollGeneration();
+
+      const data = await fetchTargetedRepoData(repoSummaries);
+      if (myGeneration !== chainGeneration) return;
+
+      if (preGeneration !== getHotPollGeneration()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      if (isFullRefreshing()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      const affectedRepos = [...repoSummaries.values()].map((s) => s.repoFullName);
+      onTargetedData(data, affectedRepos);
+      consecutiveFailures = 0;
+    } catch (err) {
+      consecutiveFailures++;
+      console.warn("[events-poll] cycle error:", err instanceof Error ? err.message : String(err));
+    }
+
+    schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+  }
+
+  // First cycle fires immediately (delay=0) to establish ETag baseline
+  const gen = chainGeneration;
+  timeoutId = setTimeout(() => void cycle(gen), 0);
 
   return { destroy };
 }
