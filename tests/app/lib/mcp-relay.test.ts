@@ -158,8 +158,8 @@ describe("updateRelaySnapshot / handleRequest", () => {
   });
 
   it("stores snapshot and returns PRs via GET_OPEN_PRS", () => {
-    const issues = [makeIssue({ state: "open" })];
-    const prs = [makePullRequest({ state: "open", repoFullName: "owner/repo" })];
+    const issues = [makeIssue({ state: "OPEN" })];
+    const prs = [makePullRequest({ state: "OPEN", repoFullName: "owner/repo" })];
     const runs = [makeWorkflowRun({ conclusion: "success" })];
 
     mod.updateRelaySnapshot({ issues, pullRequests: prs, workflowRuns: runs, lastUpdatedAt: Date.now() });
@@ -250,13 +250,13 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
 
   it("computes correct summary counts from snapshot", () => {
     const issues = [
-      makeIssue({ state: "open" }),
-      makeIssue({ state: "open" }),
+      makeIssue({ state: "OPEN" }),
+      makeIssue({ state: "OPEN" }),
       makeIssue({ state: "closed" }),
     ];
     const prs = [
-      makePullRequest({ state: "open", reviewDecision: "REVIEW_REQUIRED" }),
-      makePullRequest({ state: "open", reviewDecision: "APPROVED" }),
+      makePullRequest({ state: "OPEN", reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "OPEN", reviewDecision: "APPROVED" }),
       makePullRequest({ state: "closed" }),
     ];
     const runs = [
@@ -315,8 +315,8 @@ describe("GET_OPEN_PRS repo filter", () => {
   });
 
   it("filters by repo when repo param is provided", () => {
-    const pr1 = makePullRequest({ state: "open", repoFullName: "owner/repo-a" });
-    const pr2 = makePullRequest({ state: "open", repoFullName: "owner/repo-b" });
+    const pr1 = makePullRequest({ state: "OPEN", repoFullName: "owner/repo-a" });
+    const pr2 = makePullRequest({ state: "OPEN", repoFullName: "owner/repo-b" });
     mod.updateRelaySnapshot({ issues: [], pullRequests: [pr1, pr2], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
@@ -338,8 +338,8 @@ describe("GET_OPEN_PRS repo filter", () => {
 
   it("returns all open PRs when no filter is provided", () => {
     const prs = [
-      makePullRequest({ state: "open" }),
-      makePullRequest({ state: "open" }),
+      makePullRequest({ state: "OPEN" }),
+      makePullRequest({ state: "OPEN" }),
       makePullRequest({ state: "closed" }),
     ];
     mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], lastUpdatedAt: Date.now() });
@@ -378,7 +378,7 @@ describe("GET_PR_DETAILS handler", () => {
   });
 
   it("returns PR by repo+number", () => {
-    const pr = makePullRequest({ number: 42, repoFullName: "owner/repo", state: "open" });
+    const pr = makePullRequest({ number: 42, repoFullName: "owner/repo", state: "OPEN" });
     mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
@@ -420,7 +420,7 @@ describe("GET_PR_DETAILS handler", () => {
   });
 
   it("returns PR by numeric id", () => {
-    const pr = makePullRequest({ state: "open" });
+    const pr = makePullRequest({ state: "OPEN" });
     mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
@@ -467,8 +467,8 @@ describe("GET_OPEN_PRS status filter", () => {
 
   it("filters by status=draft", () => {
     const prs = [
-      makePullRequest({ state: "open", draft: true }),
-      makePullRequest({ state: "open", draft: false }),
+      makePullRequest({ state: "OPEN", draft: true }),
+      makePullRequest({ state: "OPEN", draft: false }),
     ];
     const responses = setupAndConnect(prs);
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 90, method: "get_open_prs", params: { status: "draft" } }));
@@ -478,9 +478,9 @@ describe("GET_OPEN_PRS status filter", () => {
 
   it("filters by status=needs_review (non-draft, REVIEW_REQUIRED)", () => {
     const prs = [
-      makePullRequest({ state: "open", draft: false, reviewDecision: "REVIEW_REQUIRED" }),
-      makePullRequest({ state: "open", draft: true, reviewDecision: "REVIEW_REQUIRED" }),
-      makePullRequest({ state: "open", draft: false, reviewDecision: "APPROVED" }),
+      makePullRequest({ state: "OPEN", draft: false, reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "OPEN", draft: true, reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "OPEN", draft: false, reviewDecision: "APPROVED" }),
     ];
     const responses = setupAndConnect(prs);
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 91, method: "get_open_prs", params: { status: "needs_review" } }));
@@ -490,8 +490,8 @@ describe("GET_OPEN_PRS status filter", () => {
 
   it("filters by status=failing", () => {
     const prs = [
-      makePullRequest({ state: "open", checkStatus: "failure" }),
-      makePullRequest({ state: "open", checkStatus: "success" }),
+      makePullRequest({ state: "OPEN", checkStatus: "failure" }),
+      makePullRequest({ state: "OPEN", checkStatus: "success" }),
     ];
     const responses = setupAndConnect(prs);
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 92, method: "get_open_prs", params: { status: "failing" } }));
@@ -501,8 +501,8 @@ describe("GET_OPEN_PRS status filter", () => {
 
   it("filters by status=approved", () => {
     const prs = [
-      makePullRequest({ state: "open", reviewDecision: "APPROVED" }),
-      makePullRequest({ state: "open", reviewDecision: "REVIEW_REQUIRED" }),
+      makePullRequest({ state: "OPEN", reviewDecision: "APPROVED" }),
+      makePullRequest({ state: "OPEN", reviewDecision: "REVIEW_REQUIRED" }),
     ];
     const responses = setupAndConnect(prs);
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 93, method: "get_open_prs", params: { status: "approved" } }));
@@ -527,7 +527,7 @@ describe("GET_OPEN_ISSUES handler", () => {
   });
 
   it("returns open issues", () => {
-    const issues = [makeIssue({ state: "open" }), makeIssue({ state: "open" }), makeIssue({ state: "closed" })];
+    const issues = [makeIssue({ state: "OPEN" }), makeIssue({ state: "OPEN" }), makeIssue({ state: "closed" })];
     mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
@@ -540,7 +540,7 @@ describe("GET_OPEN_ISSUES handler", () => {
   });
 
   it("filters by repo", () => {
-    const issues = [makeIssue({ state: "open", repoFullName: "owner/a" }), makeIssue({ state: "open", repoFullName: "owner/b" })];
+    const issues = [makeIssue({ state: "OPEN", repoFullName: "owner/a" }), makeIssue({ state: "OPEN", repoFullName: "owner/b" })];
     mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
