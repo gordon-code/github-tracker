@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
+import { createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -22,7 +22,11 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, isJiraAuthenticated, ensureJiraTokenValid, clearJiraAuth } from "../../stores/auth";
+import { JiraClient, JiraProxyClient, JiraApiError } from "../../services/jira-client";
+import type { JiraIssue } from "../../../shared/jira-types";
+import { detectAndLookupJiraKeys } from "../../services/jira-keys";
+import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
@@ -290,6 +294,72 @@ export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
   const [rlDetail, setRlDetail] = createSignal<string>("Loading...");
+  const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
+  const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
+
+  // Narrow reactivity: extract authMethod so unrelated jira config changes don't recreate the client
+  const jiraAuthMethod = createMemo(() => config.jira?.authMethod);
+  const jiraClient = createMemo(() => {
+    const auth = jiraAuth();
+    const method = jiraAuthMethod();
+    if (!auth) return null;
+    if (method === "token") {
+      if (!auth.email) return null;
+      return new JiraProxyClient(auth.cloudId, auth.email, auth.accessToken);
+    }
+    return new JiraClient(auth.cloudId, async () => {
+      await ensureJiraTokenValid();
+      return jiraAuth()!.accessToken;
+    });
+  });
+
+  async function fetchJiraAssigned(): Promise<void> {
+    const valid = await ensureJiraTokenValid();
+    if (!valid) {
+      pushNotification("jira", "Jira token expired — reconnect in Settings", "warning");
+      return;
+    }
+    const client = jiraClient();
+    if (!client) return;
+    try {
+      const result = await client.searchJql(
+        "assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC",
+        { maxResults: 100 }
+      );
+      setJiraIssues(result.issues);
+
+      // Auto-prune tracked Jira items absent from fresh fetch (done, unassigned, deleted)
+      if (config.enableTracking && viewState.trackedItems.length > 0) {
+        const liveKeys = new Set(result.issues.map((i) => i.key));
+        for (const item of viewState.trackedItems) {
+          if (item.source === "jira" && item.jiraKey && !liveKeys.has(item.jiraKey)) {
+            untrackJiraItem(item.jiraKey);
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof JiraApiError) {
+        if (err.status === 401) {
+          clearJiraAuth();
+          pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning");
+        } else if (err.status === 403) {
+          pushNotification("jira", "Jira: access denied — check your app permissions or site access in Atlassian settings", "warning");
+        } else {
+          pushNotification("jira", "Jira fetch failed — will retry on next refresh", "warning");
+        }
+      }
+    }
+  }
+
+  // CRITICAL: must never throw or rethrow — Jira errors must not break GitHub poll cycle
+  function handleJiraError(err: unknown): void {
+    try {
+      console.warn("[jira] poll error:", err);
+      pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
+    } catch {
+      // final catch-all — never propagate
+    }
+  }
 
   function fetchAndSetRlDetail(): void {
     void fetchRateLimitDetails().then((detail) => {
@@ -325,8 +395,9 @@ export default function DashboardPage() {
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
+    if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
-    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
+    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
   }
 
@@ -334,7 +405,7 @@ export default function DashboardPage() {
 
   function handleTabChange(tab: TabId) {
     // Reject invalid tab IDs to prevent persisting stale state
-    if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
+    if (!isBuiltinTab(tab) && tab !== "jiraAssigned" && !config.customTabs.some((t) => t.id === tab)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
@@ -351,6 +422,13 @@ export default function DashboardPage() {
   // Redirect away from tracked tab when tracking is disabled at runtime
   createEffect(() => {
     if (!config.enableTracking && activeTab() === "tracked") {
+      handleTabChange("issues");
+    }
+  });
+
+  // Redirect away from Jira tab when Jira is disabled at runtime
+  createEffect(() => {
+    if (!config.jira?.enabled && activeTab() === "jiraAssigned") {
       handleTabChange("issues");
     }
   });
@@ -392,6 +470,7 @@ export default function DashboardPage() {
 
     const pruneKeys = new Set<string>();
     for (const item of viewState.trackedItems) {
+      if (item.source === "jira") continue; // explicit guard — Jira items handled separately
       if (!polledRepos.has(item.repoFullName)) continue; // repo deselected — keep item
       const isLive = item.type === "issue" ? liveIssueIds.has(item.id) : livePrIds.has(item.id);
       if (!isLive) pruneKeys.add(`${item.type}:${item.id}`);
@@ -692,6 +771,7 @@ export default function DashboardPage() {
         isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
       ).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
+      ...(config.jira?.enabled ? { jiraAssigned: jiraIssues().length } : {}),
       ...customCounts,
     };
   });
@@ -702,8 +782,8 @@ export default function DashboardPage() {
     const staleIds = untrack(() => {
       const keys = new Set([
         ...Object.keys(viewState.customTabFilters),
-        ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k)),
-        ...Object.keys(viewState.lockedRepos).filter((k) => !isBuiltinTab(k)),
+        ...Object.keys(viewState.expandedRepos).filter((k) => !isBuiltinTab(k) && k !== "jiraAssigned"),
+        ...Object.keys(viewState.lockedRepos).filter((k) => !isBuiltinTab(k) && k !== "jiraAssigned"),
       ]);
       return [...keys].filter((id) => !activeIds.has(id));
     });
@@ -716,6 +796,33 @@ export default function DashboardPage() {
     if (isBuiltinTab(id)) return null;
     return getCustomTab(id) ?? null;
   });
+
+  // Jira key detection runs after every full refresh — NOT onLightData (light data may be incomplete).
+  createEffect(() => {
+    const lastRefreshed = dashboardData.lastRefreshedAt;
+    if (!lastRefreshed) return;
+    if (!config.jira?.enabled || !config.jira?.issueKeyDetection) return;
+    if (!isJiraAuthenticated()) return;
+    const client = jiraClient();
+    if (!client) return;
+    const items = [
+      ...dashboardData.issues.map((i) => ({ title: i.title })),
+      ...dashboardData.pullRequests.map((p) => ({ title: p.title, headRef: p.headRef })),
+    ];
+    void detectAndLookupJiraKeys(items, client).then((map) => {
+      setJiraKeyMap(map);
+    });
+  });
+
+  // Jira assigned issues poll: fires after each GitHub full refresh cycle
+  createEffect(on(
+    () => _coordinator()?.lastRefreshAt(),
+    () => {
+      if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      fetchJiraAssigned().catch(handleJiraError);
+    },
+    { defer: true }
+  ));
 
   // Push dashboard data into the MCP relay snapshot on each full refresh.
   // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
@@ -756,6 +863,7 @@ export default function DashboardPage() {
               onTabChange={handleTabChange}
               counts={tabCounts()}
               enableTracking={config.enableTracking}
+              enableJira={!!config.jira?.enabled}
               customTabs={config.customTabs.map((t) => ({ id: t.id, name: t.name }))}
               onAddTab={() => setShowCustomTabModal(true)}
               onEditTab={(id) => { setEditingTabId(id); setShowCustomTabModal(true); }}
@@ -785,6 +893,7 @@ export default function DashboardPage() {
                   monitoredRepos={config.monitoredRepos}
                   configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
+                  jiraKeyMap={jiraKeyMap}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -798,6 +907,7 @@ export default function DashboardPage() {
                   monitoredRepos={config.monitoredRepos}
                   configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
+                  jiraKeyMap={jiraKeyMap}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
@@ -808,6 +918,13 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   userLogin={userLogin()}
                   hotPollingPRIds={hotPollingPRIds()}
+                />
+              </Match>
+              <Match when={activeTab() === "jiraAssigned"}>
+                <JiraAssignedTab
+                  issues={jiraIssues()}
+                  loading={false}
+                  siteUrl={config.jira?.siteUrl ?? ""}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>
@@ -847,6 +964,7 @@ export default function DashboardPage() {
                           refreshTick={refreshTick()}
                           customTabId={tab().id}
                           filterPreset={tab().filterPreset}
+                          jiraKeyMap={jiraKeyMap}
                         />
                       </Match>
                       <Match when={tab().baseType === "pullRequests"}>
@@ -862,6 +980,7 @@ export default function DashboardPage() {
                           refreshTick={refreshTick()}
                           customTabId={tab().id}
                           filterPreset={tab().filterPreset}
+                          jiraKeyMap={jiraKeyMap}
                         />
                       </Match>
                       <Match when={tab().baseType === "actions"}>

@@ -4,9 +4,14 @@ import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 import { pushNotification } from "../lib/errors";
+import type { JiraAuthState } from "../../shared/jira-types";
+import { JiraConfigSchema } from "../../shared/schemas";
+
+export type { JiraAuthState } from "../../shared/jira-types";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
 export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
+export const JIRA_AUTH_STORAGE_KEY = "github-tracker:jira-auth";
 
 export interface GitHubUser {
   login: string;
@@ -38,6 +43,102 @@ export function isAuthenticated(): boolean {
 }
 
 export { user };
+
+// ── Jira auth signals ────────────────────────────────────────────────────────
+
+const [_jiraAuth, _setJiraAuth] = createSignal<JiraAuthState | null>(
+  (() => {
+    try {
+      const raw = localStorage.getItem?.(JIRA_AUTH_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as JiraAuthState) : null;
+    } catch {
+      return null;
+    }
+  })()
+);
+
+export const jiraAuth = _jiraAuth;
+
+export function isJiraAuthenticated(): boolean {
+  return _jiraAuth() !== null;
+}
+
+export function setJiraAuth(state: JiraAuthState): void {
+  try {
+    localStorage.setItem(JIRA_AUTH_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    pushNotification("localStorage:jira-auth", "Jira auth write failed — storage may be full. Auth exists in memory only this session.", "warning");
+  }
+  _setJiraAuth(state);
+}
+
+export function clearJiraAuth(): void {
+  localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
+  _setJiraAuth(null);
+  updateConfig({ jira: JiraConfigSchema.parse({}) });
+}
+
+// ── Jira token refresh ───────────────────────────────────────────────────────
+
+let _refreshingJira: Promise<boolean> | null = null;
+
+export async function ensureJiraTokenValid(): Promise<boolean> {
+  const auth = _jiraAuth();
+  if (!auth) return false;
+
+  // API token mode: three independent guards prevent refresh (authMethod check,
+  // empty sealedRefreshToken, MAX_SAFE_INTEGER expiresAt)
+  if (config.jira?.authMethod === "token") return true;
+  if (!auth.sealedRefreshToken) return true;
+
+  if (auth.expiresAt >= Date.now() + 300_000) return true;
+
+  // Single-flight guard: concurrent calls share one refresh promise
+  if (_refreshingJira !== null) return _refreshingJira;
+
+  _refreshingJira = (async (): Promise<boolean> => {
+    try {
+      let resp: Response;
+      try {
+        resp = await fetch("/api/oauth/jira/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sealed_refresh_token: auth.sealedRefreshToken }),
+        });
+      } catch {
+        // Network error — preserve tokens, transient failure
+        return false;
+      }
+
+      if (resp.status === 401) {
+        // Refresh token expired or revoked
+        clearJiraAuth();
+        pushNotification("jira:refresh", "Jira session expired — please reconnect in Settings.", "warning");
+        return false;
+      }
+
+      if (!resp.ok) return false;
+
+      const data = (await resp.json()) as { access_token: string; sealed_refresh_token: string; expires_in: number };
+      if (!data.access_token || !data.sealed_refresh_token) return false;
+
+      const current = _jiraAuth();
+      if (!current) return false;
+
+      setJiraAuth({
+        ...current,
+        accessToken: data.access_token,
+        sealedRefreshToken: data.sealed_refresh_token,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      });
+      return true;
+    } finally {
+      _refreshingJira = null;
+    }
+  })();
+
+  return _refreshingJira;
+}
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 
@@ -179,8 +280,18 @@ export async function validateToken(): Promise<boolean> {
   }
 }
 
+// Register Jira auth cleanup when GitHub auth is cleared (full logout).
+// Only clears localStorage + signal — does NOT call updateConfig because
+// clearAuth() already called resetConfig() which resets all fields to defaults.
+onAuthCleared(() => {
+  localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
+  _setJiraAuth(null);
+});
+
 // Cross-tab auth sync: if another tab clears the token, this tab should also clear.
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
+// Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
+// holding an already-invalidated token would fail on its next Jira request.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e: StorageEvent) => {
     if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
@@ -188,6 +299,14 @@ if (typeof window !== "undefined") {
       if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
       expireToken();
       window.location.replace("/login");
+    }
+    if (e.key === JIRA_AUTH_STORAGE_KEY) {
+      try {
+        const raw = e.newValue;
+        _setJiraAuth(raw ? (JSON.parse(raw) as JiraAuthState) : null);
+      } catch {
+        _setJiraAuth(null);
+      }
     }
   });
 }

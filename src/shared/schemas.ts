@@ -50,6 +50,20 @@ export function isBuiltinTab(id: string): id is BuiltinTabId {
   return (BUILTIN_TAB_IDS as readonly string[]).includes(id);
 }
 
+export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
+
+export const JiraConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  authMethod: JiraAuthMethodSchema,
+  cloudId: z.string().optional(),
+  siteUrl: z.string().optional(),
+  siteName: z.string().optional(),
+  email: z.string().optional(),
+  issueKeyDetection: z.boolean().default(true),
+});
+
+export type JiraConfig = z.infer<typeof JiraConfigSchema>;
+
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
@@ -79,6 +93,8 @@ export const ConfigSchema = z.object({
   customTabs: z.array(CustomTabSchema).max(10).default([]),
   mcpRelayEnabled: z.boolean().default(false),
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
+  // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
+  jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

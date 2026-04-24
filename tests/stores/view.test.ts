@@ -260,7 +260,7 @@ describe("ViewStateSchema", () => {
 
   it("missing expandedRepos field parses to defaults", () => {
     const result = ViewStateSchema.parse({ lastActiveTab: "actions" });
-    expect(result.expandedRepos).toEqual({ issues: {}, pullRequests: {}, actions: {} });
+    expect(result.expandedRepos).toEqual({ issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} });
   });
 
   it("old localStorage data with sortPreferences parses cleanly with globalSort default", () => {
@@ -427,6 +427,7 @@ describe("tracked items", () => {
     id: 1001,
     number: 101,
     type: "issue",
+    source: "github",
     repoFullName: "owner/repo",
     title: "Bug fix",
     addedAt: 1711000000000,
@@ -435,6 +436,7 @@ describe("tracked items", () => {
     id: 2002,
     number: 202,
     type: "pullRequest",
+    source: "github",
     repoFullName: "owner/repo",
     title: "Add feature",
     addedAt: 1711000001000,
@@ -443,6 +445,7 @@ describe("tracked items", () => {
     id: 3003,
     number: 303,
     type: "issue",
+    source: "github",
     repoFullName: "owner/other",
     title: "Another issue",
     addedAt: 1711000002000,
@@ -476,12 +479,12 @@ describe("tracked items", () => {
     it("evicts oldest item when at 200 cap (FIFO)", () => {
       // Fill to 200
       for (let i = 0; i < 200; i++) {
-        trackItem({ id: i, number: i, type: "issue", repoFullName: "o/r", title: `T${i}`, addedAt: 1000 + i });
+        trackItem({ id: i, number: i, type: "issue", source: "github", repoFullName: "o/r", title: `T${i}`, addedAt: 1000 + i });
       }
       expect(viewState.trackedItems).toHaveLength(200);
 
       // Adding 201st should evict item with id:0 (oldest)
-      trackItem({ id: 9999, number: 9999, type: "issue", repoFullName: "o/r", title: "New", addedAt: 2000 });
+      trackItem({ id: 9999, number: 9999, type: "issue", source: "github", repoFullName: "o/r", title: "New", addedAt: 2000 });
       expect(viewState.trackedItems).toHaveLength(200);
       expect(viewState.trackedItems[0].id).toBe(1); // id:0 evicted
       expect(viewState.trackedItems[199].id).toBe(9999);

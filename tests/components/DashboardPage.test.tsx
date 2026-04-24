@@ -31,6 +31,21 @@ vi.mock("../../src/app/stores/auth", () => ({
   isAuthenticated: () => true,
   onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+  jiraAuth: () => null,
+  isJiraAuthenticated: () => false,
+  setJiraAuth: vi.fn(),
+  clearJiraAuth: vi.fn(),
+  ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock("../../src/app/services/jira-client", () => ({
+  JiraClient: vi.fn(),
+  JiraProxyClient: vi.fn(),
+}));
+
+vi.mock("../../src/app/services/jira-keys", () => ({
+  detectAndLookupJiraKeys: vi.fn().mockResolvedValue(new Map()),
+  clearJiraKeyCache: vi.fn(),
 }));
 
 // Mock github service (used by Header + DashboardPage org sync)
@@ -611,6 +626,7 @@ describe("DashboardPage — data flow", () => {
         id: 555,
         number: 55,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "org/repo",
         title: "Will be pruned after non-skipped poll",
         addedAt: Date.now(),
@@ -921,6 +937,7 @@ describe("DashboardPage — tracked tab", () => {
         id: 42,
         number: 7,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "owner/repo",
         title: "Tracked issue",
         addedAt: Date.now(),
@@ -943,6 +960,7 @@ describe("DashboardPage — tracked tab", () => {
         id: 999,
         number: 99,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "org/repo",
         title: "Will be pruned",
         addedAt: Date.now(),
@@ -977,6 +995,7 @@ describe("DashboardPage — tracked tab", () => {
         id: 888,
         number: 88,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "org/deselected-repo",
         title: "Should be kept",
         addedAt: Date.now(),
@@ -1012,6 +1031,7 @@ describe("DashboardPage — tracked tab", () => {
         id: 777,
         number: 77,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "org/repo",
         title: "Should survive cold start",
         addedAt: Date.now(),
@@ -1041,6 +1061,7 @@ describe("DashboardPage — tracked tab", () => {
         id: 666,
         number: 66,
         type: "issue" as const,
+        source: "github" as const,
         repoFullName: "ext/upstream",
         title: "Upstream item closed",
         addedAt: Date.now(),

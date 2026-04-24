@@ -36,6 +36,7 @@ check_vite_var() {
 check_vite_var VITE_GITHUB_CLIENT_ID fail "VITE_GITHUB_CLIENT_ID not set (GitHub Actions variable or .env)"
 check_vite_var VITE_SENTRY_DSN warn "VITE_SENTRY_DSN not set — Sentry disabled in this build"
 check_vite_var VITE_TURNSTILE_SITE_KEY warn "VITE_TURNSTILE_SITE_KEY not set — Turnstile disabled"
+check_vite_var VITE_JIRA_CLIENT_ID warn "VITE_JIRA_CLIENT_ID not set — Jira integration disabled"
 
 # ── CF Worker secrets via wrangler ──────────────────────────────────────────
 if ! WRANGLER=$(resolve_wrangler); then
@@ -53,9 +54,11 @@ else
     has_secret SENTRY_SECURITY_TOKEN || warn "CF Worker secret 'SENTRY_SECURITY_TOKEN' not set — only needed if Sentry Allowed Domains is configured"
     has_secret SEAL_KEY_NEXT || warn "CF Worker secret 'SEAL_KEY_NEXT' not set — only needed during key rotation"
     has_secret SESSION_KEY_NEXT || warn "CF Worker secret 'SESSION_KEY_NEXT' not set — only needed during key rotation"
+    has_secret JIRA_CLIENT_ID || warn "CF Worker secret 'JIRA_CLIENT_ID' not set — Jira integration disabled"
+    has_secret JIRA_CLIENT_SECRET || warn "CF Worker secret 'JIRA_CLIENT_SECRET' not set — Jira integration disabled"
 
     # Detect unexpected secrets not in the known set
-    KNOWN="ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY TURNSTILE_SECRET_KEY SENTRY_DSN SENTRY_SECURITY_TOKEN SEAL_KEY_NEXT SESSION_KEY_NEXT"
+    KNOWN="ALLOWED_ORIGIN GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_KEY SEAL_KEY TURNSTILE_SECRET_KEY SENTRY_DSN SENTRY_SECURITY_TOKEN SEAL_KEY_NEXT SESSION_KEY_NEXT JIRA_CLIENT_ID JIRA_CLIENT_SECRET"
     while IFS= read -r secret_name; do
       found=false
       for k in $KNOWN; do

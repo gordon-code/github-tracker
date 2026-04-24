@@ -10,11 +10,16 @@ export const LOCKED_REPOS_CAP = 50;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
-  number: z.number(),
-  type: z.enum(["issue", "pullRequest"]),
+  number: z.number().optional(),
+  type: z.enum(["issue", "pullRequest", "jiraIssue"]),
+  source: z.enum(["github", "jira"]).default("github"),
   repoFullName: z.string(),
   title: z.string(),
   addedAt: z.number(),
+  jiraKey: z.string().optional(),
+  jiraProjectKey: z.string().optional(),
+  jiraStatus: z.string().optional(),
+  htmlUrl: z.string().optional(),
 });
 
 export type TrackedItem = z.infer<typeof TrackedItemSchema>;
@@ -41,12 +46,20 @@ export const ActionsFiltersSchema = z.object({
   event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
 });
 
+// "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
+export const JiraFiltersSchema = z.object({
+  statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
+  priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
+});
+
 export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
 export type IssueFilterField = keyof IssueFilters;
 export type PullRequestFilters = z.infer<typeof PullRequestFiltersSchema>;
 export type PullRequestFilterField = keyof PullRequestFilters;
 export type ActionsFilters = z.infer<typeof ActionsFiltersSchema>;
 export type ActionsFilterField = keyof ActionsFilters;
+export type JiraFilters = z.infer<typeof JiraFiltersSchema>;
+export type JiraFilterField = keyof JiraFilters;
 
 export const ViewStateSchema = z.object({
   lastActiveTab: z.string().default("issues"),
@@ -76,10 +89,12 @@ export const ViewStateSchema = z.object({
     issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
+    jiraAssigned: JiraFiltersSchema.default({ statusCategory: "all", priority: "all" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
+    jiraAssigned: { statusCategory: "all", priority: "all" },
   }),
   showPrRuns: z.boolean().default(false),
   hideDepDashboard: z.boolean().default(true),
@@ -94,15 +109,16 @@ export const ViewStateSchema = z.object({
     issues: {},
     pullRequests: {},
     actions: {},
+    jiraAssigned: {},
   }),
-  lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [] }),
+  lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
 
-const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions"] as const;
+const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"] as const;
 
 export function migrateLockedRepos(raw: unknown): unknown {
   if (raw == null) return { issues: [], pullRequests: [], actions: [] };
@@ -179,12 +195,13 @@ export function resetViewState(): void {
           issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
+          jiraAssigned: { statusCategory: "all", priority: "all" },
         },
         showPrRuns: false,
         hideDepDashboard: true,
         customTabFilters: {},
-        expandedRepos: { issues: {}, pullRequests: {}, actions: {} },
-        lockedRepos: { issues: [], pullRequests: [], actions: [] },
+        expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
+        lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
       });
     })
@@ -259,6 +276,7 @@ type TabFilterField = {
   issues: keyof IssueFilters;
   pullRequests: keyof PullRequestFilters;
   actions: keyof ActionsFilters;
+  jiraAssigned: keyof JiraFilters;
 };
 
 export function setTabFilter<T extends keyof TabFilterField>(
@@ -274,7 +292,7 @@ export function setTabFilter<T extends keyof TabFilterField>(
 }
 
 export function resetAllTabFilters(
-  tab: "issues" | "pullRequests" | "actions"
+  tab: "issues" | "pullRequests" | "actions" | "jiraAssigned"
 ): void {
   setViewState(
     produce((draft) => {
@@ -282,6 +300,8 @@ export function resetAllTabFilters(
         draft.tabFilters.issues = IssueFiltersSchema.parse({});
       } else if (tab === "pullRequests") {
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
+      } else if (tab === "jiraAssigned") {
+        draft.tabFilters.jiraAssigned = JiraFiltersSchema.parse({});
       } else {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
       }
@@ -432,8 +452,11 @@ export function pruneLockedRepos(
 export function trackItem(item: TrackedItem): void {
   setViewState(
     produce((draft) => {
-      const already = draft.trackedItems.some(
-        (i) => i.id === item.id && i.type === item.type
+      // Jira items dedup by jiraKey (not id) — hash collisions are possible with 32-bit hash
+      const already = draft.trackedItems.some((i) =>
+        item.source === "jira"
+          ? i.source === "jira" && i.jiraKey === item.jiraKey
+          : i.id === item.id && i.type === item.type
       );
       if (!already) {
         // FIFO eviction: remove oldest if at cap
@@ -442,6 +465,31 @@ export function trackItem(item: TrackedItem): void {
         }
         draft.trackedItems.push(item);
       }
+    })
+  );
+}
+
+export function untrackJiraItem(jiraKey: string): void {
+  setViewState(
+    produce((draft) => {
+      draft.trackedItems = draft.trackedItems.filter(
+        (i) => !(i.source === "jira" && i.jiraKey === jiraKey)
+      );
+    })
+  );
+}
+
+export function moveJiraItem(jiraKey: string, direction: "up" | "down"): void {
+  setViewState(
+    produce((draft) => {
+      const arr = draft.trackedItems;
+      const idx = arr.findIndex((i) => i.source === "jira" && i.jiraKey === jiraKey);
+      if (idx === -1) return;
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+      const tmp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = tmp;
     })
   );
 }

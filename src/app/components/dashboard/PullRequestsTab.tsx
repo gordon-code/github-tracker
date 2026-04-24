@@ -26,6 +26,8 @@ import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
 import EmptyLockedRepoRow from "../shared/EmptyLockedRepoRow";
 import { Tooltip } from "../shared/Tooltip";
+import JiraBadge from "../shared/JiraBadge";
+import { extractJiraKeys } from "../../../shared/validation";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -39,6 +41,7 @@ export interface PullRequestsTabProps {
   refreshTick?: number;
   customTabId?: string;
   filterPreset?: Record<string, string>;
+  jiraKeyMap?: () => ReadonlyMap<string, import("../../../shared/jira-types").JiraIssue | null>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -325,7 +328,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (trackedPrIds().has(pr.id)) {
       untrackItem(pr.id, "pullRequest");
     } else {
-      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
+      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", source: "github", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
     }
   }
 
@@ -619,6 +622,17 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       </Tooltip>
                                     </Show>
                                   </div>
+                                </Show>
+                                <Show when={config.jira?.enabled && config.jira?.issueKeyDetection && props.jiraKeyMap}>
+                                  <For each={[...new Set([...extractJiraKeys(pr.title), ...extractJiraKeys(pr.headRef ?? "")])]}>
+                                    {(key) => (
+                                      <JiraBadge
+                                        issueKey={key}
+                                        issue={props.jiraKeyMap!().get(key)}
+                                        siteUrl={config.jira?.siteUrl ?? ""}
+                                      />
+                                    )}
+                                  </For>
                                 </Show>
                               </ItemRow>
                             </div>

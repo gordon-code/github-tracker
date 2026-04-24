@@ -212,7 +212,7 @@ describe("view lock store (per-tab)", () => {
       const result = ViewStateSchema.safeParse({});
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lockedRepos).toEqual({ issues: [], pullRequests: [], actions: [] });
+        expect(result.data.lockedRepos).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
       }
     });
 

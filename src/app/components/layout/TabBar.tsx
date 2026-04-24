@@ -11,6 +11,7 @@ interface TabBarProps {
   onTabChange: (tab: TabId) => void;
   counts?: TabCounts;
   enableTracking?: boolean;
+  enableJira?: boolean;
   customTabs?: Array<{ id: string; name: string }>;
   onAddTab?: () => void;
   onEditTab?: (id: string) => void;
@@ -46,6 +47,14 @@ export default function TabBar(props: TabBarProps) {
                   Tracked
                   <Show when={props.counts?.tracked !== undefined}>
                     <span class="badge badge-sm badge-neutral ml-1">{props.counts?.tracked}</span>
+                  </Show>
+                </Tabs.Trigger>
+              </Show>
+              <Show when={props.enableJira}>
+                <Tabs.Trigger value="jiraAssigned" class="tab compact:tab-sm data-[selected]:tab-active">
+                  Jira
+                  <Show when={props.counts?.jiraAssigned !== undefined}>
+                    <span class="badge badge-sm badge-neutral ml-1">{props.counts?.jiraAssigned}</span>
                   </Show>
                 </Tabs.Trigger>
               </Show>

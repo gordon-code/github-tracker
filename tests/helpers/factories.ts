@@ -85,6 +85,7 @@ export function makeTrackedItem(overrides: Partial<TrackedItem> = {}): TrackedIt
     id,
     number: id,
     type: "issue",
+    source: "github",
     repoFullName: "owner/repo",
     title: "Test tracked item",
     addedAt: Date.now(),
