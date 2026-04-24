@@ -113,6 +113,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                   {/* Reorder buttons */}
                   <div class="flex flex-col shrink-0 pl-2 compact:pl-1">
                     <button
+                      type="button"
                       class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isFirst()}
                       aria-label={`Move up: ${item.title}`}
@@ -126,6 +127,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                       </svg>
                     </button>
                     <button
+                      type="button"
                       class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isLast()}
                       aria-label={`Move down: ${item.title}`}
@@ -172,6 +174,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                           </div>
                           <Tooltip content="Unpin Jira issue">
                             <button
+                              type="button"
                               class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
                               aria-label={`Unpin ${item.jiraKey ?? "Jira issue"} ${item.title}`}
                               onClick={() => { if (item.jiraKey) untrackJiraItem(item.jiraKey); }}
@@ -208,6 +211,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                                 </div>
                                 <Tooltip content="Untrack this item">
                                   <button
+                                    type="button"
                                     class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
                                     aria-label={`Unpin ${item.number !== undefined ? '#' + item.number + ' ' : ''}${item.title}`}
                                     onClick={() => untrackItem(item.id, item.type as "issue" | "pullRequest")}

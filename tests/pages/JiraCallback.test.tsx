@@ -87,6 +87,8 @@ describe("JiraCallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    // Re-apply default mock return values cleared by vi.clearAllMocks()
+    vi.mocked(proxyLib.acquireTurnstileToken).mockResolvedValue("mock-turnstile-token");
   });
 
   afterEach(() => {
@@ -213,11 +215,26 @@ describe("JiraCallback", () => {
 
   // ── Empty sites ───────────────────────────────────────────────────────────
 
-  it.skip("shows error when no Jira sites found", async () => {
+  it("shows error when no Jira sites found", async () => {
     setupValidState();
     setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
-    mockSuccessfulExchange();
-    vi.mocked(JiraClient.getAccessibleResources).mockResolvedValue([]);
+    // Stub fetch: first call = token exchange success, second call = resources fallback (empty)
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: "atl-access-tok",
+          sealed_refresh_token: "sealed-refresh-blob",
+          expires_in: 3600,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      })
+    );
+    // getAccessibleResources throws so the fallback fetch is used
+    vi.mocked(JiraClient.getAccessibleResources).mockRejectedValue(new Error("CORS"));
 
     renderCallback();
 
@@ -228,7 +245,7 @@ describe("JiraCallback", () => {
 
   // ── Single site auto-select ───────────────────────────────────────────────
 
-  it.skip("auto-selects single site and calls setJiraAuth + updateJiraConfig", async () => {
+  it("auto-selects single site and calls setJiraAuth + updateJiraConfig", async () => {
     setupValidState();
     setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
     mockSuccessfulExchange();

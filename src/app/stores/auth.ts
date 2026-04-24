@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { z } from "zod";
 import * as Sentry from "@sentry/solid";
 import { clearCache } from "./cache";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
@@ -7,6 +8,17 @@ import { pushNotification } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import type { JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
+
+// Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
+const JiraAuthStateSchema = z.object({
+  accessToken: z.string().min(1),
+  sealedRefreshToken: z.string(),
+  expiresAt: z.number(),
+  cloudId: z.string().min(1),
+  siteUrl: z.string().url(),
+  siteName: z.string().min(1),
+  email: z.string().optional(),
+});
 
 export type { JiraAuthState } from "../../shared/jira-types";
 
@@ -51,7 +63,15 @@ const [_jiraAuth, _setJiraAuth] = createSignal<JiraAuthState | null>(
   (() => {
     try {
       const raw = localStorage.getItem?.(JIRA_AUTH_STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as JiraAuthState) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      const result = JiraAuthStateSchema.safeParse(parsed);
+      if (!result.success) {
+        // Corrupt or outdated auth blob — evict it so user is prompted to reconnect
+        localStorage.removeItem?.(JIRA_AUTH_STORAGE_KEY);
+        return null;
+      }
+      return result.data as JiraAuthState;
     } catch {
       return null;
     }
@@ -284,7 +304,8 @@ export async function validateToken(): Promise<boolean> {
 
 // Register Jira auth cleanup when GitHub auth is cleared (full logout).
 // Only clears localStorage + signal — does NOT call updateConfig because
-// clearAuth() already called resetConfig() which resets all fields to defaults.
+// clearAuth() already calls resetConfig() before firing these callbacks,
+// so all config fields (including jira.*) are already reset to their defaults.
 onAuthCleared(() => {
   localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
   _setJiraAuth(null);

@@ -52,7 +52,7 @@ export default function TabBar(props: TabBarProps) {
               </Show>
               <Show when={props.enableJira}>
                 <Tabs.Trigger value="jiraAssigned" class="tab compact:tab-sm data-[selected]:tab-active">
-                  Jira
+                  Jira Assigned
                   <Show when={props.counts?.jiraAssigned !== undefined}>
                     <span class="badge badge-sm badge-neutral ml-1">{props.counts?.jiraAssigned}</span>
                   </Show>

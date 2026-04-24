@@ -213,6 +213,7 @@ export default function SettingsPage() {
   // ── Jira integration ──────────────────────────────────────────────────────
 
   const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+  const CLOUD_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const jiraClientId = import.meta.env.VITE_JIRA_CLIENT_ID as string | undefined;
   const jiraEnabled = () => !!jiraClientId && VALID_JIRA_CLIENT_ID_RE.test(jiraClientId);
 
@@ -240,6 +241,10 @@ export default function SettingsPage() {
     const siteUrl = jiraApiSiteUrl().trim().replace(/\/$/, "");
     if (!email || !token || !cloudId || !siteUrl) {
       setJiraApiError("Email, API token, Cloud ID, and site URL are all required.");
+      return;
+    }
+    if (!CLOUD_ID_UUID_RE.test(cloudId)) {
+      setJiraApiError("Cloud ID must be a valid UUID v4 (e.g. xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).");
       return;
     }
     setJiraApiConnecting(true);
@@ -902,6 +907,9 @@ export default function SettingsPage() {
                           class="input input-sm w-full"
                           aria-label="Jira Cloud ID"
                         />
+                        <p class="text-xs text-base-content/50">
+                          Find your Cloud ID at admin.atlassian.com → Organization → Settings → Cloud ID, or ask your Jira admin.
+                        </p>
                         <input
                           type="url"
                           placeholder="Site URL (e.g. https://yoursite.atlassian.net)"

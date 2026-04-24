@@ -118,7 +118,11 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
 
       <Show when={!props.loading && filtered().length === 0}>
         <div class="flex flex-col items-center justify-center py-16 text-base-content/40">
-          <p class="text-base">No assigned Jira issues</p>
+          <p class="text-base">
+            {(filters().statusCategory !== "all" || filters().priority !== "all")
+              ? "No issues match current filters"
+              : "No assigned Jira issues"}
+          </p>
         </div>
       </Show>
 
@@ -133,9 +137,9 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                 <div role="list" class="divide-y divide-base-300">
                   <For each={issues}>
                     {(issue) => {
-                      const isPinned = () => viewState.trackedItems.some(
+                      const isPinned = createMemo(() => viewState.trackedItems.some(
                         (t) => t.source === "jira" && t.jiraKey === issue.key
-                      );
+                      ));
                       return (
                           <div role="listitem" class="px-4 py-3 flex items-start gap-3">
                             <div class="flex-1 min-w-0">
@@ -159,7 +163,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   </span>
                                 </Show>
                               </div>
-                              <p class="mt-0.5 text-sm text-base-content truncate">
+                              <p class="mt-0.5 text-sm text-base-content truncate" title={issue.fields.summary}>
                                 {issue.fields.summary}
                               </p>
                               <Show when={issue.fields.assignee?.displayName}>

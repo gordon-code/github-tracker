@@ -31,6 +31,7 @@ export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
 type ErrorCode =
   | "token_exchange_failed"
   | "invalid_request"
+  | "payload_too_large"
   | "method_not_allowed"
   | "not_found"
   | "origin_mismatch"
@@ -209,6 +210,27 @@ const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
 // Invalidated on SEAL_KEY rotation via full-value fingerprint comparison.
 const _sealKeyCache = new Map<string, CryptoKey>();
 let _sealKeyFingerprint = "";
+
+// Separate cache for SEAL_KEY_NEXT-derived keys (used in token exchange, refresh, and proxy re-seal).
+// Keyed by purpose; invalidated when SEAL_KEY_NEXT changes.
+const _nextKeyCache = new Map<string, CryptoKey>();
+let _nextKeyFingerprint = "";
+
+/** Get or derive the active encryption key for the given purpose, using SEAL_KEY_NEXT if set. */
+async function getJiraEncryptKey(env: Env, purpose: string): Promise<CryptoKey> {
+  const activeKey = env.SEAL_KEY_NEXT ?? env.SEAL_KEY;
+  const fingerprint = activeKey;
+  if (fingerprint !== _nextKeyFingerprint) {
+    _nextKeyCache.clear();
+    _nextKeyFingerprint = fingerprint;
+  }
+  let key = _nextKeyCache.get(purpose);
+  if (key === undefined) {
+    key = await deriveKey(activeKey, SEAL_SALT, purpose, "encrypt");
+    _nextKeyCache.set(purpose, key);
+  }
+  return key;
+}
 
 async function handleProxySeal(request: Request, env: Env, sessionId: string): Promise<Response> {
   if (request.method !== "POST") {
@@ -830,7 +852,7 @@ async function handleJiraTokenExchange(
   }
 
   const code = (body as Record<string, unknown>)["code"];
-  if (typeof code !== "string" || code.length === 0) {
+  if (typeof code !== "string" || code.length === 0 || code.length > 2048) {
     log("warn", "jira_token_exchange_missing_code", {}, request);
     return errorResponse("invalid_request", 400, cors);
   }
@@ -881,12 +903,7 @@ async function handleJiraTokenExchange(
 
   let sealedRefreshToken: string;
   try {
-    const key = await deriveKey(
-      env.SEAL_KEY_NEXT ?? env.SEAL_KEY,
-      SEAL_SALT,
-      "aes-gcm-key:jira-refresh-token",
-      "encrypt"
-    );
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
     sealedRefreshToken = await sealToken(refreshToken, key);
   } catch (err) {
     log("error", "jira_token_seal_failed", {
@@ -944,7 +961,7 @@ async function handleJiraTokenRefresh(
   }
 
   const sealedRefreshToken = (body as Record<string, unknown>)["sealed_refresh_token"];
-  if (typeof sealedRefreshToken !== "string" || sealedRefreshToken.length === 0) {
+  if (typeof sealedRefreshToken !== "string" || sealedRefreshToken.length === 0 || sealedRefreshToken.length > 8192) {
     return errorResponse("invalid_request", 400, cors);
   }
 
@@ -1002,12 +1019,7 @@ async function handleJiraTokenRefresh(
   let newSealedRefreshToken: string;
   try {
     // Always seal with active key (SEAL_KEY_NEXT if set) for natural key rotation
-    const key = await deriveKey(
-      env.SEAL_KEY_NEXT ?? env.SEAL_KEY,
-      SEAL_SALT,
-      "aes-gcm-key:jira-refresh-token",
-      "encrypt"
-    );
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
     newSealedRefreshToken = await sealToken(newRefreshToken, key);
   } catch (err) {
     log("error", "jira_refresh_seal_failed", {
@@ -1044,7 +1056,7 @@ async function handleJiraProxy(
     log("warn", "jira_proxy_content_length_exceeded", {
       content_length: request.headers.get("Content-Length"),
     }, request);
-    return buildProxyResponse(errorResponse("invalid_request", 413), setCookie);
+    return buildProxyResponse(errorResponse("payload_too_large", 413), setCookie);
   }
 
   let bodyText: string;
@@ -1057,7 +1069,7 @@ async function handleJiraProxy(
   // Authoritative size check post-read
   if (bodyText.length > JIRA_PROXY_MAX_BYTES) {
     log("warn", "jira_proxy_body_too_large", { body_length: bodyText.length }, request);
-    return buildProxyResponse(errorResponse("invalid_request", 413), setCookie);
+    return buildProxyResponse(errorResponse("payload_too_large", 413), setCookie);
   }
 
   let parsed: unknown;
@@ -1100,6 +1112,15 @@ async function handleJiraProxy(
     const maxResults = typeof maxResultsRaw === "number" ? maxResultsRaw : Number(maxResultsRaw);
     if (!Number.isFinite(maxResults) || maxResults > 100) {
       log("warn", "jira_proxy_max_results_exceeded", { endpoint, sessionId }, request);
+      return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+    }
+  }
+
+  // issueIdsOrKeys cap for issue/bulkfetch endpoint
+  if (endpoint === "issue") {
+    const issueIdsOrKeys = (params as Record<string, unknown> | null | undefined)?.["issueIdsOrKeys"];
+    if (Array.isArray(issueIdsOrKeys) && issueIdsOrKeys.length > 100) {
+      log("warn", "jira_proxy_issue_keys_exceeded", { count: issueIdsOrKeys.length, sessionId }, request);
       return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
     }
   }
@@ -1170,11 +1191,14 @@ async function handleJiraProxy(
   }
 
   if (!jiraResp.ok) {
-    // Return generic error — never forward Jira error bodies (may contain PII or internals)
-    log("warn", "jira_proxy_jira_error", { jira_status: jiraResp.status, endpoint, sessionId }, request);
+    // Return generic error — never forward Jira error bodies (may contain PII or internals).
+    // Normalize Jira 5xx to 502 (bad gateway) so clients don't interpret upstream errors
+    // as worker errors. Preserve 4xx status codes (auth/permission failures).
+    const outStatus = jiraResp.status >= 500 ? 502 : jiraResp.status;
+    log("warn", "jira_proxy_jira_error", { jira_status: jiraResp.status, out_status: outStatus, endpoint, sessionId }, request);
     return buildProxyResponse(
       new Response(JSON.stringify({ error: "jira_proxy_error", status: jiraResp.status }), {
-        status: jiraResp.status,
+        status: outStatus,
         headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
       }),
       setCookie
@@ -1192,7 +1216,7 @@ async function handleJiraProxy(
   let resealed: string | undefined;
   if (env.SEAL_KEY_NEXT) {
     try {
-      const nextKey = await deriveKey(env.SEAL_KEY_NEXT, SEAL_SALT, "aes-gcm-key:jira-api-token", "encrypt");
+      const nextKey = await getJiraEncryptKey(env, "aes-gcm-key:jira-api-token");
       resealed = await sealToken(apiToken, nextKey);
     } catch {
       // Non-fatal: skip re-seal if it fails
@@ -1253,7 +1277,7 @@ async function handleJiraAccessibleResources(
   }
 
   const accessToken = (body as Record<string, unknown>)["accessToken"];
-  if (typeof accessToken !== "string" || accessToken.length === 0) {
+  if (typeof accessToken !== "string" || accessToken.length === 0 || accessToken.length > 4096) {
     return errorResponse("invalid_request", 400, cors);
   }
 

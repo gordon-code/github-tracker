@@ -296,6 +296,7 @@ export default function DashboardPage() {
   const [rlDetail, setRlDetail] = createSignal<string>("Loading...");
   const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
   const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
+  const [jiraLoading, setJiraLoading] = createSignal(false);
 
   // Narrow reactivity: extract authMethod so unrelated jira config changes don't recreate the client
   const jiraAuthMethod = createMemo(() => config.jira?.authMethod);
@@ -321,6 +322,7 @@ export default function DashboardPage() {
   async function fetchJiraAssigned(): Promise<void> {
     const client = jiraClient();
     if (!client) return;
+    setJiraLoading(true);
     try {
       const result = await client.searchJql(
         "assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC",
@@ -348,6 +350,8 @@ export default function DashboardPage() {
           pushNotification("jira", "Jira fetch failed — will retry on next refresh", "warning");
         }
       }
+    } finally {
+      setJiraLoading(false);
     }
   }
 
@@ -797,14 +801,22 @@ export default function DashboardPage() {
     return getCustomTab(id) ?? null;
   });
 
-  // Jira key detection runs after every full refresh — NOT onLightData (light data may be incomplete).
-  createEffect(() => {
-    const lastRefreshed = dashboardData.lastRefreshedAt;
-    if (!lastRefreshed) return;
+  // Fingerprint of issue+PR titles — changes only when titles actually change, not on
+  // every lastRefreshedAt tick (e.g., hot poll, clock tick, workflow run updates).
+  const titleFingerprint = createMemo(() => {
+    const issueTitles = dashboardData.issues.map((i) => i.title).join("\0");
+    const prTitles = dashboardData.pullRequests.map((p) => `${p.title}\0${p.headRef ?? ""}`).join("\0");
+    return `${issueTitles}|||${prTitles}`;
+  });
+
+  // Jira key detection runs only when titles change — NOT on every lastRefreshedAt tick.
+  // Guards: jira enabled+detection, authenticated, client ready, and titles actually changed.
+  createEffect(on(titleFingerprint, () => {
     if (!config.jira?.enabled || !config.jira?.issueKeyDetection) return;
     if (!isJiraAuthenticated()) return;
     const client = jiraClient();
     if (!client) return;
+    if (!dashboardData.lastRefreshedAt) return;
     const items = [
       ...dashboardData.issues.map((i) => ({ title: i.title })),
       ...dashboardData.pullRequests.map((p) => ({ title: p.title, headRef: p.headRef })),
@@ -812,7 +824,7 @@ export default function DashboardPage() {
     void detectAndLookupJiraKeys(items, client).then((map) => {
       setJiraKeyMap(map);
     }).catch(handleJiraError);
-  });
+  }, { defer: true }));
 
   // Jira assigned issues poll: fires after each GitHub full refresh cycle
   createEffect(on(
@@ -923,7 +935,7 @@ export default function DashboardPage() {
               <Match when={activeTab() === "jiraAssigned"}>
                 <JiraAssignedTab
                   issues={jiraIssues()}
-                  loading={false}
+                  loading={jiraLoading()}
                   siteUrl={config.jira?.siteUrl ?? ""}
                 />
               </Match>

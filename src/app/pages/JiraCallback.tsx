@@ -165,6 +165,7 @@ export default function JiraCallback() {
       <div class="max-w-sm w-full mx-4 text-center">
         <Show when={error()}>
           <div class="card bg-base-100 shadow-md p-8 flex flex-col items-center gap-4">
+            <h2 class="text-lg font-semibold">Connection Error</h2>
             <p class="text-error font-medium">{error()}</p>
             <a href="/settings" class="link link-primary text-sm">
               Return to Settings
@@ -187,6 +188,7 @@ export default function JiraCallback() {
         </Show>
         <Show when={!error() && !sites()}>
           <div class="card bg-base-100 shadow-md p-8 flex flex-col items-center gap-4">
+            <h2 class="text-lg font-semibold sr-only">Connecting to Jira</h2>
             <LoadingSpinner size="md" label="Connecting Jira..." />
           </div>
         </Show>
