@@ -363,6 +363,51 @@ describe("PersonalSummaryStrip — mixed state", () => {
   });
 });
 
+describe("PersonalSummaryStrip — state filter (OPEN only)", () => {
+  it("renders nothing when all issues and PRs are non-OPEN", () => {
+    const issues = [
+      makeIssue({ assigneeLogins: ["me"], state: "CLOSED" }),
+    ];
+    const prs = [
+      makePullRequest({ userLogin: "me", draft: false, checkStatus: "failure", state: "MERGED" }),
+      makePullRequest({
+        enriched: true,
+        reviewDecision: "REVIEW_REQUIRED",
+        reviewerLogins: ["me"],
+        userLogin: "author",
+        state: "CLOSED",
+      }),
+    ];
+
+    const { container } = renderStrip({ issues, pullRequests: prs });
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("only counts OPEN items when mixed with CLOSED and MERGED", () => {
+    const issues = [
+      makeIssue({ id: 1, assigneeLogins: ["me"], state: "OPEN" }),
+      makeIssue({ id: 2, assigneeLogins: ["me"], state: "CLOSED" }),
+    ];
+    const prs = [
+      makePullRequest({ id: 10, userLogin: "me", draft: false, checkStatus: "failure", state: "OPEN" }),
+      makePullRequest({ id: 11, userLogin: "me", draft: false, checkStatus: "failure", state: "MERGED" }),
+      makePullRequest({ id: 12, userLogin: "me", draft: false, checkStatus: "success", reviewDecision: "APPROVED", state: "OPEN" }),
+      makePullRequest({ id: 13, userLogin: "me", draft: false, checkStatus: "success", reviewDecision: "APPROVED", state: "CLOSED" }),
+    ];
+
+    renderStrip({ issues, pullRequests: prs });
+
+    const assignedButton = screen.getByText(/assigned/);
+    expect(assignedButton.textContent).toContain("1");
+
+    const blockedButton = screen.getByText(/blocked/);
+    expect(blockedButton.textContent).toContain("1");
+
+    const mergeButton = screen.getByText(/ready to merge/);
+    expect(mergeButton.textContent).toContain("1");
+  });
+});
+
 describe("PersonalSummaryStrip — label context", () => {
   it("shows 'issue assigned' (singular) for 1 assigned issue", () => {
     const issues = [makeIssue({ assigneeLogins: ["me"] })];

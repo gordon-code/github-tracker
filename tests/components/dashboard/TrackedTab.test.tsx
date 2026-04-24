@@ -126,6 +126,18 @@ describe("TrackedTab — fallback row", () => {
 
     expect(viewState.trackedItems).toHaveLength(0);
   });
+
+  it("shows fallback row for a tracked PR whose live state is MERGED", () => {
+    const pr = makePullRequest({ id: 777, number: 777, title: "Merged PR", state: "MERGED" });
+    const tracked = makeTrackedItem({ id: 777, number: 777, type: "pullRequest", title: "Merged PR" });
+    updateViewState({ trackedItems: [tracked] });
+
+    render(() => <TrackedTab issues={[]} pullRequests={[pr]} userLogin="testuser" />);
+
+    expect(screen.getByText(/not in current data/)).toBeTruthy();
+    expect(screen.getByText("Merged PR")).toBeTruthy();
+    expect(screen.getByLabelText("Unpin #777 Merged PR")).toBeTruthy();
+  });
 });
 
 describe("TrackedTab — move button disabled states", () => {

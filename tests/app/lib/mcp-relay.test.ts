@@ -252,12 +252,12 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
     const issues = [
       makeIssue({ state: "OPEN" }),
       makeIssue({ state: "OPEN" }),
-      makeIssue({ state: "closed" }),
+      makeIssue({ state: "CLOSED" }),
     ];
     const prs = [
       makePullRequest({ state: "OPEN", reviewDecision: "REVIEW_REQUIRED" }),
       makePullRequest({ state: "OPEN", reviewDecision: "APPROVED" }),
-      makePullRequest({ state: "closed" }),
+      makePullRequest({ state: "CLOSED" }),
     ];
     const runs = [
       makeWorkflowRun({ conclusion: "failure" }),
@@ -340,7 +340,7 @@ describe("GET_OPEN_PRS repo filter", () => {
     const prs = [
       makePullRequest({ state: "OPEN" }),
       makePullRequest({ state: "OPEN" }),
-      makePullRequest({ state: "closed" }),
+      makePullRequest({ state: "CLOSED" }),
     ];
     mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], lastUpdatedAt: Date.now() });
 
@@ -527,7 +527,7 @@ describe("GET_OPEN_ISSUES handler", () => {
   });
 
   it("returns open issues", () => {
-    const issues = [makeIssue({ state: "OPEN" }), makeIssue({ state: "OPEN" }), makeIssue({ state: "closed" })];
+    const issues = [makeIssue({ state: "OPEN" }), makeIssue({ state: "OPEN" }), makeIssue({ state: "CLOSED" })];
     mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];

@@ -670,6 +670,37 @@ describe("createPollCoordinator", () => {
     });
   });
 
+  it("destroy() clears pendingForce: queued retry does not fire after destroy", async () => {
+    const resolvers: Array<() => void> = [];
+    const fetchAll = vi.fn(
+      () =>
+        new Promise<DashboardData>((resolve) => {
+          resolvers.push(() => resolve(emptyData));
+        })
+    );
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+
+      await Promise.resolve();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      coordinator.manualRefresh();
+      await Promise.resolve();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      coordinator.destroy();
+
+      resolvers[0]();
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      dispose();
+    });
+  });
+
   it("fetchRateLimitDetails is called exactly once per doFetch cycle", async () => {
     const fetchRateLimitDetailsSpy = vi.mocked(githubMod.fetchRateLimitDetails);
     fetchRateLimitDetailsSpy.mockClear();
