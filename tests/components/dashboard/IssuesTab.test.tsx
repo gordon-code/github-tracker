@@ -840,6 +840,25 @@ describe("IssuesTab — customTabId lock mechanics", () => {
   });
 });
 
+// ── PA-015: state filter — non-OPEN issues are excluded ──────────────────────
+
+describe("IssuesTab — state filter", () => {
+  it("does not render a CLOSED issue", () => {
+    const issues = [
+      makeIssue({ id: 1, title: "Open issue", repoFullName: "owner/repo", state: "OPEN", surfacedBy: ["me"] }),
+      makeIssue({ id: 2, title: "Closed issue", repoFullName: "owner/repo", state: "CLOSED", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("issues", ["owner/repo"], true);
+
+    render(() => (
+      <IssuesTab issues={issues} userLogin="me" />
+    ));
+
+    screen.getByText("Open issue");
+    expect(screen.queryByText("Closed issue")).toBeNull();
+  });
+});
+
 // ── customTabId filter preset ────────────────────────────────────────────────
 
 describe("IssuesTab — customTabId filter preset", () => {

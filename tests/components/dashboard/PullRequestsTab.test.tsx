@@ -768,6 +768,40 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
   });
 });
 
+// ── PA-015: state filter — non-OPEN PRs are excluded ─────────────────────────
+
+describe("PullRequestsTab — state filter", () => {
+  it("does not render a MERGED PR", () => {
+    const prs = [
+      makePullRequest({ id: 1, title: "Open PR", repoFullName: "owner/repo", state: "OPEN", surfacedBy: ["me"] }),
+      makePullRequest({ id: 2, title: "Merged PR", repoFullName: "owner/repo", state: "MERGED", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" />
+    ));
+
+    screen.getByText("Open PR");
+    expect(screen.queryByText("Merged PR")).toBeNull();
+  });
+
+  it("does not render a CLOSED PR", () => {
+    const prs = [
+      makePullRequest({ id: 3, title: "Open PR", repoFullName: "owner/repo", state: "OPEN", surfacedBy: ["me"] }),
+      makePullRequest({ id: 4, title: "Closed PR", repoFullName: "owner/repo", state: "CLOSED", surfacedBy: ["me"] }),
+    ];
+    setAllExpanded("pullRequests", ["owner/repo"], true);
+
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" />
+    ));
+
+    screen.getByText("Open PR");
+    expect(screen.queryByText("Closed PR")).toBeNull();
+  });
+});
+
 // ── customTabId filter preset ────────────────────────────────────────────────
 
 describe("PullRequestsTab — customTabId filter preset", () => {

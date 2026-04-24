@@ -774,7 +774,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 42,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
       reviewDecision: null,
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -815,7 +815,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 43,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],

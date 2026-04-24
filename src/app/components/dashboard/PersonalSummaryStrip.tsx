@@ -35,6 +35,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     let assignedIssues = 0;
     for (const i of props.issues) {
       if (ignored.has(i.id)) continue;
+      if (i.state !== "OPEN") continue;
       if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") continue;
       if (i.assigneeLogins.some((a) => a.toLowerCase() === login)) assignedIssues++;
     }
@@ -51,6 +52,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     let prsBlocked = 0;
     for (const pr of props.pullRequests) {
       if (ignored.has(pr.id)) continue;
+      if (pr.state !== "OPEN") continue;
       const isAuthor = pr.userLogin.toLowerCase() === login;
       if (
         !isAuthor &&

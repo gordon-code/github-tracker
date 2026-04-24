@@ -893,6 +893,41 @@ describe("fetchAllData — 401 propagation from allSettled", () => {
   });
 });
 
+// ── force bypass: { force: true } skips notification gate even after recent fetch ─
+
+describe("fetchAllData — force bypass", () => {
+  it("proceeds with full fetch when force:true even if hasNotificationChanges would skip", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+
+    // First call — sets _lastSuccessfulFetch so the gate would normally engage
+    await fetchAllData();
+
+    vi.mocked(fetchIssuesAndPullRequests).mockClear();
+    vi.mocked(fetchWorkflowRuns).mockClear();
+    mockOctokit.request.mockClear();
+
+    // Second call with force:true — gate must be bypassed entirely (no 304 check)
+    const result = await fetchAllData(undefined, { force: true });
+
+    // Must not be skipped — force bypasses the notification gate
+    expect(result.skipped).toBeUndefined();
+    // Data fetches must have run
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
+    expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
+    // Notification API must NOT have been called (gate is skipped entirely)
+    expect(mockOctokit.request).not.toHaveBeenCalled();
+  });
+});
+
 // ── qa-4: Concurrency verification ────────────────────────────────────────────
 
 describe("fetchAllData — parallel execution", () => {

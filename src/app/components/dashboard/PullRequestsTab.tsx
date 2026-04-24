@@ -154,6 +154,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     const meta = new Map<number, { roles: ReturnType<typeof deriveInvolvementRoles>; sizeCategory: ReturnType<typeof prSizeCategory> }>();
 
     let items = props.pullRequests.filter((pr) => {
+      if (pr.state !== "OPEN") return false;
       if (!isPrVisible(pr, { ignoredIds, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, pr.userLogin, pr.assigneeLogins, pr.reviewerLogins, upstreamRepoSet().has(pr.repoFullName));

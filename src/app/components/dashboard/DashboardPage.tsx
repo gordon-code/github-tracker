@@ -140,7 +140,7 @@ onAuthCleared(() => {
   clearHotSets();
 });
 
-async function pollFetch(): Promise<DashboardData> {
+async function pollFetch(force = false): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
   // Subsequent refreshes keep existing data visible — the coordinator's
   // isRefreshing signal handles the "Refreshing..." indicator.
@@ -166,7 +166,7 @@ async function pollFetch(): Promise<DashboardData> {
           lastRefreshedAt: new Date(),
         });
       }
-    });
+    }, { force });
     // When notifications gate says nothing changed, keep existing data
     if (!data.skipped) {
       const hasErrors = data.errors.length > 0;
@@ -413,6 +413,11 @@ export default function DashboardPage() {
           // If a full refresh completed during the fetch, _hotPollGeneration will have
           // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
           if (fetchGeneration !== getHotPollGeneration()) return; // stale, discard
+          const terminalPrIds = new Set<number>();
+          for (const [prId, update] of prUpdates) {
+            const s = update.state;
+            if (s === "CLOSED" || s === "MERGED") terminalPrIds.add(prId);
+          }
           setDashboardData(produce((state) => {
             // Apply PR status updates
             for (const pr of state.pullRequests) {
@@ -431,7 +436,13 @@ export default function DashboardPage() {
               run.updatedAt = update.updatedAt;
               run.completedAt = update.completedAt;
             }
+            if (terminalPrIds.size > 0) {
+              state.pullRequests = state.pullRequests.filter((pr) => !terminalPrIds.has(pr.id));
+            }
           }));
+          if (terminalPrIds.size > 0) {
+            console.info(`[hot-poll] Spliced ${terminalPrIds.size} terminal PR(s) from store`);
+          }
           // Prune tracked PRs that became closed/merged via hot poll.
           // The auto-prune createEffect only fires when the pullRequests array
           // reference changes (full refresh). Hot poll mutates nested pr.state
@@ -439,8 +450,7 @@ export default function DashboardPage() {
           if (config.enableTracking && viewState.trackedItems.length > 0 && prUpdates.size > 0) {
             const pruneKeys = new Set<string>();
             for (const [prId, update] of prUpdates) {
-              const stateVal = update.state?.toUpperCase();
-              if (stateVal === "CLOSED" || stateVal === "MERGED") {
+              if (update.state === "CLOSED" || update.state === "MERGED") {
                 if (viewState.trackedItems.some(t => t.type === "pullRequest" && t.id === prId)) {
                   pruneKeys.add(`pullRequest:${prId}`);
                 }
@@ -606,6 +616,7 @@ export default function DashboardPage() {
           preset, resolveLogin: login,
         });
         customCounts[tab.id] = data.issues.filter((i) => {
+          if (i.state !== "OPEN") return false;
           if (!isItemVisibleOnTab(ownership.issues, i.id, tab.id)) return false;
           if (!isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: null })) return false;
           if (f.scope === "involves_me" && !isUserInvolved(i, login, monitoredSet)) return false;
@@ -627,6 +638,7 @@ export default function DashboardPage() {
           preset, resolveLogin: login,
         });
         customCounts[tab.id] = data.pullRequests.filter((p) => {
+          if (p.state !== "OPEN") return false;
           if (!isItemVisibleOnTab(ownership.pullRequests, p.id, tab.id)) return false;
           if (!isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: null })) return false;
           if (f.scope === "involves_me" && !isUserInvolved(p, login, monitoredSet, p.enriched !== false ? p.reviewerLogins : undefined)) return false;
@@ -683,9 +695,11 @@ export default function DashboardPage() {
 
     return {
       issues: visibleIssues().filter((i) =>
+        i.state === "OPEN" &&
         isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard, globalFilter: builtinFilter })
       ).length,
       pullRequests: visiblePullRequests().filter((p) =>
+        p.state === "OPEN" &&
         isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: builtinFilter })
       ).length,
       actions: visibleWorkflowRuns().filter((w) =>

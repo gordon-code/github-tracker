@@ -214,6 +214,7 @@ const MAX_GATE_STALENESS_MS = 10 * 60 * 1000; // 10 minutes
  */
 export async function fetchAllData(
   onLightData?: (data: DashboardData) => void,
+  options?: { force?: boolean },
 ): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
@@ -221,7 +222,7 @@ export async function fetchAllData(
   }
 
   // On subsequent polls, check notifications first (free when 304)
-  if (_lastSuccessfulFetch) {
+  if (!options?.force && _lastSuccessfulFetch) {
     const staleness = Date.now() - _lastSuccessfulFetch.getTime();
     if (staleness < MAX_GATE_STALENESS_MS) {
       const changed = await hasNotificationChanges();
@@ -344,7 +345,7 @@ function withJitter(intervalMs: number): number {
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: () => Promise<DashboardData>
+  fetchAll: (force?: boolean) => Promise<DashboardData>
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
@@ -352,9 +353,14 @@ export function createPollCoordinator(
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let hiddenAt: number | null = null;
   let destroyed = false;
+  let pendingForce = false;
 
-  async function doFetch(): Promise<void> {
-    if (destroyed || isRefreshing()) return;
+  async function doFetch(force = false): Promise<void> {
+    if (destroyed) return;
+    if (isRefreshing()) {
+      if (force) pendingForce = true;
+      return;
+    }
     checkAndResetIfExpired();
     setIsRefreshing(true);
     // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
@@ -370,7 +376,7 @@ export function createPollCoordinator(
     startCycleTracking();
 
     try {
-      const data = await fetchAll();
+      const data = await fetchAll(force);
       if (data.skipped) return; // finally handles endCycleTracking + setIsRefreshing
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally
@@ -393,6 +399,10 @@ export function createPollCoordinator(
     } finally {
       endCycleTracking(); // Safe to call twice (returns empty Set if already ended)
       setIsRefreshing(false);
+      if (pendingForce) {
+        pendingForce = false;
+        void doFetch(true);
+      }
     }
   }
 
@@ -462,7 +472,7 @@ export function createPollCoordinator(
   onCleanup(destroy);
 
   function manualRefresh(): void {
-    void doFetch();
+    void doFetch(true);
     // Reset interval timer so next auto-poll is a full interval from now
     const currentInterval = getInterval();
     if (currentInterval > 0) {
