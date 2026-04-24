@@ -218,23 +218,8 @@ describe("JiraCallback", () => {
   it("shows error when no Jira sites found", async () => {
     setupValidState();
     setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
-    // Stub fetch: first call = token exchange success, second call = resources fallback (empty)
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          access_token: "atl-access-tok",
-          sealed_refresh_token: "sealed-refresh-blob",
-          expires_in: 3600,
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      })
-    );
-    // getAccessibleResources throws so the fallback fetch is used
-    vi.mocked(JiraClient.getAccessibleResources).mockRejectedValue(new Error("CORS"));
+    mockSuccessfulExchange();
+    vi.mocked(JiraClient.getAccessibleResources).mockResolvedValue([]);
 
     renderCallback();
 
@@ -375,61 +360,34 @@ describe("JiraCallback", () => {
     );
   });
 
-  // ── CORS fallback for accessible-resources ────────────────────────────────
+  // ── Site discovery errors ─────────────────────────────────────────────────
 
-  it("falls back to Worker proxy when getAccessibleResources throws", async () => {
+  it("shows error when getAccessibleResources throws", async () => {
     setupValidState();
     setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
-    vi.mocked(JiraClient.getAccessibleResources).mockRejectedValue(new Error("CORS error"));
-
-    const sites = [makeResource("cloud-abc", "My Site", "https://mysite.atlassian.net")];
-    const exchangeMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          access_token: "atl-access-tok",
-          sealed_refresh_token: "sealed-refresh-blob",
-          expires_in: 3600,
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => sites,
-      });
-    vi.stubGlobal("fetch", exchangeMock);
-
-    renderCallback();
-
-    await waitFor(() => {
-      expect(vi.mocked(authStore.setJiraAuth)).toHaveBeenCalled();
-    });
-
-    // Second fetch call should be to /api/oauth/jira/resources
-    const [fallbackUrl] = exchangeMock.mock.calls[1] as [string];
-    expect(fallbackUrl).toBe("/api/oauth/jira/resources");
-  });
-
-  it("shows error when fallback accessible-resources call also fails", async () => {
-    setupValidState();
-    setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
-    vi.mocked(JiraClient.getAccessibleResources).mockRejectedValue(new Error("CORS error"));
-
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          access_token: "atl-tok",
-          sealed_refresh_token: "sealed",
-          expires_in: 3600,
-        }),
-      })
-      .mockResolvedValueOnce({ ok: false, status: 500 })
-    );
+    mockSuccessfulExchange();
+    vi.mocked(JiraClient.getAccessibleResources).mockRejectedValue(new Error("network error"));
 
     renderCallback();
 
     await waitFor(() => {
       expect(screen.getByText(/Failed to discover Jira sites/i)).toBeTruthy();
+    });
+  });
+
+  it("shows error when getAccessibleResources returns malformed data (Zod validation)", async () => {
+    setupValidState();
+    setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
+    mockSuccessfulExchange();
+    // Missing required fields: `id` and `scopes` are absent — Zod should reject this
+    vi.mocked(JiraClient.getAccessibleResources).mockResolvedValue([
+      { name: "My Site", url: "https://mysite.atlassian.net" } as never,
+    ]);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unexpected response from Atlassian/i)).toBeTruthy();
     });
   });
 

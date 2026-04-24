@@ -1,5 +1,6 @@
 import { createSignal, onMount, Show, For } from "solid-js";
 import { useNavigate } from "@solidjs/router";
+import { z } from "zod/v4";
 import { setJiraAuth } from "../stores/auth";
 import { updateJiraConfig } from "../stores/config";
 import { JIRA_OAUTH_STATE_KEY } from "../lib/oauth";
@@ -7,6 +8,14 @@ import { acquireTurnstileToken } from "../lib/proxy";
 import { JiraClient } from "../services/jira-client";
 import type { JiraAccessibleResource } from "../../shared/jira-types";
 import LoadingSpinner from "../components/shared/LoadingSpinner";
+
+const JiraAccessibleResourceSchema = z.array(z.object({
+  id: z.string(),
+  name: z.string(),
+  url: z.string(),
+  scopes: z.array(z.string()),
+  avatarUrl: z.string().optional(),
+}));
 
 interface JiraTokenResponse {
   access_token: string;
@@ -53,7 +62,7 @@ export default function JiraCallback() {
     setJiraAuth({
       accessToken: tokenData.access_token,
       sealedRefreshToken: tokenData.sealed_refresh_token,
-      expiresAt: Date.now() + tokenData.expires_in * 1000,
+      expiresAt: Date.now() + Math.max(tokenData.expires_in, 60) * 1000,
       cloudId: site.id,
       siteUrl: site.url,
       siteName: site.name,
@@ -119,30 +128,19 @@ export default function JiraCallback() {
       return;
     }
 
-    // Site discovery: try direct browser call first, fall back to Worker proxy
+    // Site discovery via direct browser call (Atlassian supports CORS for OAuth)
     let resources: JiraAccessibleResource[];
     try {
-      resources = await JiraClient.getAccessibleResources(tokenData.access_token);
-    } catch {
-      // CORS fallback: route through Worker endpoint
-      try {
-        const fallbackResp = await fetch("/api/oauth/jira/resources", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
-          },
-          body: JSON.stringify({ accessToken: tokenData.access_token }),
-        });
-        if (!fallbackResp.ok) {
-          setError("Failed to discover Jira sites. Please try again.");
-          return;
-        }
-        resources = (await fallbackResp.json()) as JiraAccessibleResource[];
-      } catch {
-        setError("A network error occurred discovering Jira sites. Please try again.");
+      const rawResources = await JiraClient.getAccessibleResources(tokenData.access_token);
+      const parsed = JiraAccessibleResourceSchema.safeParse(rawResources);
+      if (!parsed.success) {
+        setError("Unexpected response from Atlassian. Please try again.");
         return;
       }
+      resources = parsed.data;
+    } catch {
+      setError("Failed to discover Jira sites. Please try again.");
+      return;
     }
 
     if (!resources || resources.length === 0) {

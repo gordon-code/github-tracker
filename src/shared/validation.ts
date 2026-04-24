@@ -11,7 +11,7 @@ export const SEARCH_RESULT_CAP = 1000;
 
 // ── Jira key detection ────────────────────────────────────────────────────────
 
-export const JIRA_KEY_REGEX = /\b([A-Z]{2,10}-\d+)\b/g;
+const JIRA_KEY_REGEX = /\b([A-Z]{2,10}-\d+)\b/g;
 
 export function extractJiraKeys(text: string): string[] {
   JIRA_KEY_REGEX.lastIndex = 0;

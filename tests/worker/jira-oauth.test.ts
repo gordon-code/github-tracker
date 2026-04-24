@@ -731,6 +731,63 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
     expect(res.status).toBe(200);
   });
 
+  // ── issueIdsOrKeys cap ────────────────────────────────────────────────────
+
+  it("rejects issueIdsOrKeys with more than 100 items", async () => {
+    globalThis.fetch = vi.fn();
+    const keys101 = Array.from({ length: 101 }, (_, i) => `PROJ-${i}`);
+    const req = makeJiraProxyRequest({
+      endpoint: "issue",
+      cloudId: VALID_CLOUD_ID,
+      email: TEST_EMAIL,
+      sealed: sealedToken,
+      params: { issueIdsOrKeys: keys101, fields: ["summary"] },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("accepts issueIdsOrKeys with exactly 100 items", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [] }), { status: 200 })
+    );
+    const keys100 = Array.from({ length: 100 }, (_, i) => `PROJ-${i}`);
+    const req = makeJiraProxyRequest({
+      endpoint: "issue",
+      cloudId: VALID_CLOUD_ID,
+      email: TEST_EMAIL,
+      sealed: sealedToken,
+      params: { issueIdsOrKeys: keys100, fields: ["summary"] },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+  });
+
+  // ── SEAL_KEY_NEXT reseal ──────────────────────────────────────────────────
+
+  it("includes resealed field when SEAL_KEY_NEXT is set", async () => {
+    // A different base64-encoded 32-byte key for rotation
+    const NEXT_SEAL_KEY = "bmV4dC1zZWFsLWtleS1mb3Itcm90YXRpb24hISE="; // "next-seal-key-for-rotation!!!" base64
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], total: 0, maxResults: 10, startAt: 0 }), { status: 200 })
+    );
+
+    const req = makeJiraProxyRequest({
+      endpoint: "search",
+      cloudId: VALID_CLOUD_ID,
+      email: TEST_EMAIL,
+      sealed: sealedToken,
+      params: { jql: "assignee = currentUser()", maxResults: 10 },
+    });
+    const res = await worker.fetch(req, makeEnv({ SEAL_KEY_NEXT: NEXT_SEAL_KEY }));
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["resealed"]).toBe("string");
+    expect((json["resealed"] as string).length).toBeGreaterThan(0);
+  });
+
   // ── Validation gates ──────────────────────────────────────────────────────
 
   it("returns 403 when X-Requested-With header is missing", async () => {
@@ -862,93 +919,4 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
   });
 });
 
-// ── Jira Accessible Resources (/api/oauth/jira/resources) ─────────────────────
-
-describe("POST /api/oauth/jira/resources — accessible resources proxy", () => {
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
-  });
-
-  it("returns 404 when JIRA_CLIENT_ID is not configured", async () => {
-    const resourceReq = new Request("https://gh.gordoncode.dev/api/oauth/jira/resources", {
-      method: "POST",
-      headers: {
-        "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
-        "Origin": ALLOWED_ORIGIN,
-        "X-Requested-With": "fetch",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ accessToken: "tok" }),
-    });
-    const res = await worker.fetch(resourceReq, makeEnv({ JIRA_CLIENT_ID: undefined }));
-    expect(res.status).toBe(404);
-    expect((await res.json() as Record<string, unknown>)["error"]).toBe("not_found");
-  });
-
-  it("forwards Bearer token to accessible-resources endpoint and returns sites", async () => {
-    const sites = [
-      { id: "cloud-abc", name: "My Site", url: "https://mysite.atlassian.net", scopes: ["read:jira-work"] },
-    ];
-    globalThis.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify(sites), { status: 200 })
-    );
-
-    const resourceReq = new Request("https://gh.gordoncode.dev/api/oauth/jira/resources", {
-      method: "POST",
-      headers: {
-        "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
-        "Origin": ALLOWED_ORIGIN,
-        "X-Requested-With": "fetch",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ accessToken: "my-bearer-token" }),
-    });
-
-    const res = await worker.fetch(resourceReq, makeEnv());
-    expect(res.status).toBe(200);
-
-    // Verify the outbound fetch used Bearer auth
-    const mockFetch = globalThis.fetch as ReturnType<typeof vi.fn>;
-    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.atlassian.com/oauth/token/accessible-resources");
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer my-bearer-token");
-
-    const json = await res.json();
-    expect(json).toEqual(sites);
-  });
-
-  it("returns 400 when accessToken is missing", async () => {
-    const resourceReq = new Request("https://gh.gordoncode.dev/api/oauth/jira/resources", {
-      method: "POST",
-      headers: {
-        "CF-Connecting-IP": `10.3.0.${++_requestCounter}`,
-        "Origin": ALLOWED_ORIGIN,
-        "X-Requested-With": "fetch",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-    const res = await worker.fetch(resourceReq, makeEnv());
-    expect(res.status).toBe(400);
-  });
-
-  it("OPTIONS /api/oauth/jira/resources returns 204 with CORS headers", async () => {
-    const req = new Request("https://gh.gordoncode.dev/api/oauth/jira/resources", {
-      method: "OPTIONS",
-      headers: { "Origin": ALLOWED_ORIGIN, "CF-Connecting-IP": `10.3.0.${++_requestCounter}` },
-    });
-    const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(204);
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
-  });
-});
+// /api/oauth/jira/resources endpoint removed — accessible-resources uses direct browser call

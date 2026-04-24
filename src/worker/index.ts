@@ -168,8 +168,7 @@ function buildCorsHeaders(
 function isProxyPath(pathname: string): boolean {
   return (
     pathname.startsWith("/api/proxy/") ||
-    pathname.startsWith("/api/jira/") ||
-    pathname === "/api/oauth/jira/resources"
+    pathname.startsWith("/api/jira/")
   );
 }
 
@@ -810,6 +809,11 @@ async function handleJiraTokenExchange(
     return errorResponse("not_found", 404, cors);
   }
 
+  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
+  if (!originResult.ok) {
+    return errorResponse("origin_mismatch", 403, cors);
+  }
+
   if (request.method !== "POST") {
     return errorResponse("method_not_allowed", 405, cors);
   }
@@ -928,6 +932,11 @@ async function handleJiraTokenRefresh(
 ): Promise<Response> {
   if (!env.JIRA_CLIENT_ID || !env.JIRA_CLIENT_SECRET) {
     return errorResponse("not_found", 404, cors);
+  }
+
+  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
+  if (!originResult.ok) {
+    return errorResponse("origin_mismatch", 403, cors);
   }
 
   if (request.method !== "POST") {
@@ -1098,7 +1107,7 @@ async function handleJiraProxy(
     return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
   }
 
-  if (typeof email !== "string" || email.length === 0) {
+  if (typeof email !== "string" || email.length === 0 || email.length > 254) {
     return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
   }
 
@@ -1245,79 +1254,6 @@ function buildProxyResponse(response: Response, setCookie: string | undefined): 
   return new Response(response.body, { status: response.status, headers });
 }
 
-async function handleJiraAccessibleResources(
-  request: Request,
-  env: Env,
-  cors: Record<string, string>,
-  sessionId: string,
-  setCookie: string | undefined
-): Promise<Response> {
-  if (!env.JIRA_CLIENT_ID) {
-    return errorResponse("not_found", 404, cors);
-  }
-
-  if (request.method !== "POST") {
-    return errorResponse("method_not_allowed", 405, cors);
-  }
-
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  if (typeof body !== "object" || body === null) {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  const accessToken = (body as Record<string, unknown>)["accessToken"];
-  if (typeof accessToken !== "string" || accessToken.length === 0 || accessToken.length > 4096) {
-    return errorResponse("invalid_request", 400, cors);
-  }
-
-  log("info", "jira_accessible_resources_request", { sessionId }, request);
-
-  let atlassianResp: Response;
-  try {
-    atlassianResp = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
-      headers: { "Authorization": `Bearer ${accessToken}`, "Accept": "application/json" },
-      redirect: "error",
-    });
-  } catch (err) {
-    log("error", "jira_accessible_resources_fetch_failed", {
-      error: err instanceof Error ? err.message : "unknown",
-    }, request);
-    Sentry.captureException(err, { tags: { source: "worker-jira-accessible-resources" } });
-    return buildProxyResponse(errorResponse("jira_proxy_error", 502, cors), setCookie);
-  }
-
-  if (!atlassianResp.ok) {
-    log("warn", "jira_accessible_resources_error", { jira_status: atlassianResp.status }, request);
-    return buildProxyResponse(errorResponse("jira_proxy_error", atlassianResp.status, cors), setCookie);
-  }
-
-  let data: unknown;
-  try {
-    data = await atlassianResp.json();
-  } catch {
-    return buildProxyResponse(errorResponse("jira_proxy_error", 502, cors), setCookie);
-  }
-
-  return buildProxyResponse(
-    new Response(JSON.stringify(data), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
-    }),
-    setCookie
-  );
-}
-
 export default Sentry.withSentry(
   (env: Env) => getWorkerSentryOptions(env),
   {
@@ -1349,7 +1285,6 @@ export default Sentry.withSentry(
         "/api/oauth/jira/token",
         "/api/oauth/jira/refresh",
         "/api/jira/proxy",
-        "/api/oauth/jira/resources",
       ]);
       if (request.method === "OPTIONS" && CORS_PATHS.has(url.pathname)) {
         log("info", "cors_preflight", { cors_matched: corsMatched, pathname: url.pathname }, request);
@@ -1453,10 +1388,6 @@ export default Sentry.withSentry(
 
         if (url.pathname === "/api/jira/proxy") {
           return handleJiraProxy(request, env, sessionId, setCookie);
-        }
-
-        if (url.pathname === "/api/oauth/jira/resources") {
-          return handleJiraAccessibleResources(request, env, cors, sessionId, setCookie);
         }
 
         // Other proxy routes not yet implemented — fall through to 404

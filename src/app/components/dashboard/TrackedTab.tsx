@@ -21,6 +21,9 @@ function TypeBadge(props: { type: TrackedItem["type"] }) {
       <Match when={props.type === "pullRequest"}>
         <span class="badge badge-outline badge-sm badge-success">PR</span>
       </Match>
+      <Match when={props.type === "jiraIssue"}>
+        <span class="badge badge-outline badge-sm badge-secondary">Jira</span>
+      </Match>
     </Switch>
   );
 }

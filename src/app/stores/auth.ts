@@ -147,11 +147,14 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
       const current = _jiraAuth();
       if (!current) return false;
 
+      const expiresIn = typeof data.expires_in === "number" && data.expires_in > 0
+        ? data.expires_in
+        : 3600;
       setJiraAuth({
         ...current,
         accessToken: data.access_token,
         sealedRefreshToken: data.sealed_refresh_token,
-        expiresAt: Date.now() + data.expires_in * 1000,
+        expiresAt: Date.now() + expiresIn * 1000,
       });
       return true;
     } finally {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import JiraBadge from "../../../src/app/components/shared/JiraBadge";
-import type { JiraIssue } from "../../../src/shared/jira-types";
+import type { JiraIssue, JiraStatusCategory } from "../../../src/shared/jira-types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -112,5 +112,43 @@ describe("JiraBadge", () => {
     for (const img of images) {
       expect(img.getAttribute("src") ?? "").not.toContain("atl-paas.net");
     }
+  });
+
+  it("renders badge-success class for done status category", () => {
+    const issue = makeIssue("done");
+    render(() => (
+      <JiraBadge issueKey="PROJ-42" issue={issue} siteUrl={SITE_URL} />
+    ));
+    const link = screen.getByRole("link");
+    expect(link.className).toContain("badge-success");
+  });
+
+  it("renders badge-ghost class for unknown status category", () => {
+    // Build an issue with a statusCategory key that doesn't match any known case
+    const issue: JiraIssue = {
+      id: "10001",
+      key: "PROJ-42",
+      self: "https://api.atlassian.com/ex/jira/cloud-id/rest/api/3/issue/PROJ-42",
+      fields: {
+        summary: "Fix the bug",
+        status: {
+          id: "99",
+          name: "Custom Status",
+          statusCategory: {
+            id: 99,
+            key: "other" as JiraStatusCategory,
+            name: "Other",
+          },
+        },
+        priority: { id: "2", name: "Medium" },
+        assignee: null,
+        project: { id: "10000", key: "PROJ", name: "My Project" },
+      },
+    };
+    render(() => (
+      <JiraBadge issueKey="PROJ-42" issue={issue} siteUrl={SITE_URL} />
+    ));
+    const link = screen.getByRole("link");
+    expect(link.className).toContain("badge-ghost");
   });
 });

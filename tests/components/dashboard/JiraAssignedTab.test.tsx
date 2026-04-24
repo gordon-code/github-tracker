@@ -26,6 +26,8 @@ vi.mock("../../../src/app/stores/config", () => ({
 
 import JiraAssignedTab from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
+import { config } from "../../../src/app/stores/config";
+import { trackItem, untrackJiraItem } from "../../../src/app/stores/view";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -234,5 +236,52 @@ describe("JiraAssignedTab", () => {
     const issues = [makeIssue("PROJ-1")];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
     expect(screen.queryByRole("button", { name: /clear/i })).toBeNull();
+  });
+
+  // ── Pin / unpin tracking (enableTracking: true) ───────────────────────────
+
+  describe("pin/unpin tracking with config.enableTracking: true", () => {
+    beforeEach(() => {
+      (config as { enableTracking: boolean }).enableTracking = true;
+    });
+
+    afterEach(() => {
+      (config as { enableTracking: boolean }).enableTracking = false;
+    });
+
+    it("renders pin button when tracking is enabled", () => {
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      expect(screen.getByRole("button", { name: /pin PROJ-1/i })).toBeTruthy();
+    });
+
+    it("calls trackItem when pin button is clicked on an unpinned issue", () => {
+      const issue = makeIssue("PROJ-1");
+      render(() => <JiraAssignedTab issues={[issue]} loading={false} siteUrl={SITE_URL} />);
+
+      const pinButton = screen.getByRole("button", { name: /pin PROJ-1/i });
+      pinButton.click();
+
+      expect(vi.mocked(trackItem)).toHaveBeenCalledOnce();
+      const callArg = vi.mocked(trackItem).mock.calls[0][0];
+      expect(callArg.id).toBe(parseInt(issue.id, 10));
+      expect(callArg.source).toBe("jira");
+      expect(callArg.jiraKey).toBe("PROJ-1");
+      expect(callArg.type).toBe("jiraIssue");
+    });
+
+    it("calls untrackJiraItem when unpinning a pinned issue", () => {
+      const issue = makeIssue("PROJ-1");
+      // Seed viewState.trackedItems with a matching jira item so isPinned() is true
+      mockTrackedItems = [{ source: "jira", jiraKey: "PROJ-1" }];
+
+      render(() => <JiraAssignedTab issues={[issue]} loading={false} siteUrl={SITE_URL} />);
+
+      const unpinButton = screen.getByRole("button", { name: /unpin PROJ-1/i });
+      unpinButton.click();
+
+      expect(vi.mocked(untrackJiraItem)).toHaveBeenCalledOnce();
+      expect(vi.mocked(untrackJiraItem)).toHaveBeenCalledWith("PROJ-1");
+    });
   });
 });

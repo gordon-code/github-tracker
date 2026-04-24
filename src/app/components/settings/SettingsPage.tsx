@@ -9,7 +9,6 @@ import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
-import { clearJiraKeyCache } from "../../services/jira-keys";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
@@ -254,7 +253,7 @@ export default function SettingsPage() {
       // Validate by making a search request through the proxy
       const resp = await fetch("/api/jira/proxy", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
         body: JSON.stringify({
           endpoint: "search",
           cloudId,
@@ -268,9 +267,8 @@ export default function SettingsPage() {
         return;
       }
       // Number.MAX_SAFE_INTEGER (not Infinity — Infinity serializes to null in JSON)
-      const siteName = (() => {
-        try { return new URL(siteUrl).hostname.split(".")[0]; } catch { return cloudId; }
-      })();
+      let siteName: string;
+      try { siteName = new URL(siteUrl).hostname.split(".")[0]; } catch { siteName = cloudId; }
       setJiraAuth({
         accessToken: sealedToken,
         sealedRefreshToken: "",
@@ -294,7 +292,6 @@ export default function SettingsPage() {
   }
 
   function handleJiraDisconnect() {
-    clearJiraKeyCache();
     clearJiraAuth();
     // DefaultTab guard: reset to issues if pointing at Jira tab
     if (config.defaultTab === "jiraAssigned") {

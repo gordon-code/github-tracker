@@ -22,13 +22,13 @@ export async function lookupKeys(
   keys: string[],
   client: IJiraClient
 ): Promise<Map<string, JiraIssue | null>> {
-  if (keys.length === 0) return new Map(_jiraKeyCache);
+  if (keys.length === 0) return new Map<string, JiraIssue | null>();
 
   const uncached = keys.filter((k) => !_jiraKeyCache.has(k));
 
   if (uncached.length > 0) {
     try {
-      // bulkFetch is required on IJiraClient (per reduction review) — call unconditionally
+      // bulkFetch batches all uncached keys in a single round-trip
       const result = await client.bulkFetch(uncached);
       const byKey = new Map(result.issues.map((i) => [i.key, i]));
 
@@ -55,7 +55,7 @@ export async function lookupKeys(
           _jiraKeyCache.set(key, null);
         }
       } else {
-        // CORS or network error — fall back to sequential getIssue calls
+        // CORS or network error — fall back to concurrent individual getIssue calls
         const results = await Promise.allSettled(
           uncached.map((k) => client.getIssue(k))
         );
@@ -68,7 +68,11 @@ export async function lookupKeys(
     }
   }
 
-  return new Map(_jiraKeyCache);
+  const result = new Map<string, JiraIssue | null>();
+  for (const k of keys) {
+    if (_jiraKeyCache.has(k)) result.set(k, _jiraKeyCache.get(k)!);
+  }
+  return result;
 }
 
 export async function detectAndLookupJiraKeys(

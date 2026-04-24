@@ -1,53 +1,35 @@
 import { describe, it, expect } from "vitest";
-import { JIRA_KEY_REGEX, extractJiraKeys } from "../../src/shared/validation";
+import { extractJiraKeys } from "../../src/shared/validation";
 
-// ── JIRA_KEY_REGEX ────────────────────────────────────────────────────────────
+// ── Jira key pattern (via extractJiraKeys) ───────────────────────────────────
 
-describe("JIRA_KEY_REGEX", () => {
+describe("Jira key pattern", () => {
   it("matches a standard Jira key", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "PROJ-123".matchAll(JIRA_KEY_REGEX);
-    expect([...matches].map((m) => m[1])).toEqual(["PROJ-123"]);
+    expect(extractJiraKeys("PROJ-123")).toEqual(["PROJ-123"]);
   });
 
   it("does not match lowercase keys", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "proj-123".matchAll(JIRA_KEY_REGEX);
-    expect([...matches]).toHaveLength(0);
+    expect(extractJiraKeys("proj-123")).toEqual([]);
   });
 
   it("does not match a key that is a substring within a word boundary", () => {
-    // NOPROJ-1X: the X after the digits means it's not at a word boundary
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "NOPROJ-1X".matchAll(JIRA_KEY_REGEX);
-    // NOPROJ-1 should not match because NOPROJ-1X is one token (no word boundary after 1)
-    expect([...matches]).toHaveLength(0);
+    expect(extractJiraKeys("NOPROJ-1X")).toEqual([]);
   });
 
   it("matches project prefix of 2 characters minimum", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "AB-1 ZZ-99".matchAll(JIRA_KEY_REGEX);
-    expect([...matches].map((m) => m[1])).toEqual(["AB-1", "ZZ-99"]);
+    expect(extractJiraKeys("AB-1 ZZ-99")).toEqual(["AB-1", "ZZ-99"]);
   });
 
   it("matches project prefix up to 10 characters", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "ABCDEFGHIJ-1".matchAll(JIRA_KEY_REGEX);
-    expect([...matches].map((m) => m[1])).toEqual(["ABCDEFGHIJ-1"]);
+    expect(extractJiraKeys("ABCDEFGHIJ-1")).toEqual(["ABCDEFGHIJ-1"]);
   });
 
   it("does not match project prefix exceeding 10 characters", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "ABCDEFGHIJK-1".matchAll(JIRA_KEY_REGEX);
-    // May match a 10-char sub-prefix; we just confirm ABCDEFGHIJK-1 isn't captured as a whole
-    const allMatches = [...matches].map((m) => m[1]);
-    expect(allMatches).not.toContain("ABCDEFGHIJK-1");
+    expect(extractJiraKeys("ABCDEFGHIJK-1")).not.toContain("ABCDEFGHIJK-1");
   });
 
   it("does not match a single uppercase letter prefix (less than 2)", () => {
-    JIRA_KEY_REGEX.lastIndex = 0;
-    const matches = "A-1".matchAll(JIRA_KEY_REGEX);
-    expect([...matches]).toHaveLength(0);
+    expect(extractJiraKeys("A-1")).toEqual([]);
   });
 });
 

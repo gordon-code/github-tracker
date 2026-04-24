@@ -444,7 +444,38 @@ describe("JiraProxyClient", () => {
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       const headers = init.headers as Record<string, string>;
-      expect(headers["X-Requested-With"]).toBe("XMLHttpRequest");
+      expect(headers["X-Requested-With"]).toBe("fetch");
+    });
+
+    it("calls onResealed callback when response includes resealed field", async () => {
+      const onResealed = vi.fn();
+      const clientWithCallback = new JiraProxyClient(cloudId, email, sealed, onResealed);
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ issues: [], total: 0, maxResults: 100, startAt: 0, resealed: "new-sealed-token" }),
+          { status: 200 }
+        )
+      );
+
+      await clientWithCallback.searchJql("project = TEST");
+
+      expect(onResealed).toHaveBeenCalledOnce();
+      expect(onResealed).toHaveBeenCalledWith("new-sealed-token");
+    });
+
+    it("does not call onResealed when resealed is absent", async () => {
+      const onResealed = vi.fn();
+      const clientWithCallback = new JiraProxyClient(cloudId, email, sealed, onResealed);
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ issues: [], total: 0, maxResults: 100, startAt: 0 }),
+          { status: 200 }
+        )
+      );
+
+      await clientWithCallback.searchJql("project = TEST");
+
+      expect(onResealed).not.toHaveBeenCalled();
     });
   });
 
@@ -463,6 +494,37 @@ describe("JiraProxyClient", () => {
       const body = JSON.parse(init.body as string);
       expect(body.endpoint).toBe("issue");
       expect(body.params.issueIdsOrKeys).toEqual(["PROJ-1", "PROJ-2"]);
+    });
+
+    it("calls onResealed callback when response includes resealed field", async () => {
+      const onResealed = vi.fn();
+      const clientWithCallback = new JiraProxyClient(cloudId, email, sealed, onResealed);
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ issues: [], resealed: "new-sealed-token" }),
+          { status: 200 }
+        )
+      );
+
+      await clientWithCallback.bulkFetch(["PROJ-1"]);
+
+      expect(onResealed).toHaveBeenCalledOnce();
+      expect(onResealed).toHaveBeenCalledWith("new-sealed-token");
+    });
+
+    it("does not call onResealed when resealed is absent", async () => {
+      const onResealed = vi.fn();
+      const clientWithCallback = new JiraProxyClient(cloudId, email, sealed, onResealed);
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ issues: [] }),
+          { status: 200 }
+        )
+      );
+
+      await clientWithCallback.bulkFetch(["PROJ-1"]);
+
+      expect(onResealed).not.toHaveBeenCalled();
     });
   });
 
