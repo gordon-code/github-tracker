@@ -531,6 +531,12 @@ In Atlassian admin, go to Organization Settings. The Cloud ID appears in the sit
 **Jira badges not appearing on GitHub items.**
 Check that **Auto-detect Jira keys** is toggled on in Settings. Keys must appear in issue/PR titles or PR branch names and match the pattern `[A-Z]{2,10}-\d+` exactly (uppercase only).
 
+**"Access denied" error on the Jira Assigned tab (API token mode).**
+Your API token may lack the required permissions, or your account may have been removed from the Jira site. Check your app permissions in Atlassian settings. The dashboard preserves your auth state — you do not need to reconnect unless the token itself is revoked.
+
+**Jira disconnects across multiple browser tabs.**
+Jira uses rotating refresh tokens — each refresh invalidates the previous token. If two tabs attempt a token refresh simultaneously, one may fail and clear auth in all tabs. Refresh the affected tab or reconnect in Settings. This is a rare timing condition that only occurs when tokens expire in multiple tabs at the same instant.
+
 ---
 
 ## Settings Reference

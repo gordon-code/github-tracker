@@ -173,8 +173,8 @@ function renderSettings() {
 }
 
 function setEnv(key: string, value: string | undefined) {
-  if (value === undefined || value === "") {
-    vi.stubEnv(key, "");
+  if (value === undefined) {
+    vi.stubEnv(key, undefined as unknown as string);
   } else {
     vi.stubEnv(key, value);
   }
