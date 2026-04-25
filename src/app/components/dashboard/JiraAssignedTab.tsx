@@ -282,25 +282,29 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={issue.fields.issuetype}>
-                                    {(type) => (
-                                      <Show
-                                        when={type().iconUrl}
-                                        fallback={
-                                          <span class="badge badge-xs badge-ghost text-[10px]" title={type().name}>
-                                            {type().name}
-                                          </span>
-                                        }
-                                      >
-                                        <Tooltip content={type().name} focusable>
-                                          <img
-                                            src={type().iconUrl!}
-                                            alt={type().name}
-                                            class="h-4 w-4 shrink-0"
-                                            loading="lazy"
-                                          />
-                                        </Tooltip>
-                                      </Show>
-                                    )}
+                                    {(type) => {
+                                      const [imgFailed, setImgFailed] = createSignal(false);
+                                      return (
+                                        <Show
+                                          when={type().iconUrl && !imgFailed()}
+                                          fallback={
+                                            <span class="badge badge-xs badge-ghost text-[10px]" title={type().name}>
+                                              {type().name}
+                                            </span>
+                                          }
+                                        >
+                                          <Tooltip content={type().name} focusable>
+                                            <img
+                                              src={type().iconUrl!}
+                                              alt={type().name}
+                                              class="h-4 w-4 shrink-0"
+                                              loading="lazy"
+                                              onError={() => setImgFailed(true)}
+                                            />
+                                          </Tooltip>
+                                        </Show>
+                                      );
+                                    }}
                                   </Show>
                                   <a
                                     href={browseUrl()}
