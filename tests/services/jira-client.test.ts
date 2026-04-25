@@ -68,7 +68,7 @@ describe("JiraClient", () => {
 
       const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe(
-        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/PROJ-42?fields=summary,status,priority,assignee,project`
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/PROJ-42?fields=summary,status,priority,assignee,project,updated`
       );
     });
 

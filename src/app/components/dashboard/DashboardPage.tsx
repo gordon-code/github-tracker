@@ -127,10 +127,18 @@ export function _resetHasFetchedFresh(value = false) { setHasFetchedFresh(value)
 
 const [lastFetchHadErrors, setLastFetchHadErrors] = createSignal(false);
 
+// Jira state — module-level to persist across DashboardPage remounts (e.g., Settings → Dashboard navigation)
+const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
+const [jiraLoading, setJiraLoading] = createSignal(false);
+const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
+
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
   setHasFetchedFresh(false);
+  setJiraIssues([]);
+  setJiraLoading(false);
+  setJiraKeyMap(new Map());
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
@@ -294,9 +302,6 @@ export default function DashboardPage() {
   const [hotPollingPRIds, setHotPollingPRIds] = createSignal<ReadonlySet<number>>(new Set());
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
   const [rlDetail, setRlDetail] = createSignal<string>("Loading...");
-  const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
-  const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
-  const [jiraLoading, setJiraLoading] = createSignal(false);
 
   // Narrow reactivity: extract authMethod so unrelated jira config changes don't recreate the client
   const jiraAuthMethod = createMemo(() => config.jira?.authMethod);
@@ -350,6 +355,8 @@ export default function DashboardPage() {
         } else {
           pushNotification("jira", "Jira fetch failed — will retry on next refresh", "warning");
         }
+      } else {
+        pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
       }
     } finally {
       setJiraLoading(false);
@@ -435,6 +442,14 @@ export default function DashboardPage() {
   createEffect(() => {
     if (!config.jira?.enabled && activeTab() === "jiraAssigned") {
       handleTabChange("issues");
+    }
+  });
+
+  // Clear stale Jira data when auth is cleared (e.g., 401 during token refresh)
+  createEffect(() => {
+    if (!isJiraAuthenticated()) {
+      setJiraIssues([]);
+      setJiraKeyMap(new Map());
     }
   });
 
@@ -563,6 +578,12 @@ export default function DashboardPage() {
       }).catch(() => {
         // Non-fatal — org sync failure doesn't block dashboard
       });
+    }
+
+    // Immediate Jira fetch on mount — the deferred lastRefreshAt effect only
+    // fires on the NEXT poll, leaving a gap where jiraIssues may be empty.
+    if (config.jira?.enabled && isJiraAuthenticated()) {
+      fetchJiraAssigned().catch(handleJiraError);
     }
 
     // Wall-clock tick keeps relative time displays fresh between full poll cycles.

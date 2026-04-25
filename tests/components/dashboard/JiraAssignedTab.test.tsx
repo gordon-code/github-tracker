@@ -7,10 +7,12 @@ let mockTrackedItems: Array<{ source: string; jiraKey?: string }> = [];
 let mockJiraFilters: { statusCategory: string; priority: string } = { statusCategory: "all", priority: "all" };
 
 vi.mock("../../../src/app/stores/view", () => ({
-  viewState: new Proxy({} as { trackedItems: typeof mockTrackedItems; tabFilters: Record<string, unknown> }, {
+  viewState: new Proxy({} as Record<string, unknown>, {
     get(_t, key: string) {
       if (key === "trackedItems") return mockTrackedItems;
       if (key === "tabFilters") return { jiraAssigned: mockJiraFilters };
+      if (key === "lockedRepos") return {};
+      if (key === "expandedRepos") return { jiraAssigned: {} };
       return undefined;
     },
   }),
@@ -19,6 +21,8 @@ vi.mock("../../../src/app/stores/view", () => ({
   JiraFiltersSchema: { parse: vi.fn((_x: unknown) => ({ statusCategory: "all", priority: "all" })) },
   trackItem: vi.fn(),
   untrackJiraItem: vi.fn(),
+  toggleExpandedRepo: vi.fn(),
+  setAllExpanded: vi.fn(),
 }));
 
 vi.mock("../../../src/app/stores/config", () => ({
