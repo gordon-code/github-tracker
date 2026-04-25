@@ -4,7 +4,7 @@ import { Select } from "@kobalte/core/select";
 export interface SortOption {
   label: string;
   field: string;
-  type: "date" | "text" | "number";
+  type: "date" | "text" | "number" | "priority";
 }
 
 interface SortDropdownProps {
@@ -22,6 +22,7 @@ interface FlatOption {
 function suffixFor(type: SortOption["type"], dir: "asc" | "desc"): string {
   if (type === "date") return dir === "desc" ? "(newest first)" : "(oldest first)";
   if (type === "text") return dir === "asc" ? "(A-Z)" : "(Z-A)";
+  if (type === "priority") return dir === "asc" ? "(highest first)" : "(lowest first)";
   return dir === "desc" ? "(most)" : "(fewest)";
 }
 

@@ -40,7 +40,7 @@ const PRIORITY_OPTIONS = [
 ];
 
 const JIRA_SORT_OPTIONS: SortOption[] = [
-  { label: "Priority", field: "priority", type: "number" },
+  { label: "Priority", field: "priority", type: "priority" },
   { label: "Status", field: "status", type: "text" },
   { label: "Key", field: "key", type: "text" },
   { label: "Updated", field: "updated", type: "date" },
