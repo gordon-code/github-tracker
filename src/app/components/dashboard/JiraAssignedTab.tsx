@@ -280,6 +280,15 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                             <div role="listitem" class="px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2">
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
+                                  <Show when={issue.fields.issuetype?.iconUrl}>
+                                    <img
+                                      src={issue.fields.issuetype!.iconUrl}
+                                      alt=""
+                                      title={issue.fields.issuetype!.name}
+                                      class="h-4 w-4 shrink-0"
+                                      loading="lazy"
+                                    />
+                                  </Show>
                                   <a
                                     href={browseUrl()}
                                     target="_blank"

@@ -37,6 +37,10 @@ export interface JiraIssueFields {
     name: string;
   };
   updated?: string;
+  issuetype?: {
+    name: string;
+    iconUrl?: string;
+  };
   [key: string]: unknown;
 }
 
