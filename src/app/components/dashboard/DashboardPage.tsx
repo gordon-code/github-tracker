@@ -849,6 +849,7 @@ export default function DashboardPage() {
   // Jira key detection runs only when titles change — NOT on every lastRefreshedAt tick.
   // Guards: jira enabled+detection, authenticated, client ready, and titles actually changed.
   createEffect(on(titleFingerprint, () => {
+    if (import.meta.env.DEV) console.info("[jira] key detection guard:", { enabled: config.jira?.enabled, detection: config.jira?.issueKeyDetection, auth: isJiraAuthenticated(), client: !!jiraClient(), refreshed: !!dashboardData.lastRefreshedAt });
     if (!config.jira?.enabled || !config.jira?.issueKeyDetection) return;
     if (!isJiraAuthenticated()) return;
     const client = jiraClient();
