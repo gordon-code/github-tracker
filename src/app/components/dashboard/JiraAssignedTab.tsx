@@ -12,6 +12,7 @@ import SortDropdown, { type SortOption } from "../shared/SortDropdown";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ChevronIcon from "../shared/ChevronIcon";
 import RepoLockControls from "../shared/RepoLockControls";
+import { Tooltip } from "../shared/Tooltip";
 
 const JIRA_FILTER_DEFAULTS = JiraFiltersSchema.parse({});
 const ITEMS_PER_PAGE = 25;
@@ -281,13 +282,14 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <Show when={issue.fields.issuetype?.iconUrl}>
-                                    <img
-                                      src={issue.fields.issuetype!.iconUrl}
-                                      alt=""
-                                      title={issue.fields.issuetype!.name}
-                                      class="h-4 w-4 shrink-0"
-                                      loading="lazy"
-                                    />
+                                    <Tooltip content={issue.fields.issuetype!.name} focusable>
+                                      <img
+                                        src={issue.fields.issuetype!.iconUrl}
+                                        alt={issue.fields.issuetype!.name}
+                                        class="h-4 w-4 shrink-0"
+                                        loading="lazy"
+                                      />
+                                    </Tooltip>
                                   </Show>
                                   <a
                                     href={browseUrl()}
