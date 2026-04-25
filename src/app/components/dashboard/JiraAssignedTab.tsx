@@ -49,6 +49,10 @@ const PRIORITY_ORDER = Object.assign(Object.create(null) as Record<string, numbe
   Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4,
 });
 
+function normalizePriorityName(name: string): string {
+  return name.replace(/\s*\(.*\)$/, "");
+}
+
 const STATUS_CATEGORY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
   indeterminate: 0, new: 1, done: 2,
 });
@@ -94,8 +98,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
       let cmp = 0;
       switch (field) {
         case "priority":
-          cmp = (PRIORITY_ORDER[a.fields.priority?.name ?? "Medium"] ?? 2)
-            - (PRIORITY_ORDER[b.fields.priority?.name ?? "Medium"] ?? 2);
+          cmp = (PRIORITY_ORDER[normalizePriorityName(a.fields.priority?.name ?? "Medium")] ?? 2)
+            - (PRIORITY_ORDER[normalizePriorityName(b.fields.priority?.name ?? "Medium")] ?? 2);
           break;
         case "status":
           cmp = (STATUS_CATEGORY_ORDER[a.fields.status.statusCategory.key] ?? 1)
@@ -289,9 +293,9 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   >
                                     {issue.fields.status.name}
                                   </span>
-                                  <Show when={issue.fields.priority?.name && issue.fields.priority.name !== "Medium" && issue.fields.priority.name !== "Undefined"}>
+                                  <Show when={issue.fields.priority?.name && normalizePriorityName(issue.fields.priority.name) !== "Medium" && issue.fields.priority.name !== "Undefined"}>
                                     <span class="badge badge-xs badge-outline text-[10px]">
-                                      {issue.fields.priority!.name}
+                                      {normalizePriorityName(issue.fields.priority!.name)}
                                     </span>
                                   </Show>
                                 </div>

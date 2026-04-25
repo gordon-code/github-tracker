@@ -8,7 +8,7 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, getCustomTab, isBuiltinTab, type TrackedUser } from "../../stores/config";
+import { config, setConfig, getCustomTab, isBuiltinTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
@@ -582,6 +582,13 @@ export default function DashboardPage() {
       }).catch(() => {
         // Non-fatal — org sync failure doesn't block dashboard
       });
+    }
+
+    // Backfill config.jira.siteUrl from auth state if missing (handles configs
+    // saved before siteUrl was added, or OAuth setups that stored it only in auth)
+    if (config.jira?.enabled && !config.jira.siteUrl) {
+      const auth = jiraAuth();
+      if (auth?.siteUrl) updateJiraConfig({ siteUrl: auth.siteUrl });
     }
 
     // Immediate Jira fetch on mount — the deferred lastRefreshAt effect only
