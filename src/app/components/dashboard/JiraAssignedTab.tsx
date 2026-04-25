@@ -220,7 +220,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           <For each={paginatedGrouped()}>
             {([projectKey, issues]) => {
               const isEmpty = () => issues.length === 0;
-              const isExpanded = () => !isEmpty() && (viewState.expandedRepos[TAB_KEY]?.[projectKey] ?? true);
+              const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[TAB_KEY] ?? {})[projectKey];
 
               return (
                 <div>

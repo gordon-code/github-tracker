@@ -12,7 +12,7 @@ vi.mock("../../../src/app/stores/view", () => ({
       if (key === "trackedItems") return mockTrackedItems;
       if (key === "tabFilters") return { jiraAssigned: mockJiraFilters };
       if (key === "lockedRepos") return {};
-      if (key === "expandedRepos") return { jiraAssigned: {} };
+      if (key === "expandedRepos") return { jiraAssigned: new Proxy({}, { get: () => true }) };
       return undefined;
     },
   }),

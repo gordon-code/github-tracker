@@ -324,9 +324,12 @@ export default function DashboardPage() {
     });
   });
 
+  let _jiraFetching = false;
   async function fetchJiraAssigned(): Promise<void> {
+    if (_jiraFetching) return;
     const client = jiraClient();
     if (!client) return;
+    _jiraFetching = true;
     setJiraLoading(true);
     try {
       const result = await client.searchJql(
@@ -359,6 +362,7 @@ export default function DashboardPage() {
         pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
       }
     } finally {
+      _jiraFetching = false;
       setJiraLoading(false);
     }
   }
