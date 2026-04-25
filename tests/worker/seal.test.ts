@@ -165,7 +165,7 @@ describe("Worker /api/proxy/seal endpoint", () => {
     expect(json["error"]).toBe("turnstile_failed");
   });
 
-  it("request with Turnstile response missing action field returns 403 with turnstile_failed", async () => {
+  it("request with Turnstile response missing action field passes verification (test keys)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
@@ -173,9 +173,8 @@ describe("Worker /api/proxy/seal endpoint", () => {
     const req = makeSealRequest();
     const res = await worker.fetch(req, makeEnv());
 
-    expect(res.status).toBe(403);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("turnstile_failed");
+    // Missing action is allowed (test keys don't return it) — request proceeds past Turnstile
+    expect(res.status).not.toBe(403);
   });
 
   it("request with missing Turnstile token returns 403 with turnstile_failed", async () => {

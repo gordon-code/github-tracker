@@ -159,7 +159,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                 >
                                   {issue.fields.status.name}
                                 </span>
-                                <Show when={issue.fields.priority?.name && issue.fields.priority.name !== "Medium"}>
+                                <Show when={issue.fields.priority?.name && issue.fields.priority.name !== "Medium" && issue.fields.priority.name !== "Undefined"}>
                                   <span class="badge badge-xs badge-outline text-[10px]">
                                     {issue.fields.priority!.name}
                                   </span>

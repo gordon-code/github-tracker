@@ -252,7 +252,6 @@ describe("acquireTurnstileToken", () => {
     const token = await tokenPromise;
     expect(token).toBe("test-token-abc");
 
-    expect(mockTurnstile.ready).toHaveBeenCalledOnce();
     expect(mockTurnstile.render).toHaveBeenCalledWith(
       expect.any(HTMLDivElement),
       expect.objectContaining({ action: "seal", retry: "never" }),

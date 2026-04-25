@@ -441,7 +441,7 @@ The integration is opt-in and requires a Jira Cloud account. It can be enabled a
 - **Callback URLs:** `https://your-domain/jira/callback` and `http://localhost:5173/jira/callback` (for local dev)
 - Set `VITE_JIRA_CLIENT_ID` in `.env` and provision `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` as Worker secrets (see [Deployment](#jira-production-secrets)).
 
-**API token (if not using OAuth):** Generate one at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens). You will also need your Cloud ID (found in Atlassian admin under Organization Settings, or ask your admin).
+**API token (if not using OAuth):** Generate one at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens). Use **Create API token** (not "Create API token with scopes") — this type inherits your account's full access to Jira projects. The app uses the token read-only: it searches for assigned issues and fetches issue details.
 
 ### Connecting via OAuth
 
@@ -461,8 +461,8 @@ Use this method if OAuth is unavailable (e.g., your organization does not allow 
 
 1. Go to **Settings > Jira Cloud Integration**
 2. Click **Use API token** to switch modes
-3. Enter your Atlassian account **email**, your **API token**, your **site URL** (e.g., `https://myorg.atlassian.net`), and your **Cloud ID**
-4. Click **Connect** — the credentials are validated against the Jira API before being saved
+3. Enter your Atlassian account **email**, your **API token**, and your **site URL** (e.g., `https://myorg.atlassian.net`)
+4. Click **Connect** — the app auto-discovers your Jira Cloud ID from the site URL, then validates the credentials against the Jira API
 5. On success the integration activates. The API token is encrypted server-side (AES-256-GCM) before storage; the plaintext token is never saved in the browser
 
 The integration label shows "API Token" and displays the connected site name and URL.
@@ -512,21 +512,21 @@ wrangler secret put JIRA_CLIENT_ID
 wrangler secret put JIRA_CLIENT_SECRET
 ```
 
-Local development uses `.dev.vars` (see `.dev.vars.example`). The client-side env var `VITE_JIRA_CLIENT_ID` gates visibility of the Jira section in Settings — the section is hidden when this var is absent or malformed.
+Local development uses `.dev.vars` (see `.dev.vars.example`). The Jira Cloud Integration section always appears in Settings. When `VITE_JIRA_CLIENT_ID` is set, both OAuth and API token connection methods are available. When it is absent, only the API token method is shown.
 
 ### Troubleshooting Jira
 
 **"Reconnect in Settings" notification appears.**
 Your OAuth refresh token has expired (90-day inactivity limit) or was revoked. Go to Settings and click **Connect with Jira** to re-authenticate.
 
-**Jira section not visible in Settings.**
-`VITE_JIRA_CLIENT_ID` is not set or contains an invalid value. Check your `.env` file or deployment configuration.
+**OAuth button not visible in Settings.**
+`VITE_JIRA_CLIENT_ID` is not set or contains an invalid value. Check your `.env` file or deployment configuration. The API token method is always available regardless of this variable.
 
 **"No Jira Cloud sites found" error after OAuth.**
 Your Atlassian account does not have access to any Jira Cloud sites. Confirm your account has at least one Jira site in the Atlassian admin portal.
 
-**API token: "Cloud ID" field — where do I find it?**
-In Atlassian admin, go to Organization Settings. The Cloud ID appears in the site details. If you are not an admin, ask your Jira administrator.
+**"Could not look up your Jira site" error when connecting via API token.**
+The app auto-discovers your Jira Cloud ID from the site URL. This error means the site URL is unreachable or not a valid Jira Cloud instance. Verify the URL is correct (e.g., `https://yourorg.atlassian.net`) and that the site is accessible.
 
 **Jira badges not appearing on GitHub items.**
 Check that **Auto-detect Jira keys** is toggled on in Settings. Keys must appear in issue/PR titles or PR branch names and match the pattern `[A-Z]{2,10}-\d+` exactly (uppercase only).

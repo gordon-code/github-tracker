@@ -126,6 +126,7 @@ function createIpRateLimiter(limit: number, windowMs: number): { check(ip: strin
 const tokenRateLimiter = createIpRateLimiter(10, 60_000);        // token exchange: 10/min
 const jiraTokenRateLimiter = createIpRateLimiter(10, 60_000);   // jira token exchange: 10/min
 const jiraRefreshRateLimiter = createIpRateLimiter(30, 60_000); // jira token refresh: 30/min (more frequent, separate bucket)
+const jiraTenantInfoLimiter = createIpRateLimiter(10, 60_000); // jira tenant info lookup: 10/min
 const sentryRateLimiter = createIpRateLimiter(15, 60_000);    // sentry tunnel: 15/min
 const cspRateLimiter = createIpRateLimiter(15, 60_000);       // csp report: 15/min
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000);  // proxy pre-gate: complements CF binding
@@ -443,7 +444,7 @@ async function handleSentryTunnel(
       method: "POST",
       headers: sentryHeaders,
       body,
-      redirect: "error",
+      redirect: "manual",
     });
 
     log("info", "sentry_tunnel_forwarded", {
@@ -595,7 +596,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
           ...(env.SENTRY_SECURITY_TOKEN ? { "X-Sentry-Token": env.SENTRY_SECURITY_TOKEN } : {}),
         },
         body: JSON.stringify(payload),
-        redirect: "error",
+        redirect: "manual",
       }).catch(() => null)
     )
   );
@@ -730,7 +731,7 @@ async function handleTokenExchange(
           client_secret: env.GITHUB_CLIENT_SECRET,
           code,
         }),
-        redirect: "error",
+        redirect: "manual",
       }
     );
     githubStatus = githubResp.status;
@@ -865,7 +866,7 @@ async function handleJiraTokenExchange(
         code,
         redirect_uri: redirectUri,
       }),
-      redirect: "error",
+      redirect: "manual",
     });
     atlassianStatus = atlassianResp.status;
     atlassianData = (await atlassianResp.json()) as Record<string, unknown>;
@@ -987,7 +988,7 @@ async function handleJiraTokenRefresh(
         client_secret: env.JIRA_CLIENT_SECRET,
         refresh_token: plainRefreshToken,
       }),
-      redirect: "error",
+      redirect: "manual",
     });
     atlassianStatus = atlassianResp.status;
     atlassianData = (await atlassianResp.json()) as Record<string, unknown>;
@@ -1029,6 +1030,115 @@ async function handleJiraTokenRefresh(
   log("info", "jira_token_refresh_succeeded", { atlassian_status: atlassianStatus }, request);
 
   return new Response(JSON.stringify({ access_token: newAccessToken, sealed_refresh_token: newSealedRefreshToken, expires_in: expiresIn }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+  });
+}
+
+const ATLASSIAN_HOST_RE = /^[a-z0-9-]+\.atlassian\.net$/i;
+
+async function handleJiraTenantInfo(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  log("info", "jira_tenant_info_entry", { cors_keys: Object.keys(cors).join(","), method: request.method }, request);
+
+  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
+  if (!originResult.ok) {
+    log("warn", "jira_tenant_info_origin_failed", {}, request);
+    return errorResponse("origin_mismatch", 403, cors);
+  }
+
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405, cors);
+  }
+
+  const ip = getClientIp(request);
+  if (!ip) return errorResponse("invalid_request", 400, cors);
+  if (!jiraTenantInfoLimiter.check(ip)) {
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  const contentType = request.headers.get("Content-Type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  const siteUrl = (body as Record<string, unknown>)?.["siteUrl"];
+  if (typeof siteUrl !== "string" || siteUrl.length === 0 || siteUrl.length > 200) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(siteUrl);
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  if (parsed.protocol !== "https:" || !ATLASSIAN_HOST_RE.test(parsed.hostname)) {
+    log("warn", "jira_tenant_info_invalid_host", { hostname: parsed.hostname }, request);
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${parsed.origin}/_edge/tenant_info`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      redirect: "manual",
+    });
+  } catch (err) {
+    log("error", "jira_tenant_info_fetch_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  log("info", "jira_tenant_info_response", { status: resp.status }, request);
+
+  if (!resp.ok || resp.status >= 300) {
+    log("warn", "jira_tenant_info_upstream_error", { status: resp.status }, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  let data: unknown;
+  try {
+    data = await resp.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  const cloudId = (data as Record<string, unknown>)?.["cloudId"];
+  if (typeof cloudId !== "string" || !CLOUD_ID_RE.test(cloudId)) {
+    log("warn", "jira_tenant_info_invalid_cloud_id", {}, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  return new Response(JSON.stringify({ cloudId }), {
     status: 200,
     headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
   });
@@ -1162,7 +1272,7 @@ async function handleJiraProxy(
     jiraInit = {
       method: "GET",
       headers: { "Authorization": auth, "Accept": "application/json" },
-      redirect: "error",
+      redirect: "manual",
     };
   } else {
     // POST with params as JSON body — only allowlisted keys forwarded
@@ -1181,7 +1291,7 @@ async function handleJiraProxy(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(filteredParams),
-      redirect: "error",
+      redirect: "manual",
     };
   }
 
@@ -1285,6 +1395,7 @@ export default Sentry.withSentry(
         "/api/oauth/token",
         "/api/oauth/jira/token",
         "/api/oauth/jira/refresh",
+        "/api/jira/tenant-info",
         "/api/jira/proxy",
       ]);
       if (request.method === "OPTIONS" && CORS_PATHS.has(url.pathname)) {
@@ -1313,6 +1424,10 @@ export default Sentry.withSentry(
         return new Response("OK", {
           headers: SECURITY_HEADERS,
         });
+      }
+
+      if (url.pathname === "/api/jira/tenant-info") {
+        return handleJiraTenantInfo(request, env, cors);
       }
 
       // ── Proxy routes: validation, session, and rate limiting ─────────────────

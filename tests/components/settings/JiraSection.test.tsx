@@ -196,27 +196,39 @@ describe("SettingsPage Jira section — section visibility", () => {
     vi.unstubAllEnvs();
   });
 
-  it("Jira section is hidden when VITE_JIRA_CLIENT_ID is absent", async () => {
+  it("Jira section is visible even when VITE_JIRA_CLIENT_ID is absent", async () => {
     setEnv("VITE_JIRA_CLIENT_ID", undefined);
     renderSettings();
     await waitFor(() => {
-      expect(screen.queryByText("Jira Cloud Integration")).toBeNull();
+      expect(screen.getByText("Jira Cloud Integration")).toBeTruthy();
     });
   });
 
-  it("Jira section is hidden when VITE_JIRA_CLIENT_ID is empty string", async () => {
+  it("OAuth button is hidden when VITE_JIRA_CLIENT_ID is absent", async () => {
+    setEnv("VITE_JIRA_CLIENT_ID", undefined);
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.queryByText(/Connect with Jira OAuth/i)).toBeNull();
+      expect(screen.getByText(/Use API token/i)).toBeTruthy();
+    });
+  });
+
+  it("OAuth button is hidden when VITE_JIRA_CLIENT_ID is empty string", async () => {
     setEnv("VITE_JIRA_CLIENT_ID", "");
     renderSettings();
     await waitFor(() => {
-      expect(screen.queryByText("Jira Cloud Integration")).toBeNull();
+      expect(screen.queryByText(/Connect with Jira OAuth/i)).toBeNull();
+      expect(screen.getByText(/Use API token/i)).toBeTruthy();
     });
   });
 
-  it("Jira section is visible when VITE_JIRA_CLIENT_ID is a valid alphanumeric ID", async () => {
+  it("both OAuth and API token buttons visible when VITE_JIRA_CLIENT_ID is valid", async () => {
     setEnv("VITE_JIRA_CLIENT_ID", "valid-client-id-123");
     renderSettings();
     await waitFor(() => {
       expect(screen.getByText("Jira Cloud Integration")).toBeTruthy();
+      expect(screen.getByText(/Connect with Jira OAuth/i)).toBeTruthy();
+      expect(screen.getByText(/Use API token/i)).toBeTruthy();
     });
   });
 });
@@ -291,16 +303,22 @@ describe("SettingsPage Jira section — disconnected state", () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/Atlassian account email/i)).toBeTruthy();
       expect(screen.getByLabelText(/Atlassian API token/i)).toBeTruthy();
-      expect(screen.getByLabelText(/Jira Cloud ID/i)).toBeTruthy();
+      expect(screen.getByLabelText(/Jira site name/i)).toBeTruthy();
     });
   });
 
-  it("API token connect calls sealApiToken and sets Jira auth on success", async () => {
+  it("API token connect auto-discovers Cloud ID and sets Jira auth on success", async () => {
     mockSealApiToken.mockResolvedValue("sealed-blob-xyz");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [], total: 0, maxResults: 1, startAt: 0 }),
-    }));
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ cloudId: "a1b2c3d4-1234-4abc-89ef-a1b2c3d4e5f6" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ issues: [], total: 0, maxResults: 1, startAt: 0 }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
 
     renderSettings();
     await waitFor(() => expect(screen.getByText(/Use API token/i)).toBeTruthy());
@@ -314,22 +332,23 @@ describe("SettingsPage Jira section — disconnected state", () => {
     fireEvent.input(screen.getByLabelText(/Atlassian API token/i), {
       target: { value: "my-api-token-123" },
     });
-    fireEvent.input(screen.getByLabelText(/Jira Cloud ID/i), {
-      target: { value: "a1b2c3d4-1234-4abc-89ef-a1b2c3d4e5f6" },
-    });
-    fireEvent.input(screen.getByLabelText(/Jira site URL/i), {
+    fireEvent.input(screen.getByLabelText(/Jira site name/i), {
       target: { value: "https://mysite.atlassian.net" },
     });
 
     fireEvent.click(screen.getByRole("button", { name: /^Connect$/i }));
 
     await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith("/api/jira/tenant-info", expect.objectContaining({
+        method: "POST",
+      }));
       expect(mockSealApiToken).toHaveBeenCalledWith("my-api-token-123", "jira-api-token");
       expect(mockSetJiraAuth).toHaveBeenCalledWith(
         expect.objectContaining({
           accessToken: "sealed-blob-xyz",
           sealedRefreshToken: "",
           expiresAt: Number.MAX_SAFE_INTEGER,
+          cloudId: "a1b2c3d4-1234-4abc-89ef-a1b2c3d4e5f6",
           email: "user@example.com",
         })
       );
@@ -349,17 +368,16 @@ describe("SettingsPage Jira section — disconnected state", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Connect$/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Email, API token, Cloud ID, and site URL are all required/i)).toBeTruthy();
+      expect(screen.getByText(/Email, API token, and site name are all required/i)).toBeTruthy();
     });
     expect(mockSealApiToken).not.toHaveBeenCalled();
   });
 
-  it("API token connect shows error when proxy returns non-ok response", async () => {
-    mockSealApiToken.mockResolvedValue("sealed-blob");
+  it("API token connect shows error when tenant-info lookup fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
-      status: 401,
-      json: async () => ({ error: "unauthorized" }),
+      status: 502,
+      json: async () => ({ error: "jira_tenant_info_failed" }),
     }));
 
     renderSettings();
@@ -370,9 +388,38 @@ describe("SettingsPage Jira section — disconnected state", () => {
 
     fireEvent.input(screen.getByLabelText(/Atlassian account email/i), { target: { value: "u@e.com" } });
     fireEvent.input(screen.getByLabelText(/Atlassian API token/i), { target: { value: "tok" } });
-    // Use a valid UUID v4 for cloudId to pass UUID validation
-    fireEvent.input(screen.getByLabelText(/Jira Cloud ID/i), { target: { value: "a1b2c3d4-1234-4abc-89ef-a1b2c3d4e5f6" } });
-    fireEvent.input(screen.getByLabelText(/Jira site URL/i), { target: { value: "https://mysite.atlassian.net" } });
+    fireEvent.input(screen.getByLabelText(/Jira site name/i), { target: { value: "mysite" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not look up your Jira site/i)).toBeTruthy();
+    });
+    expect(mockSealApiToken).not.toHaveBeenCalled();
+  });
+
+  it("API token connect shows error when proxy returns non-ok response", async () => {
+    mockSealApiToken.mockResolvedValue("sealed-blob");
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ cloudId: "a1b2c3d4-1234-4abc-89ef-a1b2c3d4e5f6" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "unauthorized" }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderSettings();
+    await waitFor(() => expect(screen.getByText(/Use API token/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByText(/Use API token/i));
+    await waitFor(() => expect(screen.getByLabelText(/Atlassian account email/i)).toBeTruthy());
+
+    fireEvent.input(screen.getByLabelText(/Atlassian account email/i), { target: { value: "u@e.com" } });
+    fireEvent.input(screen.getByLabelText(/Atlassian API token/i), { target: { value: "tok" } });
+    fireEvent.input(screen.getByLabelText(/Jira site name/i), { target: { value: "mysite" } });
     fireEvent.click(screen.getByRole("button", { name: /^Connect$/i }));
 
     await waitFor(() => {

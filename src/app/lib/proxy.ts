@@ -13,7 +13,6 @@ function loadTurnstileScript(): Promise<void> {
   turnstilePromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = TURNSTILE_SCRIPT_URL;
-    script.async = true;
     script.onload = () => resolve();
     script.onerror = () => {
       script.remove();
@@ -60,50 +59,46 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
       reject(new Error("Turnstile challenge timed out after 30 seconds"));
     }, 30_000);
 
-    window.turnstile.ready(() => {
+    try {
+      const widgetId = window.turnstile.render(container, {
+        sitekey: siteKey,
+        action: "seal",
+        size: "compact",
+        execution: "execute",
+        retry: "never",
+        callback: (token: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(token);
+        },
+        "error-callback": (errorCode: string) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(`Turnstile error: ${errorCode}`));
+        },
+        "expired-callback": () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("Turnstile token expired before submission"));
+        },
+        "timeout-callback": () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error("Turnstile challenge timed out"));
+        },
+      });
+      currentWidgetId = widgetId;
+      window.turnstile.execute(widgetId);
+    } catch (err) {
       if (settled) return;
-
-      try {
-        const widgetId = window.turnstile.render(container, {
-          sitekey: siteKey,
-          action: "seal",
-          size: "invisible",
-          execution: "execute",
-          retry: "never",
-          callback: (token: string) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            resolve(token);
-          },
-          "error-callback": (errorCode: string) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error(`Turnstile error: ${errorCode}`));
-          },
-          "expired-callback": () => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error("Turnstile token expired before submission"));
-          },
-          "timeout-callback": () => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error("Turnstile challenge timed out"));
-          },
-        });
-        currentWidgetId = widgetId;
-        window.turnstile.execute(widgetId);
-      } catch (err) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(err instanceof Error ? err : new Error("Turnstile render failed"));
-      }
-    });
+      settled = true;
+      cleanup();
+      reject(err instanceof Error ? err : new Error("Turnstile render failed"));
+    }
   });
 }
 

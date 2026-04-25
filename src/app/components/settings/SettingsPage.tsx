@@ -1,4 +1,5 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, setMonitoredRepo } from "../../stores/config";
@@ -26,7 +27,6 @@ import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
-const CLOUD_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -220,11 +220,18 @@ export default function SettingsPage() {
 
   const [jiraApiEmail, setJiraApiEmail] = createSignal("");
   const [jiraApiToken, setJiraApiToken] = createSignal("");
-  const [jiraApiCloudId, setJiraApiCloudId] = createSignal("");
-  const [jiraApiSiteUrl, setJiraApiSiteUrl] = createSignal("");
+  const [jiraApiSubdomain, setJiraApiSubdomain] = createSignal("");
+  const [jiraApiDomain, setJiraApiDomain] = createSignal("atlassian.net");
+  const [jiraApiCustomUrl, setJiraApiCustomUrl] = createSignal("");
   const [jiraApiConnecting, setJiraApiConnecting] = createSignal(false);
   const [jiraApiError, setJiraApiError] = createSignal<string | null>(null);
   const [jiraApiMode, setJiraApiMode] = createSignal(false);
+
+  const jiraApiSiteUrl = () => {
+    if (jiraApiDomain() === "custom") return jiraApiCustomUrl().trim().replace(/\/$/, "");
+    const sub = jiraApiSubdomain().trim();
+    return sub ? `https://${sub}.${jiraApiDomain()}` : "";
+  };
 
   function handleJiraOAuthConnect() {
     try {
@@ -238,19 +245,33 @@ export default function SettingsPage() {
   async function handleJiraApiTokenConnect() {
     const email = jiraApiEmail().trim();
     const token = jiraApiToken().trim();
-    const cloudId = jiraApiCloudId().trim();
-    const siteUrl = jiraApiSiteUrl().trim().replace(/\/$/, "");
-    if (!email || !token || !cloudId || !siteUrl) {
-      setJiraApiError("Email, API token, Cloud ID, and site URL are all required.");
-      return;
-    }
-    if (!CLOUD_ID_UUID_RE.test(cloudId)) {
-      setJiraApiError("Cloud ID must be a valid UUID v4 (e.g. xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).");
+    const siteUrl = jiraApiSiteUrl();
+    if (!email || !token || !siteUrl) {
+      setJiraApiError(jiraApiDomain() === "custom"
+        ? "Email, API token, and site URL are all required."
+        : "Email, API token, and site name are all required.");
       return;
     }
     setJiraApiConnecting(true);
     setJiraApiError(null);
     try {
+      // Auto-discover Cloud ID from site URL
+      const tenantResp = await fetch("/api/jira/tenant-info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteUrl }),
+      });
+      if (!tenantResp.ok) {
+        setJiraApiError("Could not look up your Jira site — check the site URL and try again.");
+        return;
+      }
+      const tenantData = await tenantResp.json() as { cloudId: string };
+      const cloudId = tenantData.cloudId;
+      if (!cloudId) {
+        setJiraApiError("Could not determine Cloud ID from your Jira site URL.");
+        return;
+      }
+
       const sealedToken = await sealApiToken(token, "jira-api-token");
       // Validate by making a search request through the proxy
       const resp = await fetch("/api/jira/proxy", {
@@ -265,10 +286,9 @@ export default function SettingsPage() {
         }),
       });
       if (!resp.ok) {
-        setJiraApiError("Could not connect — check your email, API token, and Cloud ID.");
+        setJiraApiError("Could not connect — check your email and API token.");
         return;
       }
-      // Number.MAX_SAFE_INTEGER (not Infinity — Infinity serializes to null in JSON)
       let siteName: string;
       try { siteName = new URL(siteUrl).hostname.split(".")[0]; } catch { siteName = cloudId; }
       setJiraAuth({
@@ -280,14 +300,18 @@ export default function SettingsPage() {
         siteName,
         email,
       });
-      updateJiraConfig({ enabled: true, cloudId, email, authMethod: "token" });
+      updateJiraConfig({ enabled: true, cloudId, email, authMethod: "token", siteUrl, siteName });
       setJiraApiEmail("");
       setJiraApiToken("");
-      setJiraApiCloudId("");
-      setJiraApiSiteUrl("");
+      setJiraApiSubdomain("");
+      setJiraApiDomain("atlassian.net");
+      setJiraApiCustomUrl("");
       setJiraApiMode(false);
-    } catch {
-      setJiraApiError("A network error occurred. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error("[jira-connect]", err);
+      Sentry.captureException(err, { tags: { source: "jira-api-token-connect" } });
+      setJiraApiError(`Connection failed: ${msg}`);
     } finally {
       setJiraApiConnecting(false);
     }
@@ -860,8 +884,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 11: Jira Cloud Integration */}
-        <Show when={jiraEnabled}>
-          <Section title="Jira Cloud Integration">
+        <Section title="Jira Cloud Integration">
             <Show
               when={isJiraAuthenticated()}
               fallback={
@@ -871,16 +894,18 @@ export default function SettingsPage() {
                     fallback={
                       <div class="flex flex-col gap-3">
                         <p class="text-xs text-base-content/60">
-                          Enter your Atlassian email, an API token from{" "}
+                          Enter your Atlassian email, an{" "}
                           <a
                             href="https://id.atlassian.com/manage-profile/security/api-tokens"
                             target="_blank"
                             rel="noopener noreferrer"
                             class="link link-primary"
                           >
-                            id.atlassian.com
+                            API token
                           </a>
-                          , and your Jira Cloud ID.
+                          , and your Jira Cloud ID. Use <strong>Create API token</strong> (not "with
+                          scopes") — it inherits your account's access to Jira projects. The token is
+                          used read-only and encrypted before storage.
                         </p>
                         <input
                           type="email"
@@ -898,25 +923,43 @@ export default function SettingsPage() {
                           class="input input-sm w-full"
                           aria-label="Atlassian API token"
                         />
-                        <input
-                          type="text"
-                          placeholder="Cloud ID (UUID)"
-                          value={jiraApiCloudId()}
-                          onInput={(e) => setJiraApiCloudId(e.currentTarget.value)}
-                          class="input input-sm w-full"
-                          aria-label="Jira Cloud ID"
-                        />
-                        <p class="text-xs text-base-content/50">
-                          Find your Cloud ID at admin.atlassian.com → Organization → Settings → Cloud ID, or ask your Jira admin.
-                        </p>
-                        <input
-                          type="url"
-                          placeholder="Site URL (e.g. https://yoursite.atlassian.net)"
-                          value={jiraApiSiteUrl()}
-                          onInput={(e) => setJiraApiSiteUrl(e.currentTarget.value)}
-                          class="input input-sm w-full"
-                          aria-label="Jira site URL"
-                        />
+                        <div class="flex items-center gap-1">
+                          <Show when={jiraApiDomain() !== "custom"}>
+                            <span class="text-sm text-base-content/60 shrink-0">https://</span>
+                          </Show>
+                          <Show
+                            when={jiraApiDomain() !== "custom"}
+                            fallback={
+                              <input
+                                type="url"
+                                placeholder="https://jira.yourcompany.com"
+                                value={jiraApiCustomUrl()}
+                                onInput={(e) => setJiraApiCustomUrl(e.currentTarget.value)}
+                                class="input input-sm flex-1"
+                                aria-label="Jira site URL"
+                              />
+                            }
+                          >
+                            <input
+                              type="text"
+                              placeholder="yoursite"
+                              value={jiraApiSubdomain()}
+                              onInput={(e) => setJiraApiSubdomain(e.currentTarget.value)}
+                              class="input input-sm w-32"
+                              aria-label="Jira site name"
+                            />
+                            <span class="text-sm text-base-content/60">.</span>
+                          </Show>
+                          <select
+                            value={jiraApiDomain()}
+                            onChange={(e) => setJiraApiDomain(e.currentTarget.value)}
+                            class="select select-sm"
+                            aria-label="Jira domain"
+                          >
+                            <option value="atlassian.net">atlassian.net</option>
+                            <option value="custom">Custom domain</option>
+                          </select>
+                        </div>
                         <Show when={jiraApiError()}>
                           <p class="text-xs text-error">{jiraApiError()}</p>
                         </Show>
@@ -931,7 +974,7 @@ export default function SettingsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSiteUrl(""); }}
+                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSubdomain(""); setJiraApiCustomUrl(""); }}
                             class="btn btn-sm btn-ghost"
                           >
                             Cancel
@@ -944,18 +987,20 @@ export default function SettingsPage() {
                       Connect your Jira Cloud account to see assigned issues and detect Jira keys in GitHub items.
                     </p>
                     <div class="flex gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={handleJiraOAuthConnect}
-                        class="btn btn-sm btn-primary"
-                      >
-                        Connect with Jira OAuth
-                      </button>
+                      <Show when={jiraEnabled}>
+                        <button
+                          type="button"
+                          onClick={handleJiraOAuthConnect}
+                          class="btn btn-sm btn-primary"
+                        >
+                          Connect with Jira OAuth
+                        </button>
+                      </Show>
                       <button
                         type="button"
                         onClick={() => setJiraApiMode(true)}
                         aria-expanded={jiraApiMode()}
-                        class="btn btn-sm btn-outline"
+                        class={jiraEnabled ? "btn btn-sm btn-outline" : "btn btn-sm btn-primary"}
                       >
                         Use API token
                       </button>
@@ -1004,7 +1049,6 @@ export default function SettingsPage() {
               </SettingRow>
             </Show>
           </Section>
-        </Show>
 
         {/* Data */}
         <Section title="Data">
