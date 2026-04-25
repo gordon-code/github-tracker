@@ -374,17 +374,25 @@ describe("JiraAssignedTab", () => {
 
   // ── View density ───────────────────────────────────────────────────────────
 
-  it("shows assignee name when viewDensity is not compact", () => {
-    const issues = [makeIssue("PROJ-1")];
-    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
-    expect(screen.getByText("Alice")).toBeTruthy();
-  });
-
-  it("hides assignee name when viewDensity is compact", () => {
-    (config as { viewDensity: string }).viewDensity = "compact";
+  it("does not show assignee name (redundant in assigned-to-me tab)", () => {
     const issues = [makeIssue("PROJ-1")];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
     expect(screen.queryByText("Alice")).toBeNull();
+  });
+
+  it("renders summary as <p> in comfortable mode", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    const summary = screen.getByText("Summary for PROJ-1");
+    expect(summary.tagName).toBe("P");
+  });
+
+  it("renders summary inline with key in compact mode", () => {
+    (config as { viewDensity: string }).viewDensity = "compact";
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    const summary = screen.getByText("Summary for PROJ-1");
+    expect(summary.tagName).toBe("SPAN");
     (config as { viewDensity: string }).viewDensity = "comfortable";
   });
 

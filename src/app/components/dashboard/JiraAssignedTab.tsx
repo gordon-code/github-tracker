@@ -298,13 +298,15 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                       {normalizePriorityName(issue.fields.priority!.name)}
                                     </span>
                                   </Show>
+                                  <Show when={config.viewDensity === "compact"}>
+                                    <span class="text-xs text-base-content truncate" title={issue.fields.summary}>
+                                      {issue.fields.summary}
+                                    </span>
+                                  </Show>
                                 </div>
-                                <p class="mt-0.5 text-sm compact:text-xs text-base-content truncate" title={issue.fields.summary}>
-                                  {issue.fields.summary}
-                                </p>
-                                <Show when={config.viewDensity !== "compact" && issue.fields.assignee?.displayName}>
-                                  <p class="mt-0.5 text-xs text-base-content/50">
-                                    {issue.fields.assignee!.displayName}
+                                <Show when={config.viewDensity !== "compact"}>
+                                  <p class="mt-0.5 text-sm text-base-content truncate" title={issue.fields.summary}>
+                                    {issue.fields.summary}
                                   </p>
                                 </Show>
                               </div>
