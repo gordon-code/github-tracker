@@ -336,6 +336,10 @@ export default function DashboardPage() {
         "assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC",
         { maxResults: 100 }
       );
+      if (import.meta.env.DEV) {
+        const missing = result.issues.filter((i) => !i.fields.issuetype);
+        if (missing.length > 0) console.info("[jira] issues missing issuetype:", missing.map((i) => `${i.key}: ${JSON.stringify(i.fields.issuetype)}`));
+      }
       setJiraIssues(result.issues);
 
       // Auto-prune tracked Jira items absent from fresh fetch (done, unassigned, deleted)
