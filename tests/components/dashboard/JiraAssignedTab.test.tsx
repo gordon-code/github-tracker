@@ -31,7 +31,7 @@ vi.mock("../../../src/app/stores/config", () => ({
 import JiraAssignedTab from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
-import { trackItem, untrackJiraItem } from "../../../src/app/stores/view";
+import { trackItem, untrackJiraItem, setAllExpanded } from "../../../src/app/stores/view";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +59,7 @@ function makeIssue(
       priority: { id: "2", name: priority },
       assignee: { accountId: "u1", displayName: "Alice" },
       project: { id: "p1", key: projectKey, name: `${projectKey} Project` },
+      updated: "2026-04-24T12:00:00.000+0000",
     },
   };
 }
@@ -315,5 +316,82 @@ describe("JiraAssignedTab", () => {
       expect(vi.mocked(untrackJiraItem)).toHaveBeenCalledOnce();
       expect(vi.mocked(untrackJiraItem)).toHaveBeenCalledWith("PROJ-1");
     });
+  });
+
+  // ── Sort ordering ──────────────────────────────────────────────────────────
+
+  it("renders issues in priority order by default (highest first)", () => {
+    const issues = [
+      makeIssue("PROJ-1", "PROJ", "indeterminate", "Low"),
+      makeIssue("PROJ-2", "PROJ", "indeterminate", "Highest"),
+      makeIssue("PROJ-3", "PROJ", "indeterminate", "Medium"),
+    ];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    const items = screen.getAllByRole("listitem");
+    const keys = items.map((el) => el.querySelector(".font-mono")?.textContent).filter(Boolean);
+    expect(keys).toEqual(["PROJ-2", "PROJ-3", "PROJ-1"]);
+  });
+
+  it("renders sort dropdown", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    const sortButtons = screen.getAllByRole("button").filter((b) => /sort by/i.test(b.getAttribute("aria-label") ?? ""));
+    expect(sortButtons.length).toBeGreaterThan(0);
+  });
+
+  // ── Expand / collapse ──────────────────────────────────────────────────────
+
+  it("renders project group header with expand toggle button", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    const toggleButton = screen.getByRole("button", { expanded: true });
+    expect(toggleButton).toBeTruthy();
+    expect(toggleButton.textContent).toContain("PROJ");
+  });
+
+  it("calls setAllExpanded when project header is clicked", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+    const header = screen.getByRole("button", { expanded: true });
+    header.click();
+
+    expect(vi.mocked(setAllExpanded)).toHaveBeenCalled();
+  });
+
+  it("renders expand-all and collapse-all buttons", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    expect(screen.getByRole("button", { name: /expand all/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /collapse all/i })).toBeTruthy();
+  });
+
+  // ── View density ───────────────────────────────────────────────────────────
+
+  it("shows assignee name when viewDensity is not compact", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    expect(screen.getByText("Alice")).toBeTruthy();
+  });
+
+  it("hides assignee name when viewDensity is compact", () => {
+    (config as { viewDensity: string }).viewDensity = "compact";
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+    expect(screen.queryByText("Alice")).toBeNull();
+    (config as { viewDensity: string }).viewDensity = "comfortable";
+  });
+
+  // ── URL validation ─────────────────────────────────────────────────────────
+
+  it("uses # href when siteUrl is not a safe Jira URL", () => {
+    const issues = [makeIssue("PROJ-1")];
+    render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl="javascript:alert(1)" />);
+
+    const links = screen.getAllByRole("link");
+    const keyLink = links.find((l) => l.textContent === "PROJ-1");
+    expect(keyLink!.getAttribute("href")).toBe("#");
   });
 });

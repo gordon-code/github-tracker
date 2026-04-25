@@ -24,6 +24,7 @@ function makeIssue(key = "PROJ-1"): JiraIssue {
       priority: { id: "2", name: "High" },
       assignee: { accountId: "abc123", displayName: "Test User" },
       project: { id: "10000", key: "PROJ", name: "My Project" },
+      updated: "2026-04-24T12:00:00.000+0000",
     },
   };
 }

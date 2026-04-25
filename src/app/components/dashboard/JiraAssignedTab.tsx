@@ -44,13 +44,13 @@ const JIRA_SORT_OPTIONS: SortOption[] = [
   { label: "Updated", field: "updated", type: "date" },
 ];
 
-const PRIORITY_ORDER: Record<string, number> = {
+const PRIORITY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
   Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4,
-};
+});
 
-const STATUS_CATEGORY_ORDER: Record<string, number> = {
+const STATUS_CATEGORY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
   indeterminate: 0, new: 1, done: 2,
-};
+});
 
 // Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
 const [sortField, setSortField] = createSignal("priority");
