@@ -21,7 +21,6 @@ vi.mock("../../../src/app/stores/view", () => ({
   JiraFiltersSchema: { parse: vi.fn((_x: unknown) => ({ statusCategory: "all", priority: "all" })) },
   trackItem: vi.fn(),
   untrackJiraItem: vi.fn(),
-  toggleExpandedRepo: vi.fn(),
   setAllExpanded: vi.fn(),
 }));
 

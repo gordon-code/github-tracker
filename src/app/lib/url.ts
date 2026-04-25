@@ -12,6 +12,15 @@ export function isSafeGitHubUrl(url: string): boolean {
   }
 }
 
+export function isSafeJiraSiteUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".atlassian.net");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Opens a GitHub URL in a new tab after validation.
  * No-ops for non-GitHub URLs.

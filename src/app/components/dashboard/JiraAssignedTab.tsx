@@ -1,8 +1,9 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
-import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem, toggleExpandedRepo, setAllExpanded } from "../../stores/view";
+import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded } from "../../stores/view";
 import { config } from "../../stores/config";
 import { jiraStatusCategoryClass } from "../../lib/format";
+import { isSafeJiraSiteUrl } from "../../lib/url";
 import PaginationControls from "../shared/PaginationControls";
 import FilterPopover from "../shared/FilterPopover";
 import LoadingSpinner from "../shared/LoadingSpinner";
@@ -51,10 +52,12 @@ const STATUS_CATEGORY_ORDER: Record<string, number> = {
   indeterminate: 0, new: 1, done: 2,
 };
 
+// Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
+const [sortField, setSortField] = createSignal("priority");
+const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
+
 export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   const [page, setPage] = createSignal(0);
-  const [sortField, setSortField] = createSignal("priority");
-  const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
 
   const filters = createMemo(() => viewState.tabFilters.jiraAssigned ?? JIRA_FILTER_DEFAULTS);
 
@@ -96,7 +99,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         case "updated": {
           const aUp = String(a.fields.updated ?? "");
           const bUp = String(b.fields.updated ?? "");
-          cmp = aUp.localeCompare(bUp);
+          cmp = aUp < bUp ? -1 : aUp > bUp ? 1 : 0;
           break;
         }
         default:
@@ -126,7 +129,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     const lockedSet = new Set(locked);
     const lockedEntries: [string, JiraIssue[]][] = [];
     for (const k of locked) {
-      lockedEntries.push([k, map.get(k) ?? []]);
+      const group = map.get(k);
+      if (group) lockedEntries.push([k, group]);
     }
     const unlockedEntries = entries.filter(([k]) => !lockedSet.has(k));
     return [...lockedEntries, ...unlockedEntries];
@@ -222,7 +226,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                 <div>
                   <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
                     <button
-                      onClick={() => toggleExpandedRepo(TAB_KEY, projectKey)}
+                      onClick={() => setAllExpanded(TAB_KEY, [projectKey], !isExpanded())}
                       aria-expanded={isExpanded()}
                       class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold"
                     >
@@ -241,12 +245,13 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                       <For each={issues}>
                         {(issue) => {
                           const isPinned = () => pinnedJiraKeys().has(issue.key);
+                          const browseUrl = () => isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${issue.key}` : "#";
                           return (
                             <div role="listitem" class="px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2">
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
                                   <a
-                                    href={`${props.siteUrl}/browse/${issue.key}`}
+                                    href={browseUrl()}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     class="font-mono text-xs text-primary hover:underline shrink-0"
@@ -290,7 +295,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                         jiraProjectKey: issue.fields.project?.key,
                                         jiraStatus: issue.fields.status.name,
                                         repoFullName: `${props.siteUrl.replace(/^https?:\/\//, "")}/${issue.fields.project?.key ?? "unknown"}`,
-                                        htmlUrl: `${props.siteUrl}/browse/${issue.key}`,
+                                        htmlUrl: browseUrl(),
                                         title: issue.fields.summary,
                                         addedAt: Date.now(),
                                       });
