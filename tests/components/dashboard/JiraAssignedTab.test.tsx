@@ -28,7 +28,7 @@ vi.mock("../../../src/app/stores/config", () => ({
   config: { enableTracking: false },
 }));
 
-import JiraAssignedTab from "../../../src/app/components/dashboard/JiraAssignedTab";
+import JiraAssignedTab, { _resetJiraTabState } from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
 import { trackItem, untrackJiraItem, setAllExpanded } from "../../../src/app/stores/view";
@@ -72,6 +72,7 @@ describe("JiraAssignedTab", () => {
   beforeEach(() => {
     mockTrackedItems = [];
     mockJiraFilters = { statusCategory: "all", priority: "all" };
+    _resetJiraTabState();
     vi.clearAllMocks();
   });
 
@@ -216,8 +217,11 @@ describe("JiraAssignedTab", () => {
     expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
   });
 
-  it("shows pagination controls when more than 25 issues", () => {
-    const issues = Array.from({ length: 30 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+  it("shows pagination controls when groups exceed page size", () => {
+    const issues = [
+      ...Array.from({ length: 15 }, (_, i) => makeIssue(`ALPHA-${i + 1}`, "ALPHA")),
+      ...Array.from({ length: 15 }, (_, i) => makeIssue(`BETA-${i + 1}`, "BETA")),
+    ];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
     expect(screen.getByRole("button", { name: /next/i })).toBeTruthy();
   });

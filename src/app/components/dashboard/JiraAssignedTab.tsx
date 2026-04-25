@@ -4,6 +4,7 @@ import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackIt
 import { config } from "../../stores/config";
 import { jiraStatusCategoryClass } from "../../lib/format";
 import { isSafeJiraSiteUrl } from "../../lib/url";
+import { groupByRepo, computePageLayout, slicePageGroups, ensureLockedRepoGroups, orderRepoGroups } from "../../lib/grouping";
 import PaginationControls from "../shared/PaginationControls";
 import FilterPopover from "../shared/FilterPopover";
 import LoadingSpinner from "../shared/LoadingSpinner";
@@ -57,6 +58,12 @@ const [sortField, setSortField] = createSignal("priority");
 const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
 let _jiraExpandInitialized = false;
 
+export function _resetJiraTabState() {
+  setSortField("priority");
+  setSortDirection("asc");
+  _jiraExpandInitialized = false;
+}
+
 export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   const [page, setPage] = createSignal(0);
 
@@ -94,9 +101,14 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           cmp = (STATUS_CATEGORY_ORDER[a.fields.status.statusCategory.key] ?? 1)
             - (STATUS_CATEGORY_ORDER[b.fields.status.statusCategory.key] ?? 1);
           break;
-        case "key":
-          cmp = a.key.localeCompare(b.key);
+        case "key": {
+          const aP = a.key.replace(/-\d+$/, "");
+          const bP = b.key.replace(/-\d+$/, "");
+          cmp = aP === bP
+            ? parseInt(a.key.split("-").pop()!, 10) - parseInt(b.key.split("-").pop()!, 10)
+            : aP.localeCompare(bP);
           break;
+        }
         case "updated": {
           const aUp = String(a.fields.updated ?? "");
           const bUp = String(b.fields.updated ?? "");
@@ -111,33 +123,37 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     return items;
   });
 
-  const pageCount = createMemo(() => Math.ceil(filteredSorted().length / ITEMS_PER_PAGE));
-  const paginated = createMemo(() => filteredSorted().slice(page() * ITEMS_PER_PAGE, (page() + 1) * ITEMS_PER_PAGE));
+  type JiraItem = JiraIssue & { repoFullName: string };
+  const itemsWithGroupKey = createMemo(() =>
+    filteredSorted().map((issue): JiraItem => ({
+      ...issue,
+      repoFullName: issue.fields.project?.key ?? "OTHER",
+    }))
+  );
 
-  const paginatedGrouped = createMemo(() => {
-    const map = new Map<string, JiraIssue[]>();
-    for (const issue of paginated()) {
-      const key = issue.fields.project?.key ?? "OTHER";
-      let group = map.get(key);
-      if (!group) { group = []; map.set(key, group); }
-      group.push(issue);
-    }
-    const entries = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-
-    const locked = viewState.lockedRepos[TAB_KEY] ?? [];
-    if (locked.length === 0) return entries;
-
-    const lockedSet = new Set(locked);
-    const lockedEntries: [string, JiraIssue[]][] = [];
-    for (const k of locked) {
-      const group = map.get(k);
-      if (group) lockedEntries.push([k, group]);
-    }
-    const unlockedEntries = entries.filter(([k]) => !lockedSet.has(k));
-    return [...lockedEntries, ...unlockedEntries];
+  const repoGroups = createMemo(() => {
+    const groups = groupByRepo(itemsWithGroupKey());
+    const lockedForTab = viewState.lockedRepos[TAB_KEY] ?? [];
+    const withLocked = ensureLockedRepoGroups(
+      groups,
+      lockedForTab,
+      (name) => ({ repoFullName: name, items: [] as JiraItem[] }),
+    );
+    return orderRepoGroups(withLocked, lockedForTab);
   });
 
-  const projectKeys = createMemo(() => paginatedGrouped().map(([k]) => k));
+  const pageLayout = createMemo(() => computePageLayout(repoGroups(), ITEMS_PER_PAGE));
+  const pageCount = createMemo(() => pageLayout().pageCount);
+  const pageGroups = createMemo(() =>
+    slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
+  );
+
+  const projectKeys = createMemo(() => repoGroups().map((g) => g.repoFullName));
+
+  createEffect(() => {
+    const max = pageCount() - 1;
+    if (page() > max) setPage(max);
+  });
 
   createEffect(() => {
     const keys = projectKeys();
@@ -225,34 +241,34 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         </div>
       </Show>
 
-      <Show when={paginatedGrouped().length > 0}>
+      <Show when={pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
-          <For each={paginatedGrouped()}>
-            {([projectKey, issues]) => {
-              const isEmpty = () => issues.length === 0;
-              const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[TAB_KEY] ?? {})[projectKey];
+          <For each={pageGroups()}>
+            {(group) => {
+              const isEmpty = () => group.items.length === 0;
+              const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[TAB_KEY] ?? {})[group.repoFullName];
 
               return (
                 <div>
                   <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
                     <button
-                      onClick={() => setAllExpanded(TAB_KEY, [projectKey], !isExpanded())}
+                      onClick={() => setAllExpanded(TAB_KEY, [group.repoFullName], !isExpanded())}
                       aria-expanded={isExpanded()}
                       class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold"
                     >
                       <ChevronIcon size="md" rotated={!isExpanded()} />
-                      {projectKey}
+                      {group.repoFullName}
                       <Show when={!isExpanded() && !isEmpty()}>
                         <span class="ml-auto text-xs font-normal text-base-content/60">
-                          {issues.length} issue{issues.length !== 1 ? "s" : ""}
+                          {group.items.length} issue{group.items.length !== 1 ? "s" : ""}
                         </span>
                       </Show>
                     </button>
-                    <RepoLockControls repoFullName={projectKey} tabKey={TAB_KEY} />
+                    <RepoLockControls repoFullName={group.repoFullName} tabKey={TAB_KEY} />
                   </div>
                   <Show when={isExpanded()}>
                     <div role="list" class="divide-y divide-base-300">
-                      <For each={issues}>
+                      <For each={group.items}>
                         {(issue) => {
                           const isPinned = () => pinnedJiraKeys().has(issue.key);
                           const browseUrl = () => isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${issue.key}` : "#";
@@ -325,7 +341,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                   </Show>
                   <Show when={isEmpty()}>
                     <div class="px-4 py-3 compact:py-2 text-sm text-base-content/40 italic">
-                      No matching issues in {projectKey}
+                      No matching issues in {group.repoFullName}
                     </div>
                   </Show>
                 </div>
