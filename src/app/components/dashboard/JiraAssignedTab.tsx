@@ -69,6 +69,36 @@ export function _resetJiraTabState() {
   _jiraExpandInitialized = false;
 }
 
+const ISSUE_TYPE_ICONS: Record<string, { path: string; color: string }> = Object.assign(
+  Object.create(null) as Record<string, { path: string; color: string }>,
+  {
+    Epic:    { path: "M13 3L4 14h5l-2 7 9-11h-5l2-7z", color: "#904ee2" },
+    Story:   { path: "M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h12V4H6z", color: "#63ba3c" },
+    Task:    { path: "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z", color: "#4bade8" },
+    Bug:     { path: "M12 2a8 8 0 100 16 8 8 0 000-16zm0 14a6 6 0 110-12 6 6 0 010 12zm-1-5h2V7h-2v4zm0 2h2v2h-2v-2z", color: "#e5493a" },
+    Subtask: { path: "M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z", color: "#4bade8" },
+  },
+);
+
+function IssueTypeFallbackIcon(props: { name: string }) {
+  const normalized = () => normalizePriorityName(props.name);
+  const icon = () => ISSUE_TYPE_ICONS[normalized()];
+  return (
+    <Show
+      when={icon()}
+      fallback={
+        <span class="badge badge-xs badge-ghost text-[10px]">{normalized()}</span>
+      }
+    >
+      {(i) => (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={i().color} class="h-4 w-4 shrink-0" aria-label={props.name}>
+          <path d={i().path} />
+        </svg>
+      )}
+    </Show>
+  );
+}
+
 export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   const [page, setPage] = createSignal(0);
 
@@ -285,15 +315,11 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                     {(type) => {
                                       const [imgFailed, setImgFailed] = createSignal(false);
                                       return (
-                                        <Show
-                                          when={type().iconUrl && !imgFailed()}
-                                          fallback={
-                                            <span class="badge badge-xs badge-ghost text-[10px]" title={type().name}>
-                                              {type().name}
-                                            </span>
-                                          }
-                                        >
-                                          <Tooltip content={type().name} focusable>
+                                        <Tooltip content={type().name} focusable>
+                                          <Show
+                                            when={type().iconUrl && !imgFailed()}
+                                            fallback={<IssueTypeFallbackIcon name={type().name} />}
+                                          >
                                             <img
                                               src={type().iconUrl!}
                                               alt={type().name}
@@ -301,8 +327,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                               loading="lazy"
                                               onError={() => setImgFailed(true)}
                                             />
-                                          </Tooltip>
-                                        </Show>
+                                          </Show>
+                                        </Tooltip>
                                       );
                                     }}
                                   </Show>
