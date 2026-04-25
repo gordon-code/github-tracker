@@ -73,14 +73,14 @@ describe("JiraBadge", () => {
     expect(link.getAttribute("href")).toBe("https://other.atlassian.net/browse/ABC-7");
   });
 
-  it("linked badge has title attribute with status name", () => {
+  it("linked badge renders key text and status class", () => {
     const issue = makeIssue("indeterminate");
     render(() => (
       <JiraBadge issueKey="PROJ-42" issue={issue} siteUrl={SITE_URL} />
     ));
     const link = screen.getByRole("link");
-    expect(link.getAttribute("title")).toContain("PROJ-42");
-    expect(link.getAttribute("title")).toContain("In Progress");
+    expect(link.textContent).toBe("PROJ-42");
+    expect(link.className).toContain("badge-warning");
   });
 
   it("applies status color class for 'new' (To Do) status category", () => {

@@ -440,6 +440,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                                           issueKey={key}
                                           issue={props.jiraKeyMap!().get(key)}
                                           siteUrl={config.jira?.siteUrl ?? ""}
+                                          source="title"
                                         />
                                       )}
                                     </For>

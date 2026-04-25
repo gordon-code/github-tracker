@@ -624,15 +624,27 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                   </div>
                                 </Show>
                                 <Show when={config.jira?.enabled && config.jira?.issueKeyDetection && props.jiraKeyMap}>
-                                  <For each={[...new Set([...extractJiraKeys(pr.title), ...extractJiraKeys(pr.headRef ?? "")])]}>
-                                    {(key) => (
-                                      <JiraBadge
-                                        issueKey={key}
-                                        issue={props.jiraKeyMap!().get(key)}
-                                        siteUrl={config.jira?.siteUrl ?? ""}
-                                      />
-                                    )}
-                                  </For>
+                                  {(() => {
+                                    const titleKeys = new Set(extractJiraKeys(pr.title));
+                                    const branchKeys = new Set(extractJiraKeys(pr.headRef ?? ""));
+                                    const annotated = [...new Set([...titleKeys, ...branchKeys])].map((key) => ({
+                                      key,
+                                      source: (titleKeys.has(key) && branchKeys.has(key) ? "title & branch"
+                                        : titleKeys.has(key) ? "title" : "branch") as "title" | "branch" | "title & branch",
+                                    }));
+                                    return (
+                                      <For each={annotated}>
+                                        {(entry) => (
+                                          <JiraBadge
+                                            issueKey={entry.key}
+                                            issue={props.jiraKeyMap!().get(entry.key)}
+                                            siteUrl={config.jira?.siteUrl ?? ""}
+                                            source={entry.source}
+                                          />
+                                        )}
+                                      </For>
+                                    );
+                                  })()}
                                 </Show>
                               </ItemRow>
                             </div>
