@@ -13,9 +13,11 @@ interface JiraBadgeProps {
 
 export default function JiraBadge(props: JiraBadgeProps) {
   const tooltipContent = () => {
-    const status = props.issue ? `: ${props.issue.fields.status.name}` : "";
-    const src = props.source ? ` (${props.source})` : "";
-    return `${props.issueKey}${status}${src}`;
+    const parts: string[] = [props.issueKey];
+    if (props.issue) parts[0] += `: ${props.issue.fields.status.name}`;
+    if (props.issue?.fields.summary) parts.push(props.issue.fields.summary);
+    if (props.source) parts.push(`from: ${props.source}`);
+    return parts.join("\n");
   };
 
   return (
