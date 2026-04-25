@@ -131,6 +131,7 @@ const [lastFetchHadErrors, setLastFetchHadErrors] = createSignal(false);
 const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
 const [jiraLoading, setJiraLoading] = createSignal(false);
 const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
+let _jiraFetching = false;
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
@@ -324,7 +325,6 @@ export default function DashboardPage() {
     });
   });
 
-  let _jiraFetching = false;
   async function fetchJiraAssigned(): Promise<void> {
     if (_jiraFetching) return;
     const client = jiraClient();
