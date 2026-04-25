@@ -859,6 +859,7 @@ export default function DashboardPage() {
       ...dashboardData.pullRequests.map((p) => ({ title: p.title, headRef: p.headRef })),
     ];
     void detectAndLookupJiraKeys(items, client).then((map) => {
+      if (import.meta.env.DEV) console.info("[jira] key detection:", map.size, "keys found", [...map.keys()].slice(0, 10));
       setJiraKeyMap(map);
     }).catch(handleJiraError);
   }, { defer: true }));
