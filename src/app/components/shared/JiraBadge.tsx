@@ -1,6 +1,7 @@
 import { Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { jiraStatusCategoryClass } from "../../lib/format";
+import { isSafeJiraSiteUrl } from "../../lib/url";
 
 interface JiraBadgeProps {
   issueKey: string;
@@ -21,7 +22,7 @@ export default function JiraBadge(props: JiraBadgeProps) {
       >
         {(issue) => (
           <a
-            href={`${props.siteUrl}/browse/${props.issueKey}`}
+            href={isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${props.issueKey}` : "#"}
             target="_blank"
             rel="noopener noreferrer"
             class={`badge badge-xs font-mono text-[10px] no-underline ${jiraStatusCategoryClass(issue().fields.status.statusCategory.key)}`}

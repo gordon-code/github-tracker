@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded } from "../../stores/view";
 import { config } from "../../stores/config";
@@ -55,6 +55,7 @@ const STATUS_CATEGORY_ORDER: Record<string, number> = {
 // Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
 const [sortField, setSortField] = createSignal("priority");
 const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
+let _jiraExpandInitialized = false;
 
 export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   const [page, setPage] = createSignal(0);
@@ -137,6 +138,15 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   });
 
   const projectKeys = createMemo(() => paginatedGrouped().map(([k]) => k));
+
+  createEffect(() => {
+    const keys = projectKeys();
+    if (keys.length === 0 || _jiraExpandInitialized) return;
+    const expanded = viewState.expandedRepos[TAB_KEY];
+    if (expanded && Object.keys(expanded).length > 0) return;
+    _jiraExpandInitialized = true;
+    setAllExpanded(TAB_KEY, keys, true);
+  });
 
   return (
     <div class="flex flex-col">
