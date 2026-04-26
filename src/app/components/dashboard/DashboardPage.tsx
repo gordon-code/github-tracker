@@ -30,7 +30,7 @@ import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification } from "../../lib/errors";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { formatCount, prSizeCategory, rateLimitCssClass } from "../../lib/format";
+import { formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
@@ -140,6 +140,7 @@ onAuthCleared(() => {
   setJiraIssues([]);
   setJiraLoading(false);
   setJiraKeyMap(new Map());
+  _jiraFetching = false;
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
@@ -346,16 +347,43 @@ export default function DashboardPage() {
         const missing = result.issues.filter((i) => !i.fields.issuetype);
         if (missing.length > 0) console.info("[jira] issues missing issuetype:", missing.map((i) => `${i.key}: ${JSON.stringify(i.fields.issuetype)}`));
       }
+      if (!isJiraAuthenticated()) return;
       setJiraIssues(result.issues);
 
-      // Auto-prune tracked Jira items absent from fresh fetch (done, unassigned, deleted)
+      // Auto-prune tracked Jira items that are done or deleted (scope-independent).
+      // Resolves status from current search results first, then bulkFetches only
+      // keys not covered (items from a different scope than the current view).
       if (config.enableTracking && viewState.trackedItems.length > 0) {
-        const liveKeys = new Set(result.issues.map((i) => i.key));
-        const keysToPrune = viewState.trackedItems
-          .filter((item) => item.source === "jira" && item.jiraKey && !liveKeys.has(item.jiraKey))
+        const trackedJiraKeys = viewState.trackedItems
+          .filter((item) => item.source === "jira" && item.jiraKey)
           .map((item) => item.jiraKey!);
-        for (const jiraKey of keysToPrune) {
-          untrackJiraItem(jiraKey);
+        if (trackedJiraKeys.length > 0) {
+          try {
+            const liveKeys = new Map<string, string>();
+            for (const issue of result.issues) {
+              liveKeys.set(issue.key, issue.fields.status.statusCategory.key);
+            }
+            const uncheckedKeys = trackedJiraKeys.filter((k) => !liveKeys.has(k));
+            const errorKeys = new Set<string>();
+            if (uncheckedKeys.length > 0) {
+              const bulkResult = await client.bulkFetch(uncheckedKeys, ["status"]);
+              for (const issue of bulkResult.issues) {
+                liveKeys.set(issue.key, issue.fields.status.statusCategory.key);
+              }
+              for (const err of bulkResult.errors ?? []) {
+                for (const key of err.issueIdsOrKeys) errorKeys.add(key);
+              }
+            }
+            for (const jiraKey of trackedJiraKeys) {
+              if (errorKeys.has(jiraKey)) continue;
+              const statusCat = liveKeys.get(jiraKey);
+              if (!statusCat || statusCat === "done") {
+                untrackJiraItem(jiraKey);
+              }
+            }
+          } catch {
+            // Prune errors must not break the main fetch cycle
+          }
         }
       }
     } catch (err) {
@@ -818,7 +846,14 @@ export default function DashboardPage() {
         isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
       ).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
-      ...(config.jira?.enabled ? { jiraAssigned: jiraIssues().length } : {}),
+      ...(config.jira?.enabled ? (() => {
+        const f = viewState.tabFilters.jiraAssigned;
+        return { jiraAssigned: jiraIssues().filter((issue) => {
+          if (f?.statusCategory !== "all" && issue.fields.status.statusCategory.key !== f?.statusCategory) return false;
+          if (f?.priority !== "all" && stripParenthetical(issue.fields.priority?.name ?? "") !== f?.priority) return false;
+          return true;
+        }).length };
+      })() : {}),
       ...customCounts,
     };
   });

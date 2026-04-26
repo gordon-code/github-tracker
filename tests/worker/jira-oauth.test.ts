@@ -35,17 +35,20 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 
 // ── Request helpers ───────────────────────────────────────────────────────────
 
-/** Make a Jira token-exchange or refresh request (OAuth path — no X-Requested-With needed). */
+/** Make a Jira token-exchange or refresh request (OAuth path). */
 function makeJiraOAuthRequest(
   path: string,
   body: unknown,
-  options: { origin?: string; contentType?: string; turnstileToken?: string } = {}
+  options: { origin?: string; contentType?: string; turnstileToken?: string; skipXRequestedWith?: boolean } = {}
 ): Request {
   const headers: Record<string, string> = {
     "CF-Connecting-IP": `10.2.0.${++_requestCounter}`,
     "Origin": options.origin ?? ALLOWED_ORIGIN,
     "Content-Type": options.contentType ?? "application/json",
   };
+  if (!options.skipXRequestedWith) {
+    headers["X-Requested-With"] = "fetch";
+  }
   if (options.turnstileToken !== undefined) {
     headers["cf-turnstile-response"] = options.turnstileToken;
   } else {
@@ -175,14 +178,20 @@ describe("POST /api/oauth/jira/token — Jira token exchange", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when Content-Type is not application/json", async () => {
-    // Content-Type is checked after Turnstile verification — must mock Turnstile success
-    globalThis.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ success: true, action: "jira-token" }), { status: 200 })
-    );
+  it("returns 415 when Content-Type is not application/json", async () => {
+    globalThis.fetch = vi.fn();
     const req = makeJiraOAuthRequest("/api/oauth/jira/token", { code: "abc" }, { contentType: "text/plain" });
     const res = await worker.fetch(req, makeEnv());
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(415);
+  });
+
+  it("returns 403 when X-Requested-With header is missing", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeJiraOAuthRequest("/api/oauth/jira/token", { code: "abc" }, { skipXRequestedWith: true });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("missing_csrf_header");
   });
 
   it("returns access_token, sealed_refresh_token, expires_in on success", async () => {
@@ -279,6 +288,7 @@ describe("POST /api/oauth/jira/token — Jira token exchange", () => {
           "CF-Connecting-IP": fixedIp,
           "Origin": ALLOWED_ORIGIN,
           "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
           "cf-turnstile-response": "valid-turnstile-token",
         },
         body: JSON.stringify({ code: "test-code" }),
@@ -443,6 +453,15 @@ describe("POST /api/oauth/jira/refresh — Jira token refresh", () => {
     expect(json["error"]).toBe("jira_refresh_failed");
   });
 
+  it("returns 403 when X-Requested-With header is missing", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeJiraOAuthRequest("/api/oauth/jira/refresh", { sealed_refresh_token: "dummy" }, { skipXRequestedWith: true });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("missing_csrf_header");
+  });
+
   it("returns 429 after exceeding rate limit from same IP", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), { status: 200 })
@@ -456,6 +475,7 @@ describe("POST /api/oauth/jira/refresh — Jira token refresh", () => {
           "CF-Connecting-IP": fixedIp,
           "Origin": ALLOWED_ORIGIN,
           "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
         },
         body: JSON.stringify({ sealed_refresh_token: "dummy" }),
       });
@@ -956,3 +976,182 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
 });
 
 // /api/oauth/jira/resources endpoint removed — accessible-resources uses direct browser call
+
+// ── Jira Tenant Info (/api/jira/tenant-info) ──────────────────────────────────
+
+describe("POST /api/jira/tenant-info — Jira tenant info lookup", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeTenantInfoRequest(
+    body: unknown,
+    options: { origin?: string; contentType?: string } = {}
+  ): Request {
+    return new Request("https://gh.gordoncode.dev/api/jira/tenant-info", {
+      method: "POST",
+      headers: {
+        "CF-Connecting-IP": `10.4.0.${++_requestCounter}`,
+        "Origin": options.origin ?? ALLOWED_ORIGIN,
+        "Content-Type": options.contentType ?? "application/json",
+        "X-Requested-With": "fetch",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("returns cloudId for a valid atlassian.net siteUrl", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cloudId: VALID_CLOUD_ID }), { status: 200 })
+    );
+    const req = makeTenantInfoRequest({ siteUrl: "https://mysite.atlassian.net" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["cloudId"]).toBe(VALID_CLOUD_ID);
+  });
+
+  it("returns 400 for non-https siteUrl", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeTenantInfoRequest({ siteUrl: "http://mysite.atlassian.net" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("returns 400 for non-atlassian hostname", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeTenantInfoRequest({ siteUrl: "https://evil.example.com" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("returns 403 when X-Requested-With header is missing", async () => {
+    globalThis.fetch = vi.fn();
+    const req = new Request("https://gh.gordoncode.dev/api/jira/tenant-info", {
+      method: "POST",
+      headers: {
+        "CF-Connecting-IP": `10.4.0.${++_requestCounter}`,
+        "Origin": ALLOWED_ORIGIN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ siteUrl: "https://mysite.atlassian.net" }),
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(403);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("missing_csrf_header");
+  });
+
+  it("returns 400 for hostname spoofing via subdomain trick", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeTenantInfoRequest({ siteUrl: "https://evil.atlassian.net.attacker.com" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("returns 400 when siteUrl is missing from body", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeTenantInfoRequest({});
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("returns 403 when Origin header is wrong", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeTenantInfoRequest(
+      { siteUrl: "https://mysite.atlassian.net" },
+      { origin: "https://evil.com" }
+    );
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 502 when upstream tenant_info fetch throws", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValueOnce(new Error("network error"));
+    const req = makeTenantInfoRequest({ siteUrl: "https://mysite.atlassian.net" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(502);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("jira_tenant_info_failed");
+  });
+
+  it("returns 502 when upstream returns non-2xx status", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })
+    );
+    const req = makeTenantInfoRequest({ siteUrl: "https://mysite.atlassian.net" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(502);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("jira_tenant_info_failed");
+  });
+
+  it("returns 502 when upstream returns a non-UUID cloudId", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cloudId: "not-a-uuid" }), { status: 200 })
+    );
+    const req = makeTenantInfoRequest({ siteUrl: "https://mysite.atlassian.net" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(502);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("jira_tenant_info_failed");
+  });
+
+  it("returns 429 after exceeding rate limit from same IP", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ cloudId: VALID_CLOUD_ID }), { status: 200 })
+    );
+    const fixedIp = "10.4.99.7";
+    function makeFixedIpTenantRequest() {
+      return new Request("https://gh.gordoncode.dev/api/jira/tenant-info", {
+        method: "POST",
+        headers: {
+          "CF-Connecting-IP": fixedIp,
+          "Origin": ALLOWED_ORIGIN,
+          "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
+        },
+        body: JSON.stringify({ siteUrl: "https://mysite.atlassian.net" }),
+      });
+    }
+    const env = makeEnv();
+    for (let i = 0; i < 10; i++) {
+      await worker.fetch(makeFixedIpTenantRequest(), env);
+    }
+    const limited = await worker.fetch(makeFixedIpTenantRequest(), env);
+    expect(limited.status).toBe(429);
+    const json = await limited.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("rate_limited");
+  });
+
+  it("OPTIONS /api/jira/tenant-info returns 204 with CORS headers", async () => {
+    const req = new Request("https://gh.gordoncode.dev/api/jira/tenant-info", {
+      method: "OPTIONS",
+      headers: {
+        "Origin": ALLOWED_ORIGIN,
+        "CF-Connecting-IP": `10.4.0.${++_requestCounter}`,
+      },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
+  });
+});

@@ -51,6 +51,8 @@ export const JiraFiltersSchema = z.object({
   scope: z.enum(["assigned", "reported", "watching"]).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
+  sortField: z.string().default("status"),
+  sortDirection: z.enum(["asc", "desc"]).default("asc"),
 });
 
 export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
@@ -90,12 +92,12 @@ export const ViewStateSchema = z.object({
     issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
-    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all" }),
+    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
-    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all" },
+    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
   }),
   showPrRuns: z.boolean().default(false),
   hideDepDashboard: z.boolean().default(true),
@@ -196,7 +198,7 @@ export function resetViewState(): void {
           issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
-          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all" },
+          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
         },
         showPrRuns: false,
         hideDepDashboard: true,

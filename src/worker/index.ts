@@ -798,9 +798,9 @@ async function handleJiraTokenExchange(
     return errorResponse("not_found", 404, cors);
   }
 
-  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
-  if (!originResult.ok) {
-    return errorResponse("origin_mismatch", 403, cors);
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
   }
 
   if (request.method !== "POST") {
@@ -826,11 +826,6 @@ async function handleJiraTokenExchange(
   if (!turnstileResult.success) {
     log("warn", "jira_token_turnstile_failed", { error_codes: turnstileResult.errorCodes }, request);
     return errorResponse("turnstile_failed", 403, cors);
-  }
-
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return errorResponse("invalid_request", 400, cors);
   }
 
   let body: unknown;
@@ -923,9 +918,9 @@ async function handleJiraTokenRefresh(
     return errorResponse("not_found", 404, cors);
   }
 
-  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
-  if (!originResult.ok) {
-    return errorResponse("origin_mismatch", 403, cors);
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
   }
 
   if (request.method !== "POST") {
@@ -940,11 +935,6 @@ async function handleJiraTokenRefresh(
       status: 429,
       headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
     });
-  }
-
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return errorResponse("invalid_request", 400, cors);
   }
 
   let body: unknown;
@@ -1044,10 +1034,10 @@ async function handleJiraTenantInfo(
 ): Promise<Response> {
   log("info", "jira_tenant_info_entry", { cors_keys: Object.keys(cors).join(","), method: request.method }, request);
 
-  const originResult = validateOrigin(request, env.ALLOWED_ORIGIN);
-  if (!originResult.ok) {
-    log("warn", "jira_tenant_info_origin_failed", {}, request);
-    return errorResponse("origin_mismatch", 403, cors);
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    log("warn", "jira_tenant_info_validation_failed", { code: validationResult.code }, request);
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
   }
 
   if (request.method !== "POST") {
@@ -1061,11 +1051,6 @@ async function handleJiraTenantInfo(
       status: 429,
       headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
     });
-  }
-
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return errorResponse("invalid_request", 400, cors);
   }
 
   let body: unknown;

@@ -62,7 +62,6 @@ export default function JiraCallback() {
 
   async function completeSiteSelection(site: JiraAccessibleResource, tokenData: JiraTokenResponse) {
     // email intentionally omitted: OAuth uses Bearer token, not Basic (email + API token).
-    // DashboardPage checks !auth.email to determine client mode.
     setJiraAuth({
       accessToken: tokenData.access_token,
       sealedRefreshToken: tokenData.sealed_refresh_token,
@@ -112,6 +111,7 @@ export default function JiraCallback() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
           "cf-turnstile-response": turnstileToken,
         },
         body: JSON.stringify({ code }),

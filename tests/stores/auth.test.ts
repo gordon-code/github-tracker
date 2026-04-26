@@ -838,7 +838,10 @@ describe("ensureJiraTokenValid", () => {
     expect(result).toBe(true);
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
       "/api/oauth/jira/refresh",
-      expect.objectContaining({ method: "POST" })
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-Requested-With": "fetch" }),
+      })
     );
     expect(mod.jiraAuth()?.accessToken).toBe("new-access-tok");
     expect(mod.jiraAuth()?.sealedRefreshToken).toBe("new-sealed");
@@ -974,6 +977,23 @@ describe("ensureJiraTokenValid", () => {
     const expiresAt = mod.jiraAuth()!.expiresAt;
     expect(expiresAt).toBeGreaterThanOrEqual(before + 3600_000);
     expect(expiresAt).toBeLessThanOrEqual(after + 3600_000);
+  });
+
+  it("returns false and preserves auth state when refresh response is missing sealed_refresh_token", async () => {
+    setExpiredOAuthJiraAuth();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: "new-tok",
+        expires_in: 3600,
+      }),
+    }));
+
+    const result = await mod.ensureJiraTokenValid();
+    expect(result).toBe(false);
+    expect(mod.jiraAuth()?.accessToken).toBe("expired-access-tok");
+    expect(mod.jiraAuth()?.sealedRefreshToken).toBe("sealed-refresh");
   });
 });
 

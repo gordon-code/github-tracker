@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded } from "../../stores/view";
 import { config } from "../../stores/config";
-import { jiraStatusCategoryClass } from "../../lib/format";
+import { jiraStatusCategoryClass, stripParenthetical } from "../../lib/format";
 import { isSafeJiraSiteUrl } from "../../lib/url";
 import { groupByRepo, computePageLayout, slicePageGroups, ensureLockedRepoGroups, orderRepoGroups } from "../../lib/grouping";
 import PaginationControls from "../shared/PaginationControls";
@@ -58,10 +58,6 @@ const PRIORITY_ORDER = Object.assign(Object.create(null) as Record<string, numbe
   Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4,
 });
 
-function normalizePriorityName(name: string): string {
-  return name.replace(/\s*\(.*\)$/, "");
-}
-
 const STATUS_CATEGORY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
   new: 0, indeterminate: 1, done: 2,
 });
@@ -73,7 +69,7 @@ const FALLBACK_STATUS_ORDER = 4;
 const STATUS_SDLC_ORDER: Record<string, number> = Object.assign(Object.create(null) as Record<string, number>, {
   "ASSIGNED": 0, "Selected for Development": 0, "Selected to Development": 0,
   "In Progress": 1, "In Development": 1, "Dev In Progress": 1, "Development": 1,
-  "Coding In Progress": 1, "Work in progress": 1, "inprogress": 1, "Implementation": 1,
+  "Coding In Progress": 1, "Work in progress": 1, "Implementation": 1,
   "Code Review": 2, "Peer Review": 2, "In Review": 2, "Review": 2,
   "Ready for Review": 2, "PR Opened": 2, "Needs Peer Review": 2,
   "Needs Review": 2, "Under Review": 2, "Ready For Review": 2,
@@ -88,14 +84,9 @@ const STATUS_SDLC_ORDER: Record<string, number> = Object.assign(Object.create(nu
   "Stalled / Blocked": 8, "Blocked/On Hold": 8, "QA Blocked": 8,
 });
 
-// Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
-const [sortField, setSortField] = createSignal("status");
-const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
 let _jiraExpandInitialized = false;
 
 export function _resetJiraTabState() {
-  setSortField("status");
-  setSortDirection("asc");
   _jiraExpandInitialized = false;
 }
 
@@ -111,7 +102,7 @@ const ISSUE_TYPE_ICONS: Record<string, { path: string; color: string }> = Object
 );
 
 function IssueTypeFallbackIcon(props: { name: string }) {
-  const normalized = () => normalizePriorityName(props.name);
+  const normalized = () => stripParenthetical(props.name);
   const icon = () => ISSUE_TYPE_ICONS[normalized()];
   return (
     <Show
@@ -146,21 +137,21 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     const f = filters();
     return props.issues.filter((issue) => {
       if (f.statusCategory !== "all" && issue.fields.status.statusCategory.key !== f.statusCategory) return false;
-      if (f.priority !== "all" && issue.fields.priority?.name !== f.priority) return false;
+      if (f.priority !== "all" && stripParenthetical(issue.fields.priority?.name ?? "") !== f.priority) return false;
       return true;
     });
   });
 
   const filteredSorted = createMemo(() => {
     const items = [...filtered()];
-    const field = sortField();
-    const dir = sortDirection();
+    const field = filters().sortField;
+    const dir = filters().sortDirection;
     items.sort((a, b) => {
       let cmp = 0;
       switch (field) {
         case "priority":
-          cmp = (PRIORITY_ORDER[normalizePriorityName(a.fields.priority?.name ?? "Medium")] ?? 2)
-            - (PRIORITY_ORDER[normalizePriorityName(b.fields.priority?.name ?? "Medium")] ?? 2);
+          cmp = (PRIORITY_ORDER[stripParenthetical(a.fields.priority?.name ?? "Medium")] ?? 2)
+            - (PRIORITY_ORDER[stripParenthetical(b.fields.priority?.name ?? "Medium")] ?? 2);
           break;
         case "status": {
           const aCat = STATUS_CATEGORY_ORDER[a.fields.status.statusCategory.key] ?? 1;
@@ -306,11 +297,11 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           </span>
           <SortDropdown
             options={JIRA_SORT_OPTIONS}
-            value={sortField()}
-            direction={sortDirection()}
+            value={filters().sortField}
+            direction={filters().sortDirection}
             onChange={(field, dir) => {
-              setSortField(field);
-              setSortDirection(dir);
+              setTabFilter("jiraAssigned", "sortField", field);
+              setTabFilter("jiraAssigned", "sortDirection", dir);
               setPage(0);
             }}
           />
@@ -414,9 +405,9 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                 </Show>
                               </div>
                               <div class="flex items-center gap-1.5 shrink-0">
-                                <Show when={issue.fields.priority?.name && normalizePriorityName(issue.fields.priority.name) !== "Medium" && issue.fields.priority.name !== "Undefined"}>
+                                <Show when={issue.fields.priority?.name && stripParenthetical(issue.fields.priority.name) !== "Medium" && issue.fields.priority.name !== "Undefined"}>
                                   <span class="badge badge-xs badge-outline text-[10px]">
-                                    {normalizePriorityName(issue.fields.priority!.name)}
+                                    {stripParenthetical(issue.fields.priority!.name)}
                                   </span>
                                 </Show>
                                 <span

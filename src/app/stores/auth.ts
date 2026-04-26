@@ -125,7 +125,7 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
       try {
         resp = await fetch("/api/oauth/jira/refresh", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
           body: JSON.stringify({ sealed_refresh_token: auth.sealedRefreshToken }),
         });
       } catch {

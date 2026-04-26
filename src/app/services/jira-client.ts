@@ -198,7 +198,13 @@ export class JiraProxyClient implements IJiraClient {
     if (result.resealed && this.onResealed) {
       this.onResealed(result.resealed);
     }
-    return result;
+    return {
+      issues: result.issues,
+      total: result.total,
+      maxResults: result.maxResults,
+      startAt: result.startAt,
+      ...(result.nextPageToken !== undefined ? { nextPageToken: result.nextPageToken } : {}),
+    };
   }
 
   async bulkFetch(keys: string[], fields: string[] = DEFAULT_FIELDS): Promise<JiraBulkFetchResult> {

@@ -403,6 +403,14 @@ describe("JiraProxyClient", () => {
       const found = await client.getIssue("MISSING-1");
       expect(found).toBeNull();
     });
+
+    it("returns null when bulkFetch returns an issue with a different key", async () => {
+      const result: JiraBulkFetchResult = { issues: [makeIssue("PROJ-OTHER")] };
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(result), { status: 200 }));
+
+      const found = await client.getIssue("PROJ-1");
+      expect(found).toBeNull();
+    });
   });
 
   // ── searchJql ─────────────────────────────────────────────────────────────
@@ -458,10 +466,11 @@ describe("JiraProxyClient", () => {
         )
       );
 
-      await clientWithCallback.searchJql("project = TEST");
+      const result = await clientWithCallback.searchJql("project = TEST");
 
       expect(onResealed).toHaveBeenCalledOnce();
       expect(onResealed).toHaveBeenCalledWith("new-sealed-token");
+      expect("resealed" in result).toBe(false);
     });
 
     it("does not call onResealed when resealed is absent", async () => {

@@ -221,16 +221,13 @@ export default function SettingsPage() {
   const [jiraApiEmail, setJiraApiEmail] = createSignal("");
   const [jiraApiToken, setJiraApiToken] = createSignal("");
   const [jiraApiSubdomain, setJiraApiSubdomain] = createSignal("");
-  const [jiraApiDomain, setJiraApiDomain] = createSignal("atlassian.net");
-  const [jiraApiCustomUrl, setJiraApiCustomUrl] = createSignal("");
   const [jiraApiConnecting, setJiraApiConnecting] = createSignal(false);
   const [jiraApiError, setJiraApiError] = createSignal<string | null>(null);
   const [jiraApiMode, setJiraApiMode] = createSignal(false);
 
   const jiraApiSiteUrl = () => {
-    if (jiraApiDomain() === "custom") return jiraApiCustomUrl().trim().replace(/\/$/, "");
     const sub = jiraApiSubdomain().trim();
-    return sub ? `https://${sub}.${jiraApiDomain()}` : "";
+    return sub ? `https://${sub}.atlassian.net` : "";
   };
 
   function handleJiraOAuthConnect() {
@@ -247,9 +244,7 @@ export default function SettingsPage() {
     const token = jiraApiToken().trim();
     const siteUrl = jiraApiSiteUrl();
     if (!email || !token || !siteUrl) {
-      setJiraApiError(jiraApiDomain() === "custom"
-        ? "Email, API token, and site URL are all required."
-        : "Email, API token, and site name are all required.");
+      setJiraApiError("Email, API token, and site name are all required.");
       return;
     }
     setJiraApiConnecting(true);
@@ -258,7 +253,7 @@ export default function SettingsPage() {
       // Auto-discover Cloud ID from site URL
       const tenantResp = await fetch("/api/jira/tenant-info", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
         body: JSON.stringify({ siteUrl }),
       });
       if (!tenantResp.ok) {
@@ -304,8 +299,6 @@ export default function SettingsPage() {
       setJiraApiEmail("");
       setJiraApiToken("");
       setJiraApiSubdomain("");
-      setJiraApiDomain("atlassian.net");
-      setJiraApiCustomUrl("");
       setJiraApiMode(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -924,41 +917,16 @@ export default function SettingsPage() {
                           aria-label="Atlassian API token"
                         />
                         <div class="flex items-center gap-1">
-                          <Show when={jiraApiDomain() !== "custom"}>
-                            <span class="text-sm text-base-content/60 shrink-0">https://</span>
-                          </Show>
-                          <Show
-                            when={jiraApiDomain() !== "custom"}
-                            fallback={
-                              <input
-                                type="url"
-                                placeholder="https://jira.yourcompany.com"
-                                value={jiraApiCustomUrl()}
-                                onInput={(e) => setJiraApiCustomUrl(e.currentTarget.value)}
-                                class="input input-sm flex-1"
-                                aria-label="Jira site URL"
-                              />
-                            }
-                          >
-                            <input
-                              type="text"
-                              placeholder="yoursite"
-                              value={jiraApiSubdomain()}
-                              onInput={(e) => setJiraApiSubdomain(e.currentTarget.value)}
-                              class="input input-sm w-32"
-                              aria-label="Jira site name"
-                            />
-                            <span class="text-sm text-base-content/60">.</span>
-                          </Show>
-                          <select
-                            value={jiraApiDomain()}
-                            onChange={(e) => setJiraApiDomain(e.currentTarget.value)}
-                            class="select select-sm"
-                            aria-label="Jira domain"
-                          >
-                            <option value="atlassian.net">atlassian.net</option>
-                            <option value="custom">Custom domain</option>
-                          </select>
+                          <span class="text-sm text-base-content/60 shrink-0">https://</span>
+                          <input
+                            type="text"
+                            placeholder="yoursite"
+                            value={jiraApiSubdomain()}
+                            onInput={(e) => setJiraApiSubdomain(e.currentTarget.value)}
+                            class="input input-sm w-32"
+                            aria-label="Jira site name"
+                          />
+                          <span class="text-sm text-base-content/60">.atlassian.net</span>
                         </div>
                         <Show when={jiraApiError()}>
                           <p class="text-xs text-error">{jiraApiError()}</p>
@@ -974,7 +942,7 @@ export default function SettingsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSubdomain(""); setJiraApiCustomUrl(""); }}
+                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSubdomain(""); }}
                             class="btn btn-sm btn-ghost"
                           >
                             Cancel
