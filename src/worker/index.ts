@@ -1250,7 +1250,8 @@ async function handleJiraProxy(
     const searchParams = new URLSearchParams();
     if (params && typeof params === "object") {
       for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
-        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null) searchParams.set(k, String(v));
+        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null)
+          searchParams.set(k, Array.isArray(v) ? v.join(",") : String(v));
       }
     }
     jiraUrl = `${baseUrl}?${searchParams.toString()}`;

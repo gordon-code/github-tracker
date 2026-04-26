@@ -31,8 +31,8 @@ vi.mock("../../src/app/stores/auth", () => ({
   isAuthenticated: () => true,
   onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
-  jiraAuth: () => null,
-  isJiraAuthenticated: () => false,
+  jiraAuth: vi.fn(() => null),
+  isJiraAuthenticated: vi.fn(() => false),
   setJiraAuth: vi.fn(),
   clearJiraAuth: vi.fn(),
   ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
@@ -1680,6 +1680,50 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       // Only 2 failure runs counted
       const customTab = screen.getByRole("tab", { name: /Failed Runs/ });
       expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  describe("Jira auth guard", () => {
+    it("does not write Jira issues when auth becomes invalid during fetch", async () => {
+      let authenticated = true;
+      vi.mocked(authStore.isJiraAuthenticated).mockImplementation(() => authenticated);
+      vi.mocked(authStore.jiraAuth).mockReturnValue({
+        cloudId: "test-cloud-id",
+        accessToken: "test-access-token",
+        sealedRefreshToken: "sealed",
+        expiresAt: Date.now() + 3600000,
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      });
+      vi.mocked(authStore.ensureJiraTokenValid).mockResolvedValue(true);
+
+      const jiraClientMod = await import("../../src/app/services/jira-client");
+      const mockSearchJql = vi.fn().mockImplementation(async () => {
+        authenticated = false;
+        return {
+          issues: [{
+            key: "STALE-1", id: "1", self: "https://test.atlassian.net/rest/api/3/issue/1",
+            fields: {
+              summary: "Stale issue from previous user",
+              status: { id: "1", name: "To Do", statusCategory: { id: 1, key: "new", name: "To Do" } },
+              priority: null, assignee: null,
+              project: { id: "1", key: "STALE", name: "Stale Project" },
+            },
+          }],
+          total: 1, maxResults: 100, startAt: 0,
+        };
+      });
+      vi.mocked(jiraClientMod.JiraClient).mockImplementation(function () {
+        return { searchJql: mockSearchJql, bulkFetch: vi.fn().mockResolvedValue({ issues: [] }), getIssue: vi.fn() } as any;
+      } as any);
+
+      configStore.updateJiraConfig({ enabled: true, siteUrl: "https://test.atlassian.net", siteName: "Test Site", authMethod: "oauth" });
+
+      render(() => <DashboardPage />);
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(screen.queryByText("STALE-1")).toBeNull();
+      expect(screen.queryByText("Stale issue from previous user")).toBeNull();
     });
   });
 });
