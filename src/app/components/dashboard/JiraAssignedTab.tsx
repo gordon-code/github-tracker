@@ -83,12 +83,12 @@ const STATUS_SDLC_ORDER: Record<string, number> = Object.assign(Object.create(nu
 });
 
 // Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
-const [sortField, setSortField] = createSignal("priority");
+const [sortField, setSortField] = createSignal("status");
 const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
 let _jiraExpandInitialized = false;
 
 export function _resetJiraTabState() {
-  setSortField("priority");
+  setSortField("status");
   setSortDirection("asc");
   _jiraExpandInitialized = false;
 }

@@ -324,11 +324,11 @@ describe("JiraAssignedTab", () => {
 
   // ── Sort ordering ──────────────────────────────────────────────────────────
 
-  it("renders issues in priority order by default (highest first)", () => {
+  it("renders issues in status SDLC order by default (To Do → Done)", () => {
     const issues = [
-      makeIssue("PROJ-1", "PROJ", "indeterminate", "Low"),
-      makeIssue("PROJ-2", "PROJ", "indeterminate", "Highest"),
-      makeIssue("PROJ-3", "PROJ", "indeterminate", "Medium"),
+      makeIssue("PROJ-1", "PROJ", "done"),
+      makeIssue("PROJ-2", "PROJ", "new"),
+      makeIssue("PROJ-3", "PROJ", "indeterminate"),
     ];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
 
