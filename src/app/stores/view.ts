@@ -48,6 +48,7 @@ export const ActionsFiltersSchema = z.object({
 
 // "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
 export const JiraFiltersSchema = z.object({
+  scope: z.enum(["assigned", "reported", "watching"]).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
 });
@@ -89,12 +90,12 @@ export const ViewStateSchema = z.object({
     issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
-    jiraAssigned: JiraFiltersSchema.default({ statusCategory: "all", priority: "all" }),
+    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
-    jiraAssigned: { statusCategory: "all", priority: "all" },
+    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all" },
   }),
   showPrRuns: z.boolean().default(false),
   hideDepDashboard: z.boolean().default(true),
@@ -195,7 +196,7 @@ export function resetViewState(): void {
           issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
-          jiraAssigned: { statusCategory: "all", priority: "all" },
+          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all" },
         },
         showPrRuns: false,
         hideDepDashboard: true,

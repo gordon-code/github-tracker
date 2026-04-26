@@ -24,6 +24,12 @@ interface JiraAssignedTabProps {
   siteUrl: string;
 }
 
+const SCOPE_OPTIONS = [
+  { value: "assigned", label: "Assigned to me" },
+  { value: "reported", label: "Created by me" },
+  { value: "watching", label: "Watching" },
+];
+
 const STATUS_CATEGORY_OPTIONS = [
   { value: "all", label: "All" },
   { value: "new", label: "To Do" },
@@ -244,6 +250,20 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     <div class="flex flex-col">
       {/* Filter + sort toolbar */}
       <div class="border-b border-base-300 px-4 py-2 compact:py-0.5 flex items-center gap-2 compact:gap-1.5 flex-wrap">
+        <FilterPopover
+          group={{
+            field: "scope",
+            label: "Scope",
+            options: SCOPE_OPTIONS,
+            defaultValue: "assigned",
+          }}
+          value={filters().scope}
+          onChange={(field, value) => {
+            setTabFilter("jiraAssigned", field as "scope", value);
+            setPage(0);
+          }}
+        />
+        <span class="text-base-content/30">|</span>
         <span class="text-sm font-medium text-base-content/60">Filter:</span>
         <FilterPopover
           group={{
@@ -312,7 +332,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           <p class="text-base">
             {(filters().statusCategory !== "all" || filters().priority !== "all")
               ? "No issues match current filters"
-              : "No assigned Jira issues"}
+              : `No ${filters().scope === "reported" ? "created" : filters().scope === "watching" ? "watched" : "assigned"} Jira issues`}
           </p>
         </div>
       </Show>

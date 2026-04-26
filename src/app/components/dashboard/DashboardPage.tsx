@@ -325,6 +325,11 @@ export default function DashboardPage() {
     });
   });
 
+  function jiraJqlForScope(scope: string): string {
+    const field = scope === "reported" ? "reporter" : scope === "watching" ? "watcher" : "assignee";
+    return `${field} = currentUser() AND statusCategory != Done ORDER BY priority DESC`;
+  }
+
   async function fetchJiraAssigned(): Promise<void> {
     if (_jiraFetching) return;
     const client = jiraClient();
@@ -332,8 +337,9 @@ export default function DashboardPage() {
     _jiraFetching = true;
     setJiraLoading(true);
     try {
+      const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
       const result = await client.searchJql(
-        "reporter = currentUser() AND statusCategory != Done ORDER BY priority DESC",
+        jiraJqlForScope(scope),
         { maxResults: 100 }
       );
       if (import.meta.env.DEV) {
@@ -870,6 +876,17 @@ export default function DashboardPage() {
     () => _coordinator()?.lastRefreshAt(),
     () => {
       if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      fetchJiraAssigned().catch(handleJiraError);
+    },
+    { defer: true }
+  ));
+
+  // Re-fetch when Jira scope filter changes (assigned/reported/watching)
+  createEffect(on(
+    () => viewState.tabFilters.jiraAssigned?.scope,
+    () => {
+      if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      setJiraIssues([]);
       fetchJiraAssigned().catch(handleJiraError);
     },
     { defer: true }

@@ -4,7 +4,7 @@ import { render, screen } from "@solidjs/testing-library";
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
 let mockTrackedItems: Array<{ source: string; jiraKey?: string }> = [];
-let mockJiraFilters: { statusCategory: string; priority: string } = { statusCategory: "all", priority: "all" };
+let mockJiraFilters: { scope: string; statusCategory: string; priority: string } = { scope: "assigned", statusCategory: "all", priority: "all" };
 
 vi.mock("../../../src/app/stores/view", () => ({
   viewState: new Proxy({} as Record<string, unknown>, {
@@ -18,7 +18,7 @@ vi.mock("../../../src/app/stores/view", () => ({
   }),
   setTabFilter: vi.fn(),
   resetAllTabFilters: vi.fn(),
-  JiraFiltersSchema: { parse: vi.fn((_x: unknown) => ({ statusCategory: "all", priority: "all" })) },
+  JiraFiltersSchema: { parse: vi.fn((_x: unknown) => ({ scope: "assigned", statusCategory: "all", priority: "all" })) },
   trackItem: vi.fn(),
   untrackJiraItem: vi.fn(),
   setAllExpanded: vi.fn(),
@@ -71,7 +71,7 @@ const SITE_URL = "https://mysite.atlassian.net";
 describe("JiraAssignedTab", () => {
   beforeEach(() => {
     mockTrackedItems = [];
-    mockJiraFilters = { statusCategory: "all", priority: "all" };
+    mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all" };
     _resetJiraTabState();
     vi.clearAllMocks();
   });
@@ -158,7 +158,7 @@ describe("JiraAssignedTab", () => {
   });
 
   it("filters out issues that do not match active statusCategory filter", () => {
-    mockJiraFilters = { statusCategory: "new", priority: "all" };
+    mockJiraFilters = { scope: "assigned", statusCategory: "new", priority: "all" };
     const issues = [
       makeIssue("PROJ-1", "PROJ", "new"),
       makeIssue("PROJ-2", "PROJ", "indeterminate"),
@@ -170,7 +170,7 @@ describe("JiraAssignedTab", () => {
   });
 
   it("filters out issues that do not match active priority filter", () => {
-    mockJiraFilters = { statusCategory: "all", priority: "High" };
+    mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "High" };
     const issues = [
       makeIssue("PROJ-1", "PROJ", "indeterminate", "High"),
       makeIssue("PROJ-2", "PROJ", "indeterminate", "Medium"),
@@ -182,7 +182,7 @@ describe("JiraAssignedTab", () => {
   });
 
   it("shows empty state when active filter matches nothing", () => {
-    mockJiraFilters = { statusCategory: "new", priority: "all" };
+    mockJiraFilters = { scope: "assigned", statusCategory: "new", priority: "all" };
     const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate")];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
 
