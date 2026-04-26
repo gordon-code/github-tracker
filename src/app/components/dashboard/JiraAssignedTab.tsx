@@ -249,7 +249,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   return (
     <div class="flex flex-col h-full">
       {/* Filter + sort toolbar */}
-      <div class="sticky top-14 z-10 bg-base-100 border-b border-base-300 px-4 py-2 compact:py-0.5 flex items-center gap-2 compact:gap-1.5 flex-wrap">
+      <div class="border-b border-base-300 px-4 py-2 compact:py-0.5 flex items-center gap-2 compact:gap-1.5 flex-wrap">
         <FilterPopover
           group={{
             field: "scope",
