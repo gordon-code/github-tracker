@@ -1,6 +1,6 @@
 import type { JiraIssue, JiraSearchResult, JiraBulkFetchResult, JiraAccessibleResource } from "../../shared/jira-types";
 
-const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype"];
+const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"];
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 

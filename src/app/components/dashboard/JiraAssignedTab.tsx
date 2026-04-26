@@ -40,10 +40,12 @@ const PRIORITY_OPTIONS = [
 ];
 
 const JIRA_SORT_OPTIONS: SortOption[] = [
-  { label: "Priority", field: "priority", type: "priority" },
-  { label: "Status", field: "status", type: "text" },
-  { label: "Key", field: "key", type: "text" },
+  { label: "Priority", field: "priority", type: "priority", preferredDirection: "asc" },
+  { label: "Status", field: "status", type: "status", preferredDirection: "asc" },
+  { label: "Key", field: "key", type: "text", preferredDirection: "asc" },
   { label: "Updated", field: "updated", type: "date" },
+  { label: "Created", field: "created", type: "date" },
+  { label: "Title", field: "title", type: "text", preferredDirection: "asc" },
 ];
 
 const PRIORITY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
@@ -55,7 +57,7 @@ function normalizePriorityName(name: string): string {
 }
 
 const STATUS_CATEGORY_ORDER = Object.assign(Object.create(null) as Record<string, number>, {
-  indeterminate: 0, new: 1, done: 2,
+  new: 0, indeterminate: 1, done: 2,
 });
 
 // Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
@@ -150,6 +152,15 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           cmp = aUp < bUp ? -1 : aUp > bUp ? 1 : 0;
           break;
         }
+        case "created": {
+          const aCr = String(a.fields.created ?? "");
+          const bCr = String(b.fields.created ?? "");
+          cmp = aCr < bCr ? -1 : aCr > bCr ? 1 : 0;
+          break;
+        }
+        case "title":
+          cmp = a.fields.summary.localeCompare(b.fields.summary);
+          break;
         default:
           break;
       }
@@ -310,7 +321,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                           return (
                             <div role="listitem" class="px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2">
                               <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 flex-wrap">
+                                <div class="flex items-center gap-2 min-w-0">
                                   <Show when={issue.fields.issuetype}>
                                     {(type) => {
                                       const [imgFailed, setImgFailed] = createSignal(false);
@@ -340,18 +351,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   >
                                     {issue.key}
                                   </a>
-                                  <span
-                                    class={`badge badge-xs ${jiraStatusCategoryClass(issue.fields.status.statusCategory.key)}`}
-                                  >
-                                    {issue.fields.status.name}
-                                  </span>
-                                  <Show when={issue.fields.priority?.name && normalizePriorityName(issue.fields.priority.name) !== "Medium" && issue.fields.priority.name !== "Undefined"}>
-                                    <span class="badge badge-xs badge-outline text-[10px]">
-                                      {normalizePriorityName(issue.fields.priority!.name)}
-                                    </span>
-                                  </Show>
                                   <Show when={config.viewDensity === "compact"}>
-                                    <span class="text-xs text-base-content truncate" title={issue.fields.summary}>
+                                    <span class="flex-1 min-w-0 text-xs text-base-content truncate" title={issue.fields.summary}>
                                       {issue.fields.summary}
                                     </span>
                                   </Show>
@@ -361,6 +362,18 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                     {issue.fields.summary}
                                   </p>
                                 </Show>
+                              </div>
+                              <div class="flex items-center gap-1.5 shrink-0">
+                                <Show when={issue.fields.priority?.name && normalizePriorityName(issue.fields.priority.name) !== "Medium" && issue.fields.priority.name !== "Undefined"}>
+                                  <span class="badge badge-xs badge-outline text-[10px]">
+                                    {normalizePriorityName(issue.fields.priority!.name)}
+                                  </span>
+                                </Show>
+                                <span
+                                  class={`badge badge-xs ${jiraStatusCategoryClass(issue.fields.status.statusCategory.key)}`}
+                                >
+                                  {issue.fields.status.name}
+                                </span>
                               </div>
                               <Show when={config.enableTracking}>
                                 <button
