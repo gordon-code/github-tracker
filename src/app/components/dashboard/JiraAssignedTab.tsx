@@ -60,6 +60,28 @@ const STATUS_CATEGORY_ORDER = Object.assign(Object.create(null) as Record<string
   new: 0, indeterminate: 1, done: 2,
 });
 
+// Sub-ordering for indeterminate statuses based on SDLC progression.
+// Derived from Red Hat Jira MGMT project workflows + common patterns.
+// Unknown statuses get FALLBACK_STATUS_ORDER and sort alphabetically among themselves.
+const FALLBACK_STATUS_ORDER = 4;
+const STATUS_SDLC_ORDER: Record<string, number> = Object.assign(Object.create(null) as Record<string, number>, {
+  "ASSIGNED": 0, "Selected for Development": 0, "Selected to Development": 0,
+  "In Progress": 1, "In Development": 1, "Dev In Progress": 1, "Development": 1,
+  "Coding In Progress": 1, "Work in progress": 1, "inprogress": 1, "Implementation": 1,
+  "Code Review": 2, "Peer Review": 2, "In Review": 2, "Review": 2,
+  "Ready for Review": 2, "PR Opened": 2, "Needs Peer Review": 2,
+  "Needs Review": 2, "Under Review": 2, "Ready For Review": 2,
+  "Dev Complete": 3, "Development Complete": 3, "Feature Complete": 3, "MODIFIED": 3, "Merged": 3,
+  "ON_QA": 5, "QA": 5, "In QA": 5, "QA In Progress": 5, "In Test": 5,
+  "Testing": 5, "Ready for QA": 5, "Ready for QE": 5, "QE InProgress": 5,
+  "In Testing": 5, "QA READY": 5, "QE Verification": 5,
+  "Approved": 6, "Pending Approval": 6, "PM Approved": 6, "Story Approved": 6, "POST": 6,
+  "Ready for Release": 7, "Release Pending": 7, "Preparing Release": 7,
+  "Push Ready": 7, "Ready to Release": 7, "Ready For Release": 7,
+  "Blocked": 8, "On Hold/Blocked": 8, "Blocked External": 8, "ENG BLOCKED": 8,
+  "Stalled / Blocked": 8, "Blocked/On Hold": 8, "QA Blocked": 8,
+});
+
 // Module-level so sort preference persists across tab switches (matches jiraIssues/jiraKeyMap pattern)
 const [sortField, setSortField] = createSignal("priority");
 const [sortDirection, setSortDirection] = createSignal<"asc" | "desc">("asc");
@@ -134,10 +156,18 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           cmp = (PRIORITY_ORDER[normalizePriorityName(a.fields.priority?.name ?? "Medium")] ?? 2)
             - (PRIORITY_ORDER[normalizePriorityName(b.fields.priority?.name ?? "Medium")] ?? 2);
           break;
-        case "status":
-          cmp = (STATUS_CATEGORY_ORDER[a.fields.status.statusCategory.key] ?? 1)
-            - (STATUS_CATEGORY_ORDER[b.fields.status.statusCategory.key] ?? 1);
+        case "status": {
+          const aCat = STATUS_CATEGORY_ORDER[a.fields.status.statusCategory.key] ?? 1;
+          const bCat = STATUS_CATEGORY_ORDER[b.fields.status.statusCategory.key] ?? 1;
+          cmp = aCat - bCat;
+          if (cmp === 0) {
+            const aSub = STATUS_SDLC_ORDER[a.fields.status.name] ?? FALLBACK_STATUS_ORDER;
+            const bSub = STATUS_SDLC_ORDER[b.fields.status.name] ?? FALLBACK_STATUS_ORDER;
+            cmp = aSub - bSub;
+            if (cmp === 0) cmp = a.fields.status.name.localeCompare(b.fields.status.name);
+          }
           break;
+        }
         case "key": {
           const aP = a.key.replace(/-\d+$/, "");
           const bP = b.key.replace(/-\d+$/, "");
