@@ -333,7 +333,7 @@ export default function DashboardPage() {
     setJiraLoading(true);
     try {
       const result = await client.searchJql(
-        "assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC",
+        "reporter = currentUser() AND statusCategory != Done ORDER BY priority DESC",
         { maxResults: 100 }
       );
       if (import.meta.env.DEV) {
