@@ -48,7 +48,7 @@ export const ActionsFiltersSchema = z.object({
 
 // "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
 export const JiraFiltersSchema = z.object({
-  scope: z.enum(["assigned", "reported", "watching"]).default("assigned"),
+  scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100)).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
   sortField: z.string().default("status"),

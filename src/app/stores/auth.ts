@@ -96,6 +96,19 @@ export function setJiraAuth(state: JiraAuthState): void {
 export function clearJiraAuth(): void {
   localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
   _setJiraAuth(null);
+  updateConfig({
+    jira: JiraConfigSchema.parse({
+      issueKeyDetection: config.jira.issueKeyDetection,
+      customFields: config.jira.customFields,
+      customScopes: config.jira.customScopes,
+    }),
+  });
+  clearJiraKeyCache();
+}
+
+export function clearJiraConfigFull(): void {
+  localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
+  _setJiraAuth(null);
   updateConfig({ jira: JiraConfigSchema.parse({}) });
   clearJiraKeyCache();
 }

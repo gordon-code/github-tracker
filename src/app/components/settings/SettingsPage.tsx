@@ -2,7 +2,7 @@ import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-j
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, setMonitoredRepo } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, isJiraAuthenticated } from "../../stores/auth";
@@ -24,6 +24,9 @@ import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
 import { InfoTooltip } from "../shared/Tooltip";
+import { createJiraClient } from "../../lib/jira-utils";
+import JiraFieldPicker from "./JiraFieldPicker";
+import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
@@ -183,6 +186,8 @@ export default function SettingsPage() {
           cloudId: config.jira?.cloudId,
           siteName: config.jira?.siteName,
           siteUrl: config.jira?.siteUrl,
+          customFields: config.jira?.customFields ?? [],
+          customScopes: config.jira?.customScopes ?? [],
         },
       },
       null,
@@ -224,6 +229,8 @@ export default function SettingsPage() {
   const [jiraApiConnecting, setJiraApiConnecting] = createSignal(false);
   const [jiraApiError, setJiraApiError] = createSignal<string | null>(null);
   const [jiraApiMode, setJiraApiMode] = createSignal(false);
+  const [showFieldPicker, setShowFieldPicker] = createSignal(false);
+  const [showScopePicker, setShowScopePicker] = createSignal(false);
 
   const jiraApiSiteUrl = () => {
     const sub = jiraApiSubdomain().trim();
@@ -1003,6 +1010,72 @@ export default function SettingsPage() {
                   class="toggle toggle-primary"
                 />
               </SettingRow>
+              <SettingRow
+                label="Custom Fields"
+                description={
+                  (config.jira?.customFields ?? []).length > 0
+                    ? (config.jira?.customFields ?? []).map((f) => f.name).join(", ")
+                    : "None configured"
+                }
+              >
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline"
+                  onClick={() => setShowFieldPicker((v) => !v)}
+                  aria-expanded={showFieldPicker()}
+                >
+                  Configure fields
+                </button>
+              </SettingRow>
+              <Show when={showFieldPicker()}>
+                {(() => {
+                  const client = createJiraClient(config.jira?.authMethod);
+                  if (!client) return null;
+                  return (
+                    <div class="px-4 pb-3">
+                      <JiraFieldPicker
+                        client={client}
+                        selectedFields={config.jira?.customFields ?? []}
+                        onSave={(fields) => { updateJiraCustomFields(fields); setShowFieldPicker(false); }}
+                        onCancel={() => setShowFieldPicker(false)}
+                      />
+                    </div>
+                  );
+                })()}
+              </Show>
+              <SettingRow
+                label="Custom Scopes"
+                description={
+                  (config.jira?.customScopes ?? []).length > 0
+                    ? (config.jira?.customScopes ?? []).map((s) => s.name).join(", ")
+                    : "None configured"
+                }
+              >
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline"
+                  onClick={() => setShowScopePicker((v) => !v)}
+                  aria-expanded={showScopePicker()}
+                >
+                  Configure scopes
+                </button>
+              </SettingRow>
+              <Show when={showScopePicker()}>
+                {(() => {
+                  const client = createJiraClient(config.jira?.authMethod);
+                  if (!client) return null;
+                  return (
+                    <div class="px-4 pb-3">
+                      <JiraScopePicker
+                        client={client}
+                        selectedScopes={config.jira?.customScopes ?? []}
+                        onSave={(scopes) => { updateJiraCustomScopes(scopes); setShowScopePicker(false); }}
+                        onCancel={() => setShowScopePicker(false)}
+                      />
+                    </div>
+                  );
+                })()}
+              </Show>
               <SettingRow
                 label="Disconnect"
                 description="Remove Jira connection and clear stored credentials"

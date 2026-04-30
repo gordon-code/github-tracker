@@ -959,6 +959,124 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
     expect(allOutput).not.toContain(TEST_API_TOKEN);
   });
 
+  // ── fields endpoint ───────────────────────────────────────────────────────
+
+  describe("endpoint=fields", () => {
+    it("returns JSON array of field metadata", async () => {
+      const fields = [
+        { id: "summary", name: "Summary", custom: false },
+        { id: "customfield_10001", name: "Story Points", custom: true, schema: { type: "number" } },
+      ];
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify(fields), { status: 200 })
+      );
+
+      const req = makeJiraProxyRequest({
+        endpoint: "fields",
+        cloudId: VALID_CLOUD_ID,
+        email: TEST_EMAIL,
+        sealed: sealedToken,
+        params: {},
+      });
+      const res = await worker.fetch(req, makeEnv());
+      expect(res.status).toBe(200);
+      const json = await res.json() as unknown[];
+      expect(Array.isArray(json)).toBe(true);
+      expect(json).toHaveLength(2);
+    });
+
+    it("response is a raw array (not wrapped in object)", async () => {
+      const fields = [{ id: "summary", name: "Summary", custom: false }];
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify(fields), { status: 200 })
+      );
+
+      const req = makeJiraProxyRequest({
+        endpoint: "fields",
+        cloudId: VALID_CLOUD_ID,
+        email: TEST_EMAIL,
+        sealed: sealedToken,
+        params: {},
+      });
+      const res = await worker.fetch(req, makeEnv());
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(Array.isArray(json)).toBe(true);
+    });
+
+    it("response does not include a resealed property even when SEAL_KEY_NEXT is set", async () => {
+      const NEXT_SEAL_KEY = "bmV4dC1zZWFsLWtleS1mb3Itcm90YXRpb24hISE=";
+      const fields = [{ id: "summary", name: "Summary", custom: false }];
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify(fields), { status: 200 })
+      );
+
+      const req = makeJiraProxyRequest({
+        endpoint: "fields",
+        cloudId: VALID_CLOUD_ID,
+        email: TEST_EMAIL,
+        sealed: sealedToken,
+        params: {},
+      });
+      const res = await worker.fetch(req, makeEnv({ SEAL_KEY_NEXT: NEXT_SEAL_KEY }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(Array.isArray(json)).toBe(true);
+      expect((json as Record<string, unknown>)["resealed"]).toBeUndefined();
+    });
+
+    it("requires valid email and sealed credentials", async () => {
+      globalThis.fetch = vi.fn();
+
+      const req = makeJiraProxyRequest({
+        endpoint: "fields",
+        cloudId: VALID_CLOUD_ID,
+        email: TEST_EMAIL,
+        sealed: "corrupted-blob-cannot-unseal",
+        params: {},
+      });
+      const res = await worker.fetch(req, makeEnv());
+      expect(res.status).toBe(401);
+    });
+
+    it("routes to GET /rest/api/3/field (not to issue/bulkfetch)", async () => {
+      const fields = [{ id: "summary", name: "Summary", custom: false }];
+      const mockFetch = vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify(fields), { status: 200 })
+      );
+      globalThis.fetch = mockFetch;
+
+      const req = makeJiraProxyRequest({
+        endpoint: "fields",
+        cloudId: VALID_CLOUD_ID,
+        email: TEST_EMAIL,
+        sealed: sealedToken,
+        params: {},
+      });
+      await worker.fetch(req, makeEnv());
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain(`/rest/api/3/field`);
+      expect(url).not.toContain("bulkfetch");
+      expect((init as RequestInit).method ?? "GET").toBe("GET");
+    });
+  });
+
+  it("rejects unknown endpoint with 400", async () => {
+    globalThis.fetch = vi.fn();
+    const req = makeJiraProxyRequest({
+      endpoint: "unknown",
+      cloudId: VALID_CLOUD_ID,
+      email: TEST_EMAIL,
+      sealed: sealedToken,
+      params: {},
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
   // ── OPTIONS preflight ─────────────────────────────────────────────────────
 
   it("OPTIONS /api/jira/proxy with correct origin returns 204", async () => {

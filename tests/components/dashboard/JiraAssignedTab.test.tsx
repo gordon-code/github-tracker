@@ -190,9 +190,9 @@ describe("JiraAssignedTab", () => {
     expect(screen.getByText(/No issues match current filters/i)).toBeTruthy();
   });
 
-  it("shows 'No assigned Jira issues' when no filters active and list is empty", () => {
+  it("shows 'No Assigned to me Jira issues' when no filters active and list is empty", () => {
     render(() => <JiraAssignedTab issues={[]} loading={false} siteUrl={SITE_URL} />);
-    expect(screen.getByText(/No assigned Jira issues/i)).toBeTruthy();
+    expect(screen.getByText(/No Assigned to me Jira issues/i)).toBeTruthy();
   });
 
   // ── Empty state ───────────────────────────────────────────────────────────
@@ -405,5 +405,77 @@ describe("JiraAssignedTab", () => {
     const links = screen.getAllByRole("link");
     const keyLink = links.find((l) => l.textContent === "PROJ-1");
     expect(keyLink!.getAttribute("href")).toBe("#");
+  });
+
+  // ── Scope dropdown ─────────────────────────────────────────────────────────
+
+  describe("scope dropdown", () => {
+    it("scope filter button is present with label 'Scope'", () => {
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      // FilterPopover trigger has aria-label "Filter by Scope"
+      expect(screen.getByRole("button", { name: /filter by scope/i })).toBeTruthy();
+    });
+
+    it("scope trigger shows built-in label 'Assigned to me' when scope=assigned", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      // When non-default value, the trigger shows "Scope: <label>" — default is "assigned"
+      // so the trigger just shows "Scope" (no colon)
+      const trigger = screen.getByRole("button", { name: /filter by scope/i });
+      expect(trigger.textContent).toContain("Scope");
+    });
+
+    it("scope trigger reflects 'Created by me' label when scope=reported", () => {
+      mockJiraFilters = { scope: "reported", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      const trigger = screen.getByRole("button", { name: /filter by scope/i });
+      // Non-default value → trigger shows "Scope: Created by me"
+      expect(trigger.textContent).toContain("Created by me");
+    });
+
+    it("scope trigger reflects custom scope name when custom scope is active", () => {
+      (config as Record<string, unknown>).jira = { customScopes: [{ id: "customfield_10001", name: "My Assignee Field" }] };
+      mockJiraFilters = { scope: "customfield_10001", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      const trigger = screen.getByRole("button", { name: /filter by scope/i });
+      expect(trigger.textContent).toContain("My Assignee Field");
+      // Restore
+      (config as Record<string, unknown>).jira = { customScopes: [] };
+    });
+  });
+
+  // ── Expanded issue detail panel ────────────────────────────────────────────
+
+  describe("expanded issue detail panel", () => {
+    it("shows 'No custom fields configured' when no custom fields are set", () => {
+      (config as Record<string, unknown>).jira = { customFields: [] };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      // Click expand button for PROJ-1
+      const expandBtn = screen.getByRole("button", { name: /expand PROJ-1 details/i });
+      expandBtn.click();
+
+      expect(screen.getByText(/No custom fields configured/i)).toBeTruthy();
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+
+    it("multiple issues can be expanded simultaneously", () => {
+      (config as Record<string, unknown>).jira = { customFields: [] };
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /expand PROJ-1 details/i }).click();
+      screen.getByRole("button", { name: /expand PROJ-2 details/i }).click();
+
+      // Both should now show the "No custom fields configured" message
+      const msgs = screen.getAllByText(/No custom fields configured/i);
+      expect(msgs.length).toBe(2);
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
   });
 });

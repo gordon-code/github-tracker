@@ -77,6 +77,17 @@ export interface JiraAccessibleResource {
   avatarUrl?: string;
 }
 
+export interface JiraFieldMeta {
+  id: string;
+  name: string;
+  custom: boolean;
+  schema?: {
+    type: string;
+    items?: string;
+    custom?: string;
+  };
+}
+
 export interface JiraErrorResponse {
   errorMessages: string[];
   errors: Record<string, string>;

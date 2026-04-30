@@ -37,6 +37,7 @@ function makeClient(overrides: Partial<IJiraClient> = {}): IJiraClient {
     getIssue: vi.fn().mockResolvedValue(null),
     bulkFetch: vi.fn().mockResolvedValue(makeBulkResult([])),
     searchJql: vi.fn().mockResolvedValue({ issues: [], total: 0, maxResults: 50, startAt: 0 }),
+    getFields: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }

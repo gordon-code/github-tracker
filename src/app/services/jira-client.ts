@@ -1,6 +1,6 @@
-import type { JiraIssue, JiraSearchResult, JiraBulkFetchResult, JiraAccessibleResource } from "../../shared/jira-types";
+import type { JiraIssue, JiraSearchResult, JiraBulkFetchResult, JiraAccessibleResource, JiraFieldMeta } from "../../shared/jira-types";
 
-const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"];
+export const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"];
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 
@@ -28,12 +28,14 @@ export interface IJiraClient {
   getIssue(key: string, fields?: string[]): Promise<JiraIssue | null>;
   searchJql(jql: string, opts?: { maxResults?: number; fields?: string[]; startAt?: number }): Promise<JiraSearchResult>;
   bulkFetch(keys: string[], fields?: string[]): Promise<JiraBulkFetchResult>;
+  getFields(): Promise<JiraFieldMeta[]>;
 }
 
 // ── JiraClient (OAuth / Bearer) ───────────────────────────────────────────────
 
 export class JiraClient implements IJiraClient {
   private readonly baseUrl: string;
+  private _fieldsCache: { data: JiraFieldMeta[]; ts: number } | null = null;
 
   constructor(
     cloudId: string,
@@ -104,6 +106,13 @@ export class JiraClient implements IJiraClient {
     });
   }
 
+  async getFields(): Promise<JiraFieldMeta[]> {
+    if (this._fieldsCache && Date.now() - this._fieldsCache.ts < 30_000) return this._fieldsCache.data;
+    const data = await this.request<JiraFieldMeta[]>("/field");
+    this._fieldsCache = { data, ts: Date.now() };
+    return data;
+  }
+
   static async getAccessibleResources(accessToken: string): Promise<JiraAccessibleResource[]> {
     const response = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
       redirect: "error",
@@ -143,7 +152,7 @@ export class JiraProxyClient implements IJiraClient {
   ) {}
 
   private async request<T>(
-    endpoint: "search" | "issue",
+    endpoint: "search" | "issue" | "fields",
     params: Record<string, unknown>
   ): Promise<T & { resealed?: string }> {
     const response = await fetch("/api/jira/proxy", {
@@ -216,5 +225,9 @@ export class JiraProxyClient implements IJiraClient {
       this.onResealed(result.resealed);
     }
     return { issues: result.issues, errors: result.errors };
+  }
+
+  async getFields(): Promise<JiraFieldMeta[]> {
+    return this.request("fields", {}) as unknown as Promise<JiraFieldMeta[]>;
   }
 }
