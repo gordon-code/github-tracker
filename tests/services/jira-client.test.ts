@@ -332,6 +332,14 @@ describe("JiraClient", () => {
       await expect(client.getFields()).rejects.toThrow(JiraApiError);
     });
 
+    it("throws JiraApiError when response is not an array", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ errorMessages: ["something went wrong"] }), { status: 200 })
+      );
+
+      await expect(client.getFields()).rejects.toThrow(JiraApiError);
+    });
+
     it("returns cached result on second call within 30s", async () => {
       const fields = [{ id: "summary", name: "Summary", custom: false }];
       fetchMock.mockResolvedValue(new Response(JSON.stringify(fields), { status: 200 }));

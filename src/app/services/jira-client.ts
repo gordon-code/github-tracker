@@ -109,6 +109,7 @@ export class JiraClient implements IJiraClient {
   async getFields(): Promise<JiraFieldMeta[]> {
     if (this._fieldsCache && Date.now() - this._fieldsCache.ts < 30_000) return this._fieldsCache.data;
     const data = await this.request<JiraFieldMeta[]>("/field");
+    if (!Array.isArray(data)) throw new JiraApiError(502, data, "Unexpected non-array response from /field");
     this._fieldsCache = { data, ts: Date.now() };
     return data;
   }
