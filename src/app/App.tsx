@@ -22,6 +22,7 @@ function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
       if (!last || Date.now() - Number(last) > CHUNK_RELOAD_MAX_AGE) {
         sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
         window.location.reload();
+        return new Promise<never>(() => {});
       }
       throw err;
     }),
