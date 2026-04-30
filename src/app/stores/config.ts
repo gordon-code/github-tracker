@@ -3,7 +3,7 @@ import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
-import type { Config, ThemeId, CustomTab } from "../../shared/schemas";
+import type { Config, ThemeId, CustomTab, JiraConfig } from "../../shared/schemas";
 import { z } from "zod";
 
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
@@ -11,6 +11,7 @@ export {
   ConfigSchema, RepoRefSchema, TrackedUserSchema, THEME_OPTIONS,
   CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab,
   type Config, type TrackedUser, type ThemeId, type CustomTab, type BuiltinTabId,
+  type JiraConfig,
 } from "../../shared/schemas";
 
 export const CONFIG_STORAGE_KEY = "github-tracker:config";
@@ -99,6 +100,10 @@ export function setMcpRelayEnabled(enabled: boolean): void {
 
 export function setMcpRelayPort(port: number): void {
   updateConfig({ mcpRelayPort: port });
+}
+
+export function updateJiraConfig(partial: Partial<JiraConfig>): void {
+  updateConfig({ jira: { ...config.jira, ...partial } });
 }
 
 export function resetConfig(): void {

@@ -62,9 +62,21 @@ describe("verifyTurnstile", () => {
     expect(result).toEqual({ success: false, errorCodes: ["action-mismatch"] });
   });
 
-  it("returns action-mismatch when expectedAction is provided but response action is missing", async () => {
+  it("succeeds when expectedAction is provided but response action is missing (test keys)", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const result = await verifyTurnstile(TEST_TOKEN, TEST_IP, TEST_ENV, "seal");
+    expect(result).toEqual({ success: true });
+  });
+
+  it("returns action-mismatch when expectedAction differs from response action", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, action: "wrong-action" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -180,7 +192,7 @@ describe("verifyTurnstile", () => {
     expect(body.get("idempotency_key")).toBe("test-uuid-1234-5678-abcd-ef0123456789");
   });
 
-  it("uses redirect: error for SSRF hardening", async () => {
+  it("uses redirect: manual for SSRF hardening", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -192,7 +204,7 @@ describe("verifyTurnstile", () => {
 
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://challenges.cloudflare.com/turnstile/v0/siteverify");
-    expect(options.redirect).toBe("error");
+    expect(options.redirect).toBe("manual");
     expect(options.method).toBe("POST");
   });
 

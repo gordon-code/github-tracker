@@ -1,4 +1,5 @@
 import { createSignal, onMount, Show } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { useNavigate } from "@solidjs/router";
 import { setAuth, validateToken, clearAuth } from "../stores/auth";
 import { OAUTH_STATE_KEY, OAUTH_RETURN_TO_KEY, sanitizeReturnTo } from "../lib/oauth";
@@ -64,7 +65,8 @@ export default function OAuthCallback() {
       const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
       sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
       navigate(sanitizeReturnTo(returnTo), { replace: true });
-    } catch {
+    } catch (err) {
+      Sentry.captureException(err, { tags: { source: "oauth-callback" } });
       setError("A network error occurred. Please try again.");
     }
   });

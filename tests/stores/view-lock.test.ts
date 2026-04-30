@@ -212,7 +212,7 @@ describe("view lock store (per-tab)", () => {
       const result = ViewStateSchema.safeParse({});
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lockedRepos).toEqual({ issues: [], pullRequests: [], actions: [] });
+        expect(result.data.lockedRepos).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
       }
     });
 
@@ -247,6 +247,7 @@ describe("view lock store (per-tab)", () => {
         issues: ["org/a", "org/b"],
         pullRequests: ["org/a", "org/b"],
         actions: ["org/a", "org/b"],
+        jiraAssigned: [],
       });
     });
 
@@ -264,8 +265,8 @@ describe("view lock store (per-tab)", () => {
     });
 
     it("returns default record for undefined/null", () => {
-      expect(migrateLockedRepos(undefined)).toEqual({ issues: [], pullRequests: [], actions: [] });
-      expect(migrateLockedRepos(null)).toEqual({ issues: [], pullRequests: [], actions: [] });
+      expect(migrateLockedRepos(undefined)).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
+      expect(migrateLockedRepos(null)).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
     });
 
     it("caps flat array at LOCKED_REPOS_CAP (50) before copying", () => {
@@ -285,8 +286,8 @@ describe("view lock store (per-tab)", () => {
     });
 
     it("returns default record for non-array, non-object inputs", () => {
-      expect(migrateLockedRepos(42)).toEqual({ issues: [], pullRequests: [], actions: [] });
-      expect(migrateLockedRepos("bad")).toEqual({ issues: [], pullRequests: [], actions: [] });
+      expect(migrateLockedRepos(42)).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
+      expect(migrateLockedRepos("bad")).toEqual({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] });
     });
 
     it("filters out non-string elements from a flat mixed-type array", () => {

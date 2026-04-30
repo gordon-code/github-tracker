@@ -1,13 +1,15 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, setMonitoredRepo } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
-import { clearAuth } from "../../stores/auth";
+import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, isJiraAuthenticated } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
-import { buildOrgAccessUrl } from "../../lib/oauth";
+import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
+import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
@@ -23,6 +25,8 @@ import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
 import { InfoTooltip } from "../shared/Tooltip";
 import type { RepoRef } from "../../services/api";
+
+const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -171,6 +175,15 @@ export default function SettingsPage() {
         rememberLastTab: config.rememberLastTab,
         enableTracking: config.enableTracking,
         customTabs: config.customTabs,
+        // Non-secret jira config fields only — no tokens, sealed blobs, or email
+        jira: {
+          enabled: config.jira?.enabled ?? false,
+          authMethod: config.jira?.authMethod ?? "oauth",
+          issueKeyDetection: config.jira?.issueKeyDetection ?? true,
+          cloudId: config.jira?.cloudId,
+          siteName: config.jira?.siteName,
+          siteUrl: config.jira?.siteUrl,
+        },
       },
       null,
       2
@@ -200,6 +213,114 @@ export default function SettingsPage() {
     navigate("/login");
   }
 
+  // ── Jira integration ──────────────────────────────────────────────────────
+
+  const jiraClientId = import.meta.env.VITE_JIRA_CLIENT_ID as string | undefined;
+  const jiraEnabled = !!jiraClientId && VALID_JIRA_CLIENT_ID_RE.test(jiraClientId);
+
+  const [jiraApiEmail, setJiraApiEmail] = createSignal("");
+  const [jiraApiToken, setJiraApiToken] = createSignal("");
+  const [jiraApiSubdomain, setJiraApiSubdomain] = createSignal("");
+  const [jiraApiConnecting, setJiraApiConnecting] = createSignal(false);
+  const [jiraApiError, setJiraApiError] = createSignal<string | null>(null);
+  const [jiraApiMode, setJiraApiMode] = createSignal(false);
+
+  const jiraApiSiteUrl = () => {
+    const sub = jiraApiSubdomain().trim();
+    return sub ? `https://${sub}.atlassian.net` : "";
+  };
+
+  function handleJiraOAuthConnect() {
+    try {
+      const url = buildJiraAuthorizeUrl();
+      window.location.href = url;
+    } catch {
+      pushNotification("jira:connect", "Jira client ID is not configured — check VITE_JIRA_CLIENT_ID", "warning");
+    }
+  }
+
+  async function handleJiraApiTokenConnect() {
+    const email = jiraApiEmail().trim();
+    const token = jiraApiToken().trim();
+    const siteUrl = jiraApiSiteUrl();
+    if (!email || !token || !siteUrl) {
+      setJiraApiError("Email, API token, and site name are all required.");
+      return;
+    }
+    setJiraApiConnecting(true);
+    setJiraApiError(null);
+    try {
+      // Auto-discover Cloud ID from site URL
+      const tenantResp = await fetch("/api/jira/tenant-info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
+        body: JSON.stringify({ siteUrl }),
+      });
+      if (!tenantResp.ok) {
+        setJiraApiError("Could not look up your Jira site — check the site URL and try again.");
+        return;
+      }
+      const tenantData = await tenantResp.json() as { cloudId: string };
+      const cloudId = tenantData.cloudId;
+      if (!cloudId) {
+        setJiraApiError("Could not determine Cloud ID from your Jira site URL.");
+        return;
+      }
+
+      const sealedToken = await sealApiToken(token, "jira-api-token");
+      // Validate by making a search request through the proxy
+      const resp = await fetch("/api/jira/proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
+        body: JSON.stringify({
+          endpoint: "search",
+          cloudId,
+          email,
+          sealed: sealedToken,
+          params: { jql: "assignee = currentUser() AND statusCategory != Done", maxResults: 1 },
+        }),
+      });
+      if (!resp.ok) {
+        setJiraApiError("Could not connect — check your email and API token.");
+        return;
+      }
+      let siteName: string;
+      try { siteName = new URL(siteUrl).hostname.split(".")[0]; } catch { siteName = cloudId; }
+      setJiraAuth({
+        accessToken: sealedToken,
+        sealedRefreshToken: "",
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        cloudId,
+        siteUrl,
+        siteName,
+        email,
+      });
+      updateJiraConfig({ enabled: true, cloudId, email, authMethod: "token", siteUrl, siteName });
+      setJiraApiEmail("");
+      setJiraApiToken("");
+      setJiraApiSubdomain("");
+      setJiraApiMode(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error("[jira-connect]", err);
+      Sentry.captureException(err, { tags: { source: "jira-api-token-connect" } });
+      setJiraApiError(`Connection failed: ${msg}`);
+    } finally {
+      setJiraApiConnecting(false);
+    }
+  }
+
+  function handleJiraDisconnect() {
+    clearJiraAuth();
+    // DefaultTab guard: reset to issues if pointing at Jira tab
+    if (config.defaultTab === "jiraAssigned") {
+      updateConfig({ defaultTab: "issues" });
+    }
+    if (viewState.lastActiveTab === "jiraAssigned") {
+      updateViewState({ lastActiveTab: "issues" });
+    }
+  }
+
   // ── Refresh interval options ──────────────────────────────────────────────
 
   const refreshOptions = [
@@ -217,6 +338,7 @@ export default function SettingsPage() {
     { value: "pullRequests", label: "Pull Requests" },
     { value: "actions", label: "GitHub Actions" },
     ...(config.enableTracking ? [{ value: "tracked", label: "Tracked Items" }] : []),
+    ...(config.jira?.enabled ? [{ value: "jiraAssigned", label: "Jira" }] : []),
     ...config.customTabs.map((t) => ({ value: t.id, label: t.name })),
   ]);
 
@@ -754,7 +876,149 @@ export default function SettingsPage() {
           </Show>
         </Section>
 
-        {/* Section 11: Data */}
+        {/* Section 11: Jira Cloud Integration */}
+        <Section title="Jira Cloud Integration">
+            <Show
+              when={isJiraAuthenticated()}
+              fallback={
+                <div class="flex flex-col gap-3 px-4 py-3">
+                  <Show
+                    when={!jiraApiMode()}
+                    fallback={
+                      <div class="flex flex-col gap-3">
+                        <p class="text-xs text-base-content/60">
+                          Enter your Atlassian email, an{" "}
+                          <a
+                            href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="link link-primary"
+                          >
+                            API token
+                          </a>
+                          , and your Jira Cloud ID. Use <strong>Create API token</strong> (not "with
+                          scopes") — it inherits your account's access to Jira projects. The token is
+                          used read-only and encrypted before storage.
+                        </p>
+                        <input
+                          type="email"
+                          placeholder="your@email.com"
+                          value={jiraApiEmail()}
+                          onInput={(e) => setJiraApiEmail(e.currentTarget.value)}
+                          class="input input-sm w-full"
+                          aria-label="Atlassian account email"
+                        />
+                        <input
+                          type="password"
+                          placeholder="API token"
+                          value={jiraApiToken()}
+                          onInput={(e) => setJiraApiToken(e.currentTarget.value)}
+                          class="input input-sm w-full"
+                          aria-label="Atlassian API token"
+                        />
+                        <div class="flex items-center gap-1">
+                          <span class="text-sm text-base-content/60 shrink-0">https://</span>
+                          <input
+                            type="text"
+                            placeholder="yoursite"
+                            value={jiraApiSubdomain()}
+                            onInput={(e) => setJiraApiSubdomain(e.currentTarget.value)}
+                            class="input input-sm w-32"
+                            aria-label="Jira site name"
+                          />
+                          <span class="text-sm text-base-content/60">.atlassian.net</span>
+                        </div>
+                        <Show when={jiraApiError()}>
+                          <p class="text-xs text-error">{jiraApiError()}</p>
+                        </Show>
+                        <div class="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleJiraApiTokenConnect()}
+                            disabled={jiraApiConnecting()}
+                            class="btn btn-sm btn-primary"
+                          >
+                            {jiraApiConnecting() ? "Connecting..." : "Connect"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setJiraApiMode(false); setJiraApiError(null); setJiraApiSubdomain(""); }}
+                            class="btn btn-sm btn-ghost"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    }
+                  >
+                    <p class="text-xs text-base-content/60">
+                      Connect your Jira Cloud account to see assigned issues and detect Jira keys in GitHub items.
+                    </p>
+                    <div class="flex gap-2 flex-wrap">
+                      <Show when={jiraEnabled}>
+                        <button
+                          type="button"
+                          onClick={handleJiraOAuthConnect}
+                          class="btn btn-sm btn-primary"
+                        >
+                          Connect with Jira OAuth
+                        </button>
+                      </Show>
+                      <button
+                        type="button"
+                        onClick={() => setJiraApiMode(true)}
+                        aria-expanded={jiraApiMode()}
+                        class={jiraEnabled ? "btn btn-sm btn-outline" : "btn btn-sm btn-primary"}
+                      >
+                        Use API token
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+              }
+            >
+              <SettingRow
+                label="Connected site"
+                description={jiraAuth()?.siteUrl ?? ""}
+              >
+                <span class="text-sm font-medium">{jiraAuth()?.siteName ?? ""}</span>
+              </SettingRow>
+              <SettingRow
+                label="Auth method"
+                description="How this Jira integration authenticates"
+              >
+                <span class="text-sm">{config.jira?.authMethod === "token" ? "API Token" : "OAuth"}</span>
+              </SettingRow>
+              <SettingRow
+                label="Issue key detection"
+                description="Detect Jira issue keys in GitHub issue and PR titles"
+              >
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-checked={config.jira?.issueKeyDetection ?? true}
+                  aria-label="Issue key detection"
+                  checked={config.jira?.issueKeyDetection ?? true}
+                  onChange={(e) => updateJiraConfig({ issueKeyDetection: e.currentTarget.checked })}
+                  class="toggle toggle-primary"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Disconnect"
+                description="Remove Jira connection and clear stored credentials"
+              >
+                <button
+                  type="button"
+                  onClick={handleJiraDisconnect}
+                  class="btn btn-sm btn-error btn-outline"
+                >
+                  Disconnect
+                </button>
+              </SettingRow>
+            </Show>
+          </Section>
+
+        {/* Data */}
         <Section title="Data">
           {/* Authentication method */}
           <SettingRow

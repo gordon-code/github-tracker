@@ -24,9 +24,19 @@ Object.defineProperty(globalThis, "localStorage", {
 
 vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
+  clearJiraAuth: vi.fn(),
+  setJiraAuth: vi.fn(),
+  jiraAuth: () => null,
+  isJiraAuthenticated: () => false,
+  ensureJiraTokenValid: vi.fn(),
   token: () => "fake-token",
   user: () => ({ login: "testuser", name: "Test User" }),
   onAuthCleared: vi.fn(),
+}));
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+  withSentryErrorBoundary: vi.fn((c: unknown) => c),
 }));
 
 vi.mock("../../../src/app/stores/cache", () => ({

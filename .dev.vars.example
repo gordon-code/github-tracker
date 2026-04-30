@@ -1,8 +1,18 @@
 GITHUB_CLIENT_ID=your_client_id_here
 GITHUB_CLIENT_SECRET=your_client_secret_here
+# Note: ALLOWED_ORIGIN must match the registered OAuth callback origin.
+# For Jira local dev, this must be http://localhost:5173 — the Worker constructs
+# redirect_uri as ${ALLOWED_ORIGIN}/jira/callback, which Atlassian validates against
+# the registered callback URLs in your Atlassian Developer Console app settings.
 ALLOWED_ORIGIN=http://localhost:5173
 SESSION_KEY=your-base64-encoded-32-byte-key
 SEAL_KEY=your-base64-encoded-32-byte-key
 TURNSTILE_SECRET_KEY=your-turnstile-secret-from-cf-dashboard
 # Optional: only needed if Sentry "Allowed Domains" is configured in your Sentry project settings
 # SENTRY_SECURITY_TOKEN=your-sentry-security-token
+
+# ── Jira Cloud Integration (optional) ─────────────────────────────────────────
+# Get these from the Atlassian Developer Console: https://developer.atlassian.com/console/myapps/
+# Create an OAuth 2.0 (3LO) app, add read:jira-work scope, set callback to ${ALLOWED_ORIGIN}/jira/callback
+# JIRA_CLIENT_ID=your-jira-oauth-client-id
+# JIRA_CLIENT_SECRET=your-jira-oauth-client-secret

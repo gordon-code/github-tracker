@@ -1,6 +1,6 @@
 import { For, Show, Switch, Match, createMemo } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, untrackItem, moveTrackedItem } from "../../stores/view";
+import { viewState, untrackItem, moveTrackedItem, untrackJiraItem, moveJiraItem } from "../../stores/view";
 import type { TrackedItem } from "../../stores/view";
 import type { Issue, PullRequest } from "../../services/api";
 import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
@@ -20,6 +20,9 @@ function TypeBadge(props: { type: TrackedItem["type"] }) {
       </Match>
       <Match when={props.type === "pullRequest"}>
         <span class="badge badge-outline badge-sm badge-success">PR</span>
+      </Match>
+      <Match when={props.type === "jiraIssue"}>
+        <span class="badge badge-outline badge-sm badge-secondary">Jira</span>
       </Match>
     </Switch>
   );
@@ -55,9 +58,15 @@ function animateMove(before: Map<string, DOMRect>) {
   });
 }
 
-function handleMove(id: number, type: "issue" | "pullRequest", direction: "up" | "down") {
+function handleGitHubMove(id: number, type: "issue" | "pullRequest", direction: "up" | "down") {
   const before = recordPositions();
   moveTrackedItem(id, type, direction);
+  animateMove(before);
+}
+
+function handleJiraMove(jiraKey: string, direction: "up" | "down") {
+  const before = recordPositions();
+  moveJiraItem(jiraKey, direction);
   animateMove(before);
 }
 
@@ -96,11 +105,6 @@ export default function TrackedTab(props: TrackedTabProps) {
         <div class="divide-y divide-base-300">
           <For each={viewState.trackedItems}>
             {(item, index) => {
-              const liveData = () =>
-                item.type === "issue"
-                  ? maps().issueMap.get(item.id)
-                  : maps().prMap.get(item.id);
-
               const isFirst = () => index() === 0;
               const isLast = () => index() === viewState.trackedItems.length - 1;
               const itemKey = `${item.type}:${item.id}`;
@@ -113,151 +117,207 @@ export default function TrackedTab(props: TrackedTabProps) {
                   {/* Reorder buttons */}
                   <div class="flex flex-col shrink-0 pl-2 compact:pl-1">
                     <button
+                      type="button"
                       class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isFirst()}
                       aria-label={`Move up: ${item.title}`}
-                      onClick={() => handleMove(item.id, item.type, "up")}
+                      onClick={() => {
+                        if (item.source === "jira" && item.jiraKey) handleJiraMove(item.jiraKey, "up");
+                        else handleGitHubMove(item.id, item.type as "issue" | "pullRequest", "up");
+                      }}
                     >
-                      {/* Heroicons 20px solid: chevron-up */}
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                         <path fill-rule="evenodd" d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832 6.29 12.77a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z" clip-rule="evenodd" />
                       </svg>
                     </button>
                     <button
+                      type="button"
                       class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
                       disabled={isLast()}
                       aria-label={`Move down: ${item.title}`}
-                      onClick={() => handleMove(item.id, item.type, "down")}
+                      onClick={() => {
+                        if (item.source === "jira" && item.jiraKey) handleJiraMove(item.jiraKey, "down");
+                        else handleGitHubMove(item.id, item.type as "issue" | "pullRequest", "down");
+                      }}
                     >
-                      {/* Heroicons 20px solid: chevron-down */}
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
                         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                       </svg>
                     </button>
                   </div>
 
-                  {/* Row content */}
+                  {/* Row content — source-based split */}
                   <div class="flex-1 min-w-0">
                     <Show
-                      when={liveData()}
+                      when={item.source !== "jira"}
                       fallback={
-                        /* Fallback row when live data not found */
+                        /* Jira item rendering */
                         <div class="flex items-center gap-3 px-4 py-3 compact:gap-2 compact:px-3 compact:py-1 hover:bg-base-200 transition-colors">
                           <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 compact:gap-1 flex-wrap">
-                              <span class="font-medium text-sm compact:text-xs text-base-content truncate">
-                                {item.title}
-                              </span>
-                              <TypeBadge type={item.type} />
+                              <a
+                                href={item.htmlUrl ?? ""}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => { if (!item.htmlUrl) e.preventDefault(); }}
+                                class="font-mono text-xs text-primary hover:underline shrink-0"
+                              >
+                                {item.jiraKey}
+                              </a>
+                              <span class="badge badge-outline badge-xs">Jira</span>
+                              <Show when={item.jiraStatus}>
+                                <span class="badge badge-ghost badge-xs">{item.jiraStatus}</span>
+                              </Show>
                             </div>
+                            <span class="font-medium text-sm compact:text-xs text-base-content truncate block mt-0.5">
+                              {item.title}
+                            </span>
                             <div class="text-xs text-base-content/60 mt-0.5 compact:mt-0">
-                              {item.repoFullName}{" "}
-                              <span class="text-base-content/40">(not in current data)</span>
+                              {item.jiraProjectKey ?? item.repoFullName}
                             </div>
                           </div>
-                          <Tooltip content="Untrack this item">
+                          <Tooltip content="Unpin Jira issue">
                             <button
+                              type="button"
                               class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
-                              aria-label={`Unpin #${item.number} ${item.title}`}
-                              onClick={() => untrackItem(item.id, item.type)}
+                              aria-label={`Unpin ${item.jiraKey ?? "Jira issue"} ${item.title}`}
+                              onClick={() => { if (item.jiraKey) untrackJiraItem(item.jiraKey); }}
                             >
-                            {/* Solid bookmark */}
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
                             </button>
                           </Tooltip>
                         </div>
                       }
                     >
-                      {(live) => {
-                        const pr = createMemo(() => item.type === "pullRequest" ? live() as PullRequest : undefined);
-                        const commentCount = createMemo(() =>
-                          item.type === "pullRequest"
-                            ? (pr()!.enriched !== false ? pr()!.comments + pr()!.reviewThreads : undefined)
-                            : (live() as Issue).comments);
+                      {/* GitHub item rendering (source === "github" or legacy undefined) */}
+                      {(() => {
+                        const liveData = () =>
+                          item.type === "issue"
+                            ? maps().issueMap.get(item.id)
+                            : maps().prMap.get(item.id);
 
                         return (
-                          <ItemRow
-                            hideRepo={false}
-                            repo={live().repoFullName}
-                            number={live().number}
-                            title={live().title}
-                            author={live().userLogin}
-                            createdAt={live().createdAt}
-                            updatedAt={live().updatedAt}
-                            refreshTick={props.refreshTick}
-                            url={live().htmlUrl}
-                            labels={live().labels}
-                            commentCount={commentCount()}
-                            onTrack={() => untrackItem(item.id, item.type)}
-                            isTracked={true}
-                            isPolling={item.type === "pullRequest" && props.hotPollingPRIds?.has(item.id)}
-                          >
-                            <Show
-                              when={pr()}
-                              fallback={
-                                <div class="flex items-center gap-1">
-                                  <TypeBadge type="issue" />
-                                  <RoleBadge roles={deriveInvolvementRoles(props.userLogin, live().userLogin, (live() as Issue).assigneeLogins, [])} />
+                          <Show
+                            when={liveData()}
+                            fallback={
+                              <div class="flex items-center gap-3 px-4 py-3 compact:gap-2 compact:px-3 compact:py-1 hover:bg-base-200 transition-colors">
+                                <div class="flex-1 min-w-0">
+                                  <div class="flex items-center gap-2 compact:gap-1 flex-wrap">
+                                    <span class="font-medium text-sm compact:text-xs text-base-content truncate">
+                                      {item.title}
+                                    </span>
+                                    <TypeBadge type={item.type as "issue" | "pullRequest"} />
+                                  </div>
+                                  <div class="text-xs text-base-content/60 mt-0.5 compact:mt-0">
+                                    {item.repoFullName}{" "}
+                                    <span class="text-base-content/40">(not in current data)</span>
+                                  </div>
                                 </div>
-                              }
-                            >
-                              {(prData) => {
-                                const roles = createMemo(() => deriveInvolvementRoles(props.userLogin, prData().userLogin, prData().assigneeLogins, prData().reviewerLogins));
-                                const sizeCategory = createMemo(() => prSizeCategory(prData().additions, prData().deletions));
+                                <Tooltip content="Untrack this item">
+                                  <button
+                                    type="button"
+                                    class="relative z-10 shrink-0 self-center rounded p-1 text-primary transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
+                                    aria-label={`Unpin ${item.number !== undefined ? '#' + item.number + ' ' : ''}${item.title}`}
+                                    onClick={() => untrackItem(item.id, item.type as "issue" | "pullRequest")}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path fill-rule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clip-rule="evenodd" /></svg>
+                                  </button>
+                                </Tooltip>
+                              </div>
+                            }
+                          >
+                            {(live) => {
+                              const pr = createMemo(() => item.type === "pullRequest" ? live() as PullRequest : undefined);
+                              const commentCount = createMemo(() =>
+                                item.type === "pullRequest"
+                                  ? (pr()!.enriched !== false ? pr()!.comments + pr()!.reviewThreads : undefined)
+                                  : (live() as Issue).comments);
 
-                                return (
+                              return (
+                                <ItemRow
+                                  hideRepo={false}
+                                  repo={live().repoFullName}
+                                  number={live().number}
+                                  title={live().title}
+                                  author={live().userLogin}
+                                  createdAt={live().createdAt}
+                                  updatedAt={live().updatedAt}
+                                  refreshTick={props.refreshTick}
+                                  url={live().htmlUrl}
+                                  labels={live().labels}
+                                  commentCount={commentCount()}
+                                  onTrack={() => untrackItem(item.id, item.type as "issue" | "pullRequest")}
+                                  isTracked={true}
+                                  isPolling={item.type === "pullRequest" && props.hotPollingPRIds?.has(item.id)}
+                                >
                                   <Show
-                                    when={config.viewDensity === "compact"}
+                                    when={pr()}
                                     fallback={
-                                      <div class="flex items-center gap-2 flex-wrap">
-                                        <TypeBadge type="pullRequest" />
-                                        <Show when={prData().enriched !== false}>
-                                          <RoleBadge roles={roles()} />
-                                        </Show>
-                                        <ReviewBadge decision={prData().reviewDecision} />
-                                        <Show when={prData().enriched !== false}>
-                                          <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
-                                          <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
-                                          <Show when={prData().checkStatus === "conflict"}>
-                                            <Tooltip content="Merge conflict">
-                                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
-                                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                              </svg>
-                                            </Tooltip>
-                                          </Show>
-                                        </Show>
-                                        <Show when={prData().draft}>
-                                          <span class="badge badge-ghost badge-sm italic text-base-content/50">Draft</span>
-                                        </Show>
+                                      <div class="flex items-center gap-1">
+                                        <TypeBadge type="issue" />
+                                        <RoleBadge roles={deriveInvolvementRoles(props.userLogin, live().userLogin, (live() as Issue).assigneeLogins, [])} />
                                       </div>
                                     }
                                   >
-                                    {/* Compact: key badges inline */}
-                                    <div class="flex items-center gap-1">
-                                      <TypeBadge type="pullRequest" />
-                                      <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
-                                      <ReviewBadge decision={prData().reviewDecision} />
-                                      <Show when={prData().enriched !== false}>
-                                        <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
-                                      </Show>
-                                      <Show when={prData().checkStatus === "conflict"}>
-                                        <Tooltip content="Merge conflict">
-                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
-                                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                          </svg>
-                                        </Tooltip>
-                                      </Show>
-                                      <Show when={prData().draft}>
-                                        <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
-                                      </Show>
-                                    </div>
+                                    {(prData) => {
+                                      const roles = createMemo(() => deriveInvolvementRoles(props.userLogin, prData().userLogin, prData().assigneeLogins, prData().reviewerLogins));
+                                      const sizeCategory = createMemo(() => prSizeCategory(prData().additions, prData().deletions));
+
+                                      return (
+                                        <Show
+                                          when={config.viewDensity === "compact"}
+                                          fallback={
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                              <TypeBadge type="pullRequest" />
+                                              <Show when={prData().enriched !== false}>
+                                                <RoleBadge roles={roles()} />
+                                              </Show>
+                                              <ReviewBadge decision={prData().reviewDecision} />
+                                              <Show when={prData().enriched !== false}>
+                                                <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
+                                                <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
+                                                <Show when={prData().checkStatus === "conflict"}>
+                                                  <Tooltip content="Merge conflict">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
+                                                      <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                                    </svg>
+                                                  </Tooltip>
+                                                </Show>
+                                              </Show>
+                                              <Show when={prData().draft}>
+                                                <span class="badge badge-ghost badge-sm italic text-base-content/50">Draft</span>
+                                              </Show>
+                                            </div>
+                                          }
+                                        >
+                                          <div class="flex items-center gap-1">
+                                            <TypeBadge type="pullRequest" />
+                                            <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
+                                            <ReviewBadge decision={prData().reviewDecision} />
+                                            <Show when={prData().enriched !== false}>
+                                              <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
+                                            </Show>
+                                            <Show when={prData().checkStatus === "conflict"}>
+                                              <Tooltip content="Merge conflict">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-warning" viewBox="0 0 20 20" fill="currentColor" aria-label="Merge conflict">
+                                                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                                </svg>
+                                              </Tooltip>
+                                            </Show>
+                                            <Show when={prData().draft}>
+                                              <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
+                                            </Show>
+                                          </div>
+                                        </Show>
+                                      );
+                                    }}
                                   </Show>
-                                );
-                              }}
-                            </Show>
-                          </ItemRow>
+                                </ItemRow>
+                              );
+                            }}
+                          </Show>
                         );
-                      }}
+                      })()}
                     </Show>
                   </div>
                 </div>

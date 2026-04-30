@@ -9,6 +9,7 @@ import { initClientWatcher } from "./services/github";
 import { initMcpRelay } from "./lib/mcp-relay";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
+import JiraCallback from "./pages/JiraCallback";
 import PrivacyPage from "./pages/PrivacyPage";
 
 const DashboardPage = lazy(() => import("./components/dashboard/DashboardPage"));
@@ -195,6 +196,7 @@ export default function App() {
           <Route path="/" component={RootRedirect} />
           <Route path="/login" component={LoginPage} />
           <Route path="/oauth/callback" component={OAuthCallback} />
+          <Route path="/jira/callback" component={JiraCallback} />
           <Route path="/onboarding" component={() => <AuthGuard><OnboardingWizard /></AuthGuard>} />
           <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
           <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />

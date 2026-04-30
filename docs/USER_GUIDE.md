@@ -36,6 +36,14 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
 - [Tracked Items](#tracked-items)
 - [Repo Pinning](#repo-pinning)
 - [MCP Server Integration](#mcp-server-integration)
+- [Jira Cloud Integration](#jira-cloud-integration)
+  - [Prerequisites](#jira-prerequisites)
+  - [Connecting via OAuth](#connecting-via-oauth)
+  - [Connecting via API Token](#connecting-via-api-token)
+  - [Issue Key Detection](#issue-key-detection)
+  - [Jira Assigned Tab](#jira-assigned-tab)
+  - [Bookmarking Jira Issues](#bookmarking-jira-issues)
+  - [Disconnecting](#disconnecting-jira)
 - [Settings Reference](#settings-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -415,6 +423,119 @@ The relay falls back to direct GitHub API calls automatically when the dashboard
 | `get_failing_actions` | In-progress or recently failed workflow runs |
 | `get_pr_details` | Full details for a specific PR |
 | `get_rate_limit` | Current GitHub API quota |
+
+---
+
+## Jira Cloud Integration
+
+GitHub Tracker can optionally connect to Jira Cloud to show you assigned issues, detect Jira issue keys referenced in GitHub items, and let you bookmark Jira issues alongside GitHub items in the Tracked tab.
+
+The integration is opt-in and requires a Jira Cloud account. It can be enabled and disabled at any time from Settings.
+
+### Jira Prerequisites
+
+**Atlassian account:** You need a Jira Cloud account with access to at least one Jira site.
+
+**OAuth app (if using OAuth):** The app must be configured with a registered Atlassian OAuth 2.0 (3LO) client ID. If you are running your own deployment, register an app at [developer.atlassian.com](https://developer.atlassian.com/console/myapps/) with:
+- **Classic scopes:** `read:jira-work`, `read:jira-user`
+- **Callback URLs:** `https://your-domain/jira/callback` and `http://localhost:5173/jira/callback` (for local dev)
+- Set `VITE_JIRA_CLIENT_ID` in `.env` and provision `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` as Worker secrets (see [Deployment](#jira-production-secrets)).
+
+**API token (if not using OAuth):** Generate one at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens). Use **Create API token** (not "Create API token with scopes") — this type inherits your account's full access to Jira projects. The app uses the token read-only: it searches for assigned issues and fetches issue details.
+
+### Connecting via OAuth
+
+OAuth is the recommended method. It gives the app short-lived access tokens refreshed automatically and does not require you to copy credentials.
+
+1. Go to **Settings > Jira Cloud Integration**
+2. Click **Connect with Jira**
+3. You will be redirected to Atlassian's consent screen — authorize the requested scopes (`read:jira-work`, `read:jira-user`)
+4. If your account has access to multiple Jira sites, a site picker appears — select the site you want to use
+5. You are redirected back to Settings with the integration active
+
+The integration label shows "OAuth" and displays the connected site name and URL.
+
+### Connecting via API Token
+
+Use this method if OAuth is unavailable (e.g., your organization does not allow third-party OAuth apps).
+
+1. Go to **Settings > Jira Cloud Integration**
+2. Click **Use API token** to switch modes
+3. Enter your Atlassian account **email**, your **API token**, and your **site URL** (e.g., `https://myorg.atlassian.net`)
+4. Click **Connect** — the app auto-discovers your Jira Cloud ID from the site URL, then validates the credentials against the Jira API
+5. On success the integration activates. The API token is encrypted server-side (AES-256-GCM) before storage; the plaintext token is never saved in the browser
+
+The integration label shows "API Token" and displays the connected site name and URL.
+
+### Issue Key Detection
+
+When issue key detection is enabled, the app scans GitHub issue and PR titles (and PR branch names) for Jira issue key patterns (e.g., `PROJ-123`, `TEAM-42`) after each full data refresh. Matched keys are looked up in Jira and displayed as inline badges on the GitHub item rows showing the issue key, status, and a color indicating status category (blue = new, yellow = in progress, green = done).
+
+Clicking a badge opens the Jira issue in a new tab.
+
+Toggle: **Settings > Jira Cloud Integration > Auto-detect Jira keys** (visible only when connected).
+
+Keys must be uppercase (e.g., `PROJ-123`), 2–10 capital letters followed by a dash and a number. Lowercase patterns are not matched.
+
+### Jira Assigned Tab
+
+When Jira is connected, a **Jira** tab appears in the tab bar. It shows all open Jira issues assigned to you (via `assignee = currentUser() AND statusCategory != Done`), fetched in the same 5-minute poll cycle as GitHub data.
+
+**Filters:** Status category (New, In Progress) and priority (Highest through Lowest) filters are available in the filter popover.
+
+**Grouping:** Issues are grouped by Jira project key, similar to how GitHub items are grouped by repo.
+
+**Pagination:** Client-side over up to 100 fetched issues.
+
+**Polling:** Jira issues refresh after each full GitHub poll cycle. There is no hot poll for Jira — issues update every 5 minutes.
+
+If your Jira token expires (OAuth refresh tokens expire after 90 days of inactivity), a notification prompts you to reconnect in Settings.
+
+### Bookmarking Jira Issues
+
+From the Jira Assigned tab, click the **pin icon** on any issue to add it to the Tracked tab alongside your pinned GitHub items.
+
+Pinned Jira items show the issue key (linked), summary, status, and project group. They are removed automatically from the Tracked tab when the issue no longer appears in your assigned list (i.e., it was reassigned, resolved, or marked Done).
+
+To unpin manually, use the remove button on the item in the Tracked tab.
+
+### Disconnecting Jira
+
+Go to **Settings > Jira Cloud Integration > Disconnect**. This clears all stored Jira credentials and tokens from the browser, disables the Jira tab, and removes Jira issue key detection. Pinned Jira items in the Tracked tab are also cleared.
+
+### Jira Production Secrets
+
+For production deployments, provision these Worker secrets via the Wrangler CLI — do not put them in `.env` or `.dev.vars`:
+
+```bash
+wrangler secret put JIRA_CLIENT_ID
+wrangler secret put JIRA_CLIENT_SECRET
+```
+
+Local development uses `.dev.vars` (see `.dev.vars.example`). The Jira Cloud Integration section always appears in Settings. When `VITE_JIRA_CLIENT_ID` is set, both OAuth and API token connection methods are available. When it is absent, only the API token method is shown.
+
+### Troubleshooting Jira
+
+**"Reconnect in Settings" notification appears.**
+Your OAuth refresh token has expired (90-day inactivity limit) or was revoked. Go to Settings and click **Connect with Jira** to re-authenticate.
+
+**OAuth button not visible in Settings.**
+`VITE_JIRA_CLIENT_ID` is not set or contains an invalid value. Check your `.env` file or deployment configuration. The API token method is always available regardless of this variable.
+
+**"No Jira Cloud sites found" error after OAuth.**
+Your Atlassian account does not have access to any Jira Cloud sites. Confirm your account has at least one Jira site in the Atlassian admin portal.
+
+**"Could not look up your Jira site" error when connecting via API token.**
+The app auto-discovers your Jira Cloud ID from the site URL. This error means the site URL is unreachable or not a valid Jira Cloud instance. Verify the URL is correct (e.g., `https://yourorg.atlassian.net`) and that the site is accessible.
+
+**Jira badges not appearing on GitHub items.**
+Check that **Auto-detect Jira keys** is toggled on in Settings. Keys must appear in issue/PR titles or PR branch names and match the pattern `[A-Z]{2,10}-\d+` exactly (uppercase only).
+
+**"Access denied" error on the Jira Assigned tab (API token mode).**
+Your API token may lack the required permissions, or your account may have been removed from the Jira site. Check your app permissions in Atlassian settings. The dashboard preserves your auth state — you do not need to reconnect unless the token itself is revoked.
+
+**Jira disconnects across multiple browser tabs.**
+Jira uses rotating refresh tokens — each refresh invalidates the previous token. If two tabs attempt a token refresh simultaneously, one may fail and clear auth in all tabs. Refresh the affected tab or reconnect in Settings. This is a rare timing condition that only occurs when tokens expire in multiple tabs at the same instant.
 
 ---
 

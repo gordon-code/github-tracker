@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
+import { createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
 import TabBar, { TabId } from "../layout/TabBar";
@@ -8,8 +8,8 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, getCustomTab, isBuiltinTab, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
+import { config, setConfig, getCustomTab, isBuiltinTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -24,12 +24,16 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, ensureJiraTokenValid, clearJiraAuth } from "../../stores/auth";
+import { JiraClient, JiraProxyClient, JiraApiError } from "../../services/jira-client";
+import type { JiraIssue } from "../../../shared/jira-types";
+import { detectAndLookupJiraKeys } from "../../services/jira-keys";
+import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification, pushError } from "../../lib/errors";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { formatCount, prSizeCategory, rateLimitCssClass } from "../../lib/format";
+import { formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
@@ -126,10 +130,20 @@ export function _resetHasFetchedFresh(value = false) { setHasFetchedFresh(value)
 
 const [lastFetchHadErrors, setLastFetchHadErrors] = createSignal(false);
 
+// Jira state — module-level to persist across DashboardPage remounts (e.g., Settings → Dashboard navigation)
+const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
+const [jiraLoading, setJiraLoading] = createSignal(false);
+const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
+let _jiraFetching = false;
+
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
   setHasFetchedFresh(false);
+  setJiraIssues([]);
+  setJiraLoading(false);
+  setJiraKeyMap(new Map());
+  _jiraFetching = false;
   const coord = _coordinator();
   if (coord) {
     coord.destroy();
@@ -385,6 +399,116 @@ export default function DashboardPage() {
   const [hotPollingRunIds, setHotPollingRunIds] = createSignal<ReadonlySet<number>>(new Set());
   const [rlDetail, setRlDetail] = createSignal<string>("Loading...");
 
+  // Narrow reactivity: extract authMethod so unrelated jira config changes don't recreate the client
+  const jiraAuthMethod = createMemo(() => config.jira?.authMethod);
+  const jiraClient = createMemo(() => {
+    const auth = jiraAuth();
+    const method = jiraAuthMethod();
+    if (!auth) return null;
+    if (method === "token") {
+      if (!auth.email) return null;
+      return new JiraProxyClient(auth.cloudId, auth.email, auth.accessToken, (resealed) => {
+        const cur = jiraAuth();
+        if (cur) setJiraAuth({ ...cur, accessToken: resealed });
+      });
+    }
+    return new JiraClient(auth.cloudId, async () => {
+      await ensureJiraTokenValid();
+      const currentAuth = jiraAuth();
+      if (!currentAuth) throw new Error("Jira auth cleared during token refresh");
+      return currentAuth.accessToken;
+    });
+  });
+
+  function jiraJqlForScope(scope: string): string {
+    const field = scope === "reported" ? "reporter" : scope === "watching" ? "watcher" : "assignee";
+    return `${field} = currentUser() AND statusCategory != Done ORDER BY priority DESC`;
+  }
+
+  async function fetchJiraAssigned(): Promise<void> {
+    if (_jiraFetching) return;
+    const client = jiraClient();
+    if (!client) return;
+    _jiraFetching = true;
+    setJiraLoading(true);
+    try {
+      const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
+      const result = await client.searchJql(
+        jiraJqlForScope(scope),
+        { maxResults: 100 }
+      );
+      if (import.meta.env.DEV) {
+        const missing = result.issues.filter((i) => !i.fields.issuetype);
+        if (missing.length > 0) console.info("[jira] issues missing issuetype:", missing.map((i) => `${i.key}: ${JSON.stringify(i.fields.issuetype)}`));
+      }
+      if (!isJiraAuthenticated()) return;
+      setJiraIssues(result.issues);
+
+      // Auto-prune tracked Jira items that are done or deleted (scope-independent).
+      // Resolves status from current search results first, then bulkFetches only
+      // keys not covered (items from a different scope than the current view).
+      if (config.enableTracking && viewState.trackedItems.length > 0) {
+        const trackedJiraKeys = viewState.trackedItems
+          .filter((item) => item.source === "jira" && item.jiraKey)
+          .map((item) => item.jiraKey!);
+        if (trackedJiraKeys.length > 0) {
+          try {
+            const liveKeys = new Map<string, string>();
+            for (const issue of result.issues) {
+              liveKeys.set(issue.key, issue.fields.status.statusCategory.key);
+            }
+            const uncheckedKeys = trackedJiraKeys.filter((k) => !liveKeys.has(k));
+            const errorKeys = new Set<string>();
+            if (uncheckedKeys.length > 0) {
+              const bulkResult = await client.bulkFetch(uncheckedKeys, ["status"]);
+              for (const issue of bulkResult.issues) {
+                liveKeys.set(issue.key, issue.fields.status.statusCategory.key);
+              }
+              for (const err of bulkResult.errors ?? []) {
+                for (const key of err.issueIdsOrKeys) errorKeys.add(key);
+              }
+            }
+            for (const jiraKey of trackedJiraKeys) {
+              if (errorKeys.has(jiraKey)) continue;
+              const statusCat = liveKeys.get(jiraKey);
+              if (!statusCat || statusCat === "done") {
+                untrackJiraItem(jiraKey);
+              }
+            }
+          } catch {
+            // Prune errors must not break the main fetch cycle
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof JiraApiError) {
+        if (err.status === 401) {
+          clearJiraAuth();
+          pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning");
+        } else if (err.status === 403) {
+          pushNotification("jira", "Jira: access denied — check your app permissions or site access in Atlassian settings", "warning");
+        } else {
+          pushNotification("jira", "Jira fetch failed — will retry on next refresh", "warning");
+        }
+      } else {
+        pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
+      }
+    } finally {
+      _jiraFetching = false;
+      setJiraLoading(false);
+    }
+  }
+
+  // CRITICAL: must never throw or rethrow — Jira errors must not break GitHub poll cycle
+  function handleJiraError(err: unknown): void {
+    try {
+      console.warn("[jira] poll error:", err);
+      pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
+    } catch {
+      // final catch-all — never propagate
+    }
+  }
+
   function fetchAndSetRlDetail(): void {
     void fetchRateLimitDetails().then((detail) => {
       if (!detail) {
@@ -419,6 +543,7 @@ export default function DashboardPage() {
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
+    if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
@@ -446,6 +571,21 @@ export default function DashboardPage() {
   createEffect(() => {
     if (!config.enableTracking && activeTab() === "tracked") {
       handleTabChange("issues");
+    }
+  });
+
+  // Redirect away from Jira tab when Jira is disabled at runtime
+  createEffect(() => {
+    if (!config.jira?.enabled && activeTab() === "jiraAssigned") {
+      handleTabChange("issues");
+    }
+  });
+
+  // Clear stale Jira data when auth is cleared (e.g., 401 during token refresh)
+  createEffect(() => {
+    if (!isJiraAuthenticated()) {
+      setJiraIssues([]);
+      setJiraKeyMap(new Map());
     }
   });
 
@@ -486,6 +626,7 @@ export default function DashboardPage() {
 
     const pruneKeys = new Set<string>();
     for (const item of viewState.trackedItems) {
+      if (item.source === "jira") continue; // explicit guard — Jira items handled separately
       if (!polledRepos.has(item.repoFullName)) continue; // repo deselected — keep item
       const isLive = item.type === "issue" ? liveIssueIds.has(item.id) : livePrIds.has(item.id);
       if (!isLive) pruneKeys.add(`${item.type}:${item.id}`);
@@ -612,6 +753,19 @@ export default function DashboardPage() {
       }).catch(() => {
         // Non-fatal — org sync failure doesn't block dashboard
       });
+    }
+
+    // Backfill config.jira.siteUrl from auth state if missing (handles configs
+    // saved before siteUrl was added, or OAuth setups that stored it only in auth)
+    if (config.jira?.enabled && !config.jira.siteUrl) {
+      const auth = jiraAuth();
+      if (auth?.siteUrl) updateJiraConfig({ siteUrl: auth.siteUrl });
+    }
+
+    // Immediate Jira fetch on mount — the deferred lastRefreshAt effect only
+    // fires on the NEXT poll, leaving a gap where jiraIssues may be empty.
+    if (config.jira?.enabled && isJiraAuthenticated()) {
+      fetchJiraAssigned().catch(handleJiraError);
     }
 
     // Wall-clock tick keeps relative time displays fresh between full poll cycles.
@@ -830,6 +984,14 @@ export default function DashboardPage() {
         isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
       ).length,
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
+      ...(config.jira?.enabled ? (() => {
+        const f = viewState.tabFilters.jiraAssigned;
+        return { jiraAssigned: jiraIssues().filter((issue) => {
+          if (f?.statusCategory !== "all" && issue.fields.status.statusCategory.key !== f?.statusCategory) return false;
+          if (f?.priority !== "all" && stripParenthetical(issue.fields.priority?.name ?? "") !== f?.priority) return false;
+          return true;
+        }).length };
+      })() : {}),
       ...customCounts,
     };
   });
@@ -854,6 +1016,54 @@ export default function DashboardPage() {
     if (isBuiltinTab(id)) return null;
     return getCustomTab(id) ?? null;
   });
+
+  // Fingerprint of issue+PR titles — changes only when titles actually change, not on
+  // every lastRefreshedAt tick (e.g., hot poll, clock tick, workflow run updates).
+  const titleFingerprint = createMemo(() => {
+    const issueTitles = dashboardData.issues.map((i) => i.title).join("\0");
+    const prTitles = dashboardData.pullRequests.map((p) => `${p.title}\0${p.headRef ?? ""}`).join("\0");
+    return `${issueTitles}|||${prTitles}`;
+  });
+
+  // Jira key detection runs only when titles change — NOT on every lastRefreshedAt tick.
+  // Guards: jira enabled+detection, authenticated, client ready, and titles actually changed.
+  createEffect(on(titleFingerprint, () => {
+    if (import.meta.env.DEV) console.info("[jira] key detection guard:", { enabled: config.jira?.enabled, detection: config.jira?.issueKeyDetection, auth: isJiraAuthenticated(), client: !!jiraClient(), refreshed: !!dashboardData.lastRefreshedAt });
+    if (!config.jira?.enabled || !config.jira?.issueKeyDetection) return;
+    if (!isJiraAuthenticated()) return;
+    const client = jiraClient();
+    if (!client) return;
+    if (!dashboardData.lastRefreshedAt) return;
+    const items = [
+      ...dashboardData.issues.map((i) => ({ title: i.title })),
+      ...dashboardData.pullRequests.map((p) => ({ title: p.title, headRef: p.headRef })),
+    ];
+    void detectAndLookupJiraKeys(items, client).then((map) => {
+      if (import.meta.env.DEV) console.info("[jira] key detection:", map.size, "keys found", [...map.keys()].slice(0, 10));
+      setJiraKeyMap(map);
+    }).catch(handleJiraError);
+  }));
+
+  // Jira assigned issues poll: fires after each GitHub full refresh cycle
+  createEffect(on(
+    () => _coordinator()?.lastRefreshAt(),
+    () => {
+      if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      fetchJiraAssigned().catch(handleJiraError);
+    },
+    { defer: true }
+  ));
+
+  // Re-fetch when Jira scope filter changes (assigned/reported/watching)
+  createEffect(on(
+    () => viewState.tabFilters.jiraAssigned?.scope,
+    () => {
+      if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      setJiraIssues([]);
+      fetchJiraAssigned().catch(handleJiraError);
+    },
+    { defer: true }
+  ));
 
   // Push dashboard data into the MCP relay snapshot on each full refresh.
   // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
@@ -894,6 +1104,7 @@ export default function DashboardPage() {
               onTabChange={handleTabChange}
               counts={tabCounts()}
               enableTracking={config.enableTracking}
+              enableJira={!!config.jira?.enabled}
               customTabs={config.customTabs.map((t) => ({ id: t.id, name: t.name }))}
               onAddTab={() => setShowCustomTabModal(true)}
               onEditTab={(id) => { setEditingTabId(id); setShowCustomTabModal(true); }}
@@ -923,6 +1134,7 @@ export default function DashboardPage() {
                   monitoredRepos={config.monitoredRepos}
                   configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
+                  jiraKeyMap={jiraKeyMap}
                 />
               </Match>
               <Match when={activeTab() === "pullRequests"}>
@@ -936,6 +1148,7 @@ export default function DashboardPage() {
                   monitoredRepos={config.monitoredRepos}
                   configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
+                  jiraKeyMap={jiraKeyMap}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
@@ -946,6 +1159,13 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   userLogin={userLogin()}
                   hotPollingPRIds={hotPollingPRIds()}
+                />
+              </Match>
+              <Match when={activeTab() === "jiraAssigned"}>
+                <JiraAssignedTab
+                  issues={jiraIssues()}
+                  loading={jiraLoading()}
+                  siteUrl={config.jira?.siteUrl ?? ""}
                 />
               </Match>
               <Match when={activeTab() === "actions"}>
@@ -985,6 +1205,7 @@ export default function DashboardPage() {
                           refreshTick={refreshTick()}
                           customTabId={tab().id}
                           filterPreset={tab().filterPreset}
+                          jiraKeyMap={jiraKeyMap}
                         />
                       </Match>
                       <Match when={tab().baseType === "pullRequests"}>
@@ -1000,6 +1221,7 @@ export default function DashboardPage() {
                           refreshTick={refreshTick()}
                           customTabId={tab().id}
                           filterPreset={tab().filterPreset}
+                          jiraKeyMap={jiraKeyMap}
                         />
                       </Match>
                       <Match when={tab().baseType === "actions"}>

@@ -307,6 +307,7 @@ export function createPollCoordinator(
       dispatchNotifications(newItems, config);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
+      Sentry.captureException(err, { tags: { source: "poll-cycle" } });
       pushError("poll", message, true);
       // No reconciliation on catch — can't know what resolved
     } finally {

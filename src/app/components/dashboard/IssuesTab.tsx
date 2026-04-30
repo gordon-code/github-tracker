@@ -21,6 +21,8 @@ import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
 import EmptyLockedRepoRow from "../shared/EmptyLockedRepoRow";
 import { Tooltip } from "../shared/Tooltip";
+import JiraBadge from "../shared/JiraBadge";
+import { extractJiraKeys } from "../../../shared/validation";
 
 export interface IssuesTabProps {
   issues: Issue[];
@@ -33,6 +35,7 @@ export interface IssuesTabProps {
   refreshTick?: number;
   customTabId?: string;
   filterPreset?: Record<string, string>;
+  jiraKeyMap?: () => ReadonlyMap<string, import("../../../shared/jira-types").JiraIssue | null>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "comments";
@@ -253,7 +256,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     if (trackedIssueIds().has(issue.id)) {
       untrackItem(issue.id, "issue");
     } else {
-      trackItem({ id: issue.id, number: issue.number, type: "issue", repoFullName: issue.repoFullName, title: issue.title, addedAt: Date.now() });
+      trackItem({ id: issue.id, number: issue.number, type: "issue", source: "github", repoFullName: issue.repoFullName, title: issue.title, addedAt: Date.now() });
     }
   }
 
@@ -431,6 +434,18 @@ export default function IssuesTab(props: IssuesTabProps) {
                                   }
                                 >
                                   <RoleBadge roles={issueMeta().get(issue.id)?.roles ?? []} />
+                                  <Show when={config.jira?.enabled && config.jira?.issueKeyDetection && props.jiraKeyMap}>
+                                    <For each={extractJiraKeys(issue.title)}>
+                                      {(key) => (
+                                        <JiraBadge
+                                          issueKey={key}
+                                          issue={props.jiraKeyMap!().get(key)}
+                                          siteUrl={config.jira?.siteUrl ?? ""}
+                                          source="title"
+                                        />
+                                      )}
+                                    </For>
+                                  </Show>
                                 </ItemRow>
                               </div>
                             )}

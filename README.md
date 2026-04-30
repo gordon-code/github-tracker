@@ -77,6 +77,10 @@ Star counts appear in repo group headers, fetched as part of the standard data r
 
 Create named filtered views over the existing Issues, PRs, and Actions data. Each custom tab has a name, a base type (Issues, PRs, or Actions), an optional org/repo scope, and optional filter presets. An "exclusive" toggle hides matching items from the standard tabs so they only appear in the custom tab. Up to 10 custom tabs can be created. Manage them via the "+" button in the tab bar or in **Settings > Custom Tabs**.
 
+### Jira Cloud Integration
+
+Opt-in Jira Cloud integration: auto-detect Jira issue keys in GitHub issue and PR titles and display inline status badges, view your assigned Jira issues in a dedicated tab with status/priority filters, and bookmark Jira issues to the Tracked tab alongside GitHub items. Supports OAuth 2.0 (3LO) and API token authentication.
+
 ### Themes
 
 9 themes: auto (follows system), corporate, cupcake, light, nord, dim, dracula, dark, forest. Theme is applied immediately on selection with no page reload.

@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/cloudflare";
-import { CryptoEnv, deriveKey, sealToken, SEAL_SALT } from "./crypto";
+import { CryptoEnv, deriveKey, sealToken, unsealTokenWithRotation, SEAL_SALT } from "./crypto";
 import { SessionEnv, ensureSession } from "./session";
 import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
 import { validateProxyRequest, validateOrigin } from "./validation";
@@ -20,6 +20,8 @@ export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  JIRA_CLIENT_ID?: string;
+  JIRA_CLIENT_SECRET?: string;
   ALLOWED_ORIGIN: string;
   SENTRY_DSN?: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
   SENTRY_SECURITY_TOKEN?: string; // Optional: Sentry security token for Allowed Domains validation
@@ -29,6 +31,7 @@ export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
 type ErrorCode =
   | "token_exchange_failed"
   | "invalid_request"
+  | "payload_too_large"
   | "method_not_allowed"
   | "not_found"
   | "origin_mismatch"
@@ -38,7 +41,10 @@ type ErrorCode =
   | "turnstile_failed"
   | "rate_limited"
   | "seal_failed"
-  | "internal_error";
+  | "internal_error"
+  | "jira_token_exchange_failed"
+  | "jira_refresh_failed"
+  | "jira_proxy_error";
 
 // Structured logging — Cloudflare auto-indexes JSON fields for querying.
 // NEVER log secrets: codes, tokens, client_secret, cookie values.
@@ -117,10 +123,13 @@ function createIpRateLimiter(limit: number, windowMs: number): { check(ip: strin
   };
 }
 
-const tokenRateLimiter = createIpRateLimiter(10, 60_000);    // token exchange: 10/min
-const sentryRateLimiter = createIpRateLimiter(15, 60_000);   // sentry tunnel: 15/min
-const cspRateLimiter = createIpRateLimiter(15, 60_000);      // csp report: 15/min
-const proxyPreGateLimiter = createIpRateLimiter(60, 60_000); // proxy pre-gate: complements CF binding
+const tokenRateLimiter = createIpRateLimiter(10, 60_000);        // token exchange: 10/min
+const jiraTokenRateLimiter = createIpRateLimiter(10, 60_000);   // jira token exchange: 10/min
+const jiraRefreshRateLimiter = createIpRateLimiter(30, 60_000); // jira token refresh: 30/min (more frequent, separate bucket)
+const jiraTenantInfoLimiter = createIpRateLimiter(10, 60_000); // jira tenant info lookup: 10/min
+const sentryRateLimiter = createIpRateLimiter(15, 60_000);    // sentry tunnel: 15/min
+const cspRateLimiter = createIpRateLimiter(15, 60_000);       // csp report: 15/min
+const proxyPreGateLimiter = createIpRateLimiter(60, 60_000);  // proxy pre-gate: complements CF binding
 
 // CF-Connecting-IP is set by Cloudflare's proxy layer in production and by
 // miniflare/workerd in local dev. Always present in any real request path.
@@ -196,11 +205,29 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
 const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
+const ALLOWED_SEARCH_PARAMS = new Set(["jql", "maxResults", "fields", "startAt"]);
+const ALLOWED_ISSUE_PARAMS = new Set(["issueIdsOrKeys", "fields"]);
 
-// Module-level cache for derived seal keys, keyed by purpose.
-// Invalidated on SEAL_KEY rotation via full-value fingerprint comparison.
-const _sealKeyCache = new Map<string, CryptoKey>();
-let _sealKeyFingerprint = "";
+// Module-level cache for derived seal keys (used in token exchange, refresh, and proxy seal/re-seal).
+// Keyed by purpose; invalidated when SEAL_KEY_NEXT changes.
+const _nextKeyCache = new Map<string, CryptoKey>();
+let _nextKeyFingerprint = "";
+
+/** Get or derive the active encryption key for the given purpose, using SEAL_KEY_NEXT if set. */
+async function getJiraEncryptKey(env: Env, purpose: string): Promise<CryptoKey> {
+  const activeKey = env.SEAL_KEY_NEXT ?? env.SEAL_KEY;
+  const fingerprint = activeKey;
+  if (fingerprint !== _nextKeyFingerprint) {
+    _nextKeyCache.clear();
+    _nextKeyFingerprint = fingerprint;
+  }
+  let key = _nextKeyCache.get(purpose);
+  if (key === undefined) {
+    key = await deriveKey(activeKey, SEAL_SALT, purpose, "encrypt");
+    _nextKeyCache.set(purpose, key);
+  }
+  return key;
+}
 
 async function handleProxySeal(request: Request, env: Env, sessionId: string): Promise<Response> {
   if (request.method !== "POST") {
@@ -256,17 +283,8 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
 
   let sealed: string;
   try {
-    // Derive key with purpose-scoped info string (cached per-isolate, bounded by VALID_PURPOSES size)
-    const fingerprint = env.SEAL_KEY;
-    if (fingerprint !== _sealKeyFingerprint) {
-      _sealKeyCache.clear();
-      _sealKeyFingerprint = fingerprint;
-    }
-    let key = _sealKeyCache.get(purpose);
-    if (key === undefined) {
-      key = await deriveKey(env.SEAL_KEY, SEAL_SALT, "aes-gcm-key:" + purpose, "encrypt");
-      _sealKeyCache.set(purpose, key);
-    }
+    // Use SEAL_KEY_NEXT if set (matches token exchange/refresh behavior), falling back to SEAL_KEY.
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:" + purpose);
     sealed = await sealToken(token, key);
   } catch (err) {
     // Log error server-side — do not expose crypto error details in response
@@ -426,7 +444,7 @@ async function handleSentryTunnel(
       method: "POST",
       headers: sentryHeaders,
       body,
-      redirect: "error",
+      redirect: "manual",
     });
 
     log("info", "sentry_tunnel_forwarded", {
@@ -578,7 +596,7 @@ async function handleCspReport(request: Request, env: Env): Promise<Response> {
           ...(env.SENTRY_SECURITY_TOKEN ? { "X-Sentry-Token": env.SENTRY_SECURITY_TOKEN } : {}),
         },
         body: JSON.stringify(payload),
-        redirect: "error",
+        redirect: "manual",
       }).catch(() => null)
     )
   );
@@ -713,7 +731,7 @@ async function handleTokenExchange(
           client_secret: env.GITHUB_CLIENT_SECRET,
           code,
         }),
-        redirect: "error",
+        redirect: "manual",
       }
     );
     githubStatus = githubResp.status;
@@ -765,13 +783,581 @@ async function handleTokenExchange(
   });
 }
 
+// ── UUID v4 validation for cloudId (SSRF/path traversal prevention) ──────────
+const CLOUD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Max proxy body size: 64 KB
+const JIRA_PROXY_MAX_BYTES = 64 * 1024;
+
+async function handleJiraTokenExchange(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  if (!env.JIRA_CLIENT_ID || !env.JIRA_CLIENT_SECRET) {
+    return errorResponse("not_found", 404, cors);
+  }
+
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
+  }
+
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405, cors);
+  }
+
+  const ip = getClientIp(request);
+  if (!ip) return errorResponse("invalid_request", 400, cors);
+  if (!jiraTokenRateLimiter.check(ip)) {
+    log("warn", "jira_token_exchange_rate_limited", {}, request);
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  const turnstileToken = extractTurnstileToken(request);
+  if (!turnstileToken || turnstileToken.length > 2048) {
+    log("warn", "jira_token_turnstile_missing", {}, request);
+    return errorResponse("turnstile_failed", 403, cors);
+  }
+  const turnstileResult = await verifyTurnstile(turnstileToken, ip, env, "jira-token");
+  if (!turnstileResult.success) {
+    log("warn", "jira_token_turnstile_failed", { error_codes: turnstileResult.errorCodes }, request);
+    return errorResponse("turnstile_failed", 403, cors);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  const code = (body as Record<string, unknown>)["code"];
+  if (typeof code !== "string" || code.length === 0 || code.length > 2048) {
+    log("warn", "jira_token_exchange_missing_code", {}, request);
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  // redirect_uri constructed server-side — never from client request
+  const redirectUri = `${env.ALLOWED_ORIGIN}/jira/callback`;
+
+  let atlassianData: Record<string, unknown>;
+  let atlassianStatus: number;
+  try {
+    const atlassianResp = await fetch("https://auth.atlassian.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        client_id: env.JIRA_CLIENT_ID,
+        client_secret: env.JIRA_CLIENT_SECRET,
+        code,
+        redirect_uri: redirectUri,
+      }),
+      redirect: "manual",
+    });
+    atlassianStatus = atlassianResp.status;
+    atlassianData = (await atlassianResp.json()) as Record<string, unknown>;
+  } catch (err) {
+    log("error", "jira_token_exchange_fetch_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-jira-token-exchange" } });
+    return errorResponse("jira_token_exchange_failed", 400, cors);
+  }
+
+  if (
+    typeof atlassianData["access_token"] !== "string" ||
+    typeof atlassianData["refresh_token"] !== "string"
+  ) {
+    log("error", "jira_token_exchange_bad_response", {
+      atlassian_status: atlassianStatus,
+      has_access_token: "access_token" in atlassianData,
+      has_refresh_token: "refresh_token" in atlassianData,
+    }, request);
+    return errorResponse("jira_token_exchange_failed", 400, cors);
+  }
+
+  const refreshToken = atlassianData["refresh_token"] as string;
+  const accessToken = atlassianData["access_token"] as string;
+  const expiresIn = atlassianData["expires_in"] ?? 3600;
+
+  let sealedRefreshToken: string;
+  try {
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
+    sealedRefreshToken = await sealToken(refreshToken, key);
+  } catch (err) {
+    log("error", "jira_token_seal_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-jira-seal" } });
+    return errorResponse("seal_failed", 500, cors);
+  }
+
+  log("info", "jira_token_exchange_succeeded", { atlassian_status: atlassianStatus }, request);
+
+  return new Response(JSON.stringify({ access_token: accessToken, sealed_refresh_token: sealedRefreshToken, expires_in: expiresIn }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+  });
+}
+
+async function handleJiraTokenRefresh(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  if (!env.JIRA_CLIENT_ID || !env.JIRA_CLIENT_SECRET) {
+    return errorResponse("not_found", 404, cors);
+  }
+
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
+  }
+
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405, cors);
+  }
+
+  const ip = getClientIp(request);
+  if (!ip) return errorResponse("invalid_request", 400, cors);
+  if (!jiraRefreshRateLimiter.check(ip)) {
+    log("warn", "jira_token_refresh_rate_limited", {}, request);
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  const sealedRefreshToken = (body as Record<string, unknown>)["sealed_refresh_token"];
+  if (typeof sealedRefreshToken !== "string" || sealedRefreshToken.length === 0 || sealedRefreshToken.length > 8192) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  const plainRefreshToken = await unsealTokenWithRotation(
+    sealedRefreshToken,
+    env.SEAL_KEY,
+    env.SEAL_KEY_NEXT,
+    SEAL_SALT,
+    "aes-gcm-key:jira-refresh-token"
+  );
+
+  if (plainRefreshToken === null) {
+    log("warn", "jira_token_refresh_unseal_failed", {}, request);
+    return errorResponse("jira_refresh_failed", 401, cors);
+  }
+
+  let atlassianData: Record<string, unknown>;
+  let atlassianStatus: number;
+  try {
+    const atlassianResp = await fetch("https://auth.atlassian.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        client_id: env.JIRA_CLIENT_ID,
+        client_secret: env.JIRA_CLIENT_SECRET,
+        refresh_token: plainRefreshToken,
+      }),
+      redirect: "manual",
+    });
+    atlassianStatus = atlassianResp.status;
+    atlassianData = (await atlassianResp.json()) as Record<string, unknown>;
+  } catch (err) {
+    log("error", "jira_token_refresh_fetch_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-jira-refresh" } });
+    return errorResponse("jira_refresh_failed", 400, cors);
+  }
+
+  if (
+    typeof atlassianData["access_token"] !== "string" ||
+    typeof atlassianData["refresh_token"] !== "string"
+  ) {
+    log("error", "jira_token_refresh_bad_response", {
+      atlassian_status: atlassianStatus,
+    }, request);
+    return errorResponse("jira_refresh_failed", 400, cors);
+  }
+
+  const newRefreshToken = atlassianData["refresh_token"] as string;
+  const newAccessToken = atlassianData["access_token"] as string;
+  const expiresIn = atlassianData["expires_in"] ?? 3600;
+
+  let newSealedRefreshToken: string;
+  try {
+    // Always seal with active key (SEAL_KEY_NEXT if set) for natural key rotation
+    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
+    newSealedRefreshToken = await sealToken(newRefreshToken, key);
+  } catch (err) {
+    log("error", "jira_refresh_seal_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-jira-refresh-seal" } });
+    return errorResponse("seal_failed", 500, cors);
+  }
+
+  log("info", "jira_token_refresh_succeeded", { atlassian_status: atlassianStatus }, request);
+
+  return new Response(JSON.stringify({ access_token: newAccessToken, sealed_refresh_token: newSealedRefreshToken, expires_in: expiresIn }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+  });
+}
+
+const ATLASSIAN_HOST_RE = /^[a-z0-9-]+\.atlassian\.net$/i;
+
+async function handleJiraTenantInfo(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>
+): Promise<Response> {
+  log("info", "jira_tenant_info_entry", { cors_keys: Object.keys(cors).join(","), method: request.method }, request);
+
+  const validationResult = validateProxyRequest(request, env.ALLOWED_ORIGIN);
+  if (!validationResult.ok) {
+    log("warn", "jira_tenant_info_validation_failed", { code: validationResult.code }, request);
+    return errorResponse(validationResult.code as ErrorCode, validationResult.status, cors);
+  }
+
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405, cors);
+  }
+
+  const ip = getClientIp(request);
+  if (!ip) return errorResponse("invalid_request", 400, cors);
+  if (!jiraTenantInfoLimiter.check(ip)) {
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "60", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  const siteUrl = (body as Record<string, unknown>)?.["siteUrl"];
+  if (typeof siteUrl !== "string" || siteUrl.length === 0 || siteUrl.length > 200) {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(siteUrl);
+  } catch {
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  if (parsed.protocol !== "https:" || !ATLASSIAN_HOST_RE.test(parsed.hostname)) {
+    log("warn", "jira_tenant_info_invalid_host", { hostname: parsed.hostname }, request);
+    return errorResponse("invalid_request", 400, cors);
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${parsed.origin}/_edge/tenant_info`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      redirect: "manual",
+    });
+  } catch (err) {
+    log("error", "jira_tenant_info_fetch_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  log("info", "jira_tenant_info_response", { status: resp.status }, request);
+
+  if (!resp.ok || resp.status >= 300) {
+    log("warn", "jira_tenant_info_upstream_error", { status: resp.status }, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  let data: unknown;
+  try {
+    data = await resp.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  const cloudId = (data as Record<string, unknown>)?.["cloudId"];
+  if (typeof cloudId !== "string" || !CLOUD_ID_RE.test(cloudId)) {
+    log("warn", "jira_tenant_info_invalid_cloud_id", {}, request);
+    return new Response(JSON.stringify({ error: "jira_tenant_info_failed" }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+    });
+  }
+
+  return new Response(JSON.stringify({ cloudId }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...cors, ...SECURITY_HEADERS },
+  });
+}
+
+async function handleJiraProxy(
+  request: Request,
+  env: Env,
+  sessionId: string,
+  setCookie: string | undefined
+): Promise<Response> {
+  if (!env.JIRA_CLIENT_ID) {
+    return errorResponse("not_found", 404);
+  }
+
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405);
+  }
+
+  // Content-Length pre-check (optimization; post-read check is authoritative)
+  if (!checkContentLength(request, JIRA_PROXY_MAX_BYTES)) {
+    log("warn", "jira_proxy_content_length_exceeded", {
+      content_length: request.headers.get("Content-Length"),
+    }, request);
+    return buildProxyResponse(errorResponse("payload_too_large", 413), setCookie);
+  }
+
+  let bodyText: string;
+  try {
+    bodyText = await request.text();
+  } catch {
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  // Authoritative size check post-read
+  if (bodyText.length > JIRA_PROXY_MAX_BYTES) {
+    log("warn", "jira_proxy_body_too_large", { body_length: bodyText.length }, request);
+    return buildProxyResponse(errorResponse("payload_too_large", 413), setCookie);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  // Destructure only non-secret fields for logging; never log email or sealed
+  const { endpoint, cloudId, params } = parsed as Record<string, unknown>;
+  const email = (parsed as Record<string, unknown>)["email"];
+  const sealed = (parsed as Record<string, unknown>)["sealed"];
+
+  if (typeof endpoint !== "string" || (endpoint !== "search" && endpoint !== "issue")) {
+    log("warn", "jira_proxy_invalid_endpoint", { endpoint }, request);
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  if (typeof cloudId !== "string" || !CLOUD_ID_RE.test(cloudId)) {
+    log("warn", "jira_proxy_invalid_cloud_id", { sessionId }, request);
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  if (typeof email !== "string" || email.length === 0 || email.length > 254) {
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  if (typeof sealed !== "string" || sealed.length === 0) {
+    return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+  }
+
+  // maxResults cap for search endpoint
+  if (endpoint === "search") {
+    const maxResultsRaw = (params as Record<string, unknown> | null | undefined)?.["maxResults"];
+    const maxResults = typeof maxResultsRaw === "number" ? maxResultsRaw : Number(maxResultsRaw);
+    if (!Number.isFinite(maxResults) || maxResults > 100) {
+      log("warn", "jira_proxy_max_results_exceeded", { endpoint, sessionId }, request);
+      return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+    }
+  }
+
+  // issueIdsOrKeys cap and per-element validation for issue/bulkfetch endpoint
+  if (endpoint === "issue") {
+    const issueIdsOrKeys = (params as Record<string, unknown> | null | undefined)?.["issueIdsOrKeys"];
+    if (Array.isArray(issueIdsOrKeys)) {
+      if (issueIdsOrKeys.length > 100) {
+        log("warn", "jira_proxy_issue_keys_exceeded", { count: issueIdsOrKeys.length, sessionId }, request);
+        return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+      }
+      if (!issueIdsOrKeys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 50)) {
+        log("warn", "jira_proxy_issue_keys_invalid", { sessionId }, request);
+        return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
+      }
+    }
+  }
+
+  // Unseal API token — plaintext never logged or forwarded to client
+  const apiToken = await unsealTokenWithRotation(
+    sealed,
+    env.SEAL_KEY,
+    env.SEAL_KEY_NEXT,
+    SEAL_SALT,
+    "aes-gcm-key:jira-api-token"
+  );
+
+  if (apiToken === null) {
+    log("warn", "jira_proxy_unseal_failed", { sessionId }, request);
+    return buildProxyResponse(errorResponse("jira_proxy_error", 401), setCookie);
+  }
+
+  // Construct target URL server-side — cloudId validated above
+  const endpointPath = endpoint === "search" ? "search/jql" : "issue/bulkfetch";
+  const baseUrl = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/${endpointPath}`;
+  const auth = `Basic ${btoa(`${email}:${apiToken}`)}`;
+
+  let jiraUrl: string;
+  let jiraInit: RequestInit;
+
+  if (endpoint === "search") {
+    // GET with params as query string — only allowlisted keys forwarded
+    const searchParams = new URLSearchParams();
+    if (params && typeof params === "object") {
+      for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null)
+          searchParams.set(k, Array.isArray(v) ? v.join(",") : String(v));
+      }
+    }
+    jiraUrl = `${baseUrl}?${searchParams.toString()}`;
+    jiraInit = {
+      method: "GET",
+      headers: { "Authorization": auth, "Accept": "application/json" },
+      redirect: "manual",
+    };
+  } else {
+    // POST with params as JSON body — only allowlisted keys forwarded
+    const filteredParams: Record<string, unknown> = {};
+    if (params && typeof params === "object") {
+      for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+        if (ALLOWED_ISSUE_PARAMS.has(k)) filteredParams[k] = v;
+      }
+    }
+    jiraUrl = baseUrl;
+    jiraInit = {
+      method: "POST",
+      headers: {
+        "Authorization": auth,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(filteredParams),
+      redirect: "manual",
+    };
+  }
+
+  log("info", "jira_proxy_request", { endpoint, cloudId, sessionId }, request);
+
+  let jiraResp: Response;
+  try {
+    jiraResp = await fetch(jiraUrl, jiraInit);
+  } catch (err) {
+    log("error", "jira_proxy_fetch_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+      endpoint,
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-jira-proxy" } });
+    return buildProxyResponse(errorResponse("jira_proxy_error", 502), setCookie);
+  }
+
+  if (!jiraResp.ok) {
+    // Return generic error — never forward Jira error bodies (may contain PII or internals).
+    // Normalize Jira 5xx to 502 (bad gateway) so clients don't interpret upstream errors
+    // as worker errors. Preserve 4xx status codes (auth/permission failures).
+    const outStatus = jiraResp.status >= 500 ? 502 : jiraResp.status;
+    log("warn", "jira_proxy_jira_error", { jira_status: jiraResp.status, out_status: outStatus, endpoint, sessionId }, request);
+    return buildProxyResponse(
+      new Response(JSON.stringify({ error: "jira_proxy_error", status: jiraResp.status }), {
+        status: outStatus,
+        headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
+      }),
+      setCookie
+    );
+  }
+
+  let responseData: unknown;
+  try {
+    responseData = await jiraResp.json();
+  } catch {
+    return buildProxyResponse(errorResponse("jira_proxy_error", 502), setCookie);
+  }
+
+  // Re-seal on access for key rotation — only when SEAL_KEY_NEXT is set
+  let resealed: string | undefined;
+  if (env.SEAL_KEY_NEXT) {
+    try {
+      const nextKey = await getJiraEncryptKey(env, "aes-gcm-key:jira-api-token");
+      resealed = await sealToken(apiToken, nextKey);
+    } catch {
+      // Non-fatal: skip re-seal if it fails
+    }
+  }
+
+  const responseBody =
+    resealed && typeof responseData === "object" && responseData !== null && !Array.isArray(responseData)
+      ? { ...(responseData as Record<string, unknown>), resealed }
+      : responseData;
+
+  log("info", "jira_proxy_success", { endpoint, jira_status: jiraResp.status, sessionId }, request);
+
+  return buildProxyResponse(
+    new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
+    }),
+    setCookie
+  );
+}
+
+function buildProxyResponse(response: Response, setCookie: string | undefined): Response {
+  if (!setCookie) return response;
+  const headers = new Headers(response.headers);
+  headers.set("Set-Cookie", setCookie);
+  return new Response(response.body, { status: response.status, headers });
+}
+
 export default Sentry.withSentry(
   (env: Env) => getWorkerSentryOptions(env),
   {
     async fetch(request: Request, env: Env, _ctx?: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const origin = request.headers.get("Origin");
-      const cors = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST", "Content-Type");
+      const cors = buildCorsHeaders(origin, env.ALLOWED_ORIGIN, "POST", "Content-Type, X-Requested-With, cf-turnstile-response");
       const corsMatched = Object.keys(cors).length > 0;
 
       // Log all API requests (skip static asset requests to reduce noise)
@@ -790,9 +1376,16 @@ export default Sentry.withSentry(
         }
       }
 
-      // CORS preflight for the token exchange endpoint only
-      if (request.method === "OPTIONS" && url.pathname === "/api/oauth/token") {
-        log("info", "cors_preflight", { cors_matched: corsMatched }, request);
+      // CORS preflight for OAuth token endpoints
+      const CORS_PATHS = new Set([
+        "/api/oauth/token",
+        "/api/oauth/jira/token",
+        "/api/oauth/jira/refresh",
+        "/api/jira/tenant-info",
+        "/api/jira/proxy",
+      ]);
+      if (request.method === "OPTIONS" && CORS_PATHS.has(url.pathname)) {
+        log("info", "cors_preflight", { cors_matched: corsMatched, pathname: url.pathname }, request);
         return new Response(null, {
           status: 204,
           headers: { ...cors, "Access-Control-Max-Age": "86400", ...SECURITY_HEADERS },
@@ -817,6 +1410,10 @@ export default Sentry.withSentry(
         return new Response("OK", {
           headers: SECURITY_HEADERS,
         });
+      }
+
+      if (url.pathname === "/api/jira/tenant-info") {
+        return handleJiraTenantInfo(request, env, cors);
       }
 
       // ── Proxy routes: validation, session, and rate limiting ─────────────────
@@ -891,7 +1488,19 @@ export default Sentry.withSentry(
           return sealResponse;
         }
 
+        if (url.pathname === "/api/jira/proxy") {
+          return handleJiraProxy(request, env, sessionId, setCookie);
+        }
+
         // Other proxy routes not yet implemented — fall through to 404
+      }
+
+      if (url.pathname === "/api/oauth/jira/token") {
+        return handleJiraTokenExchange(request, env, cors);
+      }
+
+      if (url.pathname === "/api/oauth/jira/refresh") {
+        return handleJiraTokenRefresh(request, env, cors);
       }
 
       if (url.pathname.startsWith("/api/")) {

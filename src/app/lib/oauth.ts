@@ -1,5 +1,6 @@
 export const OAUTH_STATE_KEY = "github-tracker:oauth-state";
 export const OAUTH_RETURN_TO_KEY = "github-tracker:oauth-return-to";
+export const JIRA_OAUTH_STATE_KEY = "github-tracker:jira-oauth-state";
 
 export function generateOAuthState(): string {
   const stateBytes = crypto.getRandomValues(new Uint8Array(16));
@@ -38,6 +39,25 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
 }
 
 const VALID_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+export function buildJiraAuthorizeUrl(): string {
+  const clientId = import.meta.env.VITE_JIRA_CLIENT_ID as string | undefined;
+  if (!clientId || !VALID_CLIENT_ID_RE.test(clientId)) {
+    throw new Error("Invalid or missing VITE_JIRA_CLIENT_ID");
+  }
+  const state = generateOAuthState();
+  sessionStorage.setItem(JIRA_OAUTH_STATE_KEY, state);
+  const params = new URLSearchParams({
+    audience: "api.atlassian.com",
+    client_id: clientId,
+    scope: "read:jira-work read:jira-user offline_access",
+    redirect_uri: `${window.location.origin}/jira/callback`,
+    state,
+    response_type: "code",
+    prompt: "consent",
+  });
+  return `https://auth.atlassian.com/authorize?${params.toString()}`;
+}
 
 /**
  * Links to the per-app authorization page where users can see org access

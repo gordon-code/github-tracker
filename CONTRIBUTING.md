@@ -13,6 +13,13 @@ pnpm run dev
 
 The dev server starts at `http://localhost:5173`. You'll need a GitHub OAuth app client ID in `.env` (copy `.env.example` and fill in your value).
 
+**Jira integration (optional):** The Jira Cloud integration is opt-in. Tests run without Jira credentials. To develop or test the Jira features locally:
+
+1. Add `VITE_JIRA_CLIENT_ID=<your-atlassian-oauth-client-id>` to `.env` — this gates visibility of the Jira section in Settings
+2. Add `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET` to `.dev.vars` (copy from `.dev.vars.example`) — these are used by the Cloudflare Worker for OAuth token exchange
+
+In production, provision `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET` as Worker secrets via `wrangler secret put`. Never commit them to `.env` or `.dev.vars`.
+
 The repo uses a pnpm workspace: the root package is the SolidJS SPA; `mcp/` is a separate package (`github-tracker-mcp`) built with tsup. Running `pnpm install` at the root installs both.
 
 To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:

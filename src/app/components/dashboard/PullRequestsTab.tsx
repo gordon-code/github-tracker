@@ -26,6 +26,8 @@ import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
 import EmptyLockedRepoRow from "../shared/EmptyLockedRepoRow";
 import { Tooltip } from "../shared/Tooltip";
+import JiraBadge from "../shared/JiraBadge";
+import { extractJiraKeys } from "../../../shared/validation";
 
 export interface PullRequestsTabProps {
   pullRequests: PullRequest[];
@@ -39,6 +41,7 @@ export interface PullRequestsTabProps {
   refreshTick?: number;
   customTabId?: string;
   filterPreset?: Record<string, string>;
+  jiraKeyMap?: () => ReadonlyMap<string, import("../../../shared/jira-types").JiraIssue | null>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -326,7 +329,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     if (trackedPrIds().has(pr.id)) {
       untrackItem(pr.id, "pullRequest");
     } else {
-      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
+      trackItem({ id: pr.id, number: pr.number, type: "pullRequest", source: "github", repoFullName: pr.repoFullName, title: pr.title, addedAt: Date.now() });
     }
   }
 
@@ -620,6 +623,29 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       </Tooltip>
                                     </Show>
                                   </div>
+                                </Show>
+                                <Show when={config.jira?.enabled && config.jira?.issueKeyDetection && props.jiraKeyMap}>
+                                  {(() => {
+                                    const titleKeys = new Set(extractJiraKeys(pr.title));
+                                    const branchKeys = new Set(extractJiraKeys(pr.headRef ?? ""));
+                                    const annotated = [...new Set([...titleKeys, ...branchKeys])].map((key) => ({
+                                      key,
+                                      source: (titleKeys.has(key) && branchKeys.has(key) ? "title & branch"
+                                        : titleKeys.has(key) ? "title" : "branch") as "title" | "branch" | "title & branch",
+                                    }));
+                                    return (
+                                      <For each={annotated}>
+                                        {(entry) => (
+                                          <JiraBadge
+                                            issueKey={entry.key}
+                                            issue={props.jiraKeyMap!().get(entry.key)}
+                                            siteUrl={config.jira?.siteUrl ?? ""}
+                                            source={entry.source}
+                                          />
+                                        )}
+                                      </For>
+                                    );
+                                  })()}
                                 </Show>
                               </ItemRow>
                             </div>

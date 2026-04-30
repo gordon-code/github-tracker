@@ -4,7 +4,8 @@ import { Select } from "@kobalte/core/select";
 export interface SortOption {
   label: string;
   field: string;
-  type: "date" | "text" | "number";
+  type: "date" | "text" | "number" | "priority" | "status";
+  preferredDirection?: "asc" | "desc";
 }
 
 interface SortDropdownProps {
@@ -22,15 +23,21 @@ interface FlatOption {
 function suffixFor(type: SortOption["type"], dir: "asc" | "desc"): string {
   if (type === "date") return dir === "desc" ? "(newest first)" : "(oldest first)";
   if (type === "text") return dir === "asc" ? "(A-Z)" : "(Z-A)";
+  if (type === "priority") return dir === "asc" ? "(highest first)" : "(lowest first)";
+  if (type === "status") return dir === "asc" ? "(To Do → Done)" : "(Done → To Do)";
   return dir === "desc" ? "(most)" : "(fewest)";
 }
 
 export default function SortDropdown(props: SortDropdownProps) {
   const flatOptions = createMemo<FlatOption[]>(() =>
-    props.options.flatMap((opt) => [
-      { value: `${opt.field}:desc`, label: `${opt.label} ${suffixFor(opt.type, "desc")}` },
-      { value: `${opt.field}:asc`, label: `${opt.label} ${suffixFor(opt.type, "asc")}` },
-    ])
+    props.options.flatMap((opt) => {
+      const first = opt.preferredDirection ?? "desc";
+      const second = first === "desc" ? "asc" : "desc";
+      return [
+        { value: `${opt.field}:${first}`, label: `${opt.label} ${suffixFor(opt.type, first)}` },
+        { value: `${opt.field}:${second}`, label: `${opt.label} ${suffixFor(opt.type, second)}` },
+      ];
+    })
   );
 
   const selected = () => `${props.value}:${props.direction}`;

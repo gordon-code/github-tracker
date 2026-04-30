@@ -29,7 +29,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import TrackedTab from "../../../src/app/components/dashboard/TrackedTab";
-import { viewState, resetViewState, updateViewState } from "../../../src/app/stores/view";
+import { viewState, resetViewState, updateViewState, untrackJiraItem } from "../../../src/app/stores/view";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -274,5 +274,79 @@ describe("TrackedTab — no ignore action", () => {
 
     // Ignore button should NOT be present — TrackedTab only allows untracking
     expect(screen.queryByLabelText(`Ignore #${issue.number} ${issue.title}`)).toBeNull();
+  });
+});
+
+describe("TrackedTab — Jira items", () => {
+  const jiraTracked = makeTrackedItem({
+    id: -42,
+    type: "jiraIssue",
+    source: "jira",
+    jiraKey: "PROJ-42",
+    jiraProjectKey: "PROJ",
+    jiraStatus: "In Progress",
+    repoFullName: "mysite.atlassian.net/PROJ",
+    title: "Fix login flow",
+    htmlUrl: "https://mysite.atlassian.net/browse/PROJ-42",
+    number: undefined,
+  });
+
+  it("renders Jira tracked item with key and title", () => {
+    updateViewState({ trackedItems: [jiraTracked] });
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
+
+    expect(screen.getByText("PROJ-42")).toBeTruthy();
+    expect(screen.getByText("Fix login flow")).toBeTruthy();
+  });
+
+  it("Jira item links to correct URL via htmlUrl", () => {
+    updateViewState({ trackedItems: [jiraTracked] });
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
+
+    const link = screen.getByText("PROJ-42").closest("a");
+    expect(link?.getAttribute("href")).toBe("https://mysite.atlassian.net/browse/PROJ-42");
+  });
+
+  it("Jira item shows status label", () => {
+    updateViewState({ trackedItems: [jiraTracked] });
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
+
+    expect(screen.getByText("In Progress")).toBeTruthy();
+  });
+
+  it("mixed GitHub + Jira items render together", () => {
+    const issue = makeIssue({ id: 80, title: "GitHub Issue" });
+    const githubTracked = makeTrackedItem({ id: 80, type: "issue", title: "GitHub Issue" });
+    updateViewState({ trackedItems: [githubTracked, jiraTracked] });
+
+    render(() => <TrackedTab issues={[issue]} pullRequests={[]} userLogin="testuser" />);
+
+    expect(screen.getByText("GitHub Issue")).toBeTruthy();
+    expect(screen.getByText("Fix login flow")).toBeTruthy();
+  });
+
+  it("unpinning Jira item via untrackJiraItem removes it", () => {
+    updateViewState({ trackedItems: [jiraTracked] });
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
+
+    untrackJiraItem("PROJ-42");
+    expect(viewState.trackedItems).toHaveLength(0);
+  });
+
+  it("removing Jira item does not affect GitHub items", () => {
+    const githubTracked = makeTrackedItem({ id: 90, type: "issue", title: "Stays" });
+    updateViewState({ trackedItems: [githubTracked, jiraTracked] });
+
+    untrackJiraItem("PROJ-42");
+    expect(viewState.trackedItems).toHaveLength(1);
+    expect(viewState.trackedItems[0].source).toBe("github");
+  });
+
+  it("Jira item does not render issue number prefix", () => {
+    updateViewState({ trackedItems: [jiraTracked] });
+    render(() => <TrackedTab issues={[]} pullRequests={[]} userLogin="testuser" />);
+
+    // Should NOT show "#-42" or any number prefix — Jira items have number: undefined
+    expect(screen.queryByText(/#-42/)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isSafeGitHubUrl, openGitHubUrl } from "../../src/app/lib/url";
+import { isSafeGitHubUrl, isSafeJiraSiteUrl, openGitHubUrl } from "../../src/app/lib/url";
 
 describe("isSafeGitHubUrl", () => {
   it("returns true for a root GitHub URL", () => {
@@ -40,6 +40,40 @@ describe("isSafeGitHubUrl", () => {
 
   it("returns false for api.github.com", () => {
     expect(isSafeGitHubUrl("https://api.github.com/repos/owner/repo")).toBe(false);
+  });
+});
+
+describe("isSafeJiraSiteUrl", () => {
+  it("returns true for a valid atlassian.net site URL", () => {
+    expect(isSafeJiraSiteUrl("https://mysite.atlassian.net")).toBe(true);
+  });
+
+  it("returns true for a valid atlassian.net URL with a path", () => {
+    expect(isSafeJiraSiteUrl("https://mysite.atlassian.net/browse/PROJ-1")).toBe(true);
+  });
+
+  it("returns false for http (non-HTTPS)", () => {
+    expect(isSafeJiraSiteUrl("http://mysite.atlassian.net")).toBe(false);
+  });
+
+  it("returns false for bare atlassian.net (no subdomain)", () => {
+    expect(isSafeJiraSiteUrl("https://atlassian.net")).toBe(false);
+  });
+
+  it("returns false for a non-atlassian.net domain", () => {
+    expect(isSafeJiraSiteUrl("https://evil.com")).toBe(false);
+  });
+
+  it("returns false for a multi-level subdomain (evil.foo.atlassian.net)", () => {
+    expect(isSafeJiraSiteUrl("https://evil.foo.atlassian.net")).toBe(false);
+  });
+
+  it("returns false for a javascript: URL", () => {
+    expect(isSafeJiraSiteUrl("javascript:alert(1)")).toBe(false);
+  });
+
+  it("returns false for an empty string", () => {
+    expect(isSafeJiraSiteUrl("")).toBe(false);
   });
 });
 
