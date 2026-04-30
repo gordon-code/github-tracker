@@ -56,16 +56,20 @@ describe("isSafeJiraSiteUrl", () => {
     expect(isSafeJiraSiteUrl("http://mysite.atlassian.net")).toBe(false);
   });
 
-  it("returns false for bare atlassian.net (no subdomain)", () => {
-    expect(isSafeJiraSiteUrl("https://atlassian.net")).toBe(false);
+  it("returns true for bare atlassian.net (valid HTTPS domain)", () => {
+    expect(isSafeJiraSiteUrl("https://atlassian.net")).toBe(true);
   });
 
-  it("returns false for a non-atlassian.net domain", () => {
-    expect(isSafeJiraSiteUrl("https://evil.com")).toBe(false);
+  it("returns true for a custom domain (self-hosted Jira)", () => {
+    expect(isSafeJiraSiteUrl("https://jira.mycompany.com")).toBe(true);
   });
 
-  it("returns false for a multi-level subdomain (evil.foo.atlassian.net)", () => {
-    expect(isSafeJiraSiteUrl("https://evil.foo.atlassian.net")).toBe(false);
+  it("returns true for a multi-level subdomain", () => {
+    expect(isSafeJiraSiteUrl("https://jira.internal.mycompany.com")).toBe(true);
+  });
+
+  it("returns false for a bare TLD (no dot in hostname)", () => {
+    expect(isSafeJiraSiteUrl("https://localhost")).toBe(false);
   });
 
   it("returns false for a javascript: URL", () => {
