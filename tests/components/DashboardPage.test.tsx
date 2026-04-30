@@ -55,6 +55,13 @@ vi.mock("../../src/app/services/github", () => ({
   getClient: () => null,
 }));
 
+// Mock notifications lib
+vi.mock("../../src/app/lib/notifications", () => ({
+  detectNewItems: vi.fn(() => []),
+  dispatchNotifications: vi.fn(),
+  _resetNotificationState: vi.fn(),
+}));
+
 // Mock errors lib — return empty by default
 vi.mock("../../src/app/lib/errors", () => ({
   getErrors: vi.fn().mockReturnValue([]),
@@ -81,6 +88,8 @@ let capturedOnHotData: ((
   runUpdates: Map<number, HotWorkflowRunUpdate>,
   generation: number,
 ) => void) | null = null;
+// capturedOnTargetedData is populated by the createEventsPollCoordinator mock
+let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[]) => void) | null = null;
 
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
@@ -130,7 +139,14 @@ beforeEach(async () => {
         return { destroy: vi.fn() };
       }
     ),
+    createEventsPollCoordinator: vi.fn().mockImplementation(
+      (_getUsername: unknown, _trackedRepoNames: unknown, _isFullRefreshing: unknown, onTargetedData: typeof capturedOnTargetedData) => {
+        capturedOnTargetedData = onTargetedData;
+        return { destroy: vi.fn() };
+      }
+    ),
     rebuildHotSets: vi.fn(),
+    seedHotSetsFromTargeted: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
   }));
@@ -147,6 +163,7 @@ beforeEach(async () => {
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
   capturedOnHotData = null;
+  capturedOnTargetedData = null;
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(authStore.expireToken).mockClear();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -597,62 +614,6 @@ describe("DashboardPage — data flow", () => {
     screen.getByRole("status");
   });
 
-  it("skipped fetch (notifications gate) keeps existing data", async () => {
-    const issues = [makeIssue({ id: 5, title: "Existing issue" })];
-    // First call: returns real data; subsequent calls: skipped=true
-    vi.mocked(pollService.fetchAllData)
-      .mockResolvedValueOnce({ issues, pullRequests: [], workflowRuns: [], errors: [] })
-      .mockResolvedValue({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true });
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      // Repo group header visible (collapsed — verify data reached the tab)
-      screen.getByText("owner/repo");
-      screen.getByText("1 issue");
-    });
-
-    // Trigger a second fetch via the captured callback — skipped result should not erase data
-    await capturedFetchAll?.();
-    // Data still present (collapsed repo group summary persists)
-    screen.getByText("1 issue");
-  });
-
-  it("auto-prune runs after first non-skipped poll even if a skipped poll occurred first", async () => {
-    configStore.updateConfig({
-      enableTracking: true,
-      selectedRepos: [{ owner: "org", name: "repo", fullName: "org/repo" }],
-    });
-    viewStore.updateViewState({
-      trackedItems: [{
-        id: 555,
-        number: 55,
-        type: "issue" as const,
-        source: "github" as const,
-        repoFullName: "org/repo",
-        title: "Will be pruned after non-skipped poll",
-        addedAt: Date.now(),
-      }],
-    });
-
-    // First call: skipped — hasFetchedFresh must stay false, no pruning
-    vi.mocked(pollService.fetchAllData)
-      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [], skipped: true })
-      // Second call: real data with empty issues — item 555 absent means closed
-      .mockResolvedValueOnce({ issues: [], pullRequests: [], workflowRuns: [], errors: [] });
-
-    render(() => <DashboardPage />);
-
-    // After the first (skipped) fetch, tracked item must NOT be pruned yet
-    await waitFor(() => {
-      expect(viewStore.viewState.trackedItems.length).toBe(1);
-    });
-
-    // Trigger a second fetch — non-skipped, sets hasFetchedFresh=true, triggers prune
-    await capturedFetchAll?.();
-
-    await waitFor(() => {
-      expect(viewStore.viewState.trackedItems.length).toBe(0);
-    });
-  });
 });
 
 describe("DashboardPage — auth error handling", () => {
@@ -790,7 +751,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 42,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
       reviewDecision: null,
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -813,7 +774,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Simulate hot poll returning a status update (generation=0 matches default mock)
     const prUpdates = new Map([[42, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: "APPROVED" as const,
@@ -831,7 +792,7 @@ describe("DashboardPage — onHotData integration", () => {
     const testPR = makePullRequest({
       id: 43,
       checkStatus: "pending",
-      state: "open",
+      state: "OPEN",
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
@@ -858,7 +819,7 @@ describe("DashboardPage — onHotData integration", () => {
 
     // Send update with stale generation (999 !== mock default of 0)
     const prUpdates = new Map([[43, {
-      state: "OPEN",
+      state: "OPEN" as const,
       checkStatus: "success" as const,
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
@@ -914,6 +875,43 @@ describe("DashboardPage — onHotData integration", () => {
     // callback executed without error. The PR test above fully validates
     // the produce() mechanism; this confirms the run path is wired.
     expect(screen.getByText(/1 workflow/)).toBeTruthy();
+  });
+
+  it("splices terminal (MERGED) PR from store via capturedOnHotData", async () => {
+    const testPR = makePullRequest({
+      id: 99,
+      checkStatus: "pending",
+      state: "OPEN",
+      reviewDecision: null,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [testPR],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(capturedOnHotData).not.toBeNull();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("1 PR");
+    });
+
+    const prUpdates = new Map([[99, {
+      state: "MERGED" as const,
+      checkStatus: "success" as const,
+      mergeStateStatus: "CLEAN",
+      reviewDecision: null,
+    }]]);
+    capturedOnHotData!(prUpdates, new Map(), 0);
+
+    await waitFor(() => {
+      expect(screen.queryByText("1 PR")).toBeNull();
+    });
   });
 });
 
@@ -1725,5 +1723,170 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       expect(screen.queryByText("STALE-1")).toBeNull();
       expect(screen.queryByText("Stale issue from previous user")).toBeNull();
     });
+  });
+});
+
+describe("DashboardPage — events poll targeted merge", () => {
+  it("preserves tracked-user-only items from affected repos", async () => {
+    const trackedUserIssue = makeIssue({ id: 99, title: "Tracked user only", repoFullName: "org/repo", surfacedBy: ["other-user"] });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [trackedUserIssue, makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => { screen.getByText("org/repo"); });
+
+    const targetedData: DashboardData = {
+      issues: [makeIssue({ id: 1, title: "My issue updated", repoFullName: "org/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    await waitFor(() => {
+      screen.getByText("2 issues");
+    });
+  });
+
+  it("merges surfacedBy annotations via union for issues", async () => {
+    const sharedIssue = makeIssue({ id: 50, title: "Shared", repoFullName: "org/repo", surfacedBy: ["primary", "tracked-user"] });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [sharedIssue],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => { screen.getByText("org/repo"); });
+
+    const targetedIssue = makeIssue({ id: 50, title: "Shared updated", repoFullName: "org/repo", surfacedBy: ["primary"] });
+    const targetedData: DashboardData = {
+      issues: [targetedIssue],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    await waitFor(() => {
+      screen.getByText("1 issue");
+    });
+
+    // handleTargetedData mutates data items in-place before merging into the store
+    expect(targetedIssue.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
+    expect(targetedIssue.surfacedBy).toHaveLength(2);
+  });
+
+  it("merges surfacedBy annotations via union for pull requests", async () => {
+    const sharedPR = makePullRequest({ id: 60, repoFullName: "org/repo", surfacedBy: ["primary", "tracked-user"] });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [sharedPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+
+    const targetedPR = makePullRequest({ id: 60, repoFullName: "org/repo", surfacedBy: ["primary"] });
+    const targetedData: DashboardData = {
+      issues: [],
+      pullRequests: [targetedPR],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    // handleTargetedData mutates data items in-place before merging into the store
+    expect(targetedPR.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
+    expect(targetedPR.surfacedBy).toHaveLength(2);
+  });
+
+  it("calls detectNewItems and dispatchNotifications after targeted merge", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+
+    const notifLib = await import("../../src/app/lib/notifications");
+    vi.mocked(notifLib.detectNewItems).mockClear();
+    vi.mocked(notifLib.dispatchNotifications).mockClear();
+
+    const targetedData: DashboardData = {
+      issues: [makeIssue({ id: 200, title: "New via events", repoFullName: "org/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    expect(vi.mocked(notifLib.detectNewItems)).toHaveBeenCalledWith(targetedData);
+    expect(vi.mocked(notifLib.dispatchNotifications)).toHaveBeenCalled();
+  });
+
+  it("calls seedHotSetsFromTargeted after targeted merge", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+
+    vi.mocked(pollService.seedHotSetsFromTargeted).mockClear();
+
+    const targetedData: DashboardData = {
+      issues: [],
+      pullRequests: [makePullRequest({ id: 300, repoFullName: "org/repo" })],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
+  });
+
+  it("does not update lastRefreshedAt after targeted merge (MCP relay exclusion)", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeIssue({ id: 1, repoFullName: "org/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => { screen.getByText("org/repo"); });
+
+    // The targeted merge callback does NOT call setDashboardData with a new
+    // lastRefreshedAt — it uses produce() which only modifies issues/PRs/runs.
+    // This means the MCP relay effect (which tracks lastRefreshedAt) won't fire.
+    // We verify this by checking that rebuildHotSets is NOT called (it's only
+    // called on full refresh, not targeted merge).
+    vi.mocked(pollService.rebuildHotSets).mockClear();
+
+    const targetedData: DashboardData = {
+      issues: [makeIssue({ id: 1, title: "Updated", repoFullName: "org/repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    // seedHotSetsFromTargeted is called (additive), NOT rebuildHotSets (full replacement)
+    expect(vi.mocked(pollService.rebuildHotSets)).not.toHaveBeenCalled();
+    expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
   });
 });

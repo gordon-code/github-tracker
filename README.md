@@ -59,7 +59,7 @@ A second, faster poll loop (default 30s, configurable 10–120s) targets only in
 
 ### Desktop Notifications
 
-Browser notifications for new issues, PRs, and failed runs. Per-type toggles in settings. Notification permission requested on first enable. Uses the GitHub Notifications API as a change-detection gate when the `notifications` scope is available.
+Browser notifications for new issues, PRs, and failed runs. Per-type toggles in settings. Notification permission requested on first enable. New items are detected via the Events API polling loop and full refresh cycles.
 
 ### Repo Pinning and Reordering
 
@@ -91,7 +91,7 @@ Hide specific items with a persistent ignore list. An "N ignored" badge on the r
 
 ### ETag Caching and Auto-Refresh
 
-Conditional requests using `If-None-Match` headers — GitHub doesn't count 304 responses against the rate limit. Background polling keeps data fresh even when the tab is hidden (when the notifications scope is available for efficient change detection).
+Conditional requests using `If-None-Match` headers — GitHub doesn't count 304 responses against the rate limit. A 60-second events poll uses ETag requests to detect changes and trigger targeted per-repo refreshes, keeping data fresh even in background tabs at zero rate-limit cost.
 
 ## Tech Stack
 

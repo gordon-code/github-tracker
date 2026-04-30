@@ -81,9 +81,9 @@ describe("oauth helpers", () => {
       expect(url.searchParams.get("scope")).toBeTruthy();
     });
 
-    it("scope value is 'repo read:org notifications'", () => {
+    it("scope value is 'repo read:org'", () => {
       const url = new URL(buildAuthorizeUrl());
-      expect(url.searchParams.get("scope")).toBe("repo read:org notifications");
+      expect(url.searchParams.get("scope")).toBe("repo read:org");
     });
 
     it("URL contains state param matching sessionStorage", () => {

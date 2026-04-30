@@ -17,11 +17,14 @@ export interface RepoEntry extends RepoRef {
   pushedAt: string | null;
 }
 
+export type IssueState = "OPEN" | "CLOSED";
+export type PullRequestState = "OPEN" | "CLOSED" | "MERGED";
+
 export interface Issue {
   id: number;
   number: number;
   title: string;
-  state: string;
+  state: IssueState;
   htmlUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -43,7 +46,7 @@ export interface PullRequest {
   id: number;
   number: number;
   title: string;
-  state: string;
+  state: PullRequestState;
   draft: boolean;
   htmlUrl: string;
   createdAt: string;

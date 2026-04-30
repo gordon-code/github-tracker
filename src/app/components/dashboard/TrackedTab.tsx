@@ -86,6 +86,7 @@ export default function TrackedTab(props: TrackedTabProps) {
     }
     const prMap = new Map<number, PullRequest>();
     for (const pr of props.pullRequests) {
+      if (pr.state !== "OPEN") continue;
       prMap.set(pr.id, pr);
     }
     return { issueMap, prMap };

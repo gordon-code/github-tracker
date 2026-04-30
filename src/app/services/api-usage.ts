@@ -8,7 +8,7 @@ import { onApiRequest, type ApiRequestInfo } from "./github";
 
 const API_CALL_SOURCES = [
   "lightSearch", "heavyBackfill", "forkCheck", "globalUserSearch", "unfilteredSearch",
-  "upstreamDiscovery", "workflowRuns", "hotPRStatus", "hotRunStatus", "notifications",
+  "upstreamDiscovery", "workflowRuns", "hotPRStatus", "hotRunStatus", "userEvents",
   "validateUser", "fetchOrgs", "fetchRepos", "rateLimitCheck", "graphql", "rest",
 ] as const;
 
@@ -28,7 +28,7 @@ export const SOURCE_LABELS: Record<ApiCallSource, string> = {
   workflowRuns: "Workflow Runs",
   hotPRStatus: "Hot PR Status",
   hotRunStatus: "Hot Run Status",
-  notifications: "Notifications",
+  userEvents: "Events",
   validateUser: "Validate User",
   fetchOrgs: "Fetch Orgs",
   fetchRepos: "Fetch Repos",
@@ -195,7 +195,7 @@ export function updateResetAt(resetAt: number): void {
 // /^\/user$/ uses $ to avoid shadowing /user/orgs and /user/repos.
 // /actions/runs/\d+$ must precede /actions/runs/ (specific before general).
 const REST_SOURCE_PATTERNS: Array<[RegExp, ApiCallSource]> = [
-  [/^\/notifications/, "notifications"],
+  [/^\/users\/[^/]+\/events/, "userEvents"],
   [/^\/users\/[^/]+$/, "validateUser"],
   [/^\/user$/, "fetchOrgs"],
   [/^\/user\/orgs/, "fetchOrgs"],

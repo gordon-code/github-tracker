@@ -119,10 +119,10 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
       // Relay snapshot is inherently scoped to the user's items (SPA uses `involves:{user}`).
       // The `scope` param is intentionally ignored — relay always reflects the user's dashboard.
       const s = snapshot!;
-      const openPRs = s.pullRequests.filter((p) => p.state === "open");
+      const openPRs = s.pullRequests.filter((p) => p.state === "OPEN");
       const result = {
         openPRCount: openPRs.length,
-        openIssueCount: s.issues.filter((i) => i.state === "open").length,
+        openIssueCount: s.issues.filter((i) => i.state === "OPEN").length,
         failingRunCount: s.workflowRuns.filter(
           (r) => r.conclusion === "failure" || r.conclusion === "timed_out"
         ).length,
@@ -135,7 +135,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
     case METHODS.GET_OPEN_PRS: {
       const params = req.params ?? {};
-      let prs = snapshot!.pullRequests.filter((p) => p.state === "open");
+      let prs = snapshot!.pullRequests.filter((p) => p.state === "OPEN");
       if (typeof params["repo"] === "string" && params["repo"]) {
         prs = prs.filter((p) => p.repoFullName === params["repo"]);
       }
@@ -163,7 +163,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
 
     case METHODS.GET_OPEN_ISSUES: {
       const params = req.params ?? {};
-      let issues = snapshot!.issues.filter((i) => i.state === "open");
+      let issues = snapshot!.issues.filter((i) => i.state === "OPEN");
       if (typeof params["repo"] === "string" && params["repo"]) {
         issues = issues.filter((i) => i.repoFullName === params["repo"]);
       }

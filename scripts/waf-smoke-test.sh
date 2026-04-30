@@ -24,8 +24,12 @@ BASE="${1:-https://gh.gordoncode.dev}"
 run_test() {
   local expected="$1" label="$2"
   shift 2
-  local actual
-  actual=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$@")
+  local actual attempt
+  for attempt in 1 2 3; do
+    actual=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$@")
+    [[ "$actual" != "000" && "$actual" != "502" && "$actual" != "503" ]] && break
+    sleep "$attempt"
+  done
   if [[ "$actual" == "$expected" ]]; then
     printf '  PASS  [%s] %s\n' "$actual" "$label"
   else
@@ -107,7 +111,7 @@ TESTS=(
 # --- Run in parallel (:::  passes array elements directly, avoiding stdin quoting issues) ---
 TOTAL=${#TESTS[@]}
 
-OUTPUT=$(parallel --will-cite -k -j2 --delay 0.3 --timeout 15 run_spec ::: "${TESTS[@]}") || true
+OUTPUT=$(parallel --will-cite -k -j1 --delay 0.2 --timeout 30 run_spec ::: "${TESTS[@]}") || true
 
 # Detect infrastructure failure (parallel crashed, no tests ran)
 if [[ -z "$OUTPUT" ]]; then

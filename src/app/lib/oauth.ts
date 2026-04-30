@@ -30,8 +30,8 @@ export function buildAuthorizeUrl(options?: { returnTo?: string }): string {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    // repo: read issues/PRs; read:org: list orgs; notifications: gate
-    scope: "repo read:org notifications",
+    // repo: read issues/PRs; read:org: list orgs
+    scope: "repo read:org",
     state,
     prompt: "select_account",
   });
