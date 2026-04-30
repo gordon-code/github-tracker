@@ -144,6 +144,8 @@ export class JiraClient implements IJiraClient {
 // ── JiraProxyClient (API token / Worker proxy) ────────────────────────────────
 
 export class JiraProxyClient implements IJiraClient {
+  private _fieldsCache: { data: JiraFieldMeta[]; ts: number } | null = null;
+
   constructor(
     private readonly cloudId: string,
     private readonly email: string,
@@ -228,6 +230,11 @@ export class JiraProxyClient implements IJiraClient {
   }
 
   async getFields(): Promise<JiraFieldMeta[]> {
-    return this.request("fields", {}) as unknown as Promise<JiraFieldMeta[]>;
+    if (this._fieldsCache && Date.now() - this._fieldsCache.ts < 30_000) return this._fieldsCache.data;
+    // The proxy always returns a JiraFieldMeta[] array for the fields endpoint.
+    // request<T> returns T & { resealed? } but arrays don't merge that way — cast is safe here.
+    const data = (await this.request("fields", {})) as unknown as JiraFieldMeta[];
+    this._fieldsCache = { data, ts: Date.now() };
+    return data;
   }
 }

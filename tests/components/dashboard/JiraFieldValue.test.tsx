@@ -68,4 +68,28 @@ describe("JiraFieldValue", () => {
     // Nested arrays are filtered out by the depth-1 guard; result is empty → "—"
     expect(screen.getByText("—")).toBeTruthy();
   });
+
+  it("date-only string '2026-04-15' renders as relative time or date string (not raw ISO)", () => {
+    const { container } = render(() => <JiraFieldValue value="2026-04-15" />);
+    const text = container.textContent ?? "";
+    expect(text).not.toBe("2026-04-15");
+    expect(text).not.toContain("Invalid Date");
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it("full ISO timestamp '2026-04-15T10:00:00.000+0000' renders as relative time", () => {
+    const { container } = render(() => <JiraFieldValue value="2026-04-15T10:00:00.000+0000" />);
+    const text = container.textContent ?? "";
+    expect(text).not.toBe("2026-04-15T10:00:00.000+0000");
+    expect(text).not.toContain("Invalid Date");
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it("string matching date regex but with invalid date '2024-01-99' renders as plain text, not 'Invalid Date'", () => {
+    const { container } = render(() => <JiraFieldValue value="2024-01-99-PROJ-42" />);
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("Invalid Date");
+    // Falls through to plain string path since Date is invalid and relativeTime returns null/empty
+    expect(text.length).toBeGreaterThan(0);
+  });
 });

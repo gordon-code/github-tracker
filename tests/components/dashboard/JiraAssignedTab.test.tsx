@@ -31,7 +31,7 @@ vi.mock("../../../src/app/stores/config", () => ({
 import JiraAssignedTab, { _resetJiraTabState } from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
-import { trackItem, untrackJiraItem, setAllExpanded } from "../../../src/app/stores/view";
+import { trackItem, untrackJiraItem, setAllExpanded, setTabFilter } from "../../../src/app/stores/view";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -476,6 +476,80 @@ describe("JiraAssignedTab", () => {
       const msgs = screen.getAllByText(/No custom fields configured/i);
       expect(msgs.length).toBe(2);
       (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+
+    it("chevron button has aria-expanded='false' initially", () => {
+      (config as Record<string, unknown>).jira = { customFields: [] };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const expandBtn = screen.getByRole("button", { name: /expand PROJ-1 details/i });
+      expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+
+    it("click chevron → aria-expanded becomes true and detail panel is visible", () => {
+      (config as Record<string, unknown>).jira = { customFields: [] };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const expandBtn = screen.getByRole("button", { name: /expand PROJ-1 details/i });
+      expandBtn.click();
+
+      expect(expandBtn.getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByText(/No custom fields configured/i)).toBeTruthy();
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+
+    it("click chevron again collapses the panel", () => {
+      (config as Record<string, unknown>).jira = { customFields: [] };
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const expandBtn = screen.getByRole("button", { name: /expand PROJ-1 details/i });
+      expandBtn.click();
+      expect(screen.getByText(/No custom fields configured/i)).toBeTruthy();
+
+      // After second click, label changes to "Expand" and panel is gone
+      const collapseBtn = screen.getByRole("button", { name: /collapse PROJ-1 details/i });
+      collapseBtn.click();
+
+      expect(screen.queryByText(/No custom fields configured/i)).toBeNull();
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+
+    it("expanded panel shows custom field names and values when fields are configured", () => {
+      (config as Record<string, unknown>).jira = {
+        customFields: [{ id: "customfield_10001", name: "Team" }],
+      };
+      const issue = makeIssue("PROJ-1");
+      (issue.fields as Record<string, unknown>)["customfield_10001"] = "Platform";
+
+      render(() => <JiraAssignedTab issues={[issue]} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /expand PROJ-1 details/i }).click();
+
+      expect(screen.getByText("Team")).toBeTruthy();
+      expect(screen.getByText("Platform")).toBeTruthy();
+      (config as Record<string, unknown>).jira = { customFields: [] };
+    });
+  });
+
+  // ── Stale scope guard ──────────────────────────────────────────────────────
+
+  describe("stale scope guard", () => {
+    it("resets scope to 'assigned' when active scope is not in scopeOptions on mount", () => {
+      // config has no custom scopes, but active filter has a custom scope ID.
+      // On mount the stale guard fires: "customfield_10001" is not in built-in options → reset.
+      (config as Record<string, unknown>).jira = { customScopes: [] };
+      mockJiraFilters = { scope: "customfield_10001", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      // The createEffect on mount detects the invalid scope and calls setTabFilter
+      expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "scope", "assigned");
+      (config as Record<string, unknown>).jira = { customScopes: [] };
     });
   });
 });

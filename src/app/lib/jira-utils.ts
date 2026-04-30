@@ -27,8 +27,6 @@ export function createJiraClient(
   });
 }
 
-const CUSTOM_FIELD_ID_RE = /^[a-zA-Z0-9_\-]+$/;
-
 export function jiraJqlForScope(scope: string): string {
   const builtinFields: Record<string, string> = {
     assigned: "assignee = currentUser()",
@@ -38,7 +36,7 @@ export function jiraJqlForScope(scope: string): string {
   if (builtinFields[scope]) {
     return `${builtinFields[scope]} AND statusCategory != Done ORDER BY priority DESC`;
   }
-  if (!CUSTOM_FIELD_ID_RE.test(scope)) {
+  if (!VALID_FIELD_ID.test(scope)) {
     return `assignee = currentUser() AND statusCategory != Done ORDER BY priority DESC`;
   }
   return `${scope} in (currentUser()) AND statusCategory != Done ORDER BY priority DESC`;

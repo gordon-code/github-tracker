@@ -37,7 +37,7 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
           );
           if (result.issues.length === 0) {
             const fallback = await props.client.searchJql(
-              "creator = currentUser() OR watcher = currentUser() AND statusCategory != Done",
+              "(creator = currentUser() OR watcher = currentUser()) AND statusCategory != Done",
               { maxResults: 1, fields: customIds }
             );
             if (fallback.issues.length > 0) {
@@ -105,10 +105,12 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
 
   return (
     <div class="border border-base-300 rounded-lg p-4 flex flex-col gap-3">
-      <p class="text-xs text-base-content/60">
-        Fields shown are instance-wide. Some may not have values on all issues.
-        {fields().length > 50 && " Preview values shown for first 50 fields."}
-      </p>
+      <Show when={!loading() && !error()}>
+        <p class="text-xs text-base-content/60">
+          Fields shown are instance-wide. Some may not have values on all issues.
+          {fields().length > 50 && " Preview values shown for first 50 fields."}
+        </p>
+      </Show>
       <Show when={loading()}>
         <div class="flex justify-center py-6">
           <LoadingSpinner size="sm" label="Loading fields..." />
@@ -125,6 +127,7 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
           onInput={(e) => setSearch(e.currentTarget.value)}
           class="input input-bordered input-sm w-full"
           aria-label="Search fields"
+          data-picker-search
         />
         <Show when={fields().length === 0}>
           <p class="text-sm text-base-content/50 text-center py-4">
@@ -133,9 +136,9 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
         </Show>
         <Show when={fields().length > 0}>
           <Show when={selectedCount() >= 10}>
-            <p class="text-xs text-warning">Maximum 10 fields selected.</p>
+            <p id="field-cap-warning" class="text-xs text-warning">Maximum 10 fields selected.</p>
           </Show>
-          <div class="max-h-[400px] overflow-y-auto flex flex-col gap-1">
+          <div role="listbox" aria-label="Custom fields" class="max-h-[400px] overflow-y-auto flex flex-col gap-1">
             <For each={filtered()}>
               {(field) => {
                 const isChecked = () => selected().has(field.id);
@@ -147,6 +150,7 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
                       class="checkbox checkbox-sm"
                       checked={isChecked()}
                       disabled={isDisabled()}
+                      aria-describedby={isDisabled() ? "field-cap-warning" : undefined}
                       onChange={() => toggleField(field)}
                     />
                     <span class="flex-1 text-sm truncate">{field.name}</span>

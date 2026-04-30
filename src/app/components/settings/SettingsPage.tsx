@@ -5,7 +5,7 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
-import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, isJiraAuthenticated } from "../../stores/auth";
+import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
@@ -232,6 +232,8 @@ export default function SettingsPage() {
   const [showFieldPicker, setShowFieldPicker] = createSignal(false);
   const [showScopePicker, setShowScopePicker] = createSignal(false);
 
+  const jiraClient = createMemo(() => createJiraClient(config.jira?.authMethod));
+
   const jiraApiSiteUrl = () => {
     const sub = jiraApiSubdomain().trim();
     return sub ? `https://${sub}.atlassian.net` : "";
@@ -318,7 +320,7 @@ export default function SettingsPage() {
   }
 
   function handleJiraDisconnect() {
-    clearJiraAuth();
+    clearJiraConfigFull();
     // DefaultTab guard: reset to issues if pointing at Jira tab
     if (config.defaultTab === "jiraAssigned") {
       updateConfig({ defaultTab: "issues" });
@@ -1021,27 +1023,24 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   class="btn btn-sm btn-outline"
-                  onClick={() => setShowFieldPicker((v) => !v)}
+                  onClick={() => {
+                    setShowFieldPicker((v) => !v);
+                    setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);
+                  }}
                   aria-expanded={showFieldPicker()}
                 >
                   Configure fields
                 </button>
               </SettingRow>
-              <Show when={showFieldPicker()}>
-                {(() => {
-                  const client = createJiraClient(config.jira?.authMethod);
-                  if (!client) return null;
-                  return (
-                    <div class="px-4 pb-3">
-                      <JiraFieldPicker
-                        client={client}
-                        selectedFields={config.jira?.customFields ?? []}
-                        onSave={(fields) => { updateJiraCustomFields(fields); setShowFieldPicker(false); }}
-                        onCancel={() => setShowFieldPicker(false)}
-                      />
-                    </div>
-                  );
-                })()}
+              <Show when={showFieldPicker() && jiraClient()}>
+                <div class="px-4 pb-3">
+                  <JiraFieldPicker
+                    client={jiraClient()!}
+                    selectedFields={config.jira?.customFields ?? []}
+                    onSave={(fields) => { updateJiraCustomFields(fields); setShowFieldPicker(false); }}
+                    onCancel={() => setShowFieldPicker(false)}
+                  />
+                </div>
               </Show>
               <SettingRow
                 label="Custom Scopes"
@@ -1054,27 +1053,24 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   class="btn btn-sm btn-outline"
-                  onClick={() => setShowScopePicker((v) => !v)}
+                  onClick={() => {
+                    setShowScopePicker((v) => !v);
+                    setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);
+                  }}
                   aria-expanded={showScopePicker()}
                 >
                   Configure scopes
                 </button>
               </SettingRow>
-              <Show when={showScopePicker()}>
-                {(() => {
-                  const client = createJiraClient(config.jira?.authMethod);
-                  if (!client) return null;
-                  return (
-                    <div class="px-4 pb-3">
-                      <JiraScopePicker
-                        client={client}
-                        selectedScopes={config.jira?.customScopes ?? []}
-                        onSave={(scopes) => { updateJiraCustomScopes(scopes); setShowScopePicker(false); }}
-                        onCancel={() => setShowScopePicker(false)}
-                      />
-                    </div>
-                  );
-                })()}
+              <Show when={showScopePicker() && jiraClient()}>
+                <div class="px-4 pb-3">
+                  <JiraScopePicker
+                    client={jiraClient()!}
+                    selectedScopes={config.jira?.customScopes ?? []}
+                    onSave={(scopes) => { updateJiraCustomScopes(scopes); setShowScopePicker(false); }}
+                    onCancel={() => setShowScopePicker(false)}
+                  />
+                </div>
               </Show>
               <SettingRow
                 label="Disconnect"

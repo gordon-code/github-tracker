@@ -492,6 +492,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                             <Show when={isIssueExpanded()}>
                               <div
                                 id={detailPanelId}
+                                role="region"
+                                aria-label={`${issue.key} custom fields`}
                                 class="pl-8 pb-3 pt-1 border-l-2 border-base-300"
                               >
                                 <Show
@@ -506,7 +508,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                     <For each={config.jira?.customFields ?? []}>
                                       {(field) => (
                                         <div class="flex gap-2 items-baseline">
-                                          <span class="text-xs font-medium text-base-content/60 w-32 shrink-0 truncate">{field.name}</span>
+                                          <span class="text-xs font-medium text-base-content/60 w-32 shrink-0 truncate" title={field.name}>{field.name}</span>
                                           <JiraFieldValue value={(issue.fields as Record<string, unknown>)[field.id]} />
                                         </div>
                                       )}

@@ -11,9 +11,10 @@ interface JiraScopePickerProps {
   onCancel: () => void;
 }
 
+const SYSTEM_USER_FIELDS = new Set(["assignee", "reporter", "creator"]);
+
 function isUserTypeField(field: JiraFieldMeta): boolean {
   if (!field.custom) return false;
-  const SYSTEM_USER_FIELDS = new Set(["assignee", "reporter", "creator"]);
   if (SYSTEM_USER_FIELDS.has(field.id)) return false;
   if (field.schema?.type === "user") return true;
   if (field.schema?.type === "array" && field.schema?.items === "user") return true;
@@ -87,6 +88,7 @@ export default function JiraScopePicker(props: JiraScopePickerProps) {
           onInput={(e) => setSearch(e.currentTarget.value)}
           class="input input-bordered input-sm w-full"
           aria-label="Search scope fields"
+          data-picker-search
         />
         <Show when={fields().length === 0}>
           <p class="text-sm text-base-content/50 text-center py-4">
@@ -94,7 +96,7 @@ export default function JiraScopePicker(props: JiraScopePickerProps) {
           </p>
         </Show>
         <Show when={fields().length > 0}>
-          <div class="max-h-[300px] overflow-y-auto flex flex-col gap-1">
+          <div role="listbox" aria-label="Custom scopes" class="max-h-[300px] overflow-y-auto flex flex-col gap-1">
             <For each={filtered()}>
               {(field) => {
                 const isChecked = () => selected().has(field.id);

@@ -36,16 +36,16 @@ export default function JiraFieldValue(props: JiraFieldValueProps) {
     return <span class="text-sm text-base-content/40">—</span>;
   }
   if (Array.isArray(props.value)) {
-    const parts = props.value
+    const parts = (props.value as unknown[])
       .filter((el) => !Array.isArray(el))
-      .map((el) => renderScalar(el));
+      .map((el) => ({ text: renderScalar(el), src: el }));
     if (parts.length === 0) return <span class="text-sm text-base-content/40">—</span>;
     return (
       <span class="text-sm">
-        {parts.map((text, i) => (
+        {parts.map(({ text, src }, i) => (
           <>
             {i > 0 && <span class="text-base-content/40">, </span>}
-            {isOptionOrUser((props.value as unknown[])[i])
+            {isOptionOrUser(src)
               ? <span class="badge badge-sm badge-ghost">{text}</span>
               : text}
           </>
