@@ -268,9 +268,11 @@ export function setGlobalFilter(
   org: string | null,
   repo: string | null
 ): void {
+  if (viewState.globalFilter.org === org && viewState.globalFilter.repo === repo) return;
   setViewState(
     produce((draft) => {
-      draft.globalFilter = { org, repo };
+      draft.globalFilter.org = org;
+      draft.globalFilter.repo = repo;
     })
   );
 }

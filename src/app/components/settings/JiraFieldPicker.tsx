@@ -1,5 +1,5 @@
 import { createSignal, createMemo, For, Show, onMount } from "solid-js";
-import type { IJiraClient } from "../../services/jira-client";
+import { type IJiraClient, DEFAULT_FIELDS } from "../../services/jira-client";
 import type { JiraFieldMeta } from "../../../shared/jira-types";
 import type { JiraCustomField } from "../../../shared/schemas";
 import LoadingSpinner from "../shared/LoadingSpinner";
@@ -24,28 +24,38 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
   onMount(async () => {
     try {
       const allFields = await props.client.getFields();
-      const custom = allFields.filter((f) => f.custom);
-      setFields(custom);
+      const defaultFieldIds = new Set(DEFAULT_FIELDS);
+      const selectable = allFields.filter((f) => f.custom || !defaultFieldIds.has(f.id));
+      setFields(selectable);
 
-      // Best-effort sample value fetch
-      const customIds = custom.map((f) => f.id).slice(0, 50);
-      if (customIds.length > 0) {
+      // Best-effort sample value fetch — request all fields (*all) across
+      // multiple queries to maximize coverage across projects and issue types.
+      const fieldIdSet = new Set(selectable.map((f) => f.id));
+      if (fieldIdSet.size > 0) {
         try {
-          const result = await props.client.searchJql(
-            "assignee = currentUser() AND statusCategory != Done",
-            { maxResults: 1, fields: customIds }
-          );
-          if (result.issues.length === 0) {
-            const fallback = await props.client.searchJql(
-              "(creator = currentUser() OR watcher = currentUser()) AND statusCategory != Done",
-              { maxResults: 1, fields: customIds }
-            );
-            if (fallback.issues.length > 0) {
-              setSampleValues(fallback.issues[0].fields as Record<string, unknown>);
+          const queries = [
+            "assignee = currentUser() ORDER BY updated DESC",
+            "project in projectsWhereUserHasPermission('Browse') ORDER BY updated DESC",
+          ];
+          const merged: Record<string, unknown> = {};
+          for (const jql of queries) {
+            if (Object.keys(merged).length >= fieldIdSet.size) break;
+            try {
+              const result = await props.client.searchJql(jql, { maxResults: 20, fields: ["*all"] });
+              for (const issue of result.issues) {
+                const fields = issue.fields as Record<string, unknown>;
+                for (const id of fieldIdSet) {
+                  if (id in merged) continue;
+                  if (fields[id] !== undefined && fields[id] !== null) {
+                    merged[id] = fields[id];
+                  }
+                }
+              }
+            } catch {
+              // Individual query failure shouldn't block others
             }
-          } else {
-            setSampleValues(result.issues[0].fields as Record<string, unknown>);
           }
+          setSampleValues(merged);
         } catch {
           // Best-effort — don't block the picker
         }
@@ -59,7 +69,20 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
 
   const filtered = createMemo(() => {
     const q = search().toLowerCase();
-    return fields().filter((f) => !q || f.name.toLowerCase().includes(q));
+    const matched = fields().filter((f) => !q || f.name.toLowerCase().includes(q));
+    const samples = sampleValues();
+    const sel = selected();
+    const selOrder = [...sel.keys()];
+    return matched.sort((a, b) => {
+      const aSel = sel.has(a.id);
+      const bSel = sel.has(b.id);
+      if (aSel !== bSel) return aSel ? -1 : 1;
+      if (aSel && bSel) return selOrder.indexOf(a.id) - selOrder.indexOf(b.id);
+      const aHas = samples[a.id] !== null && samples[a.id] !== undefined;
+      const bHas = samples[b.id] !== null && samples[b.id] !== undefined;
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
   });
 
   const selectedCount = createMemo(() => selected().size);
@@ -76,27 +99,43 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
     });
   }
 
+  function moveField(id: string, direction: "up" | "down") {
+    setSelected((prev) => {
+      const entries = [...prev.entries()];
+      const idx = entries.findIndex(([k]) => k === id);
+      if (idx < 0) return prev;
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= entries.length) return prev;
+      [entries[idx], entries[swapIdx]] = [entries[swapIdx], entries[idx]];
+      return new Map(entries);
+    });
+  }
+
   function handleSave() {
     props.onSave([...selected().values()]);
+  }
+
+  function extractLabel(obj: Record<string, unknown>): string | null {
+    for (const key of ["displayName", "name", "value", "label"] as const) {
+      if (typeof obj[key] === "string") return obj[key];
+    }
+    return null;
   }
 
   function previewText(fieldId: string): string {
     const val = sampleValues()[fieldId];
     if (val === null || val === undefined) return "—";
-    if (typeof val === "string" || typeof val === "number") {
+    if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
       const s = String(val);
       return s.length > 40 ? s.slice(0, 40) + "…" : s;
     }
     if (typeof val === "object" && !Array.isArray(val)) {
-      const obj = val as Record<string, unknown>;
-      if (typeof obj["displayName"] === "string") return obj["displayName"];
-      if (typeof obj["value"] === "string") return obj["value"];
+      return extractLabel(val as Record<string, unknown>) ?? "—";
     }
     if (Array.isArray(val) && val.length > 0) {
       const first = val[0];
       if (typeof first === "object" && first !== null) {
-        const o = first as Record<string, unknown>;
-        return typeof o["displayName"] === "string" ? o["displayName"] : typeof o["value"] === "string" ? o["value"] : "…";
+        return extractLabel(first as Record<string, unknown>) ?? "…";
       }
       return String(first);
     }
@@ -107,8 +146,7 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
     <div class="border border-base-300 rounded-lg p-4 flex flex-col gap-3">
       <Show when={!loading() && !error()}>
         <p class="text-xs text-base-content/60">
-          Fields shown are instance-wide. Some may not have values on all issues.
-          {fields().length > 50 && " Preview values shown for first 50 fields."}
+          Select fields to display on Jira issues. Preview values are sampled from your recent issues.
         </p>
       </Show>
       <Show when={loading()}>
@@ -144,19 +182,30 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
                 const isChecked = () => selected().has(field.id);
                 const isDisabled = () => !isChecked() && selectedCount() >= 10;
                 return (
-                  <label class={`flex items-center gap-2 px-2 py-1 rounded hover:bg-base-200 cursor-pointer ${isDisabled() ? "opacity-40 cursor-not-allowed" : ""}`}>
-                    <input
-                      type="checkbox"
-                      class="checkbox checkbox-sm"
-                      checked={isChecked()}
-                      disabled={isDisabled()}
-                      aria-describedby={isDisabled() ? "field-cap-warning" : undefined}
-                      onChange={() => toggleField(field)}
-                    />
-                    <span class="flex-1 text-sm truncate">{field.name}</span>
-                    <span class="badge badge-sm badge-ghost shrink-0">{field.schema?.type ?? "unknown"}</span>
-                    <span class="text-xs text-base-content/50 shrink-0 w-24 truncate text-right">{previewText(field.id)}</span>
-                  </label>
+                  <div class={`flex items-center gap-2 px-2 py-1 rounded hover:bg-base-200 ${isDisabled() ? "opacity-40" : ""}`}>
+                    <label class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        class="checkbox checkbox-sm"
+                        checked={isChecked()}
+                        disabled={isDisabled()}
+                        aria-describedby={isDisabled() ? "field-cap-warning" : undefined}
+                        onChange={() => toggleField(field)}
+                      />
+                      <span class="flex-1 text-sm truncate">{field.name}</span>
+                    </label>
+                    <Show when={isChecked()}>
+                      <div class="flex shrink-0">
+                        <button type="button" class="btn btn-ghost btn-xs px-0.5" aria-label={`Move ${field.name} up`} onClick={() => moveField(field.id, "up")}>
+                          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
+                        </button>
+                        <button type="button" class="btn btn-ghost btn-xs px-0.5" aria-label={`Move ${field.name} down`} onClick={() => moveField(field.id, "down")}>
+                          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                      </div>
+                    </Show>
+                    <span class="text-xs text-base-content/50 shrink-0 max-w-48 truncate text-right" title={previewText(field.id)}>{previewText(field.id)}</span>
+                  </div>
                 );
               }}
             </For>

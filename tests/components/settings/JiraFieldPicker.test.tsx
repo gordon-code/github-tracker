@@ -117,7 +117,7 @@ describe("JiraFieldPicker", () => {
 
     const client = makeClient(() => Promise.resolve(fields));
 
-    const { container } = render(() => (
+    render(() => (
       <JiraFieldPicker
         client={client}
         selectedFields={selected}
@@ -128,9 +128,9 @@ describe("JiraFieldPicker", () => {
 
     await waitFor(() => screen.getByText("Field 0"));
 
-    const checkboxes = container.querySelectorAll("input[type=checkbox]");
-    const eleventh = checkboxes[10] as HTMLInputElement;
-    expect(eleventh.disabled).toBe(true);
+    const unselectedLabel = screen.getByText("Field 10").closest("label")!;
+    const unselectedCheckbox = unselectedLabel.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(unselectedCheckbox.disabled).toBe(true);
   });
 
   it("Save button calls onSave with selected fields", async () => {

@@ -18,8 +18,9 @@ function renderScalar(value: unknown): string {
   }
   if (typeof value === "object" && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
-    if (typeof obj["displayName"] === "string") return obj["displayName"];
-    if (typeof obj["value"] === "string") return obj["value"];
+    for (const key of ["displayName", "name", "value", "label"]) {
+      if (typeof obj[key] === "string") return obj[key] as string;
+    }
   }
   const json = JSON.stringify(value);
   return json.length > 100 ? json.slice(0, 100) + "…" : json;
@@ -28,7 +29,7 @@ function renderScalar(value: unknown): string {
 function isOptionOrUser(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const obj = value as Record<string, unknown>;
-  return typeof obj["displayName"] === "string" || typeof obj["value"] === "string";
+  return typeof obj["displayName"] === "string" || typeof obj["name"] === "string" || typeof obj["value"] === "string";
 }
 
 export default function JiraFieldValue(props: JiraFieldValueProps) {

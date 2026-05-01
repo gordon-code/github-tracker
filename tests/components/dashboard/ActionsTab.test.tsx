@@ -142,7 +142,7 @@ describe("ActionsTab — empty-repo state preservation", () => {
     expect(stub?.querySelector('[aria-expanded]')).toBeNull();
   });
 
-  it("hides empty-state message when only locked stubs exist (no double render)", () => {
+  it("shows empty state below locked stubs when only locked repos exist", () => {
     setViewState(produce((s) => {
       s.lockedRepos.actions = ["owner/locked-empty"];
     }));
@@ -157,8 +157,8 @@ describe("ActionsTab — empty-repo state preservation", () => {
     // Locked stub renders
     const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
     expect(stub).not.toBeNull();
-    // Empty-state message does NOT render alongside the stub
-    expect(screen.queryByText("No workflow runs found.")).toBeNull();
+    // Big empty state also renders
+    expect(screen.getByText("No workflow runs found.")).not.toBeNull();
   });
 
   it("hides locked stubs during initial load (no skeleton + stub double render)", () => {

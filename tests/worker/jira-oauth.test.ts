@@ -529,7 +529,7 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
 
   // ── 404 when unconfigured ─────────────────────────────────────────────────
 
-  it("returns 404 when JIRA_CLIENT_ID is not configured", async () => {
+  it("returns 503 when JIRA_CLIENT_ID is not configured", async () => {
     const req = makeJiraProxyRequest({
       endpoint: "search",
       cloudId: VALID_CLOUD_ID,
@@ -538,9 +538,9 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
       params: { jql: "assignee = currentUser()", maxResults: 10 },
     });
     const res = await worker.fetch(req, makeEnv({ JIRA_CLIENT_ID: undefined }));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(503);
     const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("not_found");
+    expect(json["error"]).toBe("jira_not_configured");
   });
 
   // ── Endpoint allowlist ────────────────────────────────────────────────────

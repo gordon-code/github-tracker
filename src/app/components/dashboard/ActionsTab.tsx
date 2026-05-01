@@ -251,18 +251,7 @@ export default function ActionsTab(props: ActionsTabProps) {
         <SkeletonRows label="Loading workflow runs" />
       </Show>
 
-      {/* Empty — only when no groups exist at all (locked stubs are handled by EmptyLockedRepoRow) */}
-      <Show
-        when={
-          (!props.loading || props.workflowRuns.length > 0) && repoGroups().length === 0
-        }
-      >
-        <div class="p-8 text-center text-base-content/50">
-          <p class="text-sm">No workflow runs found.</p>
-        </div>
-      </Show>
-
-      {/* Repo groups */}
+      {/* Repo groups + locked stubs */}
       <Show when={(!props.loading || props.workflowRuns.length > 0) && repoGroups().length > 0}>
         <For each={repoGroups()}>
           {(repoGroup) => {
@@ -372,6 +361,13 @@ export default function ActionsTab(props: ActionsTabProps) {
             );
           }}
         </For>
+      </Show>
+
+      {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
+      <Show when={(!props.loading || props.workflowRuns.length > 0) && filteredRuns().length === 0}>
+        <div class="p-8 text-center text-base-content/50">
+          <p class="text-sm">No workflow runs found.</p>
+        </div>
       </Show>
 
       {/* Upstream repos exclusion note */}

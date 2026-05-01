@@ -529,7 +529,7 @@ describe("JiraAssignedTab", () => {
 
       screen.getByRole("button", { name: /expand PROJ-1 details/i }).click();
 
-      expect(screen.getByText("Team")).toBeTruthy();
+      expect(screen.getByText("Team:")).toBeTruthy();
       expect(screen.getByText("Platform")).toBeTruthy();
       (config as Record<string, unknown>).jira = { customFields: [] };
     });

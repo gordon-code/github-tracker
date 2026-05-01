@@ -1136,7 +1136,11 @@ async function handleJiraProxy(
   setCookie: string | undefined
 ): Promise<Response> {
   if (!env.JIRA_CLIENT_ID) {
-    return errorResponse("not_found", 404);
+    log("warn", "jira_proxy_missing_client_id", {}, request);
+    return new Response(JSON.stringify({ error: "jira_not_configured", message: "JIRA_CLIENT_ID is not set — add it to .dev.vars (local) or Worker secrets (production)" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
+    });
   }
 
   if (request.method !== "POST") {

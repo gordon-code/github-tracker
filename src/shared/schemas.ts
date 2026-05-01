@@ -67,6 +67,7 @@ export const JiraConfigSchema = z.object({
   siteName: z.string().optional(),
   email: z.string().optional(),
   issueKeyDetection: z.boolean().default(true),
+  expandIssueDetails: z.boolean().default(false),
   customFields: z.array(JiraCustomFieldSchema).max(10).default([]),
   customScopes: z.array(JiraCustomFieldSchema).max(20).default([]),
 });
@@ -103,7 +104,7 @@ export const ConfigSchema = z.object({
   mcpRelayEnabled: z.boolean().default(false),
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
   // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
-  jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true, customFields: [], customScopes: [] }),
+  jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true, expandIssueDetails: false, customFields: [], customScopes: [] }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

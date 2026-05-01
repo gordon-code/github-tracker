@@ -1013,6 +1013,17 @@ export default function SettingsPage() {
                 />
               </SettingRow>
               <SettingRow
+                label="Expand issue details"
+                description="Show custom field pills on Jira issues by default"
+              >
+                <input
+                  type="checkbox"
+                  checked={config.jira?.expandIssueDetails ?? false}
+                  onChange={(e) => updateJiraConfig({ expandIssueDetails: e.currentTarget.checked })}
+                  class="toggle toggle-primary"
+                />
+              </SettingRow>
+              <SettingRow
                 label="Custom Fields"
                 description={
                   (config.jira?.customFields ?? []).length > 0
@@ -1043,7 +1054,7 @@ export default function SettingsPage() {
                 </div>
               </Show>
               <SettingRow
-                label="Custom Scopes"
+                label="Filter Scopes"
                 description={
                   (config.jira?.customScopes ?? []).length > 0
                     ? (config.jira?.customScopes ?? []).map((s) => s.name).join(", ")
@@ -1059,7 +1070,7 @@ export default function SettingsPage() {
                   }}
                   aria-expanded={showScopePicker()}
                 >
-                  Configure scopes
+                  Configure filter scopes
                 </button>
               </SettingRow>
               <Show when={showScopePicker() && jiraClient()}>

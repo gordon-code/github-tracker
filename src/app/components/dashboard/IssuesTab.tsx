@@ -307,35 +307,7 @@ export default function IssuesTab(props: IssuesTabProps) {
         <SkeletonRows label="Loading issues" />
       </Show>
 
-      {/* Empty — only when no groups exist at all (locked stubs are handled by EmptyLockedRepoRow) */}
-      <Show when={(!props.loading || props.issues.length > 0) && pageGroups().length === 0}>
-        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
-          <svg
-            class="h-10 w-10 opacity-40"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-            />
-          </svg>
-          <p class="text-sm font-medium">
-            {activeFilters().scope === "all" ? "No open issues found" : "No open issues involving you"}
-          </p>
-          <p class="text-xs">
-            {activeFilters().scope === "all"
-              ? "No issues match your current filters."
-              : "Issues where you are the author, assignee, or mentioned will appear here."}
-          </p>
-        </div>
-      </Show>
-
-      {/* Issue rows */}
+      {/* Issue rows + locked stubs */}
       <Show when={(!props.loading || props.issues.length > 0) && pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
           <For each={pageGroups()}>
@@ -457,6 +429,34 @@ export default function IssuesTab(props: IssuesTabProps) {
                 );
             }}
           </For>
+        </div>
+      </Show>
+
+      {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
+      <Show when={(!props.loading || props.issues.length > 0) && filteredSorted().length === 0}>
+        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
+          <svg
+            class="h-10 w-10 opacity-40"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          <p class="text-sm font-medium">
+            {activeFilters().scope === "all" ? "No open issues found" : "No open issues involving you"}
+          </p>
+          <p class="text-xs">
+            {activeFilters().scope === "all"
+              ? "No issues match your current filters."
+              : "Issues where you are the author, assignee, or mentioned will appear here."}
+          </p>
         </div>
       </Show>
 

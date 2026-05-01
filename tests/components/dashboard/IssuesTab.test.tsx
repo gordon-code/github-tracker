@@ -780,12 +780,12 @@ describe("IssuesTab — empty-repo state preservation", () => {
     expect(stub?.querySelector('[aria-expanded]')).toBeNull();
   });
 
-  it("hides empty-state message when only locked stubs exist (no double render)", () => {
+  it("shows empty state below locked stubs when only locked repos exist", () => {
     setViewState(produce((s) => {
       s.lockedRepos.issues = ["owner/locked-empty"];
     }));
 
-    render(() => (
+    const { container } = render(() => (
       <IssuesTab
         issues={[]}
         userLogin="me"
@@ -793,7 +793,11 @@ describe("IssuesTab — empty-repo state preservation", () => {
       />
     ));
 
-    expect(screen.queryByText(/No open issues/i)).toBeNull();
+    // Locked stub renders
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    // Big empty state also renders
+    expect(screen.getByText(/No open issues/i)).not.toBeNull();
   });
 });
 

@@ -139,18 +139,20 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     }
   });
 
-  const [expandedIssues, setExpandedIssues] = createSignal<Set<string>>(new Set());
+  const [toggledIssues, setToggledIssues] = createSignal<Set<string>>(new Set());
 
-  // Reset expanded state when scope changes
-  createEffect(on(() => filters().scope, () => setExpandedIssues(new Set<string>()), { defer: true }));
+  // Reset toggled state when scope changes
+  createEffect(on(() => filters().scope, () => setToggledIssues(new Set<string>()), { defer: true }));
 
   function toggleExpanded(key: string) {
-    setExpandedIssues((prev) => {
+    setToggledIssues((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   }
+
+  const expandByDefault = () => !!(config.jira?.expandIssueDetails);
 
   const pinnedJiraKeys = createMemo(() =>
     new Set(
@@ -345,19 +347,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         </div>
       </Show>
 
-      <Show when={!props.loading && filtered().length === 0}>
-        <div class="flex flex-col items-center justify-center py-16 text-base-content/40">
-          <p class="text-base">
-            {(filters().statusCategory !== "all" || filters().priority !== "all")
-              ? "No issues match current filters"
-              : (() => {
-                  const opt = scopeOptions().find((o) => o.value === filters().scope);
-                  return `No ${opt?.label ?? "assigned"} Jira issues`;
-                })()}
-          </p>
-        </div>
-      </Show>
-
+      {/* Jira project groups + locked stubs */}
       <Show when={pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
           <For each={pageGroups()}>
@@ -389,11 +379,17 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                         {(issue) => {
                           const isPinned = () => pinnedJiraKeys().has(issue.key);
                           const browseUrl = () => isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${issue.key}` : "#";
-                          const isIssueExpanded = () => expandedIssues().has(issue.key);
+                          const isIssueExpanded = () => expandByDefault() ? !toggledIssues().has(issue.key) : toggledIssues().has(issue.key);
                           const detailPanelId = `jira-detail-${issue.key}`;
                           return (
                             <div role="listitem">
-                            <div class="px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2">
+                            <div
+                              class={`px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2 cursor-pointer hover:bg-base-200/50 transition-colors ${isIssueExpanded() ? "pb-1 compact:pb-0.5" : ""}`}
+                              onClick={(e) => {
+                                if ((e.target as HTMLElement).closest("a, button")) return;
+                                toggleExpanded(issue.key);
+                              }}
+                            >
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 min-w-0">
                                   <Show when={issue.fields.issuetype}>
@@ -432,7 +428,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   </Show>
                                 </div>
                                 <Show when={config.viewDensity !== "compact"}>
-                                  <p class="mt-0.5 text-sm text-base-content truncate" title={issue.fields.summary}>
+                                  <p class="mt-0.5 ml-6 text-sm text-base-content truncate" title={issue.fields.summary}>
                                     {issue.fields.summary}
                                   </p>
                                 </Show>
@@ -494,7 +490,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                 id={detailPanelId}
                                 role="region"
                                 aria-label={`${issue.key} custom fields`}
-                                class="pl-8 pb-3 pt-1 border-l-2 border-base-300"
+                                class="pl-14 compact:pl-10 pb-2 pt-0.5 compact:pb-1 pr-4"
                               >
                                 <Show
                                   when={(config.jira?.customFields ?? []).length > 0}
@@ -504,14 +500,19 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                     </p>
                                   }
                                 >
-                                  <div class="flex flex-col gap-1">
+                                  <div class="flex flex-wrap gap-1.5 compact:gap-1">
                                     <For each={config.jira?.customFields ?? []}>
-                                      {(field) => (
-                                        <div class="flex gap-2 items-baseline">
-                                          <span class="text-xs font-medium text-base-content/60 w-32 shrink-0 truncate" title={field.name}>{field.name}</span>
-                                          <JiraFieldValue value={(issue.fields as Record<string, unknown>)[field.id]} />
-                                        </div>
-                                      )}
+                                      {(field) => {
+                                        const val = () => (issue.fields as Record<string, unknown>)[field.id];
+                                        return (
+                                          <Show when={val() !== null && val() !== undefined}>
+                                            <span class="inline-flex items-center gap-1 rounded-full bg-base-300 px-2.5 py-0.5 compact:px-2 compact:py-px text-xs" title={field.name}>
+                                              <span class="text-base-content/70 font-medium">{field.name}:</span>
+                                              <JiraFieldValue value={val()} />
+                                            </span>
+                                          </Show>
+                                        );
+                                      }}
                                     </For>
                                   </div>
                                 </Show>
@@ -545,6 +546,39 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
             />
           </div>
         </Show>
+      </Show>
+
+      {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
+      <Show when={!props.loading && filtered().length === 0}>
+        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
+          <svg
+            class="h-10 w-10 opacity-40"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          <p class="text-sm font-medium">
+            {(filters().statusCategory !== "all" || filters().priority !== "all")
+              ? "No issues match current filters"
+              : (() => {
+                  const opt = scopeOptions().find((o) => o.value === filters().scope);
+                  return `No ${opt?.label ?? "Assigned to me"} Jira issues`;
+                })()}
+          </p>
+          <p class="text-xs">
+            {(filters().statusCategory !== "all" || filters().priority !== "all")
+              ? "Try adjusting your status or priority filters."
+              : "Issues matching your current scope will appear here."}
+          </p>
+        </div>
       </Show>
     </div>
   );
