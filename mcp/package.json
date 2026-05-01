@@ -31,11 +31,11 @@
     "directory": "mcp"
   },
   "engines": {
-    "node": ">=22"
+    "node": "v25.9.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ws": "^8.17.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "ws": "8.20.0",
     "zod": "4.3.6"
   },
   "devDependencies": {
@@ -43,10 +43,10 @@
     "@octokit/plugin-paginate-rest": "14.0.0",
     "@octokit/plugin-retry": "8.1.0",
     "@octokit/plugin-throttling": "11.0.3",
-    "@types/ws": "^8.0.0",
-    "tsup": "^8.0.0",
-    "tsx": "^4.0.0",
-    "typescript": "6.0.2",
-    "vitest": "^4.0.0"
+    "@types/ws": "8.18.1",
+    "tsup": "8.5.1",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.0"
   }
 }
