@@ -1136,7 +1136,11 @@ async function handleJiraProxy(
   setCookie: string | undefined
 ): Promise<Response> {
   if (!env.JIRA_CLIENT_ID) {
-    return errorResponse("not_found", 404);
+    log("warn", "jira_proxy_missing_client_id", {}, request);
+    return new Response(JSON.stringify({ error: "jira_not_configured", message: "JIRA_CLIENT_ID is not set — add it to .dev.vars (local) or Worker secrets (production)" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
+    });
   }
 
   if (request.method !== "POST") {
@@ -1180,7 +1184,7 @@ async function handleJiraProxy(
   const email = (parsed as Record<string, unknown>)["email"];
   const sealed = (parsed as Record<string, unknown>)["sealed"];
 
-  if (typeof endpoint !== "string" || (endpoint !== "search" && endpoint !== "issue")) {
+  if (typeof endpoint !== "string" || (endpoint !== "search" && endpoint !== "issue" && endpoint !== "fields")) {
     log("warn", "jira_proxy_invalid_endpoint", { endpoint }, request);
     return buildProxyResponse(errorResponse("invalid_request", 400), setCookie);
   }
@@ -1238,7 +1242,7 @@ async function handleJiraProxy(
   }
 
   // Construct target URL server-side — cloudId validated above
-  const endpointPath = endpoint === "search" ? "search/jql" : "issue/bulkfetch";
+  const endpointPath = endpoint === "search" ? "search/jql" : endpoint === "issue" ? "issue/bulkfetch" : "field";
   const baseUrl = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/${endpointPath}`;
   const auth = `Basic ${btoa(`${email}:${apiToken}`)}`;
 
@@ -1260,7 +1264,7 @@ async function handleJiraProxy(
       headers: { "Authorization": auth, "Accept": "application/json" },
       redirect: "manual",
     };
-  } else {
+  } else if (endpoint === "issue") {
     // POST with params as JSON body — only allowlisted keys forwarded
     const filteredParams: Record<string, unknown> = {};
     if (params && typeof params === "object") {
@@ -1277,6 +1281,14 @@ async function handleJiraProxy(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(filteredParams),
+      redirect: "manual",
+    };
+  } else {
+    // fields endpoint — no query params, simple GET
+    jiraUrl = baseUrl;
+    jiraInit = {
+      method: "GET",
+      headers: { "Authorization": auth, "Accept": "application/json" },
       redirect: "manual",
     };
   }
@@ -1314,6 +1326,10 @@ async function handleJiraProxy(
   try {
     responseData = await jiraResp.json();
   } catch {
+    return buildProxyResponse(errorResponse("jira_proxy_error", 502), setCookie);
+  }
+
+  if (endpoint === "fields" && !Array.isArray(responseData)) {
     return buildProxyResponse(errorResponse("jira_proxy_error", 502), setCookie);
   }
 

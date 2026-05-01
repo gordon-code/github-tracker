@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -24,8 +24,9 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, ensureJiraTokenValid, clearJiraAuth } from "../../stores/auth";
-import { JiraClient, JiraProxyClient, JiraApiError } from "../../services/jira-client";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { JiraApiError } from "../../services/jira-client";
+import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
@@ -401,29 +402,12 @@ export default function DashboardPage() {
 
   // Narrow reactivity: extract authMethod so unrelated jira config changes don't recreate the client
   const jiraAuthMethod = createMemo(() => config.jira?.authMethod);
-  const jiraClient = createMemo(() => {
-    const auth = jiraAuth();
-    const method = jiraAuthMethod();
-    if (!auth) return null;
-    if (method === "token") {
-      if (!auth.email) return null;
-      return new JiraProxyClient(auth.cloudId, auth.email, auth.accessToken, (resealed) => {
-        const cur = jiraAuth();
-        if (cur) setJiraAuth({ ...cur, accessToken: resealed });
-      });
-    }
-    return new JiraClient(auth.cloudId, async () => {
-      await ensureJiraTokenValid();
-      const currentAuth = jiraAuth();
-      if (!currentAuth) throw new Error("Jira auth cleared during token refresh");
-      return currentAuth.accessToken;
-    });
-  });
-
-  function jiraJqlForScope(scope: string): string {
-    const field = scope === "reported" ? "reporter" : scope === "watching" ? "watcher" : "assignee";
-    return `${field} = currentUser() AND statusCategory != Done ORDER BY priority DESC`;
-  }
+  const jiraClient = createMemo(() =>
+    createJiraClient(jiraAuthMethod(), (resealed) => {
+      const cur = jiraAuth();
+      if (cur) setJiraAuth({ ...cur, accessToken: resealed });
+    })
+  );
 
   async function fetchJiraAssigned(): Promise<void> {
     if (_jiraFetching) return;
@@ -431,11 +415,11 @@ export default function DashboardPage() {
     if (!client) return;
     _jiraFetching = true;
     setJiraLoading(true);
+    const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
     try {
-      const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
       const result = await client.searchJql(
         jiraJqlForScope(scope),
-        { maxResults: 100 }
+        { maxResults: 100, fields: mergeCustomFields(config.jira?.customFields ?? []) }
       );
       if (import.meta.env.DEV) {
         const missing = result.issues.filter((i) => !i.fields.issuetype);
@@ -485,6 +469,10 @@ export default function DashboardPage() {
         if (err.status === 401) {
           clearJiraAuth();
           pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning");
+        } else if (err.status === 400 && !["assigned", "reported", "watching"].includes(scope)) {
+          const scopeName = config.jira?.customScopes?.find((s) => s.id === scope)?.name ?? scope;
+          pushNotification("jira", `Custom scope '${scopeName}' is not supported by your Jira instance. Remove it in Settings.`, "warning");
+          setTabFilter("jiraAssigned", "scope", "assigned");
         } else if (err.status === 403) {
           pushNotification("jira", "Jira: access denied — check your app permissions or site access in Atlassian settings", "warning");
         } else {

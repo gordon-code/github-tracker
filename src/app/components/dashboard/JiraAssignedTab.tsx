@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, on } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { viewState, setTabFilter, resetAllTabFilters, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded } from "../../stores/view";
 import { config } from "../../stores/config";
+import JiraFieldValue from "./JiraFieldValue";
 import { jiraStatusCategoryClass, stripParenthetical } from "../../lib/format";
 import { isSafeJiraSiteUrl } from "../../lib/url";
 import { groupByRepo, computePageLayout, slicePageGroups, ensureLockedRepoGroups, orderRepoGroups } from "../../lib/grouping";
@@ -24,7 +25,7 @@ interface JiraAssignedTabProps {
   siteUrl: string;
 }
 
-const SCOPE_OPTIONS = [
+const BUILTIN_SCOPE_OPTIONS = [
   { value: "assigned", label: "Assigned to me" },
   { value: "reported", label: "Created by me" },
   { value: "watching", label: "Watching" },
@@ -124,6 +125,34 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   const [page, setPage] = createSignal(0);
 
   const filters = createMemo(() => viewState.tabFilters.jiraAssigned ?? JIRA_FILTER_DEFAULTS);
+
+  const scopeOptions = createMemo(() => [
+    ...BUILTIN_SCOPE_OPTIONS,
+    ...(config.jira?.customScopes ?? []).map((s) => ({ value: s.id, label: s.name })),
+  ]);
+
+  // Stale scope guard: reset to "assigned" if active scope was removed from custom scopes
+  createEffect(() => {
+    const validValues = new Set(scopeOptions().map((o) => o.value));
+    if (!validValues.has(filters().scope)) {
+      setTabFilter("jiraAssigned", "scope", "assigned");
+    }
+  });
+
+  const [toggledIssues, setToggledIssues] = createSignal<Set<string>>(new Set());
+
+  // Reset toggled state when scope changes
+  createEffect(on(() => filters().scope, () => setToggledIssues(new Set<string>()), { defer: true }));
+
+  function toggleExpanded(key: string) {
+    setToggledIssues((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const expandByDefault = () => !!(config.jira?.expandIssueDetails);
 
   const pinnedJiraKeys = createMemo(() =>
     new Set(
@@ -245,7 +274,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           group={{
             field: "scope",
             label: "Scope",
-            options: SCOPE_OPTIONS,
+            options: scopeOptions(),
             defaultValue: "assigned",
           }}
           value={filters().scope}
@@ -318,16 +347,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         </div>
       </Show>
 
-      <Show when={!props.loading && filtered().length === 0}>
-        <div class="flex flex-col items-center justify-center py-16 text-base-content/40">
-          <p class="text-base">
-            {(filters().statusCategory !== "all" || filters().priority !== "all")
-              ? "No issues match current filters"
-              : `No ${filters().scope === "reported" ? "created" : filters().scope === "watching" ? "watched" : "assigned"} Jira issues`}
-          </p>
-        </div>
-      </Show>
-
+      {/* Jira project groups + locked stubs */}
       <Show when={pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
           <For each={pageGroups()}>
@@ -359,8 +379,17 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                         {(issue) => {
                           const isPinned = () => pinnedJiraKeys().has(issue.key);
                           const browseUrl = () => isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${issue.key}` : "#";
+                          const isIssueExpanded = () => expandByDefault() ? !toggledIssues().has(issue.key) : toggledIssues().has(issue.key);
+                          const detailPanelId = `jira-detail-${issue.key}`;
                           return (
-                            <div role="listitem" class="px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2">
+                            <div role="listitem">
+                            <div
+                              class={`px-4 py-3 compact:py-2 flex items-start gap-3 compact:gap-2 cursor-pointer hover:bg-base-200/50 transition-colors ${isIssueExpanded() ? "pb-1 compact:pb-0.5" : ""}`}
+                              onClick={(e) => {
+                                if ((e.target as HTMLElement).closest("a, button")) return;
+                                toggleExpanded(issue.key);
+                              }}
+                            >
                               <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 min-w-0">
                                   <Show when={issue.fields.issuetype}>
@@ -399,7 +428,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   </Show>
                                 </div>
                                 <Show when={config.viewDensity !== "compact"}>
-                                  <p class="mt-0.5 text-sm text-base-content truncate" title={issue.fields.summary}>
+                                  <p class="mt-0.5 ml-6 text-sm text-base-content truncate" title={issue.fields.summary}>
                                     {issue.fields.summary}
                                   </p>
                                 </Show>
@@ -445,6 +474,50 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                                   </svg>
                                 </button>
                               </Show>
+                              <button
+                                type="button"
+                                class="shrink-0 self-center rounded p-1 transition-colors text-base-content/30 hover:text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+                                aria-label={isIssueExpanded() ? `Collapse ${issue.key} details` : `Expand ${issue.key} details`}
+                                aria-expanded={isIssueExpanded()}
+                                aria-controls={detailPanelId}
+                                onClick={() => toggleExpanded(issue.key)}
+                              >
+                                <ChevronIcon size="sm" rotated={!isIssueExpanded()} />
+                              </button>
+                            </div>
+                            <Show when={isIssueExpanded()}>
+                              <div
+                                id={detailPanelId}
+                                role="region"
+                                aria-label={`${issue.key} custom fields`}
+                                class="pl-14 compact:pl-10 pb-2 pt-0.5 compact:pb-1 pr-4"
+                              >
+                                <Show
+                                  when={(config.jira?.customFields ?? []).length > 0}
+                                  fallback={
+                                    <p class="text-xs text-base-content/40 italic">
+                                      No custom fields configured — add them in Settings.
+                                    </p>
+                                  }
+                                >
+                                  <div class="flex flex-wrap gap-1.5 compact:gap-1">
+                                    <For each={config.jira?.customFields ?? []}>
+                                      {(field) => {
+                                        const val = () => (issue.fields as Record<string, unknown>)[field.id];
+                                        return (
+                                          <Show when={val() !== null && val() !== undefined}>
+                                            <span class="inline-flex items-center gap-1 rounded-full bg-base-300 px-2.5 py-0.5 compact:px-2 compact:py-px text-xs" title={field.name}>
+                                              <span class="text-base-content/70 font-medium">{field.name}:</span>
+                                              <JiraFieldValue value={val()} />
+                                            </span>
+                                          </Show>
+                                        );
+                                      }}
+                                    </For>
+                                  </div>
+                                </Show>
+                              </div>
+                            </Show>
                             </div>
                           );
                         }}
@@ -473,6 +546,39 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
             />
           </div>
         </Show>
+      </Show>
+
+      {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
+      <Show when={!props.loading && filtered().length === 0}>
+        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
+          <svg
+            class="h-10 w-10 opacity-40"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          <p class="text-sm font-medium">
+            {(filters().statusCategory !== "all" || filters().priority !== "all")
+              ? "No issues match current filters"
+              : (() => {
+                  const opt = scopeOptions().find((o) => o.value === filters().scope);
+                  return `No ${opt?.label ?? "Assigned to me"} Jira issues`;
+                })()}
+          </p>
+          <p class="text-xs">
+            {(filters().statusCategory !== "all" || filters().priority !== "all")
+              ? "Try adjusting your status or priority filters."
+              : "Issues matching your current scope will appear here."}
+          </p>
+        </div>
       </Show>
     </div>
   );

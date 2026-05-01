@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
-  CustomTabSchema,
+  CustomTabSchema, updateJiraCustomFields, updateJiraCustomScopes,
 } from "../../src/app/stores/config";
 import type { CustomTab } from "../../src/app/stores/config";
+import { clearJiraAuth, clearJiraConfigFull } from "../../src/app/stores/auth";
+import { JiraConfigSchema, JiraCustomFieldSchema } from "../../src/shared/schemas";
+import { JiraFiltersSchema } from "../../src/app/stores/view";
 import { createRoot } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 
@@ -1014,5 +1017,241 @@ describe("CustomTabSchema — field validation", () => {
       expect(result.data.filterPreset).toEqual({});
       expect(result.data.exclusive).toBe(false);
     }
+  });
+});
+
+// ── JiraCustomFieldSchema + JiraConfigSchema (comp-3) ────────────────────────
+
+describe("JiraCustomFieldSchema", () => {
+  it("accepts valid id and name", () => {
+    const result = JiraCustomFieldSchema.safeParse({ id: "customfield_10001", name: "Story Points" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects id with invalid characters", () => {
+    const result = JiraCustomFieldSchema.safeParse({ id: "custom field;DROP", name: "Bad" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects id with spaces", () => {
+    const result = JiraCustomFieldSchema.safeParse({ id: "custom field", name: "Spaced" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects name exceeding 200 chars", () => {
+    const result = JiraCustomFieldSchema.safeParse({ id: "customfield_10001", name: "a".repeat(201) });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts name at max length (200 chars)", () => {
+    const result = JiraCustomFieldSchema.safeParse({ id: "customfield_10001", name: "a".repeat(200) });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("JiraConfigSchema — customFields and customScopes", () => {
+  it("defaults customFields to empty array", () => {
+    const result = JiraConfigSchema.parse({});
+    expect(result.customFields).toEqual([]);
+  });
+
+  it("defaults customScopes to empty array", () => {
+    const result = JiraConfigSchema.parse({});
+    expect(result.customScopes).toEqual([]);
+  });
+
+  it("accepts exactly 10 customFields", () => {
+    const fields = Array.from({ length: 10 }, (_, i) => ({ id: `customfield_${i}`, name: `Field ${i}` }));
+    const result = JiraConfigSchema.safeParse({ customFields: fields });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects more than 10 customFields", () => {
+    const fields = Array.from({ length: 11 }, (_, i) => ({ id: `customfield_${i}`, name: `Field ${i}` }));
+    const result = JiraConfigSchema.safeParse({ customFields: fields });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts exactly 20 customScopes", () => {
+    const scopes = Array.from({ length: 20 }, (_, i) => ({ id: `customfield_${i}`, name: `Scope ${i}` }));
+    const result = JiraConfigSchema.safeParse({ customScopes: scopes });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects more than 20 customScopes", () => {
+    const scopes = Array.from({ length: 21 }, (_, i) => ({ id: `customfield_${i}`, name: `Scope ${i}` }));
+    const result = JiraConfigSchema.safeParse({ customScopes: scopes });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("JiraFiltersSchema — scope field", () => {
+  it("parses 'assigned' (built-in scope)", () => {
+    const result = JiraFiltersSchema.safeParse({ scope: "assigned" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.scope).toBe("assigned");
+  });
+
+  it("parses 'reported' (built-in scope)", () => {
+    const result = JiraFiltersSchema.safeParse({ scope: "reported" });
+    expect(result.success).toBe(true);
+  });
+
+  it("parses 'customfield_10001' (custom field ID via string fallback)", () => {
+    const result = JiraFiltersSchema.safeParse({ scope: "customfield_10001" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.scope).toBe("customfield_10001");
+  });
+
+  it("rejects 'custom field;DROP' (invalid chars in string fallback)", () => {
+    const result = JiraFiltersSchema.safeParse({ scope: "custom field;DROP" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects scope with spaces", () => {
+    const result = JiraFiltersSchema.safeParse({ scope: "my scope" });
+    expect(result.success).toBe(false);
+  });
+
+  it("defaults scope to 'assigned' when not provided", () => {
+    const result = JiraFiltersSchema.parse({});
+    expect(result.scope).toBe("assigned");
+  });
+});
+
+describe("updateJiraCustomFields", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("stores fields in config.jira.customFields", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      expect(config.jira.customFields).toHaveLength(1);
+      expect(config.jira.customFields[0].id).toBe("customfield_10001");
+      dispose();
+    });
+  });
+
+  it("updates config.jira.customFields in the store", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      expect(config.jira.customFields[0].name).toBe("Story Points");
+      dispose();
+    });
+  });
+
+  it("caps at 10 fields (slices excess)", () => {
+    createRoot((dispose) => {
+      const fields = Array.from({ length: 15 }, (_, i) => ({ id: `customfield_${i}`, name: `F${i}` }));
+      updateJiraCustomFields(fields);
+      expect(config.jira.customFields).toHaveLength(10);
+      dispose();
+    });
+  });
+});
+
+describe("updateJiraCustomScopes", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("stores scopes in config.jira.customScopes", () => {
+    createRoot((dispose) => {
+      updateJiraCustomScopes([{ id: "customfield_10002", name: "Assignee" }]);
+      expect(config.jira.customScopes).toHaveLength(1);
+      expect(config.jira.customScopes[0].id).toBe("customfield_10002");
+      dispose();
+    });
+  });
+
+  it("updates config.jira.customScopes in the store", () => {
+    createRoot((dispose) => {
+      updateJiraCustomScopes([{ id: "customfield_10002", name: "Assignee" }]);
+      expect(config.jira.customScopes[0].name).toBe("Assignee");
+      dispose();
+    });
+  });
+
+  it("caps at 20 scopes (slices excess)", () => {
+    createRoot((dispose) => {
+      const scopes = Array.from({ length: 25 }, (_, i) => ({ id: `customfield_${i}`, name: `S${i}` }));
+      updateJiraCustomScopes(scopes);
+      expect(config.jira.customScopes).toHaveLength(20);
+      dispose();
+    });
+  });
+});
+
+describe("clearJiraAuth — preserves customFields and customScopes", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("preserves customFields across clearJiraAuth", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      clearJiraAuth();
+      expect(config.jira.customFields).toHaveLength(1);
+      expect(config.jira.customFields[0].id).toBe("customfield_10001");
+      dispose();
+    });
+  });
+
+  it("preserves customScopes across clearJiraAuth", () => {
+    createRoot((dispose) => {
+      updateJiraCustomScopes([{ id: "customfield_10002", name: "Assignee" }]);
+      clearJiraAuth();
+      expect(config.jira.customScopes).toHaveLength(1);
+      expect(config.jira.customScopes[0].id).toBe("customfield_10002");
+      dispose();
+    });
+  });
+
+  it("resets enabled, cloudId, siteUrl but keeps custom fields", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      clearJiraAuth();
+      expect(config.jira.enabled).toBe(false);
+      expect(config.jira.cloudId).toBeUndefined();
+      expect(config.jira.customFields).toHaveLength(1);
+      dispose();
+    });
+  });
+});
+
+describe("clearJiraConfigFull — wipes all Jira config", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("wipes customFields", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      clearJiraConfigFull();
+      expect(config.jira.customFields).toEqual([]);
+      dispose();
+    });
+  });
+
+  it("wipes customScopes", () => {
+    createRoot((dispose) => {
+      updateJiraCustomScopes([{ id: "customfield_10002", name: "Assignee" }]);
+      clearJiraConfigFull();
+      expect(config.jira.customScopes).toEqual([]);
+      dispose();
+    });
+  });
+
+  it("wipes all Jira config fields including auth fields", () => {
+    createRoot((dispose) => {
+      updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      clearJiraConfigFull();
+      expect(config.jira.enabled).toBe(false);
+      expect(config.jira.customFields).toEqual([]);
+      expect(config.jira.customScopes).toEqual([]);
+      expect(config.jira.cloudId).toBeUndefined();
+      dispose();
+    });
   });
 });

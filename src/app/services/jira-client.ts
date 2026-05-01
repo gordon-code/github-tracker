@@ -1,6 +1,6 @@
-import type { JiraIssue, JiraSearchResult, JiraBulkFetchResult, JiraAccessibleResource } from "../../shared/jira-types";
+import type { JiraIssue, JiraSearchResult, JiraBulkFetchResult, JiraAccessibleResource, JiraFieldMeta } from "../../shared/jira-types";
 
-const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"];
+export const DEFAULT_FIELDS = ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"];
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 
@@ -28,12 +28,14 @@ export interface IJiraClient {
   getIssue(key: string, fields?: string[]): Promise<JiraIssue | null>;
   searchJql(jql: string, opts?: { maxResults?: number; fields?: string[]; startAt?: number }): Promise<JiraSearchResult>;
   bulkFetch(keys: string[], fields?: string[]): Promise<JiraBulkFetchResult>;
+  getFields(): Promise<JiraFieldMeta[]>;
 }
 
 // ── JiraClient (OAuth / Bearer) ───────────────────────────────────────────────
 
 export class JiraClient implements IJiraClient {
   private readonly baseUrl: string;
+  private _fieldsCache: { data: JiraFieldMeta[]; ts: number } | null = null;
 
   constructor(
     cloudId: string,
@@ -104,6 +106,14 @@ export class JiraClient implements IJiraClient {
     });
   }
 
+  async getFields(): Promise<JiraFieldMeta[]> {
+    if (this._fieldsCache && Date.now() - this._fieldsCache.ts < 30_000) return this._fieldsCache.data;
+    const data = await this.request<JiraFieldMeta[]>("/field");
+    if (!Array.isArray(data)) throw new JiraApiError(502, data, "Unexpected non-array response from /field");
+    this._fieldsCache = { data, ts: Date.now() };
+    return data;
+  }
+
   static async getAccessibleResources(accessToken: string): Promise<JiraAccessibleResource[]> {
     const response = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
       redirect: "error",
@@ -135,6 +145,8 @@ export class JiraClient implements IJiraClient {
 // ── JiraProxyClient (API token / Worker proxy) ────────────────────────────────
 
 export class JiraProxyClient implements IJiraClient {
+  private _fieldsCache: { data: JiraFieldMeta[]; ts: number } | null = null;
+
   constructor(
     private readonly cloudId: string,
     private readonly email: string,
@@ -143,7 +155,7 @@ export class JiraProxyClient implements IJiraClient {
   ) {}
 
   private async request<T>(
-    endpoint: "search" | "issue",
+    endpoint: "search" | "issue" | "fields",
     params: Record<string, unknown>
   ): Promise<T & { resealed?: string }> {
     const response = await fetch("/api/jira/proxy", {
@@ -216,5 +228,14 @@ export class JiraProxyClient implements IJiraClient {
       this.onResealed(result.resealed);
     }
     return { issues: result.issues, errors: result.errors };
+  }
+
+  async getFields(): Promise<JiraFieldMeta[]> {
+    if (this._fieldsCache && Date.now() - this._fieldsCache.ts < 30_000) return this._fieldsCache.data;
+    // The proxy always returns a JiraFieldMeta[] array for the fields endpoint.
+    // request<T> returns T & { resealed? } but arrays don't merge that way — cast is safe here.
+    const data = (await this.request("fields", {})) as unknown as JiraFieldMeta[];
+    this._fieldsCache = { data, ts: Date.now() };
+    return data;
   }
 }

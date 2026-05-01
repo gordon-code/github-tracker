@@ -751,12 +751,12 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
     expect(stub?.querySelector('[aria-expanded]')).toBeNull();
   });
 
-  it("hides empty-state message when only locked stubs exist (no double render)", () => {
+  it("shows empty state below locked stubs when only locked repos exist", () => {
     setViewState(produce((s) => {
       s.lockedRepos.pullRequests = ["owner/locked-empty"];
     }));
 
-    render(() => (
+    const { container } = render(() => (
       <PullRequestsTab
         pullRequests={[]}
         userLogin="me"
@@ -764,7 +764,11 @@ describe("PullRequestsTab — empty-repo state preservation", () => {
       />
     ));
 
-    expect(screen.queryByText(/No open pull requests/i)).toBeNull();
+    // Locked stub renders
+    const stub = container.querySelector('[data-repo-group="owner/locked-empty"]');
+    expect(stub).not.toBeNull();
+    // Big empty state also renders
+    expect(screen.getByText(/No open pull requests/i)).not.toBeNull();
   });
 });
 

@@ -52,6 +52,13 @@ export function isBuiltinTab(id: string): id is BuiltinTabId {
 
 export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
 
+export const JiraCustomFieldSchema = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100),
+  name: z.string().max(200),
+});
+
+export type JiraCustomField = z.infer<typeof JiraCustomFieldSchema>;
+
 export const JiraConfigSchema = z.object({
   enabled: z.boolean().default(false),
   authMethod: JiraAuthMethodSchema,
@@ -60,6 +67,9 @@ export const JiraConfigSchema = z.object({
   siteName: z.string().optional(),
   email: z.string().optional(),
   issueKeyDetection: z.boolean().default(true),
+  expandIssueDetails: z.boolean().default(false),
+  customFields: z.array(JiraCustomFieldSchema).max(10).default([]),
+  customScopes: z.array(JiraCustomFieldSchema).max(20).default([]),
 });
 
 export type JiraConfig = z.infer<typeof JiraConfigSchema>;
@@ -94,7 +104,7 @@ export const ConfigSchema = z.object({
   mcpRelayEnabled: z.boolean().default(false),
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
   // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
-  jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true }),
+  jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true, expandIssueDetails: false, customFields: [], customScopes: [] }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

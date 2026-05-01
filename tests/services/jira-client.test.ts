@@ -291,6 +291,66 @@ describe("JiraClient", () => {
     });
   });
 
+  // ── getFields ─────────────────────────────────────────────────────────────
+
+  describe("getFields", () => {
+    it("calls GET /field with Bearer Authorization header", async () => {
+      const fields = [
+        { id: "summary", name: "Summary", custom: false },
+        { id: "customfield_10001", name: "Story Points", custom: true },
+      ];
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fields), { status: 200 }));
+
+      await client.getFields();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain("/field");
+      const headers = init.headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe(`Bearer ${accessToken}`);
+    });
+
+    it("returns JiraFieldMeta[] on success", async () => {
+      const fields = [
+        { id: "summary", name: "Summary", custom: false },
+        { id: "customfield_10001", name: "Story Points", custom: true, schema: { type: "number", custom: "com.pyxis.greenhopper.jira:gh-story-points" } },
+      ];
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fields), { status: 200 }));
+
+      const result = await client.getFields();
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual({ id: "summary", name: "Summary", custom: false });
+      expect(result[1].custom).toBe(true);
+      expect(result[1].schema?.type).toBe("number");
+    });
+
+    it("throws JiraApiError on 403 response", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ errorMessages: ["Forbidden"] }), { status: 403 })
+      );
+
+      await expect(client.getFields()).rejects.toThrow(JiraApiError);
+    });
+
+    it("throws JiraApiError when response is not an array", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ errorMessages: ["something went wrong"] }), { status: 200 })
+      );
+
+      await expect(client.getFields()).rejects.toThrow(JiraApiError);
+    });
+
+    it("returns cached result on second call within 30s", async () => {
+      const fields = [{ id: "summary", name: "Summary", custom: false }];
+      fetchMock.mockResolvedValue(new Response(JSON.stringify(fields), { status: 200 }));
+
+      await client.getFields();
+      await client.getFields();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ── getAccessibleResources ─────────────────────────────────────────────────
 
   describe("getAccessibleResources", () => {
@@ -535,6 +595,51 @@ describe("JiraProxyClient", () => {
       await clientWithCallback.bulkFetch(["PROJ-1"]);
 
       expect(onResealed).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── getFields ─────────────────────────────────────────────────────────────
+
+  describe("getFields", () => {
+    it("sends endpoint=fields with empty params to proxy", async () => {
+      const fields = [
+        { id: "summary", name: "Summary", custom: false },
+        { id: "customfield_10001", name: "Story Points", custom: true },
+      ];
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fields), { status: 200 }));
+
+      await client.getFields();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("/api/jira/proxy");
+      const body = JSON.parse(init.body as string);
+      expect(body.endpoint).toBe("fields");
+      expect(body.cloudId).toBe(cloudId);
+      expect(body.email).toBe(email);
+      expect(body.sealed).toBe(sealed);
+    });
+
+    it("returns JiraFieldMeta[] from proxy response", async () => {
+      const fields = [
+        { id: "summary", name: "Summary", custom: false },
+        { id: "customfield_10001", name: "Story Points", custom: true, schema: { type: "number" } },
+      ];
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(fields), { status: 200 }));
+
+      const result = await client.getFields();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe("summary");
+      expect(result[1].id).toBe("customfield_10001");
+      expect(result[1].custom).toBe(true);
+    });
+
+    it("throws JiraApiError on 403 response", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "forbidden" }), { status: 403 })
+      );
+
+      await expect(client.getFields()).rejects.toThrow(JiraApiError);
     });
   });
 

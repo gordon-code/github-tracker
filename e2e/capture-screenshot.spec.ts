@@ -334,7 +334,168 @@ const workflowRunsResponse = {
   ],
 };
 
-// ── Test ──────────────────────────────────────────────────────────────────────
+// ── Synthetic Jira data ──────────────────────────────────────────────────────
+
+const jiraIssues = [
+  {
+    id: "10001",
+    key: "PLATFORM-1234",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10001",
+    fields: {
+      summary: "Migrate OAuth flow to PKCE challenge for enhanced security",
+      status: { id: "3", name: "In Progress", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "2", name: "High" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10000", key: "PLATFORM", name: "Platform Engineering" },
+      created: "2026-04-15T09:00:00.000Z",
+      updated: "2026-04-30T14:22:00.000Z",
+      issuetype: { name: "Story" },
+      customfield_10001: 8,
+      customfield_10002: { name: "Sprint 24.9 – May", id: 142 },
+      customfield_10003: { value: "Identity & Access" },
+      customfield_10004: "PLATFORM-900",
+      customfield_10005: ["security", "oauth"],
+    },
+  },
+  {
+    id: "10002",
+    key: "PLATFORM-1187",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10002",
+    fields: {
+      summary: "Add rate limiting to public API endpoints",
+      status: { id: "5", name: "Code Review", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "1", name: "Highest" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10000", key: "PLATFORM", name: "Platform Engineering" },
+      created: "2026-04-08T11:00:00.000Z",
+      updated: "2026-05-01T09:15:00.000Z",
+      issuetype: { name: "Task" },
+      customfield_10001: 5,
+      customfield_10002: { name: "Sprint 24.9 – May", id: 142 },
+      customfield_10003: { value: "Platform Core" },
+      customfield_10005: ["api", "security"],
+    },
+  },
+  {
+    id: "10003",
+    key: "PLATFORM-1302",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10003",
+    fields: {
+      summary: "Fix SAML assertion replay vulnerability in SSO flow",
+      status: { id: "3", name: "In Progress", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "1", name: "Highest" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10000", key: "PLATFORM", name: "Platform Engineering" },
+      created: "2026-04-28T15:30:00.000Z",
+      updated: "2026-04-30T18:00:00.000Z",
+      issuetype: { name: "Bug" },
+      customfield_10001: 3,
+      customfield_10002: { name: "Sprint 24.9 – May", id: 142 },
+      customfield_10003: { value: "Identity & Access" },
+      customfield_10004: "PLATFORM-900",
+    },
+  },
+  {
+    id: "10004",
+    key: "PLATFORM-1198",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10004",
+    fields: {
+      summary: "Design system token refresh for dark mode palette",
+      status: { id: "8", name: "Blocked", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "3", name: "Medium" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10000", key: "PLATFORM", name: "Platform Engineering" },
+      created: "2026-04-10T10:00:00.000Z",
+      updated: "2026-04-25T16:45:00.000Z",
+      issuetype: { name: "Story" },
+      customfield_10001: 13,
+      customfield_10002: { name: "Sprint 24.8 – Apr", id: 141 },
+      customfield_10003: { value: "Frontend Platform" },
+    },
+  },
+  {
+    id: "10005",
+    key: "DATA-892",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10005",
+    fields: {
+      summary: "Optimize Spark job partition strategy for skewed datasets",
+      status: { id: "3", name: "In Progress", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "2", name: "High" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10001", key: "DATA", name: "Data Engineering" },
+      created: "2026-04-18T08:30:00.000Z",
+      updated: "2026-04-29T11:00:00.000Z",
+      issuetype: { name: "Story" },
+      customfield_10001: 8,
+      customfield_10003: { value: "Data Engineering" },
+      customfield_10005: ["spark", "performance"],
+    },
+  },
+  {
+    id: "10006",
+    key: "DATA-915",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10006",
+    fields: {
+      summary: "Add data quality checks to ingestion pipeline",
+      status: { id: "2", name: "Selected for Development", statusCategory: { id: 2, key: "new", name: "To Do" } },
+      priority: { id: "3", name: "Medium" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10001", key: "DATA", name: "Data Engineering" },
+      created: "2026-04-22T14:00:00.000Z",
+      updated: "2026-04-28T09:30:00.000Z",
+      issuetype: { name: "Task" },
+      customfield_10001: 5,
+      customfield_10003: { value: "Data Engineering" },
+      customfield_10005: ["quality", "pipeline"],
+    },
+  },
+  {
+    id: "10007",
+    key: "INFRA-445",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10007",
+    fields: {
+      summary: "Migrate Kubernetes clusters to 1.29",
+      status: { id: "3", name: "In Progress", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "2", name: "High" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10002", key: "INFRA", name: "Cloud Infrastructure" },
+      created: "2026-03-15T10:00:00.000Z",
+      updated: "2026-05-01T08:00:00.000Z",
+      issuetype: { name: "Epic" },
+      customfield_10001: 21,
+      customfield_10003: { value: "Cloud Infrastructure" },
+      customfield_10005: ["k8s", "migration"],
+    },
+  },
+  {
+    id: "10008",
+    key: "INFRA-467",
+    self: "https://acme-corp.atlassian.net/rest/api/3/issue/10008",
+    fields: {
+      summary: "Implement pod disruption budgets for critical services",
+      status: { id: "7", name: "Ready for QA", statusCategory: { id: 4, key: "indeterminate", name: "In Progress" } },
+      priority: { id: "3", name: "Medium" },
+      assignee: { accountId: "abc123", displayName: "Jane Doe" },
+      project: { id: "10002", key: "INFRA", name: "Cloud Infrastructure" },
+      created: "2026-04-20T09:00:00.000Z",
+      updated: "2026-04-30T16:00:00.000Z",
+      issuetype: { name: "Task" },
+      customfield_10001: 3,
+      customfield_10002: { name: "Sprint 24.9 – May", id: 142 },
+      customfield_10003: { value: "Cloud Infrastructure" },
+      customfield_10004: "INFRA-445",
+    },
+  },
+];
+
+const jiraSearchResponse = {
+  issues: jiraIssues,
+  total: jiraIssues.length,
+  maxResults: 100,
+  startAt: 0,
+};
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 test("capture dashboard screenshot", async ({ page }) => {
   // 1a. Seed localStorage before any navigation
@@ -496,4 +657,144 @@ test("capture dashboard screenshot", async ({ page }) => {
   }
 
   await page.screenshot({ path: "docs/dashboard-screenshot-compact.png" });
+});
+
+test("capture jira screenshot", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.removeItem("github-tracker:view");
+    localStorage.setItem("github-tracker:auth-token", "fake-screenshot-token");
+    localStorage.setItem(
+      "github-tracker:config",
+      JSON.stringify({
+        onboardingComplete: true,
+        selectedOrgs: ["acme-corp"],
+        selectedRepos: [
+          { owner: "acme-corp", name: "web-platform", fullName: "acme-corp/web-platform" },
+        ],
+        trackedUsers: [
+          {
+            login: "jdoe",
+            avatarUrl: "https://avatars.githubusercontent.com/u/12345?v=4",
+            name: "Jane Doe",
+            type: "user",
+          },
+        ],
+        theme: "dark",
+        jira: {
+          enabled: true,
+          authMethod: "token",
+          cloudId: "fake-cloud-id",
+          siteUrl: "https://acme-corp.atlassian.net",
+          siteName: "Acme Corp",
+          email: "jane@acme-corp.com",
+          issueKeyDetection: true,
+          expandIssueDetails: true,
+          customFields: [
+            { id: "customfield_10001", name: "Story Points" },
+            { id: "customfield_10002", name: "Sprint" },
+            { id: "customfield_10003", name: "Team" },
+            { id: "customfield_10004", name: "Epic Link" },
+            { id: "customfield_10005", name: "Labels" },
+          ],
+          customScopes: [
+            { id: "customfield_10100", name: "Code Reviewer" },
+          ],
+        },
+      })
+    );
+    localStorage.setItem(
+      "github-tracker:jira-auth",
+      JSON.stringify({
+        accessToken: "fake-sealed-token",
+        sealedRefreshToken: "",
+        expiresAt: Date.now() + 3_600_000,
+        cloudId: "fake-cloud-id",
+        siteUrl: "https://acme-corp.atlassian.net",
+        siteName: "Acme Corp",
+        email: "jane@acme-corp.com",
+      })
+    );
+  });
+
+  // GitHub API mocks (catch-all first, specific routes override via reverse registration priority)
+  await page.route("https://api.github.com/**", (route) => route.abort());
+
+  await page.route("https://api.github.com/notifications*", (route) =>
+    route.fulfill({ status: 200, json: [] })
+  );
+
+  await page.route("https://api.github.com/repos/*/*/actions/runs*", (route) =>
+    route.fulfill({ status: 200, json: { total_count: 0, workflow_runs: [] } })
+  );
+
+  await page.route("https://api.github.com/graphql", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        data: {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          rateLimit: { limit: 5000, remaining: 4950, resetAt: RESET_AT },
+        },
+      },
+    })
+  );
+
+  await page.route("https://api.github.com/user", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        login: "jdoe",
+        name: "Jane Doe",
+        avatar_url: "https://avatars.githubusercontent.com/u/12345?v=4",
+        id: 12345,
+      },
+    })
+  );
+
+  // Jira proxy mock — handles all endpoints (search, issue, fields)
+  await page.route("**/api/jira/proxy", async (route) => {
+    const body = route.request().postDataJSON() as { endpoint?: string } | null;
+    const endpoint = body?.endpoint ?? "search";
+
+    if (endpoint === "fields") {
+      return route.fulfill({
+        status: 200,
+        json: [
+          { id: "summary", name: "Summary", custom: false, schema: { type: "string" } },
+          { id: "status", name: "Status", custom: false, schema: { type: "status" } },
+          { id: "customfield_10001", name: "Story Points", custom: true, schema: { type: "number" } },
+          { id: "customfield_10002", name: "Sprint", custom: true, schema: { type: "json", custom: "com.pyxis.greenhopper.jira:gh-sprint" } },
+          { id: "customfield_10003", name: "Team", custom: true, schema: { type: "option" } },
+          { id: "customfield_10004", name: "Epic Link", custom: true, schema: { type: "string", custom: "com.pyxis.greenhopper.jira:gh-epic-link" } },
+          { id: "customfield_10005", name: "Labels", custom: true, schema: { type: "array", items: "string" } },
+          { id: "customfield_10100", name: "Code Reviewer", custom: true, schema: { type: "user" } },
+        ],
+      });
+    }
+
+    // Default: search endpoint
+    return route.fulfill({ status: 200, json: jiraSearchResponse });
+  });
+
+  await page.goto("/dashboard");
+  await page.getByRole("tablist").waitFor();
+
+  // Switch to Jira tab
+  await page.getByRole("tab", { name: /jira assigned/i }).click();
+  await page.getByRole("tab", { name: /jira assigned/i, selected: true }).waitFor();
+
+  // Wait for Jira issues to load
+  await page.getByText("PLATFORM-1234").waitFor();
+
+  // Select the custom scope to show it in the screenshot
+  await page.getByRole("button", { name: /filter by scope/i }).click();
+  await page.getByRole("button", { name: "Code Reviewer" }).click();
+
+  // Wait for popover to close and re-fetch to complete
+  await page.locator(".filter-popover-content").waitFor({ state: "detached" });
+  await page.getByText("PLATFORM-1234").waitFor();
+
+  await page.screenshot({ path: "docs/jira-screenshot.png" });
 });

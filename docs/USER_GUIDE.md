@@ -491,6 +491,32 @@ When Jira is connected, a **Jira** tab appears in the tab bar. It shows all open
 
 If your Jira token expires (OAuth refresh tokens expire after 90 days of inactivity), a notification prompts you to reconnect in Settings.
 
+### Configuring Custom Fields
+
+You can choose up to 10 Jira custom fields to display in the expandable detail panel on the Jira Assigned tab. System fields (status, priority, assignee, etc.) are always shown and are not part of this list.
+
+1. Go to **Settings > Jira Cloud Integration > Configure fields**
+2. Search or scroll through the list of available custom fields for your Jira site
+3. Select up to 10 fields — selected fields are highlighted and checked
+4. Click **Save**
+
+Selected fields appear in the expandable detail panel when you click a Jira issue row on the Jira tab. If no custom fields are configured, the detail panel shows only the system fields.
+
+Changes take effect on the next poll cycle (up to 5 minutes).
+
+### Configuring Custom Scopes
+
+You can add custom scope options to the Jira tab's scope dropdown by selecting user-type fields. Each selected field adds a new scope option alongside the built-in ones ("Assigned to me", "Created by me", "Watching").
+
+For example, selecting an "Architect" user field adds an "Architect" option to the scope dropdown, which shows Jira issues where the Architect field is set to your account (`Architect = currentUser()`).
+
+1. Go to **Settings > Jira Cloud Integration > Configure scopes**
+2. Search or scroll through the list of available user-type fields (only fields where `= currentUser()` is valid JQL are shown)
+3. Select any fields you want to use as scope options
+4. Click **Save**
+
+Custom scopes are independent of custom fields — a field can be selected for both display in the detail panel and as a scope option.
+
 ### Bookmarking Jira Issues
 
 From the Jira Assigned tab, click the **pin icon** on any issue to add it to the Tracked tab alongside your pinned GitHub items.

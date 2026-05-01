@@ -19,6 +19,8 @@ A dashboard for tracking GitHub issues, PRs, and Actions workflow runs across ma
 </tr>
 </table>
 
+<img src="docs/jira-screenshot.png" alt="Jira integration — custom fields and scopes">
+
 ## Documentation
 
 For detailed feature documentation, see the [User Guide](docs/USER_GUIDE.md).

@@ -42,9 +42,12 @@ const mockSetJiraAuth = vi.fn();
 const mockIsJiraAuthenticated = vi.fn(() => false);
 const mockJiraAuth = vi.fn(() => null as Record<string, unknown> | null);
 
+const mockClearJiraConfigFull = vi.fn();
+
 vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   clearJiraAuth: (...args: unknown[]) => mockClearJiraAuth(...args),
+  clearJiraConfigFull: (...args: unknown[]) => mockClearJiraConfigFull(...args),
   setJiraAuth: (...args: unknown[]) => mockSetJiraAuth(...args),
   jiraAuth: () => mockJiraAuth(),
   isJiraAuthenticated: () => mockIsJiraAuthenticated(),
@@ -511,7 +514,7 @@ describe("SettingsPage Jira section — connected state", () => {
     });
   });
 
-  it("Disconnect button calls clearJiraAuth", async () => {
+  it("Disconnect button calls clearJiraConfigFull", async () => {
     renderSettings();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
@@ -519,7 +522,7 @@ describe("SettingsPage Jira section — connected state", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Disconnect/i }));
 
-    expect(mockClearJiraAuth).toHaveBeenCalled();
+    expect(mockClearJiraConfigFull).toHaveBeenCalled();
   });
 
   it("Disconnect does not show OAuth connect buttons (only when disconnected)", async () => {

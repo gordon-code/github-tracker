@@ -368,35 +368,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         <SkeletonRows label="Loading pull requests" />
       </Show>
 
-      {/* Empty — only when no groups exist at all (locked stubs are handled by EmptyLockedRepoRow) */}
-      <Show when={(!props.loading || props.pullRequests.length > 0) && pageGroups().length === 0}>
-        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
-          <svg
-            class="h-10 w-10 opacity-40"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M8 7h8m-8 5h5m-5 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
-            />
-          </svg>
-          <p class="text-sm font-medium">
-            {activeFilters().scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
-          </p>
-          <p class="text-xs">
-            {activeFilters().scope === "all"
-              ? "No pull requests match your current filters."
-              : "PRs where you are the author, assignee, or reviewer will appear here."}
-          </p>
-        </div>
-      </Show>
-
-      {/* PR rows */}
+      {/* PR rows + locked stubs */}
       <Show when={(!props.loading || props.pullRequests.length > 0) && pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
           <For each={pageGroups()}>
@@ -658,6 +630,34 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 );
             }}
           </For>
+        </div>
+      </Show>
+
+      {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
+      <Show when={(!props.loading || props.pullRequests.length > 0) && filteredSorted().length === 0}>
+        <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
+          <svg
+            class="h-10 w-10 opacity-40"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+              d="M8 7h8m-8 5h5m-5 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
+            />
+          </svg>
+          <p class="text-sm font-medium">
+            {activeFilters().scope === "all" ? "No open pull requests found" : "No open pull requests involving you"}
+          </p>
+          <p class="text-xs">
+            {activeFilters().scope === "all"
+              ? "No pull requests match your current filters."
+              : "PRs where you are the author, assignee, or reviewer will appear here."}
+          </p>
         </div>
       </Show>
 

@@ -3,7 +3,7 @@ import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
-import type { Config, ThemeId, CustomTab, JiraConfig } from "../../shared/schemas";
+import type { Config, ThemeId, CustomTab, JiraConfig, JiraCustomField } from "../../shared/schemas";
 import { z } from "zod";
 
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
@@ -104,6 +104,14 @@ export function setMcpRelayPort(port: number): void {
 
 export function updateJiraConfig(partial: Partial<JiraConfig>): void {
   updateConfig({ jira: { ...config.jira, ...partial } });
+}
+
+export function updateJiraCustomFields(fields: JiraCustomField[]): void {
+  updateJiraConfig({ customFields: fields.slice(0, 10) });
+}
+
+export function updateJiraCustomScopes(scopes: JiraCustomField[]): void {
+  updateJiraConfig({ customScopes: scopes.slice(0, 20) });
 }
 
 export function resetConfig(): void {
