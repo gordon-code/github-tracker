@@ -29,7 +29,7 @@ export const TrackedUserSchema = z.object({
 
 export type TrackedUser = z.infer<typeof TrackedUserSchema>;
 
-export const BUILTIN_TAB_IDS = ["issues", "pullRequests", "actions", "tracked", "jiraAssigned"] as const;
+export const BUILTIN_TAB_IDS = ["issues", "pullRequests", "dependencies", "actions", "tracked", "jiraAssigned"] as const;
 export type BuiltinTabId = (typeof BUILTIN_TAB_IDS)[number];
 
 export const CustomTabBaseType = z.enum(["issues", "pullRequests", "actions"]);
@@ -78,6 +78,12 @@ export const JiraConfigSchema = z.object({
 
 export type JiraConfig = z.infer<typeof JiraConfigSchema>;
 
+export const DependencyConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  rebaseLabel: z.string().min(1).max(50).default("rebase"),
+});
+export type DependencyConfig = z.infer<typeof DependencyConfigSchema>;
+
 export const ConfigSchema = z.object({
   selectedOrgs: z.array(z.string()).default([]),
   selectedRepos: z.array(RepoRefSchema).default([]),
@@ -110,6 +116,7 @@ export const ConfigSchema = z.object({
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
   // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
   jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true, expandIssueDetails: false, customFields: [], customScopes: [] }),
+  dependencies: DependencyConfigSchema.default({ enabled: true, rebaseLabel: "rebase" }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
