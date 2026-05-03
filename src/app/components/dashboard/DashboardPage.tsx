@@ -257,7 +257,7 @@ async function pollFetch(): Promise<DashboardData> {
         setDashboardData({
           issues: data.issues,
           pullRequests: data.pullRequests,
-          workflowRuns: data.workflowRuns,
+          workflowRuns: config.enableActions ? data.workflowRuns : [],
           loading: false,
           lastRefreshedAt: now,
         });
@@ -1073,7 +1073,7 @@ export default function DashboardPage() {
   // When Actions is disabled, clear stale workflowRuns from the store so memos
   // computing against empty workflowRuns don't process cached data (SEC-004).
   createEffect(() => {
-    if (!config.enableActions) {
+    if (!config.enableActions && dashboardData.workflowRuns.length > 0) {
       setDashboardData(produce((d) => { d.workflowRuns = []; }));
     }
   });
