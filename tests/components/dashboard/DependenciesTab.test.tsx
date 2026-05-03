@@ -427,7 +427,7 @@ describe("DependenciesTab — updateType filter", () => {
     const pin = makeMergeablePR({ title: "chore(deps): pin dependencies" });
     setTabFilter("dependencies", "updateType", "major");
     renderTab({ pullRequests: [pin] });
-    expect(screen.getByText(pin.title)).toBeDefined();
+    expect(screen.getByText("Pin dependencies")).toBeDefined();
   });
 });
 

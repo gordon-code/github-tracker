@@ -234,7 +234,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   return (
     <div class="flex flex-col h-full">
       <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
-        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-2 compact:gap-1">
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-3 compact:gap-2">
           <FilterToolbar
             groups={filterGroups()}
             values={activeFilters()}
@@ -242,10 +242,12 @@ export default function DependenciesTab(props: DependenciesTabProps) {
             onResetAll={() => resetAllTabFilters("dependencies")}
           />
         </div>
-        <ExpandCollapseButtons
-          onExpandAll={expandAllGroups}
-          onCollapseAll={collapseAllGroups}
-        />
+        <div class="shrink-0 flex items-center gap-2 py-0.5">
+          <ExpandCollapseButtons
+            onExpandAll={expandAllGroups}
+            onCollapseAll={collapseAllGroups}
+          />
+        </div>
       </div>
 
       <For each={unknownBots()}>
@@ -336,11 +338,18 @@ interface StatusGroupProps {
   onTrack: (pr: PullRequest) => void;
 }
 
+function stripCommitPrefix(title: string): string {
+  const stripped = title.replace(/^(?:chore|fix|build)\(deps[^)]*\):\s*/i, "");
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 function displayTitle(pr: PullRequest, versionInfo: VersionInfo | null): string {
-  if (!versionInfo?.packageName) return pr.title;
-  if (versionInfo.from && versionInfo.to) return `${versionInfo.packageName}: ${versionInfo.from} → ${versionInfo.to}`;
-  if (versionInfo.to) return `${versionInfo.packageName} → ${versionInfo.to}`;
-  return versionInfo.packageName;
+  if (versionInfo?.packageName) {
+    if (versionInfo.from && versionInfo.to) return `${versionInfo.packageName}: ${versionInfo.from} → ${versionInfo.to}`;
+    if (versionInfo.to) return `${versionInfo.packageName} → ${versionInfo.to}`;
+    return versionInfo.packageName;
+  }
+  return stripCommitPrefix(pr.title);
 }
 
 function filteredLabels(labels: { name: string; color: string }[]): { name: string; color: string }[] {
