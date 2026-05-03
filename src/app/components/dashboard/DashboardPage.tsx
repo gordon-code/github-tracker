@@ -213,7 +213,7 @@ async function pollFetch(): Promise<DashboardData> {
 
       setDashboardData(produce((state) => {
         state.issues = data.issues;
-        state.workflowRuns = data.workflowRuns;
+        state.workflowRuns = config.enableActions ? data.workflowRuns : [];
         state.loading = false;
         state.lastRefreshedAt = now;
 
@@ -357,14 +357,15 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
         ),
         ...data.pullRequests,
       ];
-      const newRunIds = new Set(data.workflowRuns.map(r => r.id));
-      state.workflowRuns = [
+      const targetedRuns = config.enableActions ? data.workflowRuns : [];
+      const newRunIds = new Set(targetedRuns.map(r => r.id));
+      state.workflowRuns = config.enableActions ? [
         ...state.workflowRuns.filter(r =>
           !affectedSet.has(r.repoFullName.toLowerCase()) ||
           !newRunIds.has(r.id)
         ),
-        ...data.workflowRuns,
-      ];
+        ...targetedRuns,
+      ] : [];
     }));
   });
 
@@ -529,12 +530,15 @@ export default function DashboardPage() {
     };
   }
 
+  function isActionsBasedTab(tab: TabId): boolean {
+    return tab === "actions" || (!isBuiltinTab(tab) && config.customTabs.some((t) => t.id === tab && t.baseType === "actions"));
+  }
+
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
     if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
-    if (tab === "actions" && !config.enableActions) return "issues";
-    if (!config.enableActions && !isBuiltinTab(tab) && config.customTabs.find((t) => t.id === tab)?.baseType === "actions") return "issues";
+    if (!config.enableActions && isActionsBasedTab(tab)) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
@@ -545,10 +549,7 @@ export default function DashboardPage() {
   function handleTabChange(tab: TabId) {
     // Reject invalid tab IDs to prevent persisting stale state
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
-    if (!config.enableActions) {
-      if (tab === "actions") return;
-      if (!isBuiltinTab(tab) && config.customTabs.find((t) => t.id === tab)?.baseType === "actions") return;
-    }
+    if (!config.enableActions && isActionsBasedTab(tab)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
@@ -578,10 +579,8 @@ export default function DashboardPage() {
 
   // Redirect away from Actions tab (or actions-based custom tab) when Actions is disabled
   createEffect(() => {
-    if (!config.enableActions) {
-      const tab = activeTab();
-      const isActionsTab = tab === "actions" || (!isBuiltinTab(tab) && config.customTabs.find((t) => t.id === tab)?.baseType === "actions");
-      if (isActionsTab) handleTabChange("issues");
+    if (!config.enableActions && isActionsBasedTab(activeTab())) {
+      handleTabChange("issues");
     }
   });
 
