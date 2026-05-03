@@ -1,6 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem } from "../../stores/view";
+import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem, DependencyFiltersSchema } from "../../stores/view";
 import { isSafeGitHubUrl } from "../../lib/url";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
@@ -11,7 +11,7 @@ import FilterToolbar from "../shared/FilterToolbar";
 import ItemRow from "./ItemRow";
 import SkeletonRows from "../shared/SkeletonRows";
 
-const DEP_FILTER_DEFAULTS = { updateType: "all" as const, bot: "all" };
+const DEP_FILTER_DEFAULTS = DependencyFiltersSchema.parse({});
 
 const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
   label: "Update type",
