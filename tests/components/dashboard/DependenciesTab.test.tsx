@@ -174,8 +174,8 @@ describe("DependenciesTab — status groups", () => {
   it("shows Mergeable expanded by default — displayed title visible", () => {
     const pr = makeMergeablePR();
     renderTab({ pullRequests: [pr] });
-    // "chore(deps): update dependency lodash to v5" → displayTitle: "lodash"
-    expect(screen.getByText("lodash")).toBeDefined();
+    // "chore(deps): update dependency lodash to v5" → displayTitle: "lodash → v5"
+    expect(screen.getByText("lodash → v5")).toBeDefined();
   });
 
   it("Needs Action group collapsed by default — content div is hidden", () => {
@@ -323,16 +323,22 @@ describe("DependenciesTab — version badges", () => {
     expect(screen.queryByText("patch")).toBeNull();
   });
 
-  it("shows version arrow for bump PRs", () => {
+  it("shows structured title with version arrow for bump PRs", () => {
     const pr = makeMergeablePR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("4.17.20 → 4.17.21")).toBeDefined();
+    expect(screen.getByText("lodash: 4.17.20 → 4.17.21")).toBeDefined();
   });
 
-  it("shows structured title (package name) for parseable titles", () => {
-    const pr = makeMergeablePR({ title: "Bump webpack from 5.89.0 to 5.90.0" });
+  it("shows structured title with to-version for Renovate PRs", () => {
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency react to v18" });
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("webpack")).toBeDefined();
+    expect(screen.getByText("react → v18")).toBeDefined();
+  });
+
+  it("shows structured title for Python requirement PRs", () => {
+    const pr = makeMergeablePR({ title: "chore(deps-dev): update ruff requirement from >=0.9.4 to >=0.15.10" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("ruff: 0.9.4 → 0.15.10")).toBeDefined();
   });
 });
 
@@ -404,9 +410,8 @@ describe("DependenciesTab — updateType filter", () => {
     const major = makeMergeablePR({ title: "Bump lodash from 3.0.0 to 4.0.0" });
     const patch = makeMergeablePR({ title: "Bump axios from 0.27.1 to 0.27.2" });
     renderTab({ pullRequests: [major, patch] });
-    // Structured display shows package names
-    expect(screen.getByText("lodash")).toBeDefined();
-    expect(screen.getByText("axios")).toBeDefined();
+    expect(screen.getByText("lodash: 3.0.0 → 4.0.0")).toBeDefined();
+    expect(screen.getByText("axios: 0.27.1 → 0.27.2")).toBeDefined();
   });
 
   it("filters to major only when updateType=major is set", () => {
@@ -414,8 +419,8 @@ describe("DependenciesTab — updateType filter", () => {
     const patch = makeMergeablePR({ title: "Bump axios from 0.27.1 to 0.27.2" });
     setTabFilter("dependencies", "updateType", "major");
     renderTab({ pullRequests: [major, patch] });
-    expect(screen.getByText("lodash")).toBeDefined();
-    expect(screen.queryByText("axios")).toBeNull();
+    expect(screen.getByText("lodash: 3.0.0 → 4.0.0")).toBeDefined();
+    expect(screen.queryByText("axios: 0.27.1 → 0.27.2")).toBeNull();
   });
 
   it("maintenance PRs pass through all updateType filters (unknown version type)", () => {
@@ -432,8 +437,8 @@ describe("DependenciesTab — bot filter", () => {
     const dependabotPR = makeMergeablePR({ userLogin: "dependabot[bot]", title: "Bump axios from 0.27.2 to 1.0.0" });
     setTabFilter("dependencies", "bot", "renovate[bot]");
     renderTab({ pullRequests: [renovatePR, dependabotPR] });
-    expect(screen.getByText("lodash")).toBeDefined();
-    expect(screen.queryByText("axios")).toBeNull();
+    expect(screen.getByText("lodash → v5")).toBeDefined();
+    expect(screen.queryByText(/axios/)).toBeNull();
   });
 });
 
@@ -461,12 +466,12 @@ describe("DependenciesTab — ignore button", () => {
   it("clicking the ignore button hides the PR from the list", () => {
     const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("lodash")).toBeDefined();
+    expect(screen.getByText("lodash → v5")).toBeDefined();
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);
 
-    expect(screen.queryByText("lodash")).toBeNull();
+    expect(screen.queryByText("lodash → v5")).toBeNull();
   });
 
   it("ignore button adds item to ignoredItems in viewState", () => {
@@ -487,7 +492,7 @@ describe("DependenciesTab — ignore button", () => {
     unmount();
 
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText("axios")).toBeNull();
+    expect(screen.queryByText(/axios/)).toBeNull();
   });
 });
 

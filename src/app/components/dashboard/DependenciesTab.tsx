@@ -140,8 +140,16 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     const { field, direction } = viewState.globalSort;
     const items = [...classifiedPRs()];
     const dir = direction === "asc" ? 1 : -1;
+    const isDefault = field === "updatedAt" && direction === "desc";
 
     items.sort((a, b) => {
+      // Default sort: cluster by repo, then newest first within each repo
+      if (isDefault) {
+        const repoCmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName);
+        if (repoCmp !== 0) return repoCmp;
+        return b.pr.updatedAt.localeCompare(a.pr.updatedAt);
+      }
+
       let cmp = 0;
       switch (field) {
         case "repo": cmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName); break;
@@ -330,6 +338,8 @@ interface StatusGroupProps {
 
 function displayTitle(pr: PullRequest, versionInfo: VersionInfo | null): string {
   if (!versionInfo?.packageName) return pr.title;
+  if (versionInfo.from && versionInfo.to) return `${versionInfo.packageName}: ${versionInfo.from} → ${versionInfo.to}`;
+  if (versionInfo.to) return `${versionInfo.packageName} → ${versionInfo.to}`;
   return versionInfo.packageName;
 }
 
@@ -344,7 +354,7 @@ function StatusGroup(props: StatusGroupProps) {
         <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
           <button
             type="button"
-            class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold"
+            class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold repo-header-text"
             onClick={props.onToggle}
             aria-expanded={props.expanded}
             aria-controls={`dep-group-${props.status}`}
@@ -400,18 +410,6 @@ function StatusGroup(props: StatusGroupProps) {
                             {updateType()}
                           </span>
                         )}
-                      </Show>
-
-                      <Show when={versionInfo?.from && versionInfo?.to}>
-                        <span class="text-xs text-base-content/60 font-mono">
-                          {versionInfo!.from} → {versionInfo!.to}
-                        </span>
-                      </Show>
-
-                      <Show when={!versionInfo?.from && versionInfo?.to}>
-                        <span class="text-xs text-base-content/60 font-mono">
-                          → {versionInfo!.to}
-                        </span>
                       </Show>
 
                       <Show when={pr.enriched !== false}>

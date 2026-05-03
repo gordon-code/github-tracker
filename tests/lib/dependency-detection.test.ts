@@ -167,6 +167,16 @@ describe("extractVersionInfo", () => {
     expect(() => extractVersionInfo("Bump ubuntu from 22.04 to 24.04")).not.toThrow();
   });
 
+  it("extracts package and versions from Python requirement update", () => {
+    const result = extractVersionInfo("chore(deps-dev): update ruff requirement from >=0.9.4 to >=0.15.10");
+    expect(result).toEqual({ packageName: "ruff", from: "0.9.4", to: "0.15.10", updateType: "minor" });
+  });
+
+  it("handles various pip requirement operators", () => {
+    const result = extractVersionInfo("chore(deps): update mypy requirement from ~=1.15.0 to ~=1.20.1");
+    expect(result).toEqual({ packageName: "mypy", from: "1.15.0", to: "1.20.1", updateType: "minor" });
+  });
+
   it("returns null for unrecognized title format", () => {
     expect(extractVersionInfo("Fix a bug in auth flow")).toBeNull();
   });

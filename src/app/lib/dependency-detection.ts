@@ -108,6 +108,14 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   if (/update all major/i.test(body)) return { updateType: "major" };
   if (/update all non-major/i.test(body)) return { updateType: "minor" };
 
+  // "update X requirement from >=A to >=B" (Dependabot Python)
+  const reqMatch = /^update\s+(.+?)\s+requirement\s+from\s+([^\s]+)\s+to\s+([^\s]+)/i.exec(body);
+  if (reqMatch) {
+    const from = reqMatch[2]!.replace(/^[><=!~^]+/, "");
+    const to = reqMatch[3]!.replace(/^[><=!~^]+/, "");
+    return { packageName: reqMatch[1]!, from, to, updateType: semverUpdateType(from, to) ?? undefined };
+  }
+
   // "Update dependency X to vY"
   const depMatch = /^Update\s+dependency\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
   if (depMatch && /^v?\d/.test(depMatch[2]!)) {
