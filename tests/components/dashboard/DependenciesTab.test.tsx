@@ -638,7 +638,7 @@ describe("DependenciesTab — ignore button", () => {
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);
 
-    expect(screen.queryByText("lodash")).toBeNull();
+    expect(screen.queryByText("lodash → v5")).toBeNull();
   });
 
   it("ignore button adds item to ignoredItems in viewState", () => {
@@ -659,7 +659,7 @@ describe("DependenciesTab — ignore button", () => {
     unmount();
 
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText("axios")).toBeNull();
+    expect(screen.queryByText(/axios/)).toBeNull();
   });
 });
 

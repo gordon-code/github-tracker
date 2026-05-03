@@ -207,6 +207,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     const { field, direction } = viewState.globalSort;
     const items = [...classifiedPRs()];
     const dir = direction === "asc" ? 1 : -1;
+    const isDefault = field === "updatedAt" && direction === "desc";
 
     items.sort((a, b) => {
       // User-selected sort as primary
