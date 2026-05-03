@@ -609,14 +609,14 @@ export default function SettingsPage() {
         {/* Section 5: GitHub Actions */}
         <Section title="GitHub Actions">
           <SettingRow
-            label="Enable GitHub Actions"
-            description="Track workflow runs and show the Actions tab. Disable to save API calls."
+            label="Show Actions tab"
+            description="Show the Actions tab and track workflow runs. Disable to reduce API usage and simplify the dashboard."
           >
             <input
               type="checkbox"
               role="switch"
               aria-checked={config.enableActions}
-              aria-label="Enable GitHub Actions"
+              aria-label="Show Actions tab"
               checked={config.enableActions}
               onChange={(e) => {
                 const val = e.currentTarget.checked;

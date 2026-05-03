@@ -144,13 +144,13 @@ afterEach(() => {
 describe("Actions enable toggle", () => {
   it("renders checked by default (enableActions defaults to true)", () => {
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i }) as HTMLInputElement;
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i }) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
   });
 
   it("toggling off sets enableActions to false", () => {
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(config.enableActions).toBe(false);
   });
@@ -158,7 +158,7 @@ describe("Actions enable toggle", () => {
   it("toggling off resets defaultTab to 'issues' when it was 'actions'", () => {
     updateConfig({ defaultTab: "actions" });
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(config.defaultTab).toBe("issues");
   });
@@ -166,21 +166,21 @@ describe("Actions enable toggle", () => {
   it("toggling off resets lastActiveTab to 'issues' when it was 'actions'", () => {
     updateViewState({ lastActiveTab: "actions" });
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(viewState.lastActiveTab).toBe("issues");
   });
 
   it("toggling off suppresses workflowRuns notification", () => {
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(config.notifications.workflowRuns).toBe(false);
   });
 
   it("re-enable does NOT auto-restore workflowRuns notification", () => {
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     // Disable
     fireEvent.click(toggle);
     expect(config.notifications.workflowRuns).toBe(false);
@@ -225,7 +225,7 @@ describe("Actions toggle — negative cases", () => {
   it("toggling off does NOT reset defaultTab when it was not 'actions'", () => {
     updateConfig({ defaultTab: "pullRequests" });
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(config.defaultTab).toBe("pullRequests");
   });
@@ -233,7 +233,7 @@ describe("Actions toggle — negative cases", () => {
   it("toggling off does NOT reset lastActiveTab when it was not 'actions'", () => {
     updateViewState({ lastActiveTab: "pullRequests" });
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(viewState.lastActiveTab).toBe("pullRequests");
   });
@@ -243,7 +243,7 @@ describe("Actions toggle — negative cases", () => {
       notifications: { enabled: true, issues: true, pullRequests: true, workflowRuns: true },
     });
     renderSettings();
-    const toggle = screen.getByRole("switch", { name: /enable github actions/i });
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
     fireEvent.click(toggle);
     expect(config.notifications.issues).toBe(true);
     expect(config.notifications.pullRequests).toBe(true);
