@@ -34,6 +34,17 @@ export function isKnownDepBot(login: string): boolean {
   return KNOWN_DEP_BOT_LOGINS.has(lower) || KNOWN_DEP_BOT_BASE_NAMES.has(lower.replace(/\[bot\]$/, ""));
 }
 
+export function expandBotLogins(logins: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const login of logins) {
+    set.add(login);
+    const base = login.replace(/\[bot\]$/, "");
+    set.add(base);
+    if (base === login) set.add(`${login}[bot]`);
+  }
+  return set;
+}
+
 export type DepStatus = "mergeable" | "needs-action" | "stale" | "pending-rebase";
 
 export const ALL_DEP_STATUSES: readonly DepStatus[] = [

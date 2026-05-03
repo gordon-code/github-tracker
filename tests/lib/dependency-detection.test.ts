@@ -5,6 +5,7 @@ import {
   classifyDepStatus,
   isRebasing,
   isKnownDepBot,
+  expandBotLogins,
   KNOWN_DEP_BOT_LOGINS,
   DEP_BRANCH_PREFIXES,
   DEP_TITLE_PATTERN,
@@ -396,6 +397,28 @@ describe("isKnownDepBot", () => {
   it("returns false for unknown logins", () => {
     expect(isKnownDepBot("octocat")).toBe(false);
     expect(isKnownDepBot("my-custom-bot")).toBe(false);
+  });
+});
+
+describe("expandBotLogins", () => {
+  it("includes both base and [bot] variant for plain login", () => {
+    const set = expandBotLogins(["khepri-bot"]);
+    expect(set.has("khepri-bot")).toBe(true);
+    expect(set.has("khepri-bot[bot]")).toBe(true);
+  });
+
+  it("includes both base and [bot] variant for [bot] login", () => {
+    const set = expandBotLogins(["renovate[bot]"]);
+    expect(set.has("renovate[bot]")).toBe(true);
+    expect(set.has("renovate")).toBe(true);
+  });
+
+  it("handles mixed logins", () => {
+    const set = expandBotLogins(["my-bot", "other[bot]"]);
+    expect(set.has("my-bot")).toBe(true);
+    expect(set.has("my-bot[bot]")).toBe(true);
+    expect(set.has("other[bot]")).toBe(true);
+    expect(set.has("other")).toBe(true);
   });
 });
 

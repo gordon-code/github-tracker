@@ -11,7 +11,7 @@ import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
-import { isDependencyPr } from "../../lib/dependency-detection";
+import { isDependencyPr, expandBotLogins } from "../../lib/dependency-detection";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
@@ -820,7 +820,7 @@ export default function DashboardPage() {
 
   // Dep PR detection — placed above exclusiveOwnership so pre-exclusivity claims run first
   const trackedBotLogins = createMemo(() =>
-    new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
+    expandBotLogins(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
   const dependencyPullRequests = createMemo(() => {
     if (!config.dependencies.enabled) return [];
