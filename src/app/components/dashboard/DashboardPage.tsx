@@ -1141,6 +1141,8 @@ export default function DashboardPage() {
             }
             newUrlMap.set(di.repoFullName, di.htmlUrl);
           }
+          // Don't replace valid data with empty results from a failed fetch
+          if (bodyMap.size === 0 && relevant.length > 0) return;
           setAbandonedDepsMap(newAbandonedMap);
           setDashboardIssueUrls(newUrlMap);
         } finally {
