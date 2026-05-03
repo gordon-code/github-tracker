@@ -1,15 +1,14 @@
-import { createEffect, createMemo, For, on, Show } from "solid-js";
-import { config } from "../../stores/config";
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { pushNotification } from "../../lib/errors";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
   extractVersionInfo,
   ALL_DEP_STATUSES,
-  KNOWN_DEP_BOT_LOGINS,
+  isKnownDepBot,
   DEP_TOOL_LABEL_NAMES,
   type DepStatus,
   type VersionInfo,
@@ -59,9 +58,8 @@ interface DependenciesTabProps {
   hotPollingPRIds?: ReadonlySet<number>;
   refreshTick?: number;
   rebaseLabel: string;
+  userLogin: string;
 }
-
-const _notifiedBots = new Set<string>();
 
 export default function DependenciesTab(props: DependenciesTabProps) {
   const expandedGroups = createMemo(() =>
@@ -179,27 +177,38 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     return groups;
   });
 
-  // Unknown bot detection — one-time notification per session
-  createEffect(
-    on(
-      () => props.pullRequests,
-      (prs) => {
-        const known = trackedBotLogins();
-        for (const pr of prs) {
-          const login = pr.userLogin.toLowerCase();
-          if (KNOWN_DEP_BOT_LOGINS.has(login)) continue;
-          if (known.has(login)) continue;
-          if (_notifiedBots.has(login)) continue;
-          _notifiedBots.add(login);
-          pushNotification(
-            `unknown-dep-bot:${login}`,
-            `Found dependency PRs from "${pr.userLogin}". Track this bot in Settings → Tracked Users for full coverage.`,
-            "info"
-          );
-        }
-      }
-    )
-  );
+  // Unknown bot detection — inline banner with "Track" action
+  const [dismissedBots, setDismissedBots] = createSignal(new Set<string>());
+
+  const unknownBots = createMemo(() => {
+    const known = trackedBotLogins();
+    const userLower = props.userLogin.toLowerCase();
+    const dismissed = dismissedBots();
+    const seen = new Map<string, { login: string; avatarUrl: string }>();
+
+    for (const pr of props.pullRequests) {
+      const login = pr.userLogin.toLowerCase();
+      if (login === userLower) continue;
+      if (isKnownDepBot(login)) continue;
+      if (known.has(login)) continue;
+      if (dismissed.has(login)) continue;
+      if (seen.has(login)) continue;
+      seen.set(login, { login: pr.userLogin, avatarUrl: pr.userAvatarUrl });
+    }
+    return [...seen.values()];
+  });
+
+  function handleTrackBot(login: string, avatarUrl: string) {
+    const existing = config.trackedUsers.map((u) => u.login.toLowerCase());
+    if (existing.includes(login.toLowerCase())) return;
+    updateConfig({
+      trackedUsers: [...config.trackedUsers, { login, avatarUrl, name: null, type: "bot" as const }],
+    });
+  }
+
+  function handleDismissBot(login: string) {
+    setDismissedBots((prev) => new Set([...prev, login.toLowerCase()]));
+  }
 
   function handleIgnore(pr: PullRequest) {
     ignoreItem({ id: pr.id, type: "pullRequest", repo: pr.repoFullName, title: pr.title, ignoredAt: Date.now() });
@@ -230,6 +239,33 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           onCollapseAll={collapseAllGroups}
         />
       </div>
+
+      <For each={unknownBots()}>
+        {(bot) => (
+          <div class="flex items-center gap-2 px-4 py-2 bg-info/10 border-b border-base-300 text-sm">
+            <Show when={bot.avatarUrl}>
+              <img src={bot.avatarUrl} alt={bot.login} class="w-5 h-5 rounded-full" />
+            </Show>
+            <span class="flex-1">
+              Dependency PRs from <strong>{bot.login}</strong> — track this bot for full coverage?
+            </span>
+            <button
+              type="button"
+              class="btn btn-xs btn-primary"
+              onClick={() => handleTrackBot(bot.login, bot.avatarUrl)}
+            >
+              Track bot
+            </button>
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              onClick={() => handleDismissBot(bot.login)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </For>
 
       <Show when={props.loading && props.pullRequests.length === 0}>
         <SkeletonRows label="Loading dependency PRs" />

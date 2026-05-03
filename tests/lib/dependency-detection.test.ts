@@ -4,6 +4,7 @@ import {
   extractVersionInfo,
   classifyDepStatus,
   isRebasing,
+  isKnownDepBot,
   KNOWN_DEP_BOT_LOGINS,
   DEP_BRANCH_PREFIXES,
   DEP_TITLE_PATTERN,
@@ -358,6 +359,33 @@ describe("DEP_TOOL_LABEL_NAMES", () => {
 
   it("does not contain non-dep labels", () => {
     expect(DEP_TOOL_LABEL_NAMES.has("bug")).toBe(false);
+  });
+});
+
+describe("isKnownDepBot", () => {
+  it("returns true for exact match with [bot] suffix", () => {
+    expect(isKnownDepBot("dependabot[bot]")).toBe(true);
+    expect(isKnownDepBot("renovate[bot]")).toBe(true);
+  });
+
+  it("returns true for base name without [bot] suffix", () => {
+    expect(isKnownDepBot("dependabot")).toBe(true);
+    expect(isKnownDepBot("renovate")).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isKnownDepBot("Dependabot[bot]")).toBe(true);
+    expect(isKnownDepBot("RENOVATE")).toBe(true);
+  });
+
+  it("returns true for bots without [bot] in known list", () => {
+    expect(isKnownDepBot("snyk-bot")).toBe(true);
+    expect(isKnownDepBot("scala-steward")).toBe(true);
+  });
+
+  it("returns false for unknown logins", () => {
+    expect(isKnownDepBot("octocat")).toBe(false);
+    expect(isKnownDepBot("my-custom-bot")).toBe(false);
   });
 });
 

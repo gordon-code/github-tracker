@@ -30,7 +30,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import { render } from "@solidjs/testing-library";
 import DependenciesTab from "../../../src/app/components/dashboard/DependenciesTab.js";
-import { resetConfig, updateConfig } from "../../../src/app/stores/config.js";
+import { config, resetConfig, updateConfig } from "../../../src/app/stores/config.js";
 import { setTabFilter, resetViewState, viewState, setDependencyExpandedGroups } from "../../../src/app/stores/view.js";
 import { makePullRequest } from "../../helpers/factories.js";
 import type { AbandonedDependency } from "../../../src/app/lib/dependency-dashboard.js";
@@ -44,6 +44,7 @@ const EMPTY_MAPS = {
 
 const BASE_PROPS = {
   rebaseLabel: "rebase",
+  userLogin: "testuser",
   ...EMPTY_MAPS,
 };
 
@@ -529,5 +530,60 @@ describe("DependenciesTab — track button", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Unpin #/ }));
     expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(false);
+  });
+});
+
+// ── Unknown bot detection ────────────────────────────────────────────────────
+
+describe("DependenciesTab — unknown bot banner", () => {
+  it("shows banner for unknown bot authors", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByRole("button", { name: "Track bot" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+  });
+
+  it("does not show banner for known dep bots", () => {
+    const pr = makeMergeablePR({ userLogin: "renovate[bot]" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("does not show banner for known bots without [bot] suffix", () => {
+    const pr = makeMergeablePR({ userLogin: "dependabot" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("does not show banner for the authenticated user", () => {
+    const pr = makeMergeablePR({ userLogin: "testuser" });
+    renderTab({ pullRequests: [pr], userLogin: "testuser" });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("dismiss button hides the banner for the session", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("track button adds bot to config.trackedUsers", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    fireEvent.click(screen.getByRole("button", { name: "Track bot" }));
+
+    expect(config.trackedUsers.some((u) => u.login === "custom-dep-bot" && u.type === "bot")).toBe(true);
   });
 });

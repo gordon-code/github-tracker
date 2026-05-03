@@ -25,6 +25,15 @@ export const DEP_TOOL_LABEL_NAMES = new Set([
   "renovate",
 ]);
 
+const KNOWN_DEP_BOT_BASE_NAMES = new Set(
+  [...KNOWN_DEP_BOT_LOGINS].map((l) => l.replace(/\[bot\]$/, ""))
+);
+
+export function isKnownDepBot(login: string): boolean {
+  const lower = login.toLowerCase();
+  return KNOWN_DEP_BOT_LOGINS.has(lower) || KNOWN_DEP_BOT_BASE_NAMES.has(lower.replace(/\[bot\]$/, ""));
+}
+
 export type DepStatus = "mergeable" | "needs-action" | "stale" | "pending-rebase";
 
 export const ALL_DEP_STATUSES: readonly DepStatus[] = [
