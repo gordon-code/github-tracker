@@ -125,6 +125,7 @@ export const ViewStateSchema = z.object({
   }),
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
+  dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -215,6 +216,7 @@ export function resetViewState(): void {
         expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
+        dependencyExpandedGroups: ["mergeable"],
       });
     })
   );
@@ -322,6 +324,14 @@ export function resetAllTabFilters(
       } else if (tab === "dependencies") {
         draft.tabFilters.dependencies = DependencyFiltersSchema.parse({});
       }
+    })
+  );
+}
+
+export function setDependencyExpandedGroups(groups: string[]): void {
+  setViewState(
+    produce((draft) => {
+      draft.dependencyExpandedGroups = groups;
     })
   );
 }

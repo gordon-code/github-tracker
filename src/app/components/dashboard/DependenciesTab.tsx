@@ -1,13 +1,27 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, For, on, Show } from "solid-js";
 import { config } from "../../stores/config";
-import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem, DependencyFiltersSchema } from "../../stores/view";
+import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import { isSafeGitHubUrl } from "../../lib/url";
+import { pushNotification } from "../../lib/errors";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
-import { classifyDepStatus, extractVersionInfo, isRebasing, type DepStatus } from "../../lib/dependency-detection";
+import {
+  classifyDepStatus,
+  extractVersionInfo,
+  ALL_DEP_STATUSES,
+  KNOWN_DEP_BOT_LOGINS,
+  DEP_TOOL_LABEL_NAMES,
+  type DepStatus,
+  type VersionInfo,
+} from "../../lib/dependency-detection";
 import { matchAbandonedToPr } from "../../lib/dependency-dashboard";
 import type { FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
+import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
+import ChevronIcon from "../shared/ChevronIcon";
+import StatusDot from "../shared/StatusDot";
+import SizeBadge from "../shared/SizeBadge";
+import ReviewBadge from "../shared/ReviewBadge";
 import ItemRow from "./ItemRow";
 import SkeletonRows from "../shared/SkeletonRows";
 
@@ -17,18 +31,23 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
   label: "Update type",
   field: "updateType",
   options: [
-    { value: "all", label: "All" },
     { value: "major", label: "Major" },
     { value: "minor", label: "Minor" },
     { value: "patch", label: "Patch" },
   ],
 };
 
+const STATUS_META: Record<DepStatus, { label: string; badgeClass: string; defaultExpanded: boolean }> = {
+  "mergeable":       { label: "Mergeable",      badgeClass: "badge-success",  defaultExpanded: true },
+  "pending-rebase":  { label: "Pending Rebase",  badgeClass: "badge-ghost",    defaultExpanded: false },
+  "needs-action":    { label: "Needs Action",    badgeClass: "badge-warning",  defaultExpanded: true },
+  "stale":           { label: "Stale",           badgeClass: "badge-error",    defaultExpanded: false },
+};
+
 interface ClassifiedPR {
   pr: PullRequest;
   status: DepStatus;
-  versionInfo: ReturnType<typeof extractVersionInfo>;
-  rebasing: boolean;
+  versionInfo: VersionInfo | null;
   abandonedDep: AbandonedDependency | null;
 }
 
@@ -42,18 +61,27 @@ interface DependenciesTabProps {
   rebaseLabel: string;
 }
 
+const _notifiedBots = new Set<string>();
+
 export default function DependenciesTab(props: DependenciesTabProps) {
-  const [expandedGroups, setExpandedGroups] = createSignal<Set<DepStatus>>(
-    new Set<DepStatus>(["needs-review"])
+  const expandedGroups = createMemo(() =>
+    new Set<string>(viewState.dependencyExpandedGroups)
   );
 
   function toggleGroup(status: DepStatus) {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(status)) next.delete(status);
-      else next.add(status);
-      return next;
-    });
+    const current = viewState.dependencyExpandedGroups;
+    const next = current.includes(status)
+      ? current.filter((s) => s !== status)
+      : [...current, status];
+    setDependencyExpandedGroups(next);
+  }
+
+  function expandAllGroups() {
+    setDependencyExpandedGroups([...ALL_DEP_STATUSES]);
+  }
+
+  function collapseAllGroups() {
+    setDependencyExpandedGroups([]);
   }
 
   const activeFilters = createMemo(() => ({
@@ -66,10 +94,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     return {
       label: "Bot",
       field: "bot",
-      options: [
-        { value: "all", label: "All" },
-        ...logins.map((l) => ({ value: l, label: l })),
-      ],
+      options: logins.map((l) => ({ value: l, label: l })),
     };
   });
 
@@ -85,6 +110,10 @@ export default function DependenciesTab(props: DependenciesTabProps) {
       : new Set<number>()
   );
 
+  const trackedBotLogins = createMemo(() =>
+    new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
+  );
+
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
     const ignored = ignoredIds();
@@ -94,39 +123,83 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
         return {
           pr,
-          status: classifyDepStatus(pr),
+          status: classifyDepStatus(pr, props.rebaseLabel),
           versionInfo,
-          rebasing: isRebasing(pr, props.rebaseLabel),
           abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
         };
       })
       .filter(({ pr, versionInfo }) => {
         if (ignored.has(pr.id)) return false;
-
-        // Bot filter
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
-
-        // updateType filter — pass through when updateType is null (unknown)
         if (filters.updateType !== "all") {
           if (versionInfo !== null && versionInfo.updateType !== undefined && versionInfo.updateType !== filters.updateType) return false;
         }
-
         return true;
-      })
-      .sort((a, b) => (a.pr.updatedAt < b.pr.updatedAt ? 1 : a.pr.updatedAt > b.pr.updatedAt ? -1 : 0));
+      });
+  });
+
+  const sortedPRs = createMemo(() => {
+    const { field, direction } = viewState.globalSort;
+    const items = [...classifiedPRs()];
+    const dir = direction === "asc" ? 1 : -1;
+
+    items.sort((a, b) => {
+      let cmp = 0;
+      switch (field) {
+        case "repo": cmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName); break;
+        case "title": cmp = a.pr.title.localeCompare(b.pr.title); break;
+        case "author": cmp = a.pr.userLogin.localeCompare(b.pr.userLogin); break;
+        case "comments": cmp = a.pr.comments - b.pr.comments; break;
+        case "checkStatus": cmp = (a.pr.checkStatus ?? "").localeCompare(b.pr.checkStatus ?? ""); break;
+        case "reviewDecision": cmp = (a.pr.reviewDecision ?? "").localeCompare(b.pr.reviewDecision ?? ""); break;
+        case "size": cmp = (a.pr.additions + a.pr.deletions) - (b.pr.additions + b.pr.deletions); break;
+        case "createdAt": cmp = a.pr.createdAt.localeCompare(b.pr.createdAt); break;
+        case "updatedAt":
+        default:
+          cmp = a.pr.updatedAt.localeCompare(b.pr.updatedAt);
+          break;
+      }
+      if (cmp !== 0) return cmp * dir;
+      return a.pr.repoFullName.localeCompare(b.pr.repoFullName);
+    });
+
+    return items;
   });
 
   const statusGroups = createMemo(() => {
     const groups: Record<DepStatus, ClassifiedPR[]> = {
-      "needs-review": [],
-      waiting: [],
-      stale: [],
+      "mergeable": [],
+      "pending-rebase": [],
+      "needs-action": [],
+      "stale": [],
     };
-    for (const item of classifiedPRs()) {
+    for (const item of sortedPRs()) {
       groups[item.status].push(item);
     }
     return groups;
   });
+
+  // Unknown bot detection — one-time notification per session
+  createEffect(
+    on(
+      () => props.pullRequests,
+      (prs) => {
+        const known = trackedBotLogins();
+        for (const pr of prs) {
+          const login = pr.userLogin.toLowerCase();
+          if (KNOWN_DEP_BOT_LOGINS.has(login)) continue;
+          if (known.has(login)) continue;
+          if (_notifiedBots.has(login)) continue;
+          _notifiedBots.add(login);
+          pushNotification(
+            `unknown-dep-bot:${login}`,
+            `Found dependency PRs from "${pr.userLogin}". Track this bot in Settings → Tracked Users for full coverage.`,
+            "info"
+          );
+        }
+      }
+    )
+  );
 
   function handleIgnore(pr: PullRequest) {
     ignoreItem({ id: pr.id, type: "pullRequest", repo: pr.repoFullName, title: pr.title, ignoredAt: Date.now() });
@@ -152,13 +225,17 @@ export default function DependenciesTab(props: DependenciesTabProps) {
             onResetAll={() => resetAllTabFilters("dependencies")}
           />
         </div>
+        <ExpandCollapseButtons
+          onExpandAll={expandAllGroups}
+          onCollapseAll={collapseAllGroups}
+        />
       </div>
 
       <Show when={props.loading && props.pullRequests.length === 0}>
         <SkeletonRows label="Loading dependency PRs" />
       </Show>
 
-      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.length === 0}>
+      <Show when={!props.loading && sortedPRs().length === 0 && props.pullRequests.length === 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <svg class="h-10 w-10 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -168,59 +245,32 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         </div>
       </Show>
 
-      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.length > 0}>
+      <Show when={!props.loading && sortedPRs().length === 0 && props.pullRequests.length > 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <p class="text-sm font-medium">No PRs match your current filters</p>
         </div>
       </Show>
 
-      <Show when={classifiedPRs().length > 0}>
+      <Show when={sortedPRs().length > 0}>
         <div class="divide-y divide-base-300 overflow-y-auto flex-1">
-          <StatusGroup
-            status="needs-review"
-            label="Needs Review"
-            badgeClass="badge-warning"
-            items={statusGroups()["needs-review"]}
-            expanded={expandedGroups().has("needs-review")}
-            onToggle={() => toggleGroup("needs-review")}
-            dashboardIssueUrls={props.dashboardIssueUrls}
-            hotPollingPRIds={props.hotPollingPRIds}
-            refreshTick={props.refreshTick}
-            trackedPrIds={trackedPrIds()}
-            enableTracking={config.enableTracking}
-            onIgnore={handleIgnore}
-            onTrack={handleTrack}
-          />
-          <StatusGroup
-            status="waiting"
-            label="Waiting"
-            badgeClass="badge-info"
-            items={statusGroups().waiting}
-            expanded={expandedGroups().has("waiting")}
-            onToggle={() => toggleGroup("waiting")}
-            dashboardIssueUrls={props.dashboardIssueUrls}
-            hotPollingPRIds={props.hotPollingPRIds}
-            refreshTick={props.refreshTick}
-            trackedPrIds={trackedPrIds()}
-            enableTracking={config.enableTracking}
-            onIgnore={handleIgnore}
-            onTrack={handleTrack}
-          />
-          <StatusGroup
-            status="stale"
-            label="Stale"
-            badgeClass="badge-error"
-            items={statusGroups().stale}
-            expanded={expandedGroups().has("stale")}
-            onToggle={() => toggleGroup("stale")}
-            dashboardIssueUrls={props.dashboardIssueUrls}
-            hotPollingPRIds={props.hotPollingPRIds}
-            refreshTick={props.refreshTick}
-            trackedPrIds={trackedPrIds()}
-            enableTracking={config.enableTracking}
-            onIgnore={handleIgnore}
-            onTrack={handleTrack}
-          />
+          <For each={ALL_DEP_STATUSES}>
+            {(status) => (
+              <StatusGroup
+                status={status}
+                label={STATUS_META[status].label}
+                items={statusGroups()[status]}
+                expanded={expandedGroups().has(status)}
+                onToggle={() => toggleGroup(status)}
+                dashboardIssueUrls={props.dashboardIssueUrls}
+                hotPollingPRIds={props.hotPollingPRIds}
+                refreshTick={props.refreshTick}
+                trackedPrIds={trackedPrIds()}
+                enableTracking={config.enableTracking}
+                onIgnore={handleIgnore}
+                onTrack={handleTrack}
+              />
+            )}
+          </For>
         </div>
       </Show>
     </div>
@@ -230,7 +280,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 interface StatusGroupProps {
   status: DepStatus;
   label: string;
-  badgeClass: string;
   items: ClassifiedPR[];
   expanded: boolean;
   onToggle: () => void;
@@ -243,46 +292,49 @@ interface StatusGroupProps {
   onTrack: (pr: PullRequest) => void;
 }
 
+function displayTitle(pr: PullRequest, versionInfo: VersionInfo | null): string {
+  if (!versionInfo?.packageName) return pr.title;
+  return versionInfo.packageName;
+}
+
+function filteredLabels(labels: { name: string; color: string }[]): { name: string; color: string }[] {
+  return labels.filter((l) => !DEP_TOOL_LABEL_NAMES.has(l.name.toLowerCase()));
+}
+
 function StatusGroup(props: StatusGroupProps) {
   return (
     <Show when={props.items.length > 0}>
       <div>
-        <button
-          type="button"
-          class="w-full flex items-center gap-2 px-4 py-2 bg-base-200 hover:bg-base-300 text-sm font-medium text-base-content transition-colors"
-          onClick={props.onToggle}
-          aria-expanded={props.expanded}
-          aria-controls={`dep-group-${props.status}`}
-        >
-          <svg
-            class={`h-3.5 w-3.5 text-base-content/50 transition-transform ${props.expanded ? "rotate-90" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
+        <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
+          <button
+            type="button"
+            class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold"
+            onClick={props.onToggle}
+            aria-expanded={props.expanded}
+            aria-controls={`dep-group-${props.status}`}
           >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-          </svg>
-          <span>{props.label}</span>
-          <span class={`badge badge-sm ${props.badgeClass}`}>{props.items.length}</span>
-        </button>
+            <ChevronIcon size="md" rotated={!props.expanded} />
+            <span>{props.label}</span>
+          </button>
+        </div>
 
         <div id={`dep-group-${props.status}`} role="list" class={`divide-y divide-base-300${props.expanded ? "" : " hidden"}`}>
           <For each={props.items}>
-            {({ pr, versionInfo, rebasing, abandonedDep }) => {
+            {({ pr, versionInfo, abandonedDep }) => {
               const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
+              const title = () => displayTitle(pr, versionInfo);
               return (
                 <div role="listitem">
                   <ItemRow
                     repo={pr.repoFullName}
                     number={pr.number}
-                    title={pr.title}
+                    title={title()}
                     author={pr.userLogin}
                     createdAt={pr.createdAt}
                     updatedAt={pr.updatedAt}
                     refreshTick={props.refreshTick}
                     url={pr.htmlUrl}
-                    labels={pr.labels}
+                    labels={filteredLabels(pr.labels)}
                     commentCount={pr.enriched !== false ? pr.comments : undefined}
                     onIgnore={() => props.onIgnore(pr)}
                     onTrack={props.enableTracking ? () => props.onTrack(pr) : undefined}
@@ -298,6 +350,10 @@ function StatusGroup(props: StatusGroupProps) {
                         />
                       </Show>
 
+                      <Show when={pr.enriched !== false}>
+                        <StatusDot status={pr.checkStatus} />
+                      </Show>
+
                       <Show when={versionInfo?.updateType}>
                         {(updateType) => (
                           <span class={`badge badge-sm ${
@@ -310,8 +366,28 @@ function StatusGroup(props: StatusGroupProps) {
                         )}
                       </Show>
 
-                      <Show when={rebasing}>
-                        <span class="badge badge-ghost badge-sm">Rebasing</span>
+                      <Show when={versionInfo?.from && versionInfo?.to}>
+                        <span class="text-xs text-base-content/60 font-mono">
+                          {versionInfo!.from} → {versionInfo!.to}
+                        </span>
+                      </Show>
+
+                      <Show when={!versionInfo?.from && versionInfo?.to}>
+                        <span class="text-xs text-base-content/60 font-mono">
+                          → {versionInfo!.to}
+                        </span>
+                      </Show>
+
+                      <Show when={pr.enriched !== false}>
+                        <ReviewBadge decision={pr.reviewDecision} />
+                      </Show>
+
+                      <Show when={pr.enriched !== false && (pr.additions > 0 || pr.deletions > 0)}>
+                        <SizeBadge
+                          additions={pr.additions}
+                          deletions={pr.deletions}
+                          changedFiles={pr.changedFiles}
+                        />
                       </Show>
 
                       <Show when={pr.draft}>

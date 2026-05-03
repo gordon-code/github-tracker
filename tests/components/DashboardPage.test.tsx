@@ -2226,9 +2226,9 @@ describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clea
     await waitFor(() => screen.getByRole("tab", { name: /Dependencies/ }));
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
 
-    // DependenciesTab renders the PR inside a status group
+    // DependenciesTab renders the PR with structured title (package name)
     await waitFor(() => {
-      expect(screen.getByText(depPR.title)).toBeDefined();
+      expect(screen.getByText("axios")).toBeDefined();
     });
   });
 });

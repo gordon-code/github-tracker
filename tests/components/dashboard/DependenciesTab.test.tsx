@@ -31,7 +31,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 import { render } from "@solidjs/testing-library";
 import DependenciesTab from "../../../src/app/components/dashboard/DependenciesTab.js";
 import { resetConfig, updateConfig } from "../../../src/app/stores/config.js";
-import { setTabFilter, resetViewState, viewState } from "../../../src/app/stores/view.js";
+import { setTabFilter, resetViewState, viewState, setDependencyExpandedGroups } from "../../../src/app/stores/view.js";
 import { makePullRequest } from "../../helpers/factories.js";
 import type { AbandonedDependency } from "../../../src/app/lib/dependency-dashboard.js";
 
@@ -43,8 +43,6 @@ const EMPTY_MAPS = {
 };
 
 const BASE_PROPS = {
-  userLogin: "testuser",
-  trackedBotLogins: new Set<string>(),
   rebaseLabel: "rebase",
   ...EMPTY_MAPS,
 };
@@ -54,8 +52,8 @@ function renderTab(overrides: Partial<Parameters<typeof DependenciesTab>[0]> = {
   return render(() => <DependenciesTab {...props} />);
 }
 
-// A PR that lands in "needs-review" (enriched, not draft, CI passing, not approved)
-function makeNeedsReviewPR(overrides: Parameters<typeof makePullRequest>[0] = {}) {
+// A PR that lands in "mergeable" (enriched, not draft, CI passing, not approved)
+function makeMergeablePR(overrides: Parameters<typeof makePullRequest>[0] = {}) {
   return makePullRequest({
     userLogin: "renovate[bot]",
     headRef: "renovate/lodash-4.x",
@@ -70,8 +68,8 @@ function makeNeedsReviewPR(overrides: Parameters<typeof makePullRequest>[0] = {}
   });
 }
 
-// A PR that lands in "waiting" (CI pending, recent so not stale)
-function makeWaitingPR(overrides: Parameters<typeof makePullRequest>[0] = {}) {
+// A PR that lands in "needs-action" (CI pending, recent so not stale)
+function makeNeedsActionPR(overrides: Parameters<typeof makePullRequest>[0] = {}) {
   const recentDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2h ago
   return makePullRequest({
     userLogin: "dependabot[bot]",
@@ -124,8 +122,8 @@ describe("DependenciesTab — empty state", () => {
 
   it("does not show status group headers when empty", () => {
     renderTab({ pullRequests: [] });
-    expect(screen.queryByText("Needs Review")).toBeNull();
-    expect(screen.queryByText("Waiting")).toBeNull();
+    expect(screen.queryByText("Mergeable")).toBeNull();
+    expect(screen.queryByText("Needs Action")).toBeNull();
     expect(screen.queryByText("Stale")).toBeNull();
   });
 
@@ -154,16 +152,16 @@ describe("DependenciesTab — empty state", () => {
 // ── Status groups ─────────────────────────────────────────────────────────────
 
 describe("DependenciesTab — status groups", () => {
-  it("renders Needs Review group for enriched passing PRs", () => {
-    const pr = makeNeedsReviewPR();
+  it("renders Mergeable group for enriched passing PRs", () => {
+    const pr = makeMergeablePR();
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("Needs Review")).toBeDefined();
+    expect(screen.getByText("Mergeable")).toBeDefined();
   });
 
-  it("renders Waiting group for CI-pending PRs", () => {
-    const pr = makeWaitingPR();
+  it("renders Needs Action group for CI-pending PRs", () => {
+    const pr = makeNeedsActionPR();
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("Waiting")).toBeDefined();
+    expect(screen.getByText("Needs Action")).toBeDefined();
   });
 
   it("renders Stale group for old PRs", () => {
@@ -172,43 +170,108 @@ describe("DependenciesTab — status groups", () => {
     expect(screen.getByText("Stale")).toBeDefined();
   });
 
-  it("shows Needs Review expanded by default — PR title visible", () => {
-    const pr = makeNeedsReviewPR();
+  it("shows Mergeable expanded by default — displayed title visible", () => {
+    const pr = makeMergeablePR();
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText(pr.title)).toBeDefined();
+    // "chore(deps): update dependency lodash to v5" → displayTitle: "lodash"
+    expect(screen.getByText("lodash")).toBeDefined();
   });
 
-  it("Waiting group collapsed by default — content div is hidden", () => {
-    const pr = makeWaitingPR();
+  it("Needs Action group collapsed by default — content div is hidden", () => {
+    const pr = makeNeedsActionPR();
     renderTab({ pullRequests: [pr] });
-    const contentDiv = document.getElementById("dep-group-waiting")!;
+    const contentDiv = document.getElementById("dep-group-needs-action")!;
     expect(contentDiv.classList.contains("hidden")).toBe(true);
   });
 
-  it("expands Waiting group when header is clicked", () => {
-    const pr = makeWaitingPR();
+  it("expands Needs Action group when header is clicked", () => {
+    const pr = makeNeedsActionPR();
     renderTab({ pullRequests: [pr] });
-    const header = screen.getByText("Waiting").closest("button")!;
+    const header = screen.getByText("Needs Action").closest("button")!;
     fireEvent.click(header);
-    const contentDiv = document.getElementById("dep-group-waiting")!;
+    const contentDiv = document.getElementById("dep-group-needs-action")!;
     expect(contentDiv.classList.contains("hidden")).toBe(false);
   });
 
   it("collapses an expanded group on second click", () => {
-    const pr = makeNeedsReviewPR();
+    const pr = makeMergeablePR();
     renderTab({ pullRequests: [pr] });
-    const header = screen.getByText("Needs Review").closest("button")!;
+    const header = screen.getByText("Mergeable").closest("button")!;
     fireEvent.click(header);
-    const contentDiv = document.getElementById("dep-group-needs-review")!;
+    const contentDiv = document.getElementById("dep-group-mergeable")!;
     expect(contentDiv.classList.contains("hidden")).toBe(true);
   });
 
-  it("shows count badge in group header", () => {
-    const pr1 = makeNeedsReviewPR();
-    const pr2 = makeNeedsReviewPR({ title: "chore(deps): update dependency react to v18" });
+  it("does not show count badges in group headers", () => {
+    const pr1 = makeMergeablePR();
+    const pr2 = makeMergeablePR({ title: "Bump react from 17.0.0 to 18.0.0" });
     renderTab({ pullRequests: [pr1, pr2] });
-    const header = screen.getByText("Needs Review").closest("button")!;
-    expect(header.textContent).toContain("2");
+    const header = screen.getByText("Mergeable").closest("button")!;
+    expect(header.textContent).not.toContain("2");
+  });
+});
+
+// ── Expand state persistence ─────────────────────────────────────────────────
+
+describe("DependenciesTab — expand state persistence", () => {
+  it("persists expanded groups to viewState", () => {
+    const pr = makeNeedsActionPR();
+    renderTab({ pullRequests: [pr] });
+    const header = screen.getByText("Needs Action").closest("button")!;
+    fireEvent.click(header);
+    expect(viewState.dependencyExpandedGroups).toContain("needs-action");
+  });
+
+  it("restores expanded groups from viewState", () => {
+    setDependencyExpandedGroups(["needs-action", "stale"]);
+    const pr = makeNeedsActionPR();
+    renderTab({ pullRequests: [pr] });
+    const contentDiv = document.getElementById("dep-group-needs-action")!;
+    expect(contentDiv.classList.contains("hidden")).toBe(false);
+  });
+
+  it("expand all opens all groups", () => {
+    const pr1 = makeMergeablePR();
+    const pr2 = makeNeedsActionPR();
+    const pr3 = makeStalePR();
+    renderTab({ pullRequests: [pr1, pr2, pr3] });
+    const expandAllBtn = screen.getByLabelText("Expand all repos");
+    fireEvent.click(expandAllBtn);
+    expect(document.getElementById("dep-group-mergeable")!.classList.contains("hidden")).toBe(false);
+    expect(document.getElementById("dep-group-needs-action")!.classList.contains("hidden")).toBe(false);
+    expect(document.getElementById("dep-group-stale")!.classList.contains("hidden")).toBe(false);
+  });
+
+  it("collapse all closes all groups", () => {
+    const pr = makeMergeablePR();
+    renderTab({ pullRequests: [pr] });
+    const collapseAllBtn = screen.getByLabelText("Collapse all repos");
+    fireEvent.click(collapseAllBtn);
+    expect(document.getElementById("dep-group-mergeable")!.classList.contains("hidden")).toBe(true);
+  });
+});
+
+// ── Pending Rebase status ────────────────────────────────────────────────────
+
+describe("DependenciesTab — pending rebase", () => {
+  it("classifies PR with rebase label into Pending Rebase group", () => {
+    const pr = makeMergeablePR({ labels: [{ name: "rebase", color: "ededed" }] });
+    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
+    expect(screen.getByText("Pending Rebase")).toBeDefined();
+    expect(screen.queryByText("Mergeable")).toBeNull();
+  });
+
+  it("rebase classification is case-insensitive", () => {
+    const pr = makeMergeablePR({ labels: [{ name: "Rebase", color: "ededed" }] });
+    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
+    expect(screen.getByText("Pending Rebase")).toBeDefined();
+  });
+
+  it("Pending Rebase group is collapsed by default", () => {
+    const pr = makeMergeablePR({ labels: [{ name: "rebase", color: "ededed" }] });
+    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
+    const contentDiv = document.getElementById("dep-group-pending-rebase")!;
+    expect(contentDiv.classList.contains("hidden")).toBe(true);
   });
 });
 
@@ -221,11 +284,11 @@ describe("DependenciesTab — stale threshold", () => {
     expect(screen.getByText("Stale")).toBeDefined();
   });
 
-  it("PR updated 12 hours ago is not stale (goes to waiting)", () => {
+  it("PR updated 12 hours ago is not stale (goes to needs-action)", () => {
     const recentDate = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
-    const pr = makeWaitingPR({ updatedAt: recentDate });
+    const pr = makeNeedsActionPR({ updatedAt: recentDate });
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("Waiting")).toBeDefined();
+    expect(screen.getByText("Needs Action")).toBeDefined();
     expect(screen.queryByText("Stale")).toBeNull();
   });
 });
@@ -234,51 +297,41 @@ describe("DependenciesTab — stale threshold", () => {
 
 describe("DependenciesTab — version badges", () => {
   it("shows 'major' badge for major version bump", () => {
-    const pr = makeNeedsReviewPR({ title: "Bump lodash from 3.10.0 to 4.0.0" });
+    const pr = makeMergeablePR({ title: "Bump lodash from 3.10.0 to 4.0.0" });
     renderTab({ pullRequests: [pr] });
     expect(screen.getByText("major")).toBeDefined();
   });
 
   it("shows 'minor' badge for minor version bump", () => {
-    const pr = makeNeedsReviewPR({ title: "Bump lodash from 4.16.0 to 4.17.0" });
+    const pr = makeMergeablePR({ title: "Bump lodash from 4.16.0 to 4.17.0" });
     renderTab({ pullRequests: [pr] });
     expect(screen.getByText("minor")).toBeDefined();
   });
 
   it("shows 'patch' badge for patch version bump", () => {
-    const pr = makeNeedsReviewPR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
+    const pr = makeMergeablePR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
     renderTab({ pullRequests: [pr] });
     expect(screen.getByText("patch")).toBeDefined();
   });
 
   it("shows no version badge for maintenance titles", () => {
-    const pr = makeNeedsReviewPR({ title: "chore(deps): pin dependencies" });
+    const pr = makeMergeablePR({ title: "chore(deps): pin dependencies" });
     renderTab({ pullRequests: [pr] });
     expect(screen.queryByText("major")).toBeNull();
     expect(screen.queryByText("minor")).toBeNull();
     expect(screen.queryByText("patch")).toBeNull();
   });
-});
 
-// ── Rebase indicator ──────────────────────────────────────────────────────────
-
-describe("DependenciesTab — rebase indicator", () => {
-  it("shows 'Rebasing' when PR has the rebase label", () => {
-    const pr = makeNeedsReviewPR({ labels: [{ name: "rebase", color: "ededed" }] });
-    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
-    expect(screen.getByText("Rebasing")).toBeDefined();
+  it("shows version arrow for bump PRs", () => {
+    const pr = makeMergeablePR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("4.17.20 → 4.17.21")).toBeDefined();
   });
 
-  it("does not show 'Rebasing' when label does not match", () => {
-    const pr = makeNeedsReviewPR({ labels: [] });
-    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
-    expect(screen.queryByText("Rebasing")).toBeNull();
-  });
-
-  it("rebase label check is case-insensitive", () => {
-    const pr = makeNeedsReviewPR({ labels: [{ name: "Rebase", color: "ededed" }] });
-    renderTab({ pullRequests: [pr], rebaseLabel: "rebase" });
-    expect(screen.getByText("Rebasing")).toBeDefined();
+  it("shows structured title (package name) for parseable titles", () => {
+    const pr = makeMergeablePR({ title: "Bump webpack from 5.89.0 to 5.90.0" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("webpack")).toBeDefined();
   });
 });
 
@@ -286,7 +339,7 @@ describe("DependenciesTab — rebase indicator", () => {
 
 describe("DependenciesTab — abandoned dep pill", () => {
   it("shows 'Abandoned dep' pill when PR title matches abandoned package", () => {
-    const pr = makeNeedsReviewPR({
+    const pr = makeMergeablePR({
       title: "chore(deps): update dependency lodash to v5",
       repoFullName: "owner/repo",
     });
@@ -301,7 +354,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
   });
 
   it("does not show pill when no abandoned dep match", () => {
-    const pr = makeNeedsReviewPR({ title: "Bump react from 17.0.0 to 18.0.0" });
+    const pr = makeMergeablePR({ title: "Bump react from 17.0.0 to 18.0.0" });
     const abandonedDepsMap = new Map([
       ["owner/repo", [{ datasource: "npm", packageName: "lodash", lastUpdated: "2024-01-01" }]],
     ]);
@@ -310,7 +363,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
   });
 
   it("abandoned pill is an anchor when dashboard URL is safe (SEC-001)", () => {
-    const pr = makeNeedsReviewPR({
+    const pr = makeMergeablePR({
       title: "chore(deps): update dependency lodash to v5",
       repoFullName: "owner/repo",
     });
@@ -327,7 +380,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
   });
 
   it("abandoned pill is a span when URL fails SEC-001 check", () => {
-    const pr = makeNeedsReviewPR({
+    const pr = makeMergeablePR({
       title: "chore(deps): update dependency lodash to v5",
       repoFullName: "owner/repo",
     });
@@ -347,24 +400,25 @@ describe("DependenciesTab — abandoned dep pill", () => {
 
 describe("DependenciesTab — updateType filter", () => {
   it("shows all PRs by default (updateType=all)", () => {
-    const major = makeNeedsReviewPR({ title: "Bump lodash from 3.0.0 to 4.0.0" });
-    const patch = makeNeedsReviewPR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
+    const major = makeMergeablePR({ title: "Bump lodash from 3.0.0 to 4.0.0" });
+    const patch = makeMergeablePR({ title: "Bump axios from 0.27.1 to 0.27.2" });
     renderTab({ pullRequests: [major, patch] });
-    expect(screen.getByText(major.title)).toBeDefined();
-    expect(screen.getByText(patch.title)).toBeDefined();
+    // Structured display shows package names
+    expect(screen.getByText("lodash")).toBeDefined();
+    expect(screen.getByText("axios")).toBeDefined();
   });
 
   it("filters to major only when updateType=major is set", () => {
-    const major = makeNeedsReviewPR({ title: "Bump lodash from 3.0.0 to 4.0.0" });
-    const patch = makeNeedsReviewPR({ title: "Bump lodash from 4.17.20 to 4.17.21" });
+    const major = makeMergeablePR({ title: "Bump lodash from 3.0.0 to 4.0.0" });
+    const patch = makeMergeablePR({ title: "Bump axios from 0.27.1 to 0.27.2" });
     setTabFilter("dependencies", "updateType", "major");
     renderTab({ pullRequests: [major, patch] });
-    expect(screen.getByText(major.title)).toBeDefined();
-    expect(screen.queryByText(patch.title)).toBeNull();
+    expect(screen.getByText("lodash")).toBeDefined();
+    expect(screen.queryByText("axios")).toBeNull();
   });
 
   it("maintenance PRs pass through all updateType filters (unknown version type)", () => {
-    const pin = makeNeedsReviewPR({ title: "chore(deps): pin dependencies" });
+    const pin = makeMergeablePR({ title: "chore(deps): pin dependencies" });
     setTabFilter("dependencies", "updateType", "major");
     renderTab({ pullRequests: [pin] });
     expect(screen.getByText(pin.title)).toBeDefined();
@@ -373,12 +427,30 @@ describe("DependenciesTab — updateType filter", () => {
 
 describe("DependenciesTab — bot filter", () => {
   it("filters to specific bot when bot filter is set", () => {
-    const renovatePR = makeNeedsReviewPR({ userLogin: "renovate[bot]", title: "chore(deps): update lodash" });
-    const dependabotPR = makeNeedsReviewPR({ userLogin: "dependabot[bot]", title: "Bump axios from 0.27 to 1.0.0" });
+    const renovatePR = makeMergeablePR({ userLogin: "renovate[bot]", title: "chore(deps): update dependency lodash to v5" });
+    const dependabotPR = makeMergeablePR({ userLogin: "dependabot[bot]", title: "Bump axios from 0.27.2 to 1.0.0" });
     setTabFilter("dependencies", "bot", "renovate[bot]");
     renderTab({ pullRequests: [renovatePR, dependabotPR] });
-    expect(screen.getByText(renovatePR.title)).toBeDefined();
-    expect(screen.queryByText(dependabotPR.title)).toBeNull();
+    expect(screen.getByText("lodash")).toBeDefined();
+    expect(screen.queryByText("axios")).toBeNull();
+  });
+});
+
+// ── Label filtering ──────────────────────────────────────────────────────────
+
+describe("DependenciesTab — label filtering", () => {
+  it("filters out dep-tool labels (dependencies, renovate)", () => {
+    const pr = makeMergeablePR({
+      labels: [
+        { name: "dependencies", color: "0075ca" },
+        { name: "renovate", color: "1a7f37" },
+        { name: "go", color: "00add8" },
+      ],
+    });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByText("dependencies")).toBeNull();
+    expect(screen.queryByText("renovate")).toBeNull();
+    expect(screen.getByText("go")).toBeDefined();
   });
 });
 
@@ -386,21 +458,18 @@ describe("DependenciesTab — bot filter", () => {
 
 describe("DependenciesTab — ignore button", () => {
   it("clicking the ignore button hides the PR from the list", () => {
-    const pr = makeNeedsReviewPR({ title: "chore(deps): bump lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
-
-    // PR is visible before ignore
-    expect(screen.getByText(pr.title)).toBeDefined();
+    expect(screen.getByText("lodash")).toBeDefined();
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);
 
-    // PR should no longer be rendered
-    expect(screen.queryByText(pr.title)).toBeNull();
+    expect(screen.queryByText("lodash")).toBeNull();
   });
 
   it("ignore button adds item to ignoredItems in viewState", () => {
-    const pr = makeNeedsReviewPR({ id: 5001, title: "chore(deps): update react to v19" });
+    const pr = makeMergeablePR({ id: 5001, title: "chore(deps): update dependency react to v19" });
     renderTab({ pullRequests: [pr] });
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
@@ -410,15 +479,14 @@ describe("DependenciesTab — ignore button", () => {
   });
 
   it("ignored PR is not rendered even when re-renderTab is called", () => {
-    const pr = makeNeedsReviewPR({ id: 5002, title: "Bump axios from 0.27 to 1.0.0 (ignored)" });
+    const pr = makeMergeablePR({ id: 5002, title: "Bump axios from 0.27.2 to 1.0.0" });
     const { unmount } = renderTab({ pullRequests: [pr] });
 
     fireEvent.click(screen.getByRole("button", { name: /^Ignore #/ }));
     unmount();
 
-    // Re-render with same PR data — ignored item should still be filtered out
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText(pr.title)).toBeNull();
+    expect(screen.queryByText("axios")).toBeNull();
   });
 });
 
@@ -427,7 +495,7 @@ describe("DependenciesTab — ignore button", () => {
 describe("DependenciesTab — track button", () => {
   it("track button is not rendered when enableTracking is false", () => {
     updateConfig({ enableTracking: false });
-    const pr = makeNeedsReviewPR({ title: "chore(deps): update lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
 
     expect(screen.queryByRole("button", { name: /^Pin #/ })).toBeNull();
@@ -435,7 +503,7 @@ describe("DependenciesTab — track button", () => {
 
   it("track button renders when enableTracking is true", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ title: "chore(deps): update lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
 
     expect(screen.getByRole("button", { name: /^Pin #/ })).toBeDefined();
@@ -443,7 +511,7 @@ describe("DependenciesTab — track button", () => {
 
   it("clicking track button adds the PR to trackedItems", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ id: 6001, title: "Bump react from 17 to 18" });
+    const pr = makeMergeablePR({ id: 6001, title: "Bump react from 17.0.0 to 18.0.0" });
     renderTab({ pullRequests: [pr] });
 
     fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
@@ -453,14 +521,12 @@ describe("DependenciesTab — track button", () => {
 
   it("clicking track button a second time removes the PR from trackedItems (toggle)", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ id: 6002, title: "Bump typescript from 4 to 5" });
+    const pr = makeMergeablePR({ id: 6002, title: "Bump typescript from 4.0.0 to 5.0.0" });
     renderTab({ pullRequests: [pr] });
 
-    // First click: track (aria-label is "Pin #…")
     fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
     expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(true);
 
-    // Second click: untrack (aria-label switches to "Unpin #…" when tracked)
     fireEvent.click(screen.getByRole("button", { name: /^Unpin #/ }));
     expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(false);
   });

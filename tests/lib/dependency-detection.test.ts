@@ -7,6 +7,8 @@ import {
   KNOWN_DEP_BOT_LOGINS,
   DEP_BRANCH_PREFIXES,
   DEP_TITLE_PATTERN,
+  DEP_TOOL_LABEL_NAMES,
+  ALL_DEP_STATUSES,
 } from "../../src/app/lib/dependency-detection.js";
 import { makePullRequest } from "../helpers/factories.js";
 
@@ -95,17 +97,22 @@ describe("isDependencyPr", () => {
 describe("extractVersionInfo", () => {
   it("extracts major update from Dependabot bump title", () => {
     const result = extractVersionInfo("Bump lodash from 3.0.0 to 4.0.0");
-    expect(result).toEqual({ from: "3.0.0", to: "4.0.0", updateType: "major" });
+    expect(result).toEqual({ packageName: "lodash", from: "3.0.0", to: "4.0.0", updateType: "major" });
   });
 
   it("extracts minor update from Dependabot bump title", () => {
     const result = extractVersionInfo("Bump lodash from 4.0.0 to 4.1.0");
-    expect(result).toEqual({ from: "4.0.0", to: "4.1.0", updateType: "minor" });
+    expect(result).toEqual({ packageName: "lodash", from: "4.0.0", to: "4.1.0", updateType: "minor" });
   });
 
   it("extracts patch update from Dependabot bump title", () => {
     const result = extractVersionInfo("Bump lodash from 4.17.20 to 4.17.21");
-    expect(result).toEqual({ from: "4.17.20", to: "4.17.21", updateType: "patch" });
+    expect(result).toEqual({ packageName: "lodash", from: "4.17.20", to: "4.17.21", updateType: "patch" });
+  });
+
+  it("extracts package name from chore(deps) bump title", () => {
+    const result = extractVersionInfo("chore(deps): bump webpack from 5.90.0 to 5.90.1");
+    expect(result).toEqual({ packageName: "webpack", from: "5.90.0", to: "5.90.1", updateType: "patch" });
   });
 
   it("returns major for Renovate 'update all major dependencies'", () => {
@@ -123,16 +130,19 @@ describe("extractVersionInfo", () => {
     expect(result).toEqual({ updateType: "minor" });
   });
 
-  it("extracts to-version for Renovate single-dep title", () => {
+  it("extracts package name and to-version for Renovate single-dep title", () => {
     const result = extractVersionInfo("chore(deps): update dependency pytest to v9");
-    expect(result).toMatchObject({ to: "v9" });
-    expect(result?.updateType).toBeUndefined();
+    expect(result).toEqual({ packageName: "pytest", to: "v9" });
   });
 
-  it("extracts to-version for Renovate action title", () => {
+  it("extracts package name and to-version for Renovate action title", () => {
     const result = extractVersionInfo("chore(deps): update astral-sh/setup-uv action to v8");
-    expect(result).toMatchObject({ to: "v8" });
-    expect(result?.updateType).toBeUndefined();
+    expect(result).toEqual({ packageName: "astral-sh/setup-uv", to: "v8" });
+  });
+
+  it("extracts to-version for plain Renovate dependency title (no chore prefix)", () => {
+    const result = extractVersionInfo("Update dependency @types/node to v20.11.5");
+    expect(result).toEqual({ packageName: "@types/node", to: "v20.11.5" });
   });
 
   it("returns null for 'pin dependencies'", () => {
@@ -149,11 +159,10 @@ describe("extractVersionInfo", () => {
 
   it("strips [security] suffix before parsing", () => {
     const result = extractVersionInfo("chore(deps): update dependency pytest to v9 [security]");
-    expect(result).toMatchObject({ to: "v9" });
+    expect(result).toEqual({ packageName: "pytest", to: "v9" });
   });
 
   it("does not throw for non-semver bump (date-based version)", () => {
-    // parseSemver of "22.04" → [22, 4, 0] which parses as valid; result is non-null but that's acceptable
     expect(() => extractVersionInfo("Bump ubuntu from 22.04 to 24.04")).not.toThrow();
   });
 
@@ -163,7 +172,7 @@ describe("extractVersionInfo", () => {
 
   it("returns null updateType when from and to are identical versions", () => {
     const result = extractVersionInfo("Bump lodash from 4.17.21 to 4.17.21");
-    expect(result).toEqual({ from: "4.17.21", to: "4.17.21", updateType: undefined });
+    expect(result).toEqual({ packageName: "lodash", from: "4.17.21", to: "4.17.21", updateType: undefined });
   });
 });
 
@@ -195,10 +204,10 @@ describe("isRebasing", () => {
 });
 
 describe("classifyDepStatus", () => {
-  const RECENT = new Date(Date.now() - 7 * 86_400_000).toISOString();  // 7 days ago
-  const OLD = new Date(Date.now() - 31 * 86_400_000).toISOString();   // 31 days ago
+  const RECENT = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const OLD = new Date(Date.now() - 31 * 86_400_000).toISOString();
 
-  it("returns needs-review for enriched, non-draft, passing CI, not approved", () => {
+  it("returns mergeable for enriched, non-draft, passing CI, not approved", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -206,12 +215,10 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("needs-review");
+    expect(classifyDepStatus(pr, "", 14)).toBe("mergeable");
   });
 
-  it("returns needs-review even for old PR if CI passing and not approved", () => {
-    // needs-review wins over stale when actionable
+  it("returns mergeable even for old PR if CI passing and not approved", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -219,12 +226,43 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, 14);
-    // needs-review check runs first and wins
-    expect(result).toBe("needs-review");
+    expect(classifyDepStatus(pr, "", 14)).toBe("mergeable");
   });
 
-  it("returns stale for old PR that is not needs-review eligible", () => {
+  it("returns pending-rebase when PR has rebase label", () => {
+    const pr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: "success",
+      reviewDecision: null,
+      labels: [{ name: "rebase", color: "ffffff" }],
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(pr, "rebase", 14)).toBe("pending-rebase");
+  });
+
+  it("pending-rebase takes priority over mergeable", () => {
+    const pr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: "success",
+      reviewDecision: null,
+      labels: [{ name: "rebase", color: "ffffff" }],
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(pr, "rebase")).toBe("pending-rebase");
+  });
+
+  it("pending-rebase takes priority over stale", () => {
+    const pr = makePullRequest({
+      draft: true,
+      labels: [{ name: "rebase", color: "ffffff" }],
+      updatedAt: OLD,
+    });
+    expect(classifyDepStatus(pr, "rebase")).toBe("pending-rebase");
+  });
+
+  it("returns stale for old PR that is not mergeable", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -232,8 +270,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("stale");
+    expect(classifyDepStatus(pr, "", 14)).toBe("stale");
   });
 
   it("returns stale for old draft PR", () => {
@@ -241,20 +278,18 @@ describe("classifyDepStatus", () => {
       draft: true,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("stale");
+    expect(classifyDepStatus(pr, "", 14)).toBe("stale");
   });
 
-  it("returns waiting for recent draft PR", () => {
+  it("returns needs-action for recent draft PR", () => {
     const pr = makePullRequest({
       draft: true,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("waiting");
+    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns waiting for recent PR with pending CI", () => {
+  it("returns needs-action for recent PR with pending CI", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -262,21 +297,19 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("waiting");
+    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns waiting for unenriched PR (enriched=false, checkStatus is null)", () => {
+  it("returns needs-action for unenriched PR (enriched=false, checkStatus is null)", () => {
     const pr = makePullRequest({
       enriched: false,
       checkStatus: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("waiting");
+    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns waiting for approved PR (already handled, not needs-review)", () => {
+  it("returns needs-action for approved PR (already handled, not mergeable)", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -284,8 +317,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: "APPROVED",
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, 14);
-    expect(result).toBe("waiting");
+    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
   it("uses default stale threshold of 14 days when not provided", () => {
@@ -295,8 +327,37 @@ describe("classifyDepStatus", () => {
     const recent = makePullRequest({ draft: true, updatedAt: thirteenDaysAgo });
     const old = makePullRequest({ draft: true, updatedAt: fifteenDaysAgo });
 
-    expect(classifyDepStatus(recent)).toBe("waiting");
+    expect(classifyDepStatus(recent)).toBe("needs-action");
     expect(classifyDepStatus(old)).toBe("stale");
+  });
+
+  it("skips rebase check when rebaseLabel is empty", () => {
+    const pr = makePullRequest({
+      labels: [{ name: "rebase", color: "ffffff" }],
+      enriched: true,
+      draft: false,
+      checkStatus: "success",
+      reviewDecision: null,
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(pr)).toBe("mergeable");
+  });
+});
+
+describe("ALL_DEP_STATUSES", () => {
+  it("contains all status values in render order", () => {
+    expect(ALL_DEP_STATUSES).toEqual(["mergeable", "pending-rebase", "needs-action", "stale"]);
+  });
+});
+
+describe("DEP_TOOL_LABEL_NAMES", () => {
+  it("contains known dep tool label names", () => {
+    expect(DEP_TOOL_LABEL_NAMES.has("dependencies")).toBe(true);
+    expect(DEP_TOOL_LABEL_NAMES.has("renovate")).toBe(true);
+  });
+
+  it("does not contain non-dep labels", () => {
+    expect(DEP_TOOL_LABEL_NAMES.has("bug")).toBe(false);
   });
 });
 

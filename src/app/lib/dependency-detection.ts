@@ -20,7 +20,19 @@ export const DEP_BRANCH_PREFIXES = [
 
 export const DEP_TITLE_PATTERN = /^(Bump |Update dependency |chore\(deps|fix\(deps|build\(deps|\[Snyk\])/i;
 
-export type DepStatus = "needs-review" | "waiting" | "stale";
+export const DEP_TOOL_LABEL_NAMES = new Set([
+  "dependencies",
+  "renovate",
+]);
+
+export type DepStatus = "mergeable" | "needs-action" | "stale" | "pending-rebase";
+
+export const ALL_DEP_STATUSES: readonly DepStatus[] = [
+  "mergeable",
+  "pending-rebase",
+  "needs-action",
+  "stale",
+];
 
 export function isDependencyPr(pr: PullRequest, trackedBotLogins: Set<string>): boolean {
   const login = pr.userLogin.toLowerCase();
@@ -59,36 +71,50 @@ function semverUpdateType(from: string, to: string): "major" | "minor" | "patch"
   return null;
 }
 
-export function extractVersionInfo(
-  title: string
-): { from?: string; to?: string; updateType?: "major" | "minor" | "patch" } | null {
-  // Strip trailing annotations like " [security]"
+export interface VersionInfo {
+  packageName?: string;
+  from?: string;
+  to?: string;
+  updateType?: "major" | "minor" | "patch";
+}
+
+export function extractVersionInfo(title: string): VersionInfo | null {
   const cleaned = title.replace(/\s*\[[\w\s]+\]\s*$/, "").trim();
 
-  // Maintenance titles — no version classification
   if (/pin dependencies/i.test(cleaned)) return null;
   if (/lock file maintenance/i.test(cleaned)) return null;
 
-  // Dependabot "Bump X from A to B"
-  const bumpMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(cleaned);
+  // Strip conventional commit prefix: chore(deps): / fix(deps-dev): / build(deps):
+  let body = cleaned;
+  const ccPrefix = /^(?:chore|fix|build)\(deps[^)]*\):\s*/i.exec(body);
+  if (ccPrefix) body = body.slice(ccPrefix[0].length);
+
+  // "Bump X from A to B" or "Bump X from A to B in /dir"
+  const bumpMatch = /^Bump\s+(.+?)\s+from\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
   if (bumpMatch) {
-    const from = bumpMatch[1]!;
-    const to = bumpMatch[2]!;
-    const updateType = semverUpdateType(from, to) ?? undefined;
-    return { from, to, updateType };
+    return { packageName: bumpMatch[1]!, from: bumpMatch[2]!, to: bumpMatch[3]!, updateType: semverUpdateType(bumpMatch[2]!, bumpMatch[3]!) ?? undefined };
   }
 
-  // Renovate group: "update all major dependencies"
-  if (/update all major/i.test(cleaned)) return { updateType: "major" };
-  // Renovate group: "update all non-major dependencies"
-  if (/update all non-major/i.test(cleaned)) return { updateType: "minor" };
+  // "update all major/non-major dependencies"
+  if (/update all major/i.test(body)) return { updateType: "major" };
+  if (/update all non-major/i.test(body)) return { updateType: "minor" };
 
-  // Renovate single-dep: "update dependency X to vY" or "update X action to vY"
-  const renovateMatch = /\bupdate\b.+\bto\s+(v?[\w.\-+]+)/i.exec(cleaned);
-  if (renovateMatch) {
-    const to = renovateMatch[1]!;
-    // Only treat as version if it looks like a version (starts with digit or v+digit)
-    if (/^v?\d/.test(to)) return { to };
+  // "Update dependency X to vY"
+  const depMatch = /^Update\s+dependency\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
+  if (depMatch && /^v?\d/.test(depMatch[2]!)) {
+    return { packageName: depMatch[1]!, to: depMatch[2]! };
+  }
+
+  // "Update X action to vY"
+  const actionMatch = /^Update\s+(.+?)\s+action\s+to\s+(v?[\w.\-+]+)/i.exec(body);
+  if (actionMatch && /^v?\d/.test(actionMatch[2]!)) {
+    return { packageName: actionMatch[1]!, to: actionMatch[2]! };
+  }
+
+  // Generic "from A to B" anywhere
+  const genericMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
+  if (genericMatch) {
+    return { from: genericMatch[1]!, to: genericMatch[2]!, updateType: semverUpdateType(genericMatch[1]!, genericMatch[2]!) ?? undefined };
   }
 
   return null;
@@ -104,24 +130,30 @@ export const STALE_THRESHOLD_DEFAULT_DAYS = 14;
 
 export function classifyDepStatus(
   pr: PullRequest,
+  rebaseLabel: string = "",
   staleThresholdDays: number = STALE_THRESHOLD_DEFAULT_DAYS
 ): DepStatus {
-  // needs-review: enriched, not draft, CI passing, not yet approved
+  // 1. Rebase label → pending-rebase
+  if (rebaseLabel && isRebasing(pr, rebaseLabel)) {
+    return "pending-rebase";
+  }
+
+  // 2. Enriched + CI green + not draft + not approved → mergeable
   if (
     pr.enriched !== false &&
     !pr.draft &&
     pr.checkStatus === "success" &&
     pr.reviewDecision !== "APPROVED"
   ) {
-    return "needs-review";
+    return "mergeable";
   }
 
-  // stale: not updated recently (even drafts/CI-pending get stale)
+  // 3. Stale: not updated recently
   const ageMs = Date.now() - new Date(pr.updatedAt).getTime();
   if (ageMs > staleThresholdDays * 86_400_000) {
     return "stale";
   }
 
-  // waiting: CI pending, draft, rebasing, unenriched, approved-but-not-merged
-  return "waiting";
+  // 4. Everything else → needs-action
+  return "needs-action";
 }
