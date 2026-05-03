@@ -2140,3 +2140,75 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
     });
   });
 });
+
+// ── Dependencies tab — abandonedDepsMap + dashboardIssueUrls reset on auth clear ─
+
+describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clear", () => {
+  it("Dependencies tab disappears after auth clear (abandonedDepsMap reset)", async () => {
+    // The module-level signals abandonedDepsMap and dashboardIssueUrls are reset
+    // to empty Maps by the onAuthCleared callback alongside resetDashboardData().
+    // We verify indirectly: dep PRs are cleared → Dependencies tab vanishes.
+    const depPR = makePullRequest({
+      id: 800,
+      title: "chore(deps): update dependency lodash to v5",
+      userLogin: "renovate[bot]",
+      headRef: "renovate/lodash-5.x",
+      state: "OPEN",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+
+    // Dependencies tab appears when dep PRs are present
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeDefined();
+    });
+
+    // Invoke auth clear callbacks — this calls resetDashboardData() which clears
+    // all PRs, and also calls setAbandonedDepsMap(new Map()) + setDashboardIssueUrls(new Map())
+    expect(authClearCallbacks.length).toBeGreaterThan(0);
+    for (const cb of authClearCallbacks) cb();
+
+    // After clear, no dep PRs → enableDependencies() becomes false → tab hidden
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: /Dependencies/ })).toBeNull();
+    });
+  });
+
+  it("DependenciesTab renders dep PRs when navigating to Dependencies tab", async () => {
+    const user = userEvent.setup();
+
+    const depPR = makePullRequest({
+      id: 801,
+      title: "Bump axios from 0.27 to 1.0",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+      state: "OPEN",
+      enriched: true,
+      checkStatus: "pending",
+      draft: false,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+
+    // Click the Dependencies tab
+    await waitFor(() => screen.getByRole("tab", { name: /Dependencies/ }));
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+
+    // DependenciesTab renders the PR inside a status group
+    await waitFor(() => {
+      expect(screen.getByText(depPR.title)).toBeDefined();
+    });
+  });
+});
