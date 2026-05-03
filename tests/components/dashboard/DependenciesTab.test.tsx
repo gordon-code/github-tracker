@@ -430,11 +430,28 @@ describe("DependenciesTab — updateType filter", () => {
     expect(screen.queryByText("Pin dependencies")).toBeNull();
   });
 
-  it("maintenance PRs are shown when maintenance filter is selected", () => {
+  it("pin PRs are shown when pin filter is selected", () => {
     const pin = makeMergeablePR({ title: "chore(deps): pin dependencies" });
-    setTabFilter("dependencies", "updateType", "maintenance");
+    setTabFilter("dependencies", "updateType", "pin");
     renderTab({ pullRequests: [pin] });
     expect(screen.getByText("Pin dependencies")).toBeDefined();
+  });
+
+  it("lock file PRs are shown when maintenance filter is selected", () => {
+    const lockFile = makeMergeablePR({ title: "chore(deps): lock file maintenance" });
+    setTabFilter("dependencies", "updateType", "maintenance");
+    renderTab({ pullRequests: [lockFile] });
+    expect(screen.getByText("Lock file maintenance")).toBeDefined();
+  });
+
+  it("uses label as fallback when title has no version info", () => {
+    const pr = makeMergeablePR({
+      title: "chore(deps): update dependency foo to v2",
+      labels: [{ name: "major", color: "ff0000" }],
+    });
+    setTabFilter("dependencies", "updateType", "major");
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("foo → v2")).toBeDefined();
   });
 });
 

@@ -34,6 +34,7 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
     { value: "major", label: "Major" },
     { value: "minor", label: "Minor" },
     { value: "patch", label: "Patch" },
+    { value: "pin", label: "Pin" },
     { value: "maintenance", label: "Maintenance" },
     { value: "other", label: "Other" },
   ],
@@ -46,11 +47,34 @@ const STATUS_META: Record<DepStatus, { label: string; badgeClass: string; defaul
   "stale":           { label: "Stale",           badgeClass: "badge-error",    defaultExpanded: false },
 };
 
-type DepCategory = "major" | "minor" | "patch" | "maintenance" | "other";
+type DepCategory = "major" | "minor" | "patch" | "pin" | "maintenance" | "other";
 
-function depCategory(versionInfo: VersionInfo | null): DepCategory {
-  if (!versionInfo) return "maintenance";
-  return versionInfo.updateType ?? "other";
+function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCategory {
+  if (versionInfo?.updateType) return versionInfo.updateType;
+
+  const titleLower = pr.title.toLowerCase();
+  if (/pin\s+dep/i.test(titleLower)) return "pin";
+  if (/lock\s*file\s+maintenance/i.test(titleLower)) return "maintenance";
+
+  if (!versionInfo) {
+    // Label fallback — Renovate/Dependabot may label PRs with update type
+    for (const l of pr.labels) {
+      const name = l.name.toLowerCase();
+      if (name === "major") return "major";
+      if (name === "minor") return "minor";
+      if (name === "patch") return "patch";
+    }
+    return "maintenance";
+  }
+
+  // Has versionInfo but no updateType — check labels before giving up
+  for (const l of pr.labels) {
+    const name = l.name.toLowerCase();
+    if (name === "major") return "major";
+    if (name === "minor") return "minor";
+    if (name === "patch") return "patch";
+  }
+  return "other";
 }
 
 interface ClassifiedPR {
@@ -135,7 +159,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           pr,
           status: classifyDepStatus(pr, props.rebaseLabel),
           versionInfo,
-          category: depCategory(versionInfo),
+          category: depCategory(pr, versionInfo),
           abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
         };
       })
