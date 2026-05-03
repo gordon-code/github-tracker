@@ -1070,8 +1070,7 @@ export default function DashboardPage() {
     { defer: true }
   ));
 
-  // When Actions is disabled, clear stale workflowRuns from the store so memos
-  // computing against empty workflowRuns don't process cached data (SEC-004).
+  // When Actions is disabled, clear stale workflowRuns restored from cache.
   createEffect(() => {
     if (!config.enableActions && dashboardData.workflowRuns.length > 0) {
       setDashboardData(produce((d) => { d.workflowRuns = []; }));

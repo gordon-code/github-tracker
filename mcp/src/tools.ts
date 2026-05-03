@@ -189,7 +189,6 @@ export function registerTools(server: McpServer, dataSource: DataSource): void {
     async (args) => {
       const { repo } = args as { repo?: string };
       try {
-        // SEC-010: check config before calling getFailingActions to surface disabled state
         const cachedConfig: CachedConfig | null = await dataSource.getConfig();
         if (cachedConfig?.enableActions === false) {
           const text = "GitHub Actions monitoring is disabled in the dashboard. Enable it in Settings to track workflow runs." + stalenessLine();

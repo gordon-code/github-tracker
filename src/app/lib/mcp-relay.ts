@@ -126,7 +126,6 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
       const result = {
         openPRCount: openPRs.length,
         openIssueCount: s.issues.filter((i) => i.state === "OPEN").length,
-        // SEC-010: null when Actions monitoring is disabled so AI clients don't interpret 0 as "all clear"
         failingRunCount: s.enableActions
           ? s.workflowRuns.filter((r) => r.conclusion === "failure" || r.conclusion === "timed_out").length
           : null,
@@ -177,7 +176,6 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
     }
 
     case METHODS.GET_FAILING_ACTIONS: {
-      // SEC-010: surface disabled state rather than returning empty array (false "all clear")
       if (!snapshot!.enableActions) {
         sendResponse(ws, {
           jsonrpc: "2.0",
