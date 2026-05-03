@@ -4,7 +4,7 @@ import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, unt
 import { isSafeGitHubUrl } from "../../lib/url";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
-import { classifyDepStatus, extractVersionInfo, isRebasing, STALE_THRESHOLD_DEFAULT_DAYS, type DepStatus } from "../../lib/dependency-detection";
+import { classifyDepStatus, extractVersionInfo, isRebasing, type DepStatus } from "../../lib/dependency-detection";
 import { matchAbandonedToPr } from "../../lib/dependency-dashboard";
 import type { FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
@@ -96,14 +96,13 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
         return {
           pr,
-          status: classifyDepStatus(pr, STALE_THRESHOLD_DEFAULT_DAYS),
+          status: classifyDepStatus(pr),
           versionInfo,
           rebasing: isRebasing(pr, props.rebaseLabel),
           abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
         };
       })
       .filter(({ pr, versionInfo }) => {
-        if (pr.state !== "OPEN") return false;
         if (ignored.has(pr.id)) return false;
 
         // Bot filter
@@ -118,8 +117,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
       })
       .sort((a, b) => (a.pr.updatedAt < b.pr.updatedAt ? 1 : a.pr.updatedAt > b.pr.updatedAt ? -1 : 0));
   });
-
-  const openPrCount = createMemo(() => props.pullRequests.filter(p => p.state === "OPEN").length);
 
   const statusGroups = createMemo(() => {
     const groups: Record<DepStatus, ClassifiedPR[]> = {
@@ -148,7 +145,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Filter toolbar */}
       <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
         <div class="flex flex-wrap items-center min-w-0 flex-1 gap-2 compact:gap-1">
           <FilterToolbar
@@ -160,13 +156,11 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         </div>
       </div>
 
-      {/* Loading skeleton */}
       <Show when={props.loading && props.pullRequests.length === 0}>
         <SkeletonRows label="Loading dependency PRs" />
       </Show>
 
-      {/* Empty state */}
-      <Show when={!props.loading && classifiedPRs().length === 0 && openPrCount() === 0}>
+      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.length === 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <svg class="h-10 w-10 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -176,14 +170,12 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         </div>
       </Show>
 
-      {/* No results from filter */}
-      <Show when={!props.loading && classifiedPRs().length === 0 && openPrCount() > 0}>
+      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.length > 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <p class="text-sm font-medium">No PRs match your current filters</p>
         </div>
       </Show>
 
-      {/* Status groups */}
       <Show when={classifiedPRs().length > 0}>
         <div class="divide-y divide-base-300 overflow-y-auto flex-1">
           <StatusGroup
@@ -257,7 +249,6 @@ function StatusGroup(props: StatusGroupProps) {
   return (
     <Show when={props.items.length > 0}>
       <div>
-        {/* Group header */}
         <button
           type="button"
           class="w-full flex items-center gap-2 px-4 py-2 bg-base-200 hover:bg-base-300 text-sm font-medium text-base-content transition-colors"
@@ -278,7 +269,6 @@ function StatusGroup(props: StatusGroupProps) {
           <span class={`badge badge-sm ${props.badgeClass}`}>{props.items.length}</span>
         </button>
 
-        {/* PR rows */}
         <Show when={props.expanded}>
           <div id={`dep-group-${props.status}`} role="list" class="divide-y divide-base-300">
             <For each={props.items}>
@@ -303,7 +293,6 @@ function StatusGroup(props: StatusGroupProps) {
                       isPolling={props.hotPollingPRIds?.has(pr.id)}
                     >
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        {/* Version badge */}
                         <Show when={versionInfo?.updateType}>
                           {(updateType) => (
                             <span class={`badge badge-sm ${
@@ -316,12 +305,10 @@ function StatusGroup(props: StatusGroupProps) {
                           )}
                         </Show>
 
-                        {/* Rebase indicator */}
                         <Show when={rebasing}>
                           <span class="badge badge-ghost badge-sm">Rebasing</span>
                         </Show>
 
-                        {/* Draft indicator */}
                         <Show when={pr.draft}>
                           <span class="badge badge-ghost badge-sm">Draft</span>
                         </Show>

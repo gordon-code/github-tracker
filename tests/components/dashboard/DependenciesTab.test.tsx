@@ -358,21 +358,6 @@ describe("DependenciesTab — bot filter", () => {
   });
 });
 
-// ── Closed PRs excluded ───────────────────────────────────────────────────────
-
-describe("DependenciesTab — state filtering", () => {
-  it("does not render closed PRs", () => {
-    const closed = makePullRequest({
-      userLogin: "renovate[bot]",
-      headRef: "renovate/lodash",
-      title: "This PR is closed",
-      state: "CLOSED",
-    });
-    renderTab({ pullRequests: [closed] });
-    expect(screen.queryByText(closed.title)).toBeNull();
-  });
-});
-
 // ── Ignore button ─────────────────────────────────────────────────────────────
 
 describe("DependenciesTab — ignore button", () => {
