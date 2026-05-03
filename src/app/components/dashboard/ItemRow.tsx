@@ -58,6 +58,13 @@ export default function ItemRow(props: ItemRowProps) {
     return created !== "" && updated !== "" && created !== updated;
   });
 
+  const compactDateTooltip = createMemo(() => {
+    if (shouldShowUpdated()) {
+      return `${staticDateInfo().updatedTitle}\n${staticDateInfo().createdTitle}`;
+    }
+    return staticDateInfo().createdTitle;
+  });
+
   const compactLabelTooltip = createMemo(() => {
     const parts: string[] = [];
     if (props.labels.length > 0) {
@@ -172,7 +179,7 @@ export default function ItemRow(props: ItemRowProps) {
         <span class="shrink-0 text-xs text-base-content/50 whitespace-nowrap">
           {props.author}
           {" · "}
-          <Tooltip content={staticDateInfo().updatedTitle} class="relative z-10">
+          <Tooltip content={compactDateTooltip()} contentClass="whitespace-pre-line" class="relative z-10">
             <time datetime={props.updatedAt} aria-label={dateDisplay().updatedLabel}>
               {dateDisplay().updated || dateDisplay().created}
             </time>

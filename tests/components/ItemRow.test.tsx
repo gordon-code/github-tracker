@@ -152,7 +152,7 @@ describe("ItemRow", () => {
       expect(timeEls.length).toBe(1);
     });
 
-    it("shows updated date tooltip content on hover in compact mode", () => {
+    it("shows both updated and created dates in tooltip on hover", () => {
       vi.useFakeTimers();
       const { container, unmount } = render(() => <ItemRow {...defaultProps} />);
       const updatedTrigger = container.querySelector(
@@ -164,6 +164,9 @@ describe("ItemRow", () => {
       vi.advanceTimersByTime(300);
       expect(document.body.textContent).toContain(
         `Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`
+      );
+      expect(document.body.textContent).toContain(
+        `Created: ${new Date(defaultProps.createdAt).toLocaleString()}`
       );
       fireEvent.pointerLeave(updatedTrigger!);
       vi.advanceTimersByTime(500);
