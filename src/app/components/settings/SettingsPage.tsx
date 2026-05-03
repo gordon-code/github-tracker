@@ -2,7 +2,7 @@ import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-j
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab, updateDependencyConfig } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
@@ -348,6 +348,7 @@ export default function SettingsPage() {
     { value: "pullRequests", label: "Pull Requests" },
     ...(config.enableActions ? [{ value: "actions", label: "GitHub Actions" }] : []),
     ...(config.enableTracking ? [{ value: "tracked", label: "Tracked Items" }] : []),
+    ...(config.dependencies?.enabled ? [{ value: "dependencies", label: "Dependencies" }] : []),
     ...(config.jira?.enabled ? [{ value: "jiraAssigned", label: "Jira" }] : []),
     ...config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ value: t.id, label: t.name })),
   ]);
@@ -1129,6 +1130,36 @@ export default function SettingsPage() {
               </SettingRow>
             </Show>
           </Section>
+
+        {/* Dependencies */}
+        <Section title="Dependencies">
+          <SettingRow
+            label="Dependencies tab"
+            description="Auto-show a Dependencies tab when dependency bot PRs are detected"
+          >
+            <input
+              type="checkbox"
+              class="toggle"
+              aria-label="Enable dependencies tab"
+              checked={config.dependencies?.enabled ?? true}
+              onChange={() => updateDependencyConfig({ enabled: !(config.dependencies?.enabled ?? true) })}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Rebase label"
+            description="Label name Renovate uses to signal a PR needs rebasing"
+          >
+            <input
+              type="text"
+              class="input input-bordered input-sm w-40"
+              aria-label="Rebase label"
+              value={config.dependencies?.rebaseLabel ?? "rebase"}
+              maxLength={50}
+              placeholder="rebase"
+              onInput={(e) => updateDependencyConfig({ rebaseLabel: e.currentTarget.value || "rebase" })}
+            />
+          </SettingRow>
+        </Section>
 
         {/* Data */}
         <Section title="Data">

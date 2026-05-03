@@ -897,3 +897,57 @@ describe("SettingsPage — monitor toggle wiring", () => {
     expect(json.monitoredRepos).toEqual([{ owner: "org", name: "repo1", fullName: "org/repo1" }]);
   });
 });
+
+// ── Dependencies section ──────────────────────────────────────────────────────
+
+describe("Dependencies settings section", () => {
+  it("renders Dependencies section heading", () => {
+    renderSettings();
+    screen.getByRole("heading", { name: "Dependencies" });
+  });
+
+  it("renders Dependencies tab toggle checked when enabled", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    renderSettings();
+    const toggle = screen.getByRole<HTMLInputElement>("checkbox", { name: /Enable dependencies tab/i });
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("renders Dependencies tab toggle unchecked when disabled", () => {
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    renderSettings();
+    const toggle = screen.getByRole<HTMLInputElement>("checkbox", { name: /Enable dependencies tab/i });
+    expect(toggle.checked).toBe(false);
+  });
+
+  it("toggles dependencies.enabled when checkbox is clicked", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    renderSettings();
+    const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
+    fireEvent.click(toggle);
+    expect(config.dependencies.enabled).toBe(false);
+  });
+
+  it("renders rebase label input with current value", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase-please" } });
+    renderSettings();
+    const input = screen.getByRole<HTMLInputElement>("textbox", { name: /Rebase label/i });
+    expect(input.value).toBe("rebase-please");
+  });
+
+  it("updates dependencies.rebaseLabel on input change", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    renderSettings();
+    const input = screen.getByRole("textbox", { name: /Rebase label/i });
+    fireEvent.input(input, { target: { value: "rebase-please" } });
+    expect(config.dependencies.rebaseLabel).toBe("rebase-please");
+  });
+
+  it("rebase label input falls back to 'rebase' when cleared", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    renderSettings();
+    const input = screen.getByRole("textbox", { name: /Rebase label/i });
+    fireEvent.input(input, { target: { value: "" } });
+    expect(config.dependencies.rebaseLabel).toBe("rebase");
+  });
+});
