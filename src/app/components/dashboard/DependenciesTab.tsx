@@ -35,8 +35,6 @@ interface ClassifiedPR {
 interface DependenciesTabProps {
   pullRequests: PullRequest[];
   loading?: boolean;
-  userLogin: string;
-  trackedBotLogins: Set<string>;
   abandonedDepsMap: Map<string, AbandonedDependency[]>;
   dashboardIssueUrls: Map<string, string>;
   hotPollingPRIds?: ReadonlySet<number>;

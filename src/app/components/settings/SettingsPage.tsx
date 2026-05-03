@@ -190,6 +190,7 @@ export default function SettingsPage() {
           customFields: config.jira?.customFields ?? [],
           customScopes: config.jira?.customScopes ?? [],
         },
+        dependencies: config.dependencies,
       },
       null,
       2

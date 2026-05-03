@@ -1248,8 +1248,6 @@ export default function DashboardPage() {
                 <DependenciesTab
                   pullRequests={dependencyPullRequests()}
                   loading={dashboardData.loading}
-                  userLogin={userLogin()}
-                  trackedBotLogins={trackedBotLogins()}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}
                   hotPollingPRIds={hotPollingPRIds()}
