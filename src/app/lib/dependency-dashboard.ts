@@ -93,6 +93,10 @@ export function parseAbandonedSection(body: string): AbandonedDependency[] {
 
 const _abandonedPatternCache = new Map<string, RegExp>();
 
+export function resetAbandonedPatternCache(): void {
+  _abandonedPatternCache.clear();
+}
+
 /**
  * Checks if a dep PR's title references an abandoned package name.
  * Uses word-boundary regex with escaped package name (SEC-002).

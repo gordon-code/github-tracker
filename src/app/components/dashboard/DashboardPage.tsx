@@ -12,7 +12,7 @@ import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updat
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr } from "../../lib/dependency-detection";
-import { findDashboardIssues, parseAbandonedSection, type AbandonedDependency } from "../../lib/dependency-dashboard";
+import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
@@ -157,6 +157,7 @@ onAuthCleared(() => {
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
   _fetchingDashboardBodies = false;
+  resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {
     coord.destroy();

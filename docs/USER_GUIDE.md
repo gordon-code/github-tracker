@@ -273,9 +273,11 @@ The Dependencies tab is a built-in tab that groups dependency bot PRs separately
 
 The tab uses a multi-layer detection pipeline to identify dependency PRs:
 
-1. **Author login** — any PR author whose login ends in `[bot]` and whose name contains `renovate`, `dependabot`, `snyk`, or `mend` is treated as a dependency bot.
-2. **Branch name prefix** — branches starting with `renovate/`, `deps/`, or `dependabot/` are flagged as dependency updates regardless of author.
-3. **Label match** — PRs with a configurable label (default: `dependencies`) are included. The label can be changed in **Settings > Dependencies > Rebase label**.
+1. **Known bot logins** — PRs from known dependency bots (dependabot[bot], renovate[bot], snyk-bot, depfu[bot], pyup-bot, scala-steward, mend-renovate-bot) are detected automatically.
+2. **Tracked bot users** — any user added to your tracked users list with type "bot" in Settings is also detected.
+3. **Branch name prefix** — branches starting with `dependabot/`, `renovate/`, `snyk-fix-`, `snyk-upgrade-`, or `pyup-update-` are flagged as dependency updates.
+4. **Title pattern** — PR titles matching common dependency update patterns (e.g., "Bump X from Y to Z", "chore(deps): ...", "[Snyk] ...") are detected.
+5. **Label match** — PRs with the `dependencies` label are included.
 
 Dependency PRs claimed by the Dependencies tab are excluded from the standard Pull Requests tab and any custom tabs with exclusivity enabled. The tab title shows the current count of open dependency PRs.
 
@@ -293,9 +295,9 @@ Within each group, PRs are sorted by updated date (most recent first).
 
 ### Abandoned Dependencies
 
-If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Ignored or Blocked" and "Open" sections are shown as pills below the relevant group. Each pill links directly to the Renovate Dashboard issue so you can take bulk action (e.g., re-enable a paused dependency).
+If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Abandoned" section are shown as pill badges on matching PR rows. Each pill links directly to the Renovate Dashboard issue so you can investigate further.
 
-The parser reads the Renovate Dashboard issue body to extract package names and their status. If the Renovate Dashboard issue is hidden via the Issues tab toggle, it is still parsed for abandoned dep data.
+The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table.
 
 ### Dependencies Settings
 
@@ -304,7 +306,7 @@ Go to **Settings > Dependencies** to configure:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Enable Dependencies tab | On | Show or hide the tab. When disabled, dependency PRs appear in the standard Pull Requests tab. |
-| Rebase label | `dependencies` | PRs with this label are treated as dependency updates. Change to match your repo's label conventions. |
+| Rebase label | `rebase` | PRs with this label are shown with a "Rebasing" indicator in the Dependencies tab. Change to match the label name your dependency bot uses to signal rebase-needed status. |
 
 ### Dependencies Filters
 
