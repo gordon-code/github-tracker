@@ -3,6 +3,7 @@ import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
+import { pushNotification } from "../../lib/errors";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
@@ -110,6 +111,8 @@ interface DependenciesTabProps {
   onRefresh?: () => void;
 }
 
+const _notifiedBots = new Set<string>();
+
 export default function DependenciesTab(props: DependenciesTabProps) {
   const expandedGroups = createMemo(() =>
     new Set<string>(viewState.dependencyExpandedGroups)
@@ -160,6 +163,10 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     config.enableTracking
       ? new Set(viewState.trackedItems.filter((t) => t.type === "pullRequest").map((t) => t.id))
       : new Set<number>()
+  );
+
+  const trackedBotLogins = createMemo(() =>
+    new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {

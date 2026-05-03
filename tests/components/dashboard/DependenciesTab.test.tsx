@@ -631,21 +631,18 @@ describe("DependenciesTab — unknown bot banner", () => {
 
 describe("DependenciesTab — ignore button", () => {
   it("clicking the ignore button hides the PR from the list", () => {
-    const pr = makeNeedsReviewPR({ title: "chore(deps): bump lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
-
-    // PR is visible before ignore
-    expect(screen.getByText(pr.title)).toBeDefined();
+    expect(screen.getByText("lodash")).toBeDefined();
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);
 
-    // PR should no longer be rendered
-    expect(screen.queryByText(pr.title)).toBeNull();
+    expect(screen.queryByText("lodash")).toBeNull();
   });
 
   it("ignore button adds item to ignoredItems in viewState", () => {
-    const pr = makeNeedsReviewPR({ id: 5001, title: "chore(deps): update react to v19" });
+    const pr = makeMergeablePR({ id: 5001, title: "chore(deps): update dependency react to v19" });
     renderTab({ pullRequests: [pr] });
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
@@ -655,15 +652,14 @@ describe("DependenciesTab — ignore button", () => {
   });
 
   it("ignored PR is not rendered even when re-renderTab is called", () => {
-    const pr = makeNeedsReviewPR({ id: 5002, title: "Bump axios from 0.27 to 1.0.0 (ignored)" });
+    const pr = makeMergeablePR({ id: 5002, title: "Bump axios from 0.27.2 to 1.0.0" });
     const { unmount } = renderTab({ pullRequests: [pr] });
 
     fireEvent.click(screen.getByRole("button", { name: /^Ignore #/ }));
     unmount();
 
-    // Re-render with same PR data — ignored item should still be filtered out
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText(pr.title)).toBeNull();
+    expect(screen.queryByText("axios")).toBeNull();
   });
 });
 
@@ -672,7 +668,7 @@ describe("DependenciesTab — ignore button", () => {
 describe("DependenciesTab — track button", () => {
   it("track button is not rendered when enableTracking is false", () => {
     updateConfig({ enableTracking: false });
-    const pr = makeNeedsReviewPR({ title: "chore(deps): update lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
 
     expect(screen.queryByRole("button", { name: /^Pin #/ })).toBeNull();
@@ -680,7 +676,7 @@ describe("DependenciesTab — track button", () => {
 
   it("track button renders when enableTracking is true", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ title: "chore(deps): update lodash to v5" });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
 
     expect(screen.getByRole("button", { name: /^Pin #/ })).toBeDefined();
@@ -688,7 +684,7 @@ describe("DependenciesTab — track button", () => {
 
   it("clicking track button adds the PR to trackedItems", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ id: 6001, title: "Bump react from 17 to 18" });
+    const pr = makeMergeablePR({ id: 6001, title: "Bump react from 17.0.0 to 18.0.0" });
     renderTab({ pullRequests: [pr] });
 
     fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
@@ -698,14 +694,12 @@ describe("DependenciesTab — track button", () => {
 
   it("clicking track button a second time removes the PR from trackedItems (toggle)", () => {
     updateConfig({ enableTracking: true });
-    const pr = makeNeedsReviewPR({ id: 6002, title: "Bump typescript from 4 to 5" });
+    const pr = makeMergeablePR({ id: 6002, title: "Bump typescript from 4.0.0 to 5.0.0" });
     renderTab({ pullRequests: [pr] });
 
-    // First click: track (aria-label is "Pin #…")
     fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
     expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(true);
 
-    // Second click: untrack (aria-label switches to "Unpin #…" when tracked)
     fireEvent.click(screen.getByRole("button", { name: /^Unpin #/ }));
     expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(false);
   });
