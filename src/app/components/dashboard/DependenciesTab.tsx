@@ -17,7 +17,7 @@ import { matchAbandonedToPr } from "../../lib/dependency-dashboard";
 import type { FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
-import ChevronIcon from "../shared/ChevronIcon";
+import RepoGroupHeader from "../shared/RepoGroupHeader";
 import StatusDot from "../shared/StatusDot";
 import SizeBadge from "../shared/SizeBadge";
 import ReviewBadge from "../shared/ReviewBadge";
@@ -351,18 +351,11 @@ function StatusGroup(props: StatusGroupProps) {
   return (
     <Show when={props.items.length > 0}>
       <div>
-        <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
-          <button
-            type="button"
-            class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold repo-header-text"
-            onClick={props.onToggle}
-            aria-expanded={props.expanded}
-            aria-controls={`dep-group-${props.status}`}
-          >
-            <ChevronIcon size="md" rotated={!props.expanded} />
-            <span>{props.label}</span>
-          </button>
-        </div>
+        <RepoGroupHeader
+          repoFullName={props.label}
+          isExpanded={props.expanded}
+          onToggle={props.onToggle}
+        />
 
         <div id={`dep-group-${props.status}`} role="list" class={`divide-y divide-base-300${props.expanded ? "" : " hidden"}`}>
           <For each={props.items}>
