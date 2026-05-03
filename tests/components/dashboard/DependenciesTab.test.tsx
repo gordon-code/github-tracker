@@ -157,18 +157,18 @@ describe("DependenciesTab — status groups", () => {
     expect(screen.getByText(pr.title)).toBeDefined();
   });
 
-  it("Waiting group expanded by default — PR title visible", () => {
+  it("Waiting group collapsed by default — PR title hidden", () => {
     const pr = makeWaitingPR();
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText(pr.title)).toBeDefined();
+    expect(screen.queryByText(pr.title)).toBeNull();
   });
 
-  it("collapses Waiting group when header is clicked", () => {
+  it("expands Waiting group when header is clicked", () => {
     const pr = makeWaitingPR();
     renderTab({ pullRequests: [pr] });
     const header = screen.getByText("Waiting").closest("button")!;
     fireEvent.click(header);
-    expect(screen.queryByText(pr.title)).toBeNull();
+    expect(screen.getByText(pr.title)).toBeDefined();
   });
 
   it("collapses an expanded group on second click", () => {

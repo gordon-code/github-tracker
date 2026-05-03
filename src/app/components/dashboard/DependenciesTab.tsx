@@ -44,7 +44,7 @@ interface DependenciesTabProps {
 
 export default function DependenciesTab(props: DependenciesTabProps) {
   const [expandedGroups, setExpandedGroups] = createSignal<Set<DepStatus>>(
-    new Set(["needs-review", "waiting", "stale"])
+    new Set<DepStatus>(["needs-review"])
   );
 
   function toggleGroup(status: DepStatus) {

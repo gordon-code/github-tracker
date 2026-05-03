@@ -2190,7 +2190,8 @@ describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clea
       headRef: "dependabot/npm_and_yarn/axios-1.0.0",
       state: "OPEN",
       enriched: true,
-      checkStatus: "pending",
+      checkStatus: "success",
+      reviewDecision: null,
       draft: false,
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
