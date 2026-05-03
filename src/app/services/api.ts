@@ -1189,7 +1189,7 @@ export async function fetchDashboardIssueBodies(
       );
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
       for (const node of response.nodes) {
-        if (!node) continue;
+        if (!node || !node.id) continue;
         result.set(node.id, node.body);
       }
     } catch (err) {

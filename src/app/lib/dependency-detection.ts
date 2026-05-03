@@ -100,11 +100,10 @@ export function isRebasing(pr: PullRequest, rebaseLabel: string): boolean {
   return pr.labels.some((l) => l.name.toLowerCase() === target);
 }
 
-const STALE_THRESHOLD_DEFAULT_DAYS = 14;
+export const STALE_THRESHOLD_DEFAULT_DAYS = 14;
 
 export function classifyDepStatus(
   pr: PullRequest,
-  _rebaseLabel: string,
   staleThresholdDays: number = STALE_THRESHOLD_DEFAULT_DAYS
 ): DepStatus {
   // needs-review: enriched, not draft, CI passing, not yet approved

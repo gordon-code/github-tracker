@@ -1139,7 +1139,7 @@ export default function SettingsPage() {
           >
             <input
               type="checkbox"
-              class="toggle"
+              class="toggle toggle-primary"
               aria-label="Enable dependencies tab"
               checked={config.dependencies?.enabled ?? true}
               onChange={() => updateDependencyConfig({ enabled: !(config.dependencies?.enabled ?? true) })}
@@ -1151,7 +1151,7 @@ export default function SettingsPage() {
           >
             <input
               type="text"
-              class="input input-bordered input-sm w-40"
+              class="input input-sm w-40"
               aria-label="Rebase label"
               value={config.dependencies?.rebaseLabel ?? "rebase"}
               maxLength={50}

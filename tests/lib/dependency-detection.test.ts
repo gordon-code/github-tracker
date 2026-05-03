@@ -201,7 +201,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("needs-review");
   });
 
@@ -214,7 +214,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     // needs-review check runs first and wins
     expect(result).toBe("needs-review");
   });
@@ -227,7 +227,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("stale");
   });
 
@@ -236,7 +236,7 @@ describe("classifyDepStatus", () => {
       draft: true,
       updatedAt: OLD,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("stale");
   });
 
@@ -245,7 +245,7 @@ describe("classifyDepStatus", () => {
       draft: true,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("waiting");
   });
 
@@ -257,7 +257,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("waiting");
   });
 
@@ -267,7 +267,7 @@ describe("classifyDepStatus", () => {
       checkStatus: null,
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("waiting");
   });
 
@@ -279,7 +279,7 @@ describe("classifyDepStatus", () => {
       reviewDecision: "APPROVED",
       updatedAt: RECENT,
     });
-    const result = classifyDepStatus(pr, "rebase", 14);
+    const result = classifyDepStatus(pr, 14);
     expect(result).toBe("waiting");
   });
 
@@ -290,8 +290,8 @@ describe("classifyDepStatus", () => {
     const recent = makePullRequest({ draft: true, updatedAt: thirteenDaysAgo });
     const old = makePullRequest({ draft: true, updatedAt: fifteenDaysAgo });
 
-    expect(classifyDepStatus(recent, "rebase")).toBe("waiting");
-    expect(classifyDepStatus(old, "rebase")).toBe("stale");
+    expect(classifyDepStatus(recent)).toBe("waiting");
+    expect(classifyDepStatus(old)).toBe("stale");
   });
 });
 

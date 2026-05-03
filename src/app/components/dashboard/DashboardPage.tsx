@@ -596,7 +596,7 @@ export default function DashboardPage() {
   // Redirect away from Dependencies tab when it becomes invisible
   createEffect(() => {
     if (activeTab() === "dependencies" && !enableDependencies()) {
-      handleTabChange("pullRequests");
+      handleTabChange("issues");
     }
   });
 
@@ -821,15 +821,11 @@ export default function DashboardPage() {
   const trackedBotLogins = createMemo(() =>
     new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
-  const dependencyPrIds = createMemo(() =>
-    new Set(
-      dashboardData.pullRequests
-        .filter((pr) => pr.state === "OPEN" && isDependencyPr(pr, trackedBotLogins()))
-        .map((pr) => pr.id)
-    )
-  );
   const dependencyPullRequests = createMemo(() =>
-    dashboardData.pullRequests.filter((pr) => dependencyPrIds().has(pr.id))
+    dashboardData.pullRequests.filter((pr) => pr.state === "OPEN" && isDependencyPr(pr, trackedBotLogins()))
+  );
+  const dependencyPrIds = createMemo(() =>
+    new Set(dependencyPullRequests().map((pr) => pr.id))
   );
 
   // Eagerly compute scoped data for exclusive custom tabs (needed by exclusiveOwnership).

@@ -7,13 +7,6 @@ export interface AbandonedDependency {
   lastUpdated: string;
 }
 
-export interface DashboardIssueInfo {
-  issueNumber: number;
-  htmlUrl: string;
-  repoFullName: string;
-  abandonedDeps: AbandonedDependency[];
-}
-
 /** SEC-002: escapes ALL regex metacharacters. */
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -98,6 +91,8 @@ export function parseAbandonedSection(body: string): AbandonedDependency[] {
   }
 }
 
+const _abandonedPatternCache = new Map<string, RegExp>();
+
 /**
  * Checks if a dep PR's title references an abandoned package name.
  * Uses word-boundary regex with escaped package name (SEC-002).
@@ -107,11 +102,15 @@ export function matchAbandonedToPr(
   abandonedDeps: AbandonedDependency[]
 ): AbandonedDependency | null {
   for (const dep of abandonedDeps) {
-    // SEC-002: escape package name before using in regex
-    // Use (?:^|\W) and (?:\W|$) instead of \b to correctly handle scoped packages like @scope/pkg
-    // \b fails when package name starts/ends with non-word chars (e.g. @, /)
-    const escaped = escapeRegex(dep.packageName);
-    const pattern = new RegExp("(?:^|\\W)" + escaped + "(?:\\W|$)", "i");
+    let pattern = _abandonedPatternCache.get(dep.packageName);
+    if (!pattern) {
+      // SEC-002: escape package name before using in regex
+      // Use (?:^|\W) and (?:\W|$) instead of \b to correctly handle scoped packages like @scope/pkg
+      // \b fails when package name starts/ends with non-word chars (e.g. @, /)
+      const escaped = escapeRegex(dep.packageName);
+      pattern = new RegExp("(?:^|\\W)" + escaped + "(?:\\W|$)", "i");
+      _abandonedPatternCache.set(dep.packageName, pattern);
+    }
     if (pattern.test(pr.title)) return dep;
   }
   return null;

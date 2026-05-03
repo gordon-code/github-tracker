@@ -4,7 +4,7 @@ import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, unt
 import { isSafeGitHubUrl } from "../../lib/url";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
-import { classifyDepStatus, extractVersionInfo, isRebasing, type DepStatus } from "../../lib/dependency-detection";
+import { classifyDepStatus, extractVersionInfo, isRebasing, STALE_THRESHOLD_DEFAULT_DAYS, type DepStatus } from "../../lib/dependency-detection";
 import { matchAbandonedToPr } from "../../lib/dependency-dashboard";
 import type { FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
@@ -23,8 +23,6 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
     { value: "patch", label: "Patch" },
   ],
 };
-
-const STALE_THRESHOLD_DAYS = 14;
 
 interface ClassifiedPR {
   pr: PullRequest;
@@ -48,7 +46,7 @@ interface DependenciesTabProps {
 
 export default function DependenciesTab(props: DependenciesTabProps) {
   const [expandedGroups, setExpandedGroups] = createSignal<Set<DepStatus>>(
-    new Set(["needs-review"])
+    new Set(["needs-review", "waiting", "stale"])
   );
 
   function toggleGroup(status: DepStatus) {
@@ -66,7 +64,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   }));
 
   const botOptions = createMemo<FilterChipGroupDef>(() => {
-    const logins = [...new Set(props.pullRequests.map((pr) => pr.userLogin))].sort();
+    const logins = [...new Set(props.pullRequests.filter((pr) => pr.state === "OPEN").map((pr) => pr.userLogin))].sort();
     return {
       label: "Bot",
       field: "bot",
@@ -91,34 +89,37 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
+    const ignored = ignoredIds();
     return props.pullRequests
-      .filter((pr) => {
+      .map((pr) => {
+        const versionInfo = extractVersionInfo(pr.title);
+        const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
+        return {
+          pr,
+          status: classifyDepStatus(pr, STALE_THRESHOLD_DEFAULT_DAYS),
+          versionInfo,
+          rebasing: isRebasing(pr, props.rebaseLabel),
+          abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
+        };
+      })
+      .filter(({ pr, versionInfo }) => {
         if (pr.state !== "OPEN") return false;
-        if (ignoredIds().has(pr.id)) return false;
+        if (ignored.has(pr.id)) return false;
 
         // Bot filter
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
 
         // updateType filter — pass through when updateType is null (unknown)
         if (filters.updateType !== "all") {
-          const vi = extractVersionInfo(pr.title);
-          if (vi !== null && vi.updateType !== undefined && vi.updateType !== filters.updateType) return false;
+          if (versionInfo !== null && versionInfo.updateType !== undefined && versionInfo.updateType !== filters.updateType) return false;
         }
 
         return true;
       })
-      .map((pr) => {
-        const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
-        return {
-          pr,
-          status: classifyDepStatus(pr, props.rebaseLabel, STALE_THRESHOLD_DAYS),
-          versionInfo: extractVersionInfo(pr.title),
-          rebasing: isRebasing(pr, props.rebaseLabel),
-          abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
-        };
-      })
       .sort((a, b) => (a.pr.updatedAt < b.pr.updatedAt ? 1 : a.pr.updatedAt > b.pr.updatedAt ? -1 : 0));
   });
+
+  const openPrCount = createMemo(() => props.pullRequests.filter(p => p.state === "OPEN").length);
 
   const statusGroups = createMemo(() => {
     const groups: Record<DepStatus, ClassifiedPR[]> = {
@@ -149,12 +150,14 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     <div class="flex flex-col h-full">
       {/* Filter toolbar */}
       <div class="flex items-start px-4 py-2 gap-3 compact:py-0.5 compact:gap-2 border-b border-base-300 bg-base-100">
-        <FilterToolbar
-          groups={filterGroups()}
-          values={activeFilters()}
-          onChange={(f, v) => setTabFilter("dependencies", f as "updateType" | "bot", v)}
-          onResetAll={() => resetAllTabFilters("dependencies")}
-        />
+        <div class="flex flex-wrap items-center min-w-0 flex-1 gap-2 compact:gap-1">
+          <FilterToolbar
+            groups={filterGroups()}
+            values={activeFilters()}
+            onChange={(f, v) => setTabFilter("dependencies", f as "updateType" | "bot", v)}
+            onResetAll={() => resetAllTabFilters("dependencies")}
+          />
+        </div>
       </div>
 
       {/* Loading skeleton */}
@@ -163,7 +166,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
       </Show>
 
       {/* Empty state */}
-      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.filter(p => p.state === "OPEN").length === 0}>
+      <Show when={!props.loading && classifiedPRs().length === 0 && openPrCount() === 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <svg class="h-10 w-10 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -174,7 +177,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
       </Show>
 
       {/* No results from filter */}
-      <Show when={!props.loading && classifiedPRs().length === 0 && props.pullRequests.filter(p => p.state === "OPEN").length > 0}>
+      <Show when={!props.loading && classifiedPRs().length === 0 && openPrCount() > 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <p class="text-sm font-medium">No PRs match your current filters</p>
         </div>
@@ -182,7 +185,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
       {/* Status groups */}
       <Show when={classifiedPRs().length > 0}>
-        <div class="divide-y divide-base-300">
+        <div class="divide-y divide-base-300 overflow-y-auto flex-1">
           <StatusGroup
             status="needs-review"
             label="Needs Review"
@@ -260,6 +263,7 @@ function StatusGroup(props: StatusGroupProps) {
           class="w-full flex items-center gap-2 px-4 py-2 bg-base-200 hover:bg-base-300 text-sm font-medium text-base-content transition-colors"
           onClick={props.onToggle}
           aria-expanded={props.expanded}
+          aria-controls={`dep-group-${props.status}`}
         >
           <svg
             class={`h-3.5 w-3.5 text-base-content/50 transition-transform ${props.expanded ? "rotate-90" : ""}`}
@@ -276,7 +280,7 @@ function StatusGroup(props: StatusGroupProps) {
 
         {/* PR rows */}
         <Show when={props.expanded}>
-          <div role="list" class="divide-y divide-base-300">
+          <div id={`dep-group-${props.status}`} role="list" class="divide-y divide-base-300">
             <For each={props.items}>
               {({ pr, versionInfo, rebasing, abandonedDep }) => {
                 const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
@@ -312,9 +316,6 @@ function StatusGroup(props: StatusGroupProps) {
                           )}
                         </Show>
 
-                        {/* Bot name */}
-                        <span class="text-xs text-base-content/50">{pr.userLogin}</span>
-
                         {/* Rebase indicator */}
                         <Show when={rebasing}>
                           <span class="badge badge-ghost badge-sm">Rebasing</span>
@@ -322,7 +323,7 @@ function StatusGroup(props: StatusGroupProps) {
 
                         {/* Draft indicator */}
                         <Show when={pr.draft}>
-                          <span class="badge badge-ghost badge-sm italic text-base-content/50">Draft</span>
+                          <span class="badge badge-ghost badge-sm">Draft</span>
                         </Show>
 
                         {/* Abandoned dep pill — SEC-001: URL validated before use as href */}
@@ -337,7 +338,7 @@ function StatusGroup(props: StatusGroupProps) {
                               href={dashUrl()}
                               target="_blank"
                               rel="noopener noreferrer"
-                              class="badge badge-error badge-outline badge-sm hover:badge-error"
+                              class="badge badge-error badge-outline badge-sm"
                               onClick={(e) => e.stopPropagation()}
                             >
                               Abandoned dep
