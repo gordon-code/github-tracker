@@ -3,6 +3,7 @@ import {
   findDashboardIssues,
   parseAbandonedSection,
   matchAbandonedToPr,
+  resetAbandonedPatternCache,
   escapeRegex,
 } from "../../src/app/lib/dependency-dashboard.js";
 import { makeIssue, makePullRequest } from "../helpers/factories.js";
@@ -234,5 +235,21 @@ describe("matchAbandonedToPr", () => {
     const adversarial = [{ datasource: "npm", packageName: "a+b*c?d", lastUpdated: "2023-01-01" }];
     const pr = makePullRequest({ title: "Bump something from 1.0 to 2.0" });
     expect(() => matchAbandonedToPr(pr, adversarial)).not.toThrow();
+  });
+});
+
+describe("resetAbandonedPatternCache", () => {
+  it("clears the regex cache without breaking subsequent matches", () => {
+    const deps = [{ datasource: "npm", packageName: "lodash", lastUpdated: "2023-01-15" }];
+    const pr = makePullRequest({ title: "Bump lodash from 4.0.0 to 4.17.21" });
+
+    // Populate the cache
+    expect(matchAbandonedToPr(pr, deps)).toEqual(deps[0]);
+
+    // Clear it
+    resetAbandonedPatternCache();
+
+    // Matching still works (cache rebuilt on demand, not stale)
+    expect(matchAbandonedToPr(pr, deps)).toEqual(deps[0]);
   });
 });

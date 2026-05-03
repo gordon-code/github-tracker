@@ -822,9 +822,10 @@ export default function DashboardPage() {
   const trackedBotLogins = createMemo(() =>
     new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
-  const dependencyPullRequests = createMemo(() =>
-    dashboardData.pullRequests.filter((pr) => pr.state === "OPEN" && isDependencyPr(pr, trackedBotLogins()))
-  );
+  const dependencyPullRequests = createMemo(() => {
+    if (!config.dependencies.enabled) return [];
+    return dashboardData.pullRequests.filter((pr) => pr.state === "OPEN" && isDependencyPr(pr, trackedBotLogins()));
+  });
   const dependencyPrIds = createMemo(() =>
     new Set(dependencyPullRequests().map((pr) => pr.id))
   );

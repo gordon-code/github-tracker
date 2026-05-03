@@ -128,6 +128,27 @@ describe("DependenciesTab — empty state", () => {
     expect(screen.queryByText("Waiting")).toBeNull();
     expect(screen.queryByText("Stale")).toBeNull();
   });
+
+  it("shows loading skeleton when loading with no PRs", () => {
+    renderTab({ loading: true, pullRequests: [] });
+    expect(screen.getByRole("status", { name: "Loading dependency PRs" })).toBeDefined();
+  });
+
+  it("shows 'no filter matches' when filters exclude all PRs", () => {
+    const pr = makePullRequest({
+      userLogin: "renovate[bot]",
+      headRef: "renovate/lodash-4.x",
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      state: "OPEN",
+      enriched: true,
+      checkStatus: "success",
+      reviewDecision: null,
+      draft: false,
+    });
+    setTabFilter("dependencies", "updateType", "major");
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("No PRs match your current filters")).toBeDefined();
+  });
 });
 
 // ── Status groups ─────────────────────────────────────────────────────────────
@@ -157,10 +178,11 @@ describe("DependenciesTab — status groups", () => {
     expect(screen.getByText(pr.title)).toBeDefined();
   });
 
-  it("Waiting group collapsed by default — PR title hidden", () => {
+  it("Waiting group collapsed by default — content div is hidden", () => {
     const pr = makeWaitingPR();
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText(pr.title)).toBeNull();
+    const contentDiv = document.getElementById("dep-group-waiting")!;
+    expect(contentDiv.classList.contains("hidden")).toBe(true);
   });
 
   it("expands Waiting group when header is clicked", () => {
@@ -168,7 +190,8 @@ describe("DependenciesTab — status groups", () => {
     renderTab({ pullRequests: [pr] });
     const header = screen.getByText("Waiting").closest("button")!;
     fireEvent.click(header);
-    expect(screen.getByText(pr.title)).toBeDefined();
+    const contentDiv = document.getElementById("dep-group-waiting")!;
+    expect(contentDiv.classList.contains("hidden")).toBe(false);
   });
 
   it("collapses an expanded group on second click", () => {
@@ -176,7 +199,8 @@ describe("DependenciesTab — status groups", () => {
     renderTab({ pullRequests: [pr] });
     const header = screen.getByText("Needs Review").closest("button")!;
     fireEvent.click(header);
-    expect(screen.queryByText(pr.title)).toBeNull();
+    const contentDiv = document.getElementById("dep-group-needs-review")!;
+    expect(contentDiv.classList.contains("hidden")).toBe(true);
   });
 
   it("shows count badge in group header", () => {

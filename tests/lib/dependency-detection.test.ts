@@ -160,6 +160,11 @@ describe("extractVersionInfo", () => {
   it("returns null for unrecognized title format", () => {
     expect(extractVersionInfo("Fix a bug in auth flow")).toBeNull();
   });
+
+  it("returns null updateType when from and to are identical versions", () => {
+    const result = extractVersionInfo("Bump lodash from 4.17.21 to 4.17.21");
+    expect(result).toEqual({ from: "4.17.21", to: "4.17.21", updateType: undefined });
+  });
 });
 
 describe("isRebasing", () => {

@@ -267,77 +267,82 @@ function StatusGroup(props: StatusGroupProps) {
           <span class={`badge badge-sm ${props.badgeClass}`}>{props.items.length}</span>
         </button>
 
-        <Show when={props.expanded}>
-          <div id={`dep-group-${props.status}`} role="list" class="divide-y divide-base-300">
-            <For each={props.items}>
-              {({ pr, versionInfo, rebasing, abandonedDep }) => {
-                const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
-                return (
-                  <div role="listitem">
-                    <ItemRow
-                      repo={pr.repoFullName}
-                      number={pr.number}
-                      title={pr.title}
-                      author={pr.userLogin}
-                      createdAt={pr.createdAt}
-                      updatedAt={pr.updatedAt}
-                      refreshTick={props.refreshTick}
-                      url={pr.htmlUrl}
-                      labels={pr.labels}
-                      commentCount={pr.enriched !== false ? pr.comments : undefined}
-                      onIgnore={() => props.onIgnore(pr)}
-                      onTrack={props.enableTracking ? () => props.onTrack(pr) : undefined}
-                      isTracked={props.enableTracking ? props.trackedPrIds.has(pr.id) : undefined}
-                      isPolling={props.hotPollingPRIds?.has(pr.id)}
-                    >
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <Show when={versionInfo?.updateType}>
-                          {(updateType) => (
-                            <span class={`badge badge-sm ${
-                              updateType() === "major" ? "badge-error" :
-                              updateType() === "minor" ? "badge-warning" :
-                              "badge-success"
-                            }`}>
-                              {updateType()}
-                            </span>
-                          )}
-                        </Show>
+        <div id={`dep-group-${props.status}`} role="list" class={`divide-y divide-base-300${props.expanded ? "" : " hidden"}`}>
+          <For each={props.items}>
+            {({ pr, versionInfo, rebasing, abandonedDep }) => {
+              const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
+              return (
+                <div role="listitem">
+                  <ItemRow
+                    repo={pr.repoFullName}
+                    number={pr.number}
+                    title={pr.title}
+                    author={pr.userLogin}
+                    createdAt={pr.createdAt}
+                    updatedAt={pr.updatedAt}
+                    refreshTick={props.refreshTick}
+                    url={pr.htmlUrl}
+                    labels={pr.labels}
+                    commentCount={pr.enriched !== false ? pr.comments : undefined}
+                    onIgnore={() => props.onIgnore(pr)}
+                    onTrack={props.enableTracking ? () => props.onTrack(pr) : undefined}
+                    isTracked={props.enableTracking ? props.trackedPrIds.has(pr.id) : undefined}
+                    isPolling={props.hotPollingPRIds?.has(pr.id)}
+                  >
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <Show when={pr.userAvatarUrl}>
+                        <img
+                          src={pr.userAvatarUrl}
+                          alt={pr.userLogin}
+                          class="w-5 h-5 rounded-full ring-1 ring-base-100"
+                        />
+                      </Show>
 
-                        <Show when={rebasing}>
-                          <span class="badge badge-ghost badge-sm">Rebasing</span>
-                        </Show>
+                      <Show when={versionInfo?.updateType}>
+                        {(updateType) => (
+                          <span class={`badge badge-sm ${
+                            updateType() === "major" ? "badge-error" :
+                            updateType() === "minor" ? "badge-warning" :
+                            "badge-success"
+                          }`}>
+                            {updateType()}
+                          </span>
+                        )}
+                      </Show>
 
-                        <Show when={pr.draft}>
-                          <span class="badge badge-ghost badge-sm">Draft</span>
-                        </Show>
+                      <Show when={rebasing}>
+                        <span class="badge badge-ghost badge-sm">Rebasing</span>
+                      </Show>
 
-                        {/* Abandoned dep pill — SEC-001: URL validated before use as href */}
-                        <Show when={abandonedDep !== null}>
-                          <Show
-                            when={dashUrl() && isSafeGitHubUrl(dashUrl()!)}
-                            fallback={
-                              <span class="badge badge-error badge-outline badge-sm">Abandoned dep</span>
-                            }
+                      <Show when={pr.draft}>
+                        <span class="badge badge-ghost badge-sm">Draft</span>
+                      </Show>
+
+                      <Show when={abandonedDep !== null}>
+                        <Show
+                          when={dashUrl() && isSafeGitHubUrl(dashUrl()!)}
+                          fallback={
+                            <span class="badge badge-error badge-outline badge-sm">Abandoned dep</span>
+                          }
+                        >
+                          <a
+                            href={dashUrl()}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="badge badge-error badge-outline badge-sm"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <a
-                              href={dashUrl()}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              class="badge badge-error badge-outline badge-sm"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              Abandoned dep
-                            </a>
-                          </Show>
+                            Abandoned dep
+                          </a>
                         </Show>
-                      </div>
-                    </ItemRow>
-                  </div>
-                );
-              }}
-            </For>
-          </div>
-        </Show>
+                      </Show>
+                    </div>
+                  </ItemRow>
+                </div>
+              );
+            }}
+          </For>
+        </div>
       </div>
     </Show>
   );

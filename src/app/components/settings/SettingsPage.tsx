@@ -1143,7 +1143,7 @@ export default function SettingsPage() {
               class="toggle toggle-primary"
               aria-label="Enable dependencies tab"
               checked={config.dependencies?.enabled ?? true}
-              onChange={() => updateDependencyConfig({ enabled: !(config.dependencies?.enabled ?? true) })}
+              onChange={() => saveWithFeedback({ dependencies: { ...config.dependencies, enabled: !(config.dependencies?.enabled ?? true) } })}
             />
           </SettingRow>
           <SettingRow
@@ -1157,7 +1157,7 @@ export default function SettingsPage() {
               value={config.dependencies?.rebaseLabel ?? "rebase"}
               maxLength={50}
               placeholder="rebase"
-              onInput={(e) => updateDependencyConfig({ rebaseLabel: e.currentTarget.value || "rebase" })}
+              onInput={(e) => saveWithFeedback({ dependencies: { ...config.dependencies, rebaseLabel: e.currentTarget.value || "rebase" } })}
             />
           </SettingRow>
         </Section>
