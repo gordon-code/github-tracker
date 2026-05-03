@@ -110,7 +110,6 @@ export const ViewStateSchema = z.object({
     dependencies: { updateType: "all", bot: "all" },
   }),
   showPrRuns: z.boolean().default(false),
-  hideDepDashboard: z.boolean().default(true),
   customTabFilters: z.record(
     z.string(),
     z.record(z.string(), z.string())
@@ -213,7 +212,6 @@ export function resetViewState(): void {
           dependencies: { updateType: "all", bot: "all" },
         },
         showPrRuns: false,
-        hideDepDashboard: true,
         customTabFilters: {},
         expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },

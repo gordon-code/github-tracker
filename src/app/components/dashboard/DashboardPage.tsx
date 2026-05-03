@@ -1331,6 +1331,19 @@ export default function DashboardPage() {
                   onRefresh={() => _coordinator()?.manualRefresh()}
                 />
               </Match>
+              <Match when={activeTab() === "dependencies"}>
+                <DependenciesTab
+                  pullRequests={dependencyPullRequests()}
+                  loading={dashboardData.loading}
+                  userLogin={userLogin()}
+                  trackedBotLogins={trackedBotLogins()}
+                  abandonedDepsMap={abandonedDepsMap()}
+                  dashboardIssueUrls={dashboardIssueUrls()}
+                  hotPollingPRIds={hotPollingPRIds()}
+                  refreshTick={refreshTick()}
+                  rebaseLabel={config.dependencies.rebaseLabel}
+                />
+              </Match>
               <Match when={activeTab() === "tracked"}>
                 {/* TrackedTab intentionally receives unfiltered dashboardData — it bypasses exclusivity */}
                 <TrackedTab

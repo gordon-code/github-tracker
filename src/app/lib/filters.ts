@@ -2,7 +2,6 @@ import type { Issue, PullRequest, WorkflowRun } from "../../shared/types";
 
 export interface ItemFilterOpts {
   ignoredIds: Set<number>;
-  hideDepDashboard?: boolean;
   showPrRuns?: boolean;
   // null = bypass globalFilter (custom tabs have their own scope)
   globalFilter?: { org: string | null; repo: string | null } | null;
@@ -10,7 +9,6 @@ export interface ItemFilterOpts {
 
 export function isIssueVisible(issue: Issue, opts: ItemFilterOpts): boolean {
   if (opts.ignoredIds.has(issue.id)) return false;
-  if (opts.hideDepDashboard && issue.title === "Dependency Dashboard") return false;
   if (opts.globalFilter) {
     const { org, repo } = opts.globalFilter;
     if (repo && issue.repoFullName !== repo) return false;
