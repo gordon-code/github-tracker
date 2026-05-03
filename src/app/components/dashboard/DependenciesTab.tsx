@@ -137,7 +137,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   }));
 
   const botOptions = createMemo<FilterChipGroupDef>(() => {
-    const logins = [...new Set(props.pullRequests.map((pr) => pr.userLogin))].sort();
+    const logins = [...new Set(props.pullRequests.filter((pr) => pr.state === "OPEN").map((pr) => pr.userLogin))].sort();
     return {
       label: "Bot",
       field: "bot",
@@ -232,6 +232,8 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
     return items;
   });
+
+  const openPrCount = createMemo(() => props.pullRequests.filter(p => p.state === "OPEN").length);
 
   const statusGroups = createMemo(() => {
     const groups: Record<DepStatus, ClassifiedPR[]> = {
