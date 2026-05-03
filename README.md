@@ -75,6 +75,10 @@ Shimmer animations on items being updated by the hot poll, flash highlights when
 
 Star counts appear in repo group headers, fetched as part of the standard data refresh.
 
+### Dependencies Tab
+
+An auto-detected built-in tab that appears when dependency bot PRs are found in your tracked repos. Dependency PRs are identified via a multi-layer bot detection pipeline (PR author login, branch name prefix, configurable label). Items are grouped by status — **Needs Review** (CI passing, not yet approved), **Waiting** (CI pending or draft), and **Stale** (open more than 14 days) — rather than by repo. Abandoned dependency pills link directly to the Renovate Dashboard issue for bulk resolution. Configurable via **Settings > Dependencies**.
+
 ### Custom Tabs
 
 Create named filtered views over the existing Issues, PRs, and Actions data. Each custom tab has a name, a base type (Issues, PRs, or Actions), an optional org/repo scope, and optional filter presets. An "exclusive" toggle hides matching items from the standard tabs so they only appear in the custom tab. Up to 10 custom tabs can be created. Manage them via the "+" button in the tab bar or in **Settings > Custom Tabs**.

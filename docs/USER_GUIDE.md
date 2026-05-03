@@ -28,6 +28,12 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Workflow Grouping](#workflow-grouping)
   - [Show PR Runs](#show-pr-runs)
   - [Filters](#actions-filters)
+- [Dependencies Tab](#dependencies-tab)
+  - [Auto-Detection](#auto-detection)
+  - [Status Grouping](#status-grouping)
+  - [Abandoned Dependencies](#abandoned-dependencies)
+  - [Settings](#dependencies-settings)
+  - [Filters](#dependencies-filters)
 - [Multi-User Tracking](#multi-user-tracking)
 - [Monitor-All Mode](#monitor-all-mode)
 - [Upstream Repos](#upstream-repos)
@@ -256,6 +262,58 @@ By default, runs triggered by pull request events are hidden to reduce noise. To
 |--------|---------|---------|
 | Conclusion | All / Success / Failure / Cancelled / Running / Other | All |
 | Event | All / Push / Pull request / Schedule / Workflow dispatch / Other | All |
+
+---
+
+## Dependencies Tab
+
+The Dependencies tab is a built-in tab that groups dependency bot PRs separately from your regular Pull Requests view. It appears automatically when the app detects dependency bot PRs in your tracked repos and is enabled in **Settings > Dependencies**.
+
+### Auto-Detection
+
+The tab uses a multi-layer detection pipeline to identify dependency PRs:
+
+1. **Author login** — any PR author whose login ends in `[bot]` and whose name contains `renovate`, `dependabot`, `snyk`, or `mend` is treated as a dependency bot.
+2. **Branch name prefix** — branches starting with `renovate/`, `deps/`, or `dependabot/` are flagged as dependency updates regardless of author.
+3. **Label match** — PRs with a configurable label (default: `dependencies`) are included. The label can be changed in **Settings > Dependencies > Rebase label**.
+
+Dependency PRs claimed by the Dependencies tab are excluded from the standard Pull Requests tab and any custom tabs with exclusivity enabled. The tab title shows the current count of open dependency PRs.
+
+### Status Grouping
+
+Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups items by their update status:
+
+| Group | Criteria |
+|-------|----------|
+| **Needs Review** | CI passing (all checks green), PR not yet approved — these are ready to merge |
+| **Waiting** | CI pending, checks still running, or PR is a draft — not yet actionable |
+| **Stale** | PR has been open more than 14 days without merging — may need a rebase or manual review |
+
+Within each group, PRs are sorted by updated date (most recent first).
+
+### Abandoned Dependencies
+
+If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Ignored or Blocked" and "Open" sections are shown as pills below the relevant group. Each pill links directly to the Renovate Dashboard issue so you can take bulk action (e.g., re-enable a paused dependency).
+
+The parser reads the Renovate Dashboard issue body to extract package names and their status. If the Renovate Dashboard issue is hidden via the Issues tab toggle, it is still parsed for abandoned dep data.
+
+### Dependencies Settings
+
+Go to **Settings > Dependencies** to configure:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enable Dependencies tab | On | Show or hide the tab. When disabled, dependency PRs appear in the standard Pull Requests tab. |
+| Rebase label | `dependencies` | PRs with this label are treated as dependency updates. Change to match your repo's label conventions. |
+
+### Dependencies Filters
+
+| Filter | Options | Default |
+|--------|---------|---------|
+| Update type | All / Major / Minor / Patch | All |
+| Bot | All / (detected bot logins) | All (shown when multiple bots are active) |
+
+The update type filter reads the PR title for SemVer version bump signals (e.g., `1.x → 2.x` = Major). PRs with titles that do not contain recognizable version patterns are grouped under the currently active filter if it is set to All.
 
 ---
 
