@@ -10,6 +10,7 @@ import {
   extractVersionInfo,
   ALL_DEP_STATUSES,
   isKnownDepBot,
+  expandBotLogins,
   DEP_TOOL_LABEL_NAMES,
   type DepStatus,
   type VersionInfo,
@@ -163,7 +164,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   );
 
   const trackedBotLogins = createMemo(() =>
-    new Set(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
+    expandBotLogins(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
