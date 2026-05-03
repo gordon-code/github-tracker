@@ -1340,6 +1340,7 @@ export default function DashboardPage() {
                   hotPollingPRIds={hotPollingPRIds()}
                   refreshTick={refreshTick()}
                   rebaseLabel={config.dependencies.rebaseLabel}
+                  userLogin={userLogin()}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>

@@ -3,7 +3,6 @@ import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { pushNotification } from "../../lib/errors";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
@@ -110,8 +109,6 @@ interface DependenciesTabProps {
   trackedBotLogins: ReadonlySet<string>;
   onRefresh?: () => void;
 }
-
-const _notifiedBots = new Set<string>();
 
 export default function DependenciesTab(props: DependenciesTabProps) {
   const expandedGroups = createMemo(() =>
