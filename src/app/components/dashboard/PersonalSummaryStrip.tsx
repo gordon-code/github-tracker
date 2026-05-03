@@ -37,7 +37,6 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
     for (const i of props.issues) {
       if (ignored.has(i.id)) continue;
       if (i.state !== "OPEN") continue;
-      if (viewState.hideDepDashboard && i.title === "Dependency Dashboard") continue;
       if (i.assigneeLogins.some((a) => a.toLowerCase() === login)) assignedIssues++;
     }
     return { assignedIssues };

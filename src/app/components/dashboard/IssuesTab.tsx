@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import type { Issue, RepoRef } from "../../services/api";
 import { isIssueVisible } from "../../lib/filters";
@@ -124,7 +124,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
     let items = props.issues.filter((issue) => {
       if (issue.state !== "OPEN") return false;
-      if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: viewState.hideDepDashboard, globalFilter })) return false;
+      if (!isIssueVisible(issue, { ignoredIds, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
@@ -277,18 +277,6 @@ export default function IssuesTab(props: IssuesTabProps) {
               setPage(0);
             }}
           />
-          <Tooltip content="Show or hide Renovate Dependency Dashboard issues">
-            <button
-              onClick={() => {
-                updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
-                setPage(0);
-              }}
-              class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
-              aria-pressed={!viewState.hideDepDashboard}
-            >
-              Show Dep Dashboard
-            </button>
-          </Tooltip>
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons

@@ -239,7 +239,6 @@ describe("ViewStateSchema", () => {
     expect(result.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
     expect(result.ignoredItems).toEqual([]);
     expect(result.globalFilter).toEqual({ org: null, repo: null });
-    expect(result.hideDepDashboard).toBe(true);
   });
 
   it("handles missing fields with defaults", () => {
@@ -381,27 +380,6 @@ describe("resetViewState", () => {
   });
 });
 
-describe("hideDepDashboard", () => {
-  beforeEach(() => resetViewState());
-
-  it("defaults to true", () => {
-    expect(viewState.hideDepDashboard).toBe(true);
-  });
-
-  it("can be toggled via updateViewState", () => {
-    updateViewState({ hideDepDashboard: false });
-    expect(viewState.hideDepDashboard).toBe(false);
-    updateViewState({ hideDepDashboard: true });
-    expect(viewState.hideDepDashboard).toBe(true);
-  });
-
-  it("is not affected by resetAllTabFilters", () => {
-    updateViewState({ hideDepDashboard: false });
-    resetAllTabFilters("issues");
-    expect(viewState.hideDepDashboard).toBe(false);
-  });
-});
-
 describe("resetAllTabFilters — scope reset", () => {
   it("resets issues scope from 'all' back to 'involves_me'", () => {
     setTabFilter("issues", "scope", "all");
@@ -415,12 +393,6 @@ describe("resetAllTabFilters — scope reset", () => {
     expect(viewState.tabFilters.pullRequests.scope).toBe("all");
     resetAllTabFilters("pullRequests");
     expect(viewState.tabFilters.pullRequests.scope).toBe("involves_me");
-  });
-
-  it("is reset by resetViewState", () => {
-    updateViewState({ hideDepDashboard: false });
-    resetViewState();
-    expect(viewState.hideDepDashboard).toBe(true);
   });
 
   it("resets jiraAssigned filters back to defaults", () => {

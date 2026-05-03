@@ -242,49 +242,6 @@ describe("DashboardPage — clock tick", () => {
 });
 
 describe("DashboardPage — tab badge counts", () => {
-  it("excludes Dependency Dashboard issues from badge count by default", async () => {
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues: [
-        makeIssue({ id: 1, title: "Real issue" }),
-        makeIssue({ id: 2, title: "Dependency Dashboard" }),
-        makeIssue({ id: 3, title: "Dependency Dashboard" }),
-      ],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-    });
-
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      const issuesTab = screen.getByRole("tab", { name: /Issues/ });
-      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("1");
-    });
-  });
-
-  it("updates badge dynamically when hideDepDashboard is toggled off", async () => {
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues: [
-        makeIssue({ id: 1, title: "Real issue" }),
-        makeIssue({ id: 2, title: "Dependency Dashboard" }),
-      ],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-    });
-
-    render(() => <DashboardPage />);
-    // hideDepDashboard defaults to true — badge shows 1
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
-    });
-
-    // Toggle off — badge should update to 2
-    viewStore.updateViewState({ hideDepDashboard: false });
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
-    });
-  });
-
   it("decrements issue badge on ignore and increments on un-ignore", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
@@ -295,8 +252,6 @@ describe("DashboardPage — tab badge counts", () => {
       workflowRuns: [],
       errors: [],
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     render(() => <DashboardPage />);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
@@ -312,30 +267,6 @@ describe("DashboardPage — tab badge counts", () => {
     viewStore.unignoreItem(1);
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
-    });
-  });
-
-  it("combines hideDepDashboard and ignore exclusions correctly", async () => {
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues: [
-        makeIssue({ id: 1, title: "Issue A" }),
-        makeIssue({ id: 2, title: "Dependency Dashboard" }),
-        makeIssue({ id: 3, title: "Issue C" }),
-      ],
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
-    });
-    // hideDepDashboard defaults true — badge starts at 2 (excludes Dep Dashboard)
-    render(() => <DashboardPage />);
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("2");
-    });
-
-    // Ignore one real issue — badge should drop to 1
-    viewStore.ignoreItem({ id: 1, type: "issue", repo: "owner/repo", title: "Issue A", ignoredAt: Date.now() });
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Issues/ }).textContent?.replace(/\D+/g, "")).toBe("1");
     });
   });
 
@@ -484,7 +415,6 @@ describe("DashboardPage — tab badge counts", () => {
     });
     // Set filter BEFORE render to avoid Kobalte Select onChange cascade in happy-dom
     viewStore.updateViewState({
-      hideDepDashboard: false,
       globalFilter: { org: null, repo: "org/alpha" },
     });
 
@@ -514,7 +444,6 @@ describe("DashboardPage — tab badge counts", () => {
       errors: [],
     });
     viewStore.updateViewState({
-      hideDepDashboard: false,
       globalFilter: { org: "alpha", repo: null },
     });
 
@@ -1130,8 +1059,6 @@ describe("DashboardPage — exclusive custom tabs", () => {
       filterPreset: {},
       exclusive: true,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 1, title: "Issue A" }),
@@ -1192,8 +1119,6 @@ describe("DashboardPage — exclusive custom tabs", () => {
       filterPreset: {},
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 1, title: "Issue A" }),
@@ -1232,8 +1157,6 @@ describe("DashboardPage — exclusive custom tabs", () => {
       filterPreset: {},
       exclusive: true,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 1, title: "Issue A" }),
@@ -1330,8 +1253,6 @@ describe("DashboardPage — custom tab scoping", () => {
       filterPreset: { scope: "all" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 1, title: "In-scope", repoFullName: "myorg/repo-a" }),
@@ -1360,8 +1281,6 @@ describe("DashboardPage — custom tab scoping", () => {
       filterPreset: { scope: "all" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 10, title: "Repo A issue", repoFullName: "myorg/repo-a" }),
@@ -1389,8 +1308,6 @@ describe("DashboardPage — custom tab scoping", () => {
       filterPreset: { scope: "all" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [makeIssue({ id: 20, title: "Lowercase org", repoFullName: "myorg/repo" })],
       pullRequests: [],
@@ -1415,8 +1332,6 @@ describe("DashboardPage — custom tab scoping", () => {
       filterPreset: { scope: "all" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 40, title: "Matches orgScope", repoFullName: "testorg/any-repo" }),
@@ -1446,8 +1361,6 @@ describe("DashboardPage — custom tab scoping", () => {
       filterPreset: { scope: "all" },
       exclusive: true,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         makeIssue({ id: 30, title: "myorg issue", repoFullName: "myorg/repo" }),
@@ -1586,7 +1499,6 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       filterPreset: { scope: "all", role: "author" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
 
     // 3 issues: 2 by "octocat" (makeIssue default), 1 by "someone"
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -1627,8 +1539,6 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       filterPreset: { scope: "all", user: "_self" },
       exclusive: false,
     });
-    viewStore.updateViewState({ hideDepDashboard: false });
-
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [
         // surfacedBy includes testuser — should be counted
@@ -2053,5 +1963,180 @@ describe("DashboardPage — events poll targeted merge", () => {
     // seedHotSetsFromTargeted is called (additive), NOT rebuildHotSets (full replacement)
     expect(vi.mocked(pollService.rebuildHotSets)).not.toHaveBeenCalled();
     expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
+  });
+});
+
+describe("DashboardPage — dependency pre-exclusivity", () => {
+  it("excludes dep bot PRs from the Pull Requests tab", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+        makePullRequest({ id: 2, title: "Normal feature PR", userLogin: "developer" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("shows the Dependencies tab when dep bot PRs exist", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeTruthy();
+    });
+  });
+
+  it("does not show the Dependencies tab when config.dependencies.enabled is false", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: /Dependencies/ })).toBeNull();
+    });
+  });
+
+  it("does not show the Dependencies tab when no dep PRs exist", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Normal feature PR", userLogin: "developer" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: /Dependencies/ })).toBeNull();
+    });
+  });
+
+  it("Dependencies tab count reflects dep PR count (excluding ignored)", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+        makePullRequest({ id: 2, title: "Bump react from 17 to 18", userLogin: "dependabot[bot]" }),
+        makePullRequest({ id: 3, title: "Normal feature PR", userLogin: "developer" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+
+    viewStore.ignoreItem({ id: 1, type: "pullRequest", repo: "owner/repo", title: "Bump lodash", ignoredAt: Date.now() });
+    await waitFor(() => {
+      const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("dep PRs are excluded from exclusive custom tab ownership", async () => {
+    configStore.addCustomTab({
+      id: "custom-prs",
+      name: "Custom PRs",
+      baseType: "pullRequests",
+      exclusive: true,
+      orgScope: [],
+      repoScope: [{ owner: "owner", name: "repo", fullName: "owner/repo" }],
+      filterPreset: {},
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]", repoFullName: "owner/repo" }),
+        makePullRequest({ id: 2, title: "Normal feature PR", userLogin: "developer", repoFullName: "owner/repo" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const customTab = screen.getByRole("tab", { name: /Custom PRs/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("excludes dep PRs from visiblePullRequests even when no exclusive custom tabs exist", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+        makePullRequest({ id: 2, title: "Normal feature PR", userLogin: "developer" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+  });
+
+  it("PersonalSummaryStrip PR counts exclude dep bot PRs via pre-exclusivity", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 1,
+          title: "Bump lodash from 4.0 to 5.0",
+          userLogin: "dependabot[bot]",
+          checkStatus: "success",
+          reviewDecision: "APPROVED",
+          draft: false,
+        }),
+        makePullRequest({
+          id: 2,
+          title: "My feature PR",
+          userLogin: "testuser",
+          checkStatus: "success",
+          reviewDecision: "APPROVED",
+          draft: false,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const readyToMerge = screen.getByText(/ready to merge/);
+      expect(readyToMerge.textContent).toMatch(/^1\s/);
+    });
   });
 });
