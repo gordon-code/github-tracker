@@ -172,9 +172,11 @@ export default function ItemRow(props: ItemRowProps) {
         <span class="shrink-0 text-xs text-base-content/50 whitespace-nowrap">
           {props.author}
           {" · "}
-          <time datetime={props.updatedAt} title={staticDateInfo().updatedTitle} aria-label={dateDisplay().updatedLabel}>
-            {dateDisplay().updated || dateDisplay().created}
-          </time>
+          <Tooltip content={staticDateInfo().updatedTitle} class="relative z-10">
+            <time datetime={props.updatedAt} aria-label={dateDisplay().updatedLabel}>
+              {dateDisplay().updated || dateDisplay().created}
+            </time>
+          </Tooltip>
         </span>
 
       </Show>
