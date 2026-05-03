@@ -60,6 +60,7 @@ interface DependenciesTabProps {
   refreshTick?: number;
   rebaseLabel: string;
   userLogin: string;
+  onRefresh?: () => void;
 }
 
 export default function DependenciesTab(props: DependenciesTabProps) {
@@ -214,6 +215,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     updateConfig({
       trackedUsers: [...config.trackedUsers, { login: normalized, avatarUrl, name: null, type: "bot" as const }],
     });
+    props.onRefresh?.();
   }
 
   function handleDismissBot(login: string) {

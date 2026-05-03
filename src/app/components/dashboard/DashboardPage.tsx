@@ -1256,6 +1256,7 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   rebaseLabel={config.dependencies.rebaseLabel}
                   userLogin={userLogin()}
+                  onRefresh={() => _coordinator()?.manualRefresh()}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
