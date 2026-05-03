@@ -854,9 +854,10 @@ export default function DashboardPage() {
     const issueOwner = new Map<number, string>();
     const prOwner = new Map<number, string>();
     const runOwner = new Map<number, string>();
-    // Pre-exclusivity: dep PRs claimed before custom tab ownership runs
-    for (const id of dependencyPrIds()) {
-      prOwner.set(id, "dependencies");
+    if (config.dependencies.enabled) {
+      for (const id of dependencyPrIds()) {
+        prOwner.set(id, "dependencies");
+      }
     }
     for (const tab of config.customTabs) {
       if (!tab.exclusive) continue;

@@ -2035,6 +2035,25 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
     });
   });
 
+  it("dep PRs appear on Pull Requests tab when dependencies feature is disabled", async () => {
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({ id: 1, title: "Bump lodash from 4.0 to 5.0", userLogin: "dependabot[bot]" }),
+        makePullRequest({ id: 2, title: "Normal feature PR", userLogin: "developer" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const prTab = screen.getByRole("tab", { name: /Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
   it("Dependencies tab count reflects dep PR count (excluding ignored)", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
