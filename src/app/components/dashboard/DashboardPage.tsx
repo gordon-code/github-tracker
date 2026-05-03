@@ -263,14 +263,15 @@ async function pollFetch(): Promise<DashboardData> {
         });
       });
     }
-    rebuildHotSets(data);
+    const filteredRuns = config.enableActions ? data.workflowRuns : [];
+    rebuildHotSets({ ...data, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted. Deferred to avoid blocking paint.
     const cachePayload = {
       _v: CACHE_VERSION,
       issues: data.issues,
       pullRequests: data.pullRequests,
-      workflowRuns: data.workflowRuns,
+      workflowRuns: filteredRuns,
       lastRefreshedAt: now.toISOString(),
     };
     setTimeout(() => {
