@@ -276,4 +276,39 @@ describe("TabBar", () => {
     ));
     expect(screen.queryByRole("button", { name: /Edit Alpha/i })).toBeNull();
   });
+
+  // ── enableActions prop ───────────────────────────────────────────────────────
+
+  it("renders Actions tab when enableActions is true", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableActions={true} />
+    ));
+    expect(screen.getByRole("tab", { name: /Actions/ })).toBeDefined();
+  });
+
+  it("renders Actions tab when enableActions is omitted (default visible)", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} />
+    ));
+    expect(screen.getByRole("tab", { name: /Actions/ })).toBeDefined();
+  });
+
+  it("hides Actions tab when enableActions is false", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableActions={false} />
+    ));
+    expect(screen.queryByRole("tab", { name: /Actions/ })).toBeNull();
+  });
+
+  it("still shows Issues and Pull Requests tabs when enableActions is false", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableActions={false} />
+    ));
+    expect(screen.getByRole("tab", { name: /Issues/ })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /Pull Requests/ })).toBeDefined();
+  });
 });

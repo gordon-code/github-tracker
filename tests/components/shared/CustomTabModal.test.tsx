@@ -468,3 +468,55 @@ describe("CustomTabModal — scope accordion", () => {
     expect(arg.repoScope).toEqual([{ owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" }]);
   });
 });
+
+// ── enableActions prop ────────────────────────────────────────────────────────
+
+describe("CustomTabModal — enableActions prop", () => {
+  function renderModalWithActions(enableActions: boolean) {
+    return render(() => (
+      <CustomTabModal
+        open={true}
+        onClose={vi.fn()}
+        availableOrgs={["myorg"]}
+        availableRepos={[{ owner: "myorg", name: "repo1", fullName: "myorg/repo1" }]}
+        enableActions={enableActions}
+      />
+    ));
+  }
+
+  it("shows Actions option in type select when enableActions is true", () => {
+    renderModalWithActions(true);
+    const typeSelect = screen.getByRole("combobox", { name: /type/i }) as HTMLSelectElement;
+    const values = Array.from(typeSelect.options).map((o) => o.value);
+    expect(values).toContain("actions");
+  });
+
+  it("hides Actions option in type select when enableActions is false", () => {
+    renderModalWithActions(false);
+    const typeSelect = screen.getByRole("combobox", { name: /type/i }) as HTMLSelectElement;
+    const values = Array.from(typeSelect.options).map((o) => o.value);
+    expect(values).not.toContain("actions");
+  });
+
+  it("shows Actions option when enableActions is omitted (default visible)", () => {
+    render(() => (
+      <CustomTabModal
+        open={true}
+        onClose={vi.fn()}
+        availableOrgs={[]}
+        availableRepos={[]}
+      />
+    ));
+    const typeSelect = screen.getByRole("combobox", { name: /type/i }) as HTMLSelectElement;
+    const values = Array.from(typeSelect.options).map((o) => o.value);
+    expect(values).toContain("actions");
+  });
+
+  it("still shows Issues and Pull Requests options when enableActions is false", () => {
+    renderModalWithActions(false);
+    const typeSelect = screen.getByRole("combobox", { name: /type/i }) as HTMLSelectElement;
+    const values = Array.from(typeSelect.options).map((o) => o.value);
+    expect(values).toContain("issues");
+    expect(values).toContain("pullRequests");
+  });
+});

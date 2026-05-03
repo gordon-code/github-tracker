@@ -71,6 +71,7 @@ vi.mock("../../src/app/stores/config", () => ({
     hotPollInterval: 30,
     trackedUsers: [],
     monitoredRepos: [],
+    enableActions: true,
   },
 }));
 

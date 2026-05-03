@@ -11,6 +11,7 @@ interface TabBarProps {
   onTabChange: (tab: TabId) => void;
   counts?: TabCounts;
   enableTracking?: boolean;
+  enableActions?: boolean;
   enableJira?: boolean;
   customTabs?: Array<{ id: string; name: string }>;
   onAddTab?: () => void;
@@ -36,12 +37,14 @@ export default function TabBar(props: TabBarProps) {
                   <span class="badge badge-sm badge-neutral ml-1">{props.counts?.pullRequests}</span>
                 </Show>
               </Tabs.Trigger>
-              <Tabs.Trigger value="actions" class="tab compact:tab-sm data-[selected]:tab-active">
-                Actions
-                <Show when={props.counts?.actions !== undefined}>
-                  <span class="badge badge-sm badge-neutral ml-1">{props.counts?.actions}</span>
-                </Show>
-              </Tabs.Trigger>
+              <Show when={props.enableActions !== false}>
+                <Tabs.Trigger value="actions" class="tab compact:tab-sm data-[selected]:tab-active">
+                  Actions
+                  <Show when={props.counts?.actions !== undefined}>
+                    <span class="badge badge-sm badge-neutral ml-1">{props.counts?.actions}</span>
+                  </Show>
+                </Tabs.Trigger>
+              </Show>
               <Show when={props.enableTracking}>
                 <Tabs.Trigger value="tracked" class="tab compact:tab-sm data-[selected]:tab-active">
                   Tracked

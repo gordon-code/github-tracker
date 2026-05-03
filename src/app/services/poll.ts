@@ -96,6 +96,8 @@ let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
 let _monitoredReposMounted = false;
 let _monitoredReposKey = "";
+let _enableActionsMounted = false;
+let _enableActionsKey = true;
 createRoot(() => {
   createEffect(() => {
     const key = user()?.login ?? "";
@@ -138,6 +140,26 @@ createRoot(() => {
       untrack(() => {
         _resetNotificationState();
         resetEventsState();
+      });
+    }
+  });
+
+  createEffect(() => {
+    const key = config.enableActions;
+    if (!_enableActionsMounted) {
+      _enableActionsMounted = true;
+      _enableActionsKey = key;
+      return;
+    }
+    if (key !== _enableActionsKey) {
+      _enableActionsKey = key;
+      untrack(() => {
+        if (key) {
+          _resetNotificationState();
+          resetEventsState();
+        } else {
+          clearHotSets();
+        }
       });
     }
   });
@@ -191,7 +213,9 @@ export async function fetchAllData(
         errors: lightData.errors,
       });
     } : undefined, trackedUsers, monitoredRepos),
-    fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow),
+    config.enableActions
+      ? fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
+      : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
   ]);
 
   // Collect top-level errors (total function failures)
@@ -684,12 +708,22 @@ export async function fetchTargetedRepoData(
     return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
   }
 
-  // Record cooldown timestamps
+  // Record cooldown timestamps for ALL entries before filtering
   for (const [key] of entries) {
     _repoLastTargeted.set(key, now);
   }
 
-  const targetRepos = entries
+  // When Actions is disabled, skip repos whose only event activity is workflow-related.
+  // These repos have no issue/PR changes to refresh — fetching them wastes API calls.
+  const filteredEntries = config.enableActions
+    ? entries
+    : entries.filter(([, summary]) => summary.hasIssueActivity || summary.hasPRActivity);
+
+  if (filteredEntries.length === 0) {
+    return { issues: [], pullRequests: [], workflowRuns: [], errors: [] };
+  }
+
+  const targetRepos = filteredEntries
     .map(([, summary]) => {
       const parts = summary.repoFullName.split("/");
       if (parts.length !== 2) return null;
@@ -697,14 +731,16 @@ export async function fetchTargetedRepoData(
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  const workflowRepos = entries
-    .filter(([, summary]) => summary.hasWorkflowActivity)
-    .map(([, summary]) => {
-      const parts = summary.repoFullName.split("/");
-      if (parts.length !== 2) return null;
-      return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null);
+  const workflowRepos = config.enableActions
+    ? entries
+        .filter(([, summary]) => summary.hasWorkflowActivity)
+        .map(([, summary]) => {
+          const parts = summary.repoFullName.split("/");
+          if (parts.length !== 2) return null;
+          return { owner: parts[0], name: parts[1], fullName: summary.repoFullName };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null)
+    : [];
 
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
     fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),

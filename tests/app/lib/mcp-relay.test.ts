@@ -162,7 +162,7 @@ describe("updateRelaySnapshot / handleRequest", () => {
     const prs = [makePullRequest({ state: "OPEN", repoFullName: "owner/repo" })];
     const runs = [makeWorkflowRun({ conclusion: "success" })];
 
-    mod.updateRelaySnapshot({ issues, pullRequests: prs, workflowRuns: runs, lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues, pullRequests: prs, workflowRuns: runs, enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -210,6 +210,7 @@ describe("updateRelaySnapshot / handleRequest", () => {
       issues: [],
       pullRequests: [],
       workflowRuns: [],
+      enableActions: true,
       lastUpdatedAt: Date.now(),
     });
 
@@ -265,7 +266,7 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
       makeWorkflowRun({ conclusion: "success" }),
     ];
 
-    mod.updateRelaySnapshot({ issues, pullRequests: prs, workflowRuns: runs, lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues, pullRequests: prs, workflowRuns: runs, enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -297,6 +298,24 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
     expect(parsed.result.needsReviewCount).toBe(1);
     expect(parsed.result.approvedUnmergedCount).toBe(1);
   });
+
+  it("returns failingRunCount=null and actionsMonitoringDisabled=true when enableActions is false", () => {
+    const issues = [makeIssue({ state: "OPEN" })];
+    const runs = [makeWorkflowRun({ conclusion: "failure" })];
+    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: runs, enableActions: false, lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 11, method: "get_dashboard_summary", params: { scope: "involves_me" } }));
+
+    const response = responses.find((r) => (JSON.parse(r) as { id?: number }).id === 11);
+    const parsed = JSON.parse(response!) as { result: { failingRunCount: number | null; actionsMonitoringDisabled?: boolean; openIssueCount: number } };
+    expect(parsed.result.failingRunCount).toBeNull();
+    expect(parsed.result.actionsMonitoringDisabled).toBe(true);
+    expect(parsed.result.openIssueCount).toBe(1);
+  });
 });
 
 describe("GET_OPEN_PRS repo filter", () => {
@@ -317,7 +336,7 @@ describe("GET_OPEN_PRS repo filter", () => {
   it("filters by repo when repo param is provided", () => {
     const pr1 = makePullRequest({ state: "OPEN", repoFullName: "owner/repo-a" });
     const pr2 = makePullRequest({ state: "OPEN", repoFullName: "owner/repo-b" });
-    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr1, pr2], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr1, pr2], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -342,7 +361,7 @@ describe("GET_OPEN_PRS repo filter", () => {
       makePullRequest({ state: "OPEN" }),
       makePullRequest({ state: "CLOSED" }),
     ];
-    mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -379,7 +398,7 @@ describe("GET_PR_DETAILS handler", () => {
 
   it("returns PR by repo+number", () => {
     const pr = makePullRequest({ number: 42, repoFullName: "owner/repo", state: "OPEN" });
-    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -399,7 +418,7 @@ describe("GET_PR_DETAILS handler", () => {
   });
 
   it("returns result: null when PR not found", () => {
-    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -421,7 +440,7 @@ describe("GET_PR_DETAILS handler", () => {
 
   it("returns PR by numeric id", () => {
     const pr = makePullRequest({ state: "OPEN" });
-    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [pr], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -457,7 +476,7 @@ describe("GET_OPEN_PRS status filter", () => {
   });
 
   function setupAndConnect(prs: ReturnType<typeof makePullRequest>[]) {
-    mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: prs, workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
     mod.connectRelay(9876);
@@ -528,7 +547,7 @@ describe("GET_OPEN_ISSUES handler", () => {
 
   it("returns open issues", () => {
     const issues = [makeIssue({ state: "OPEN" }), makeIssue({ state: "OPEN" }), makeIssue({ state: "CLOSED" })];
-    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -541,7 +560,7 @@ describe("GET_OPEN_ISSUES handler", () => {
 
   it("filters by repo", () => {
     const issues = [makeIssue({ state: "OPEN", repoFullName: "owner/a" }), makeIssue({ state: "OPEN", repoFullName: "owner/b" })];
-    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: [], enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -575,7 +594,7 @@ describe("GET_FAILING_ACTIONS handler", () => {
       makeWorkflowRun({ status: "completed", conclusion: "timed_out" }),
       makeWorkflowRun({ status: "completed", conclusion: "success" }),
     ];
-    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: runs, lastUpdatedAt: Date.now() });
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: runs, enableActions: true, lastUpdatedAt: Date.now() });
 
     const responses: string[] = [];
     ws.send = vi.fn((data: string) => responses.push(data));
@@ -584,6 +603,20 @@ describe("GET_FAILING_ACTIONS handler", () => {
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 60, method: "get_failing_actions", params: {} }));
     const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 60)!) as { result: unknown[] };
     expect(parsed.result).toHaveLength(3);
+  });
+
+  it("returns disabled message when enableActions is false", () => {
+    const runs = [makeWorkflowRun({ status: "completed", conclusion: "failure" })];
+    mod.updateRelaySnapshot({ issues: [], pullRequests: [], workflowRuns: runs, enableActions: false, lastUpdatedAt: Date.now() });
+
+    const responses: string[] = [];
+    ws.send = vi.fn((data: string) => responses.push(data));
+    mod.connectRelay(9876);
+    ws._triggerOpen();
+    ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 61, method: "get_failing_actions", params: {} }));
+    const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 61)!) as { result: { disabled: boolean; message: string } };
+    expect(parsed.result.disabled).toBe(true);
+    expect(parsed.result.message).toContain("disabled");
   });
 });
 

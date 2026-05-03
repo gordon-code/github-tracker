@@ -4,7 +4,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { METHODS } from "../../src/shared/protocol.js";
-import type { DataSource } from "./data-source.js";
+import type { DataSource, CachedConfig } from "./data-source.js";
 import type {
   Issue,
   PullRequest,
@@ -68,12 +68,15 @@ function formatRun(run: WorkflowRun, index: number): string {
 }
 
 function formatSummary(summary: DashboardSummary, scope: string): string {
+  const failingLine = summary.failingRunCount === null
+    ? "Failing CI Runs:  — (Actions monitoring disabled)"
+    : `Failing CI Runs:  ${summary.failingRunCount}`;
   const lines: string[] = [
     `GitHub Tracker Dashboard Summary (scope: ${scope})`,
     "─".repeat(50),
     `Open PRs:         ${summary.openPRCount}`,
     `Open Issues:      ${summary.openIssueCount}`,
-    `Failing CI Runs:  ${summary.failingRunCount}`,
+    failingLine,
     `Needs Review:     ${summary.needsReviewCount}`,
     `Approved/Unmerged: ${summary.approvedUnmergedCount}`,
   ];
@@ -186,6 +189,12 @@ export function registerTools(server: McpServer, dataSource: DataSource): void {
     async (args) => {
       const { repo } = args as { repo?: string };
       try {
+        // SEC-010: check config before calling getFailingActions to surface disabled state
+        const cachedConfig: CachedConfig | null = await dataSource.getConfig();
+        if (cachedConfig?.enableActions === false) {
+          const text = "GitHub Actions monitoring is disabled in the dashboard. Enable it in Settings to track workflow runs." + stalenessLine();
+          return { content: [{ type: "text" as const, text }] };
+        }
         const runs = await dataSource.getFailingActions(repo);
         if (runs.length === 0) {
           const text = `No failing or in-progress workflow runs found${repo ? ` in ${repo}` : ""}.` + stalenessLine();
