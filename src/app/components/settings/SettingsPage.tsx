@@ -2,7 +2,7 @@ import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-j
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab, updateDependencyConfig } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
