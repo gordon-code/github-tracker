@@ -151,6 +151,28 @@ describe("ItemRow", () => {
       const timeEls = container.querySelectorAll("time");
       expect(timeEls.length).toBe(1);
     });
+
+    it("shows both updated and created dates in tooltip on hover", () => {
+      vi.useFakeTimers();
+      const { container, unmount } = render(() => <ItemRow {...defaultProps} />);
+      const updatedTrigger = container.querySelector(
+        `time[datetime="${defaultProps.updatedAt}"]`
+      )?.closest("span.inline-flex");
+      expect(updatedTrigger).not.toBeNull();
+      expect(updatedTrigger!.className).toContain("z-10");
+      fireEvent.pointerEnter(updatedTrigger!);
+      vi.advanceTimersByTime(300);
+      expect(document.body.textContent).toContain(
+        `Updated: ${new Date(defaultProps.updatedAt).toLocaleString()}`
+      );
+      expect(document.body.textContent).toContain(
+        `Created: ${new Date(defaultProps.createdAt).toLocaleString()}`
+      );
+      fireEvent.pointerLeave(updatedTrigger!);
+      vi.advanceTimersByTime(500);
+      unmount();
+      vi.useRealTimers();
+    });
   });
 
   it("renders no labels section when labels array is empty", () => {
