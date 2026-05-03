@@ -36,6 +36,7 @@ export interface Issue {
   comments: number;
   starCount?: number;
   surfacedBy?: string[];
+  nodeId?: string;
 }
 
 export interface CheckStatus {

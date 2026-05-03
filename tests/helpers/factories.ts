@@ -18,6 +18,7 @@ export function makeIssue(overrides: Partial<Issue> = {}): Issue {
     assigneeLogins: [],
     repoFullName: "owner/repo",
     comments: 0,
+    nodeId: "I_test_node_id",
     ...overrides,
   };
 }

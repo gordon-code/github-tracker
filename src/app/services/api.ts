@@ -158,6 +158,7 @@ export async function pooledAllSettled<T>(
 // ── GraphQL search types ─────────────────────────────────────────────────────
 
 interface GraphQLIssueNode {
+  id: string;
   databaseId: number;
   number: number;
   title: string;
@@ -201,6 +202,7 @@ interface ForkQueryResponse {
 
 const LIGHT_ISSUE_FRAGMENT = `
   fragment LightIssueFields on Issue {
+    id
     databaseId
     number
     title
@@ -627,6 +629,7 @@ function processIssueNode(
     repoFullName: node.repository.nameWithOwner,
     comments: node.comments.totalCount,
     starCount: node.repository.stargazerCount,
+    nodeId: node.id,
   });
   return true;
 }
@@ -1151,6 +1154,55 @@ export async function fetchPREnrichment(
   }));
 
   return { enrichments, errors };
+}
+
+// ── Dashboard issue body fetch ────────────────────────────────────────────────
+
+const DASHBOARD_ISSUE_BODIES_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Issue { id body }
+    }
+    rateLimit { cost limit remaining resetAt }
+  }
+`;
+
+interface DashboardIssueBodiesResponse {
+  nodes: Array<{ id: string; body: string | null } | null>;
+  rateLimit?: GraphQLRateLimit;
+}
+
+/** Fetches issue bodies for Dashboard issues by node ID (single nodes() batch query). */
+export async function fetchDashboardIssueBodies(
+  octokit: GitHubOctokit,
+  issueNodeIds: string[]
+): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  if (issueNodeIds.length === 0) return result;
+
+  const batches = chunkArray(issueNodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch) => {
+    try {
+      const response = await octokit.graphql<DashboardIssueBodiesResponse>(
+        DASHBOARD_ISSUE_BODIES_QUERY,
+        { ids: batch, request: { apiSource: "dashboardBodies" } }
+      );
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      for (const node of response.nodes) {
+        if (!node) continue;
+        result.set(node.id, node.body);
+      }
+    } catch (err) {
+      const partialErr =
+        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+          ? (err.data as Partial<DashboardIssueBodiesResponse>)
+          : null;
+      if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+      // Partial failures return null bodies — callers handle missing entries gracefully
+    }
+  }));
+
+  return result;
 }
 
 /**
