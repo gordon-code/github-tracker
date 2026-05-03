@@ -1824,16 +1824,13 @@ interface RawGitHubUser {
  * Returns null if the login is invalid or the user does not exist (404).
  * Throws on network or server errors.
  */
-export async function validateGitHubUser(
+async function tryGetUser(
   octokit: GitHubOctokit,
-  login: string
-): Promise<TrackedUser | null> {
-  const normalized = login.replace(/\[bot\]$/i, "");
-  if (!VALID_TRACKED_LOGIN.test(normalized)) return null;
-
-  let response: { data: RawGitHubUser; headers: Record<string, string> };
+  username: string
+): Promise<RawGitHubUser | null> {
   try {
-    response = await octokit.request("GET /users/{username}", { username: normalized }) as { data: RawGitHubUser; headers: Record<string, string> };
+    const response = await octokit.request("GET /users/{username}", { username }) as { data: RawGitHubUser };
+    return response.data;
   } catch (err) {
     const status =
       typeof err === "object" && err !== null && "status" in err
@@ -1842,13 +1839,27 @@ export async function validateGitHubUser(
     if (status === 404) return null;
     throw err;
   }
-  const raw = response.data;
+}
+
+export async function validateGitHubUser(
+  octokit: GitHubOctokit,
+  login: string
+): Promise<TrackedUser | null> {
+  const base = login.replace(/\[bot\]$/i, "");
+  if (!VALID_TRACKED_LOGIN.test(base)) return null;
+
+  let raw = await tryGetUser(octokit, base);
+  if (!raw) {
+    raw = await tryGetUser(octokit, `${base}[bot]`);
+  }
+  if (!raw) return null;
+
   const avatarUrl = raw.avatar_url.startsWith(AVATAR_CDN_PREFIX)
     ? raw.avatar_url
     : AVATAR_FALLBACK;
 
   return {
-    login: raw.login.toLowerCase(),
+    login: raw.login.toLowerCase().replace(/\[bot\]$/, ""),
     avatarUrl,
     name: raw.name ?? null,
     type: raw.type === "Bot" ? "bot" : "user",

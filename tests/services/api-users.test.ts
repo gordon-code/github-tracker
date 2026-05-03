@@ -119,7 +119,7 @@ describe("validateGitHubUser", () => {
     });
     const result = await validateGitHubUser(octokit as never, "nonexistent-user");
     expect(result).toBeNull();
-    expect(octokit.request).toHaveBeenCalledOnce();
+    expect(octokit.request).toHaveBeenCalledTimes(2);
   });
 
   it("returns null for invalid login without making API call", async () => {
