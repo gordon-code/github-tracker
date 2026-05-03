@@ -1354,8 +1354,19 @@ export async function fetchIssuesAndPullRequests(
   // Tracked user searches — scoped to normalRepos only. Monitored repos are already
   // covered by graphqlUnfilteredSearch (all open items, no user qualifier), so running
   // involves: on them would duplicate work and add spurious surfacedBy annotations.
-  const trackedSearchPromise = hasTrackedUsers && normalRepos.length > 0
-    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, normalRepos, u.login, "globalUserSearch")))
+  // Bot users get both base and [bot] variant searches for coverage.
+  const trackedSearchTasks: { login: string; promise: Promise<LightSearchResult> }[] = [];
+  if (hasTrackedUsers && normalRepos.length > 0) {
+    for (const u of trackedUsers!) {
+      trackedSearchTasks.push({ login: u.login, promise: graphqlLightCombinedSearch(octokit, normalRepos, u.login, "globalUserSearch") });
+      if (u.type === "bot") {
+        const botVariant = `${u.login}[bot]`;
+        trackedSearchTasks.push({ login: u.login, promise: graphqlLightCombinedSearch(octokit, normalRepos, botVariant, "globalUserSearch") });
+      }
+    }
+  }
+  const trackedSearchPromise = trackedSearchTasks.length > 0
+    ? Promise.allSettled(trackedSearchTasks.map((t) => t.promise))
     : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
 
   // Unfiltered search for monitored repos — runs in parallel with tracked searches
@@ -1394,11 +1405,11 @@ export async function fetchIssuesAndPullRequests(
 
   // Merge tracked user results and collect new (delta) node IDs for both
   // monitored repo PRs (added above) and tracked user PRs (added below).
-  if (hasTrackedUsers) {
+  if (trackedSearchTasks.length > 0) {
     const settled = trackedResults as PromiseSettledResult<LightSearchResult>[];
     for (let i = 0; i < settled.length; i++) {
       const result = settled[i];
-      const trackedLogin = trackedUsers![i].login;
+      const trackedLogin = trackedSearchTasks[i].login;
       if (result.status === "fulfilled") {
         allErrors.push(...result.value.errors);
         mergeTrackedUserResults(issueMap, prMap, nodeIdMap, result.value, trackedLogin);
@@ -1817,11 +1828,12 @@ export async function validateGitHubUser(
   octokit: GitHubOctokit,
   login: string
 ): Promise<TrackedUser | null> {
-  if (!VALID_TRACKED_LOGIN.test(login)) return null;
+  const normalized = login.replace(/\[bot\]$/i, "");
+  if (!VALID_TRACKED_LOGIN.test(normalized)) return null;
 
   let response: { data: RawGitHubUser; headers: Record<string, string> };
   try {
-    response = await octokit.request("GET /users/{username}", { username: login }) as { data: RawGitHubUser; headers: Record<string, string> };
+    response = await octokit.request("GET /users/{username}", { username: normalized }) as { data: RawGitHubUser; headers: Record<string, string> };
   } catch (err) {
     const status =
       typeof err === "object" && err !== null && "status" in err

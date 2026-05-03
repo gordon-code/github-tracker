@@ -208,10 +208,11 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   });
 
   function handleTrackBot(login: string, avatarUrl: string) {
+    const normalized = login.replace(/\[bot\]$/i, "");
     const existing = config.trackedUsers.map((u) => u.login.toLowerCase());
-    if (existing.includes(login.toLowerCase())) return;
+    if (existing.includes(normalized.toLowerCase())) return;
     updateConfig({
-      trackedUsers: [...config.trackedUsers, { login, avatarUrl, name: null, type: "bot" as const }],
+      trackedUsers: [...config.trackedUsers, { login: normalized, avatarUrl, name: null, type: "bot" as const }],
     });
   }
 

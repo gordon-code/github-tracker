@@ -598,22 +598,29 @@ describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => 
     expect(result).toBeNull();
   });
 
-  it("returns null for [Bot] (case-sensitive — only [bot] accepted)", async () => {
-    const octokit = makeOctokit(async () => ({ data: {} }));
-    const result = await validateGitHubUser(
-      octokit as never,
-      "user[Bot]"
-    );
-    expect(result).toBeNull();
+  it("normalizes [Bot] (case-insensitive) and validates as base login", async () => {
+    const octokit = makeUserOctokit({
+      login: "user",
+      avatar_url: "https://avatars.githubusercontent.com/u/1",
+      name: null,
+      type: "Bot",
+    });
+    const result = await validateGitHubUser(octokit as never, "user[Bot]");
+    expect(result).not.toBeNull();
+    expect(result?.login).toBe("user");
+    expect(result?.type).toBe("bot");
   });
 
-  it("returns null for user[bot][bot] (double suffix)", async () => {
-    const octokit = makeOctokit(async () => ({ data: {} }));
-    const result = await validateGitHubUser(
-      octokit as never,
-      "user[bot][bot]"
-    );
-    expect(result).toBeNull();
+  it("normalizes user[bot][bot] by stripping trailing [bot]", async () => {
+    const octokit = makeUserOctokit({
+      login: "user[bot]",
+      avatar_url: "https://avatars.githubusercontent.com/u/1",
+      name: null,
+      type: "Bot",
+    });
+    const result = await validateGitHubUser(octokit as never, "user[bot][bot]");
+    expect(result).not.toBeNull();
+    expect(result?.login).toBe("user[bot]");
   });
 
   it("returns null on 404 for bot login", async () => {
