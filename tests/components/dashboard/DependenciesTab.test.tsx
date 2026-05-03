@@ -423,9 +423,16 @@ describe("DependenciesTab — updateType filter", () => {
     expect(screen.queryByText("axios: 0.27.1 → 0.27.2")).toBeNull();
   });
 
-  it("maintenance PRs pass through all updateType filters (unknown version type)", () => {
+  it("maintenance PRs are hidden when a specific version type is selected", () => {
     const pin = makeMergeablePR({ title: "chore(deps): pin dependencies" });
     setTabFilter("dependencies", "updateType", "major");
+    renderTab({ pullRequests: [pin] });
+    expect(screen.queryByText("Pin dependencies")).toBeNull();
+  });
+
+  it("maintenance PRs are shown when maintenance filter is selected", () => {
+    const pin = makeMergeablePR({ title: "chore(deps): pin dependencies" });
+    setTabFilter("dependencies", "updateType", "maintenance");
     renderTab({ pullRequests: [pin] });
     expect(screen.getByText("Pin dependencies")).toBeDefined();
   });

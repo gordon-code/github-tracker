@@ -34,6 +34,8 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
     { value: "major", label: "Major" },
     { value: "minor", label: "Minor" },
     { value: "patch", label: "Patch" },
+    { value: "maintenance", label: "Maintenance" },
+    { value: "other", label: "Other" },
   ],
 };
 
@@ -44,10 +46,18 @@ const STATUS_META: Record<DepStatus, { label: string; badgeClass: string; defaul
   "stale":           { label: "Stale",           badgeClass: "badge-error",    defaultExpanded: false },
 };
 
+type DepCategory = "major" | "minor" | "patch" | "maintenance" | "other";
+
+function depCategory(versionInfo: VersionInfo | null): DepCategory {
+  if (!versionInfo) return "maintenance";
+  return versionInfo.updateType ?? "other";
+}
+
 interface ClassifiedPR {
   pr: PullRequest;
   status: DepStatus;
   versionInfo: VersionInfo | null;
+  category: DepCategory;
   abandonedDep: AbandonedDependency | null;
 }
 
@@ -125,15 +135,14 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           pr,
           status: classifyDepStatus(pr, props.rebaseLabel),
           versionInfo,
+          category: depCategory(versionInfo),
           abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
         };
       })
-      .filter(({ pr, versionInfo }) => {
+      .filter(({ pr, category }) => {
         if (ignored.has(pr.id)) return false;
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
-        if (filters.updateType !== "all") {
-          if (versionInfo !== null && versionInfo.updateType !== undefined && versionInfo.updateType !== filters.updateType) return false;
-        }
+        if (filters.updateType !== "all" && category !== filters.updateType) return false;
         return true;
       });
   });
