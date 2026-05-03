@@ -233,8 +233,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     return items;
   });
 
-  const openPrCount = createMemo(() => props.pullRequests.filter(p => p.state === "OPEN").length);
-
   const statusGroups = createMemo(() => {
     const groups: Record<DepStatus, ClassifiedPR[]> = {
       "mergeable": [],
