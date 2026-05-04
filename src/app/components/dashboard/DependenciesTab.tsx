@@ -210,16 +210,13 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     const { field, direction } = viewState.globalSort;
     const items = [...classifiedPRs()];
     const dir = direction === "asc" ? 1 : -1;
-    const isDefault = field === "updatedAt" && direction === "desc";
 
     items.sort((a, b) => {
-      // Default sort: category priority (maintenance→major), then repo
-      if (isDefault) {
-        const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
-        if (catCmp !== 0) return catCmp;
-        return a.pr.repoFullName.localeCompare(b.pr.repoFullName);
-      }
+      // Category is always the primary sort axis (safest → least safe)
+      const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
+      if (catCmp !== 0) return catCmp;
 
+      // User-selected sort as secondary within same category
       let cmp = 0;
       switch (field) {
         case "repo": cmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName); break;
