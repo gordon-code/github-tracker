@@ -16,10 +16,12 @@ export const SETTINGS_SECTIONS = [
   { id: "data", label: "Data", group: "Account" },
 ] as const;
 
-const SETTINGS_GROUPS = Array.from(
-  Map.groupBy(SETTINGS_SECTIONS, (s) => s.group),
-  ([name, items]) => ({ name, items })
-);
+const SETTINGS_GROUPS: { name: string; items: (typeof SETTINGS_SECTIONS)[number][] }[] = [];
+for (const s of SETTINGS_SECTIONS) {
+  const g = SETTINGS_GROUPS.find((x) => x.name === s.group);
+  if (g) g.items.push(s);
+  else SETTINGS_GROUPS.push({ name: s.group, items: [s] });
+}
 
 function useScrollSpy() {
   const [activeId, setActiveId] = createSignal<string>(SETTINGS_SECTIONS[0].id);
@@ -74,25 +76,35 @@ export default function SettingsTOC() {
   const [scrollingTo, setScrollingTo] = createSignal<string | null>(null);
   const [mobileOpen, setMobileOpen] = createSignal(false);
 
-  const displayedActiveId = () => scrollingTo() ?? activeId();
+  const displayedActiveId = createMemo(() => scrollingTo() ?? activeId());
   const activeLabel = createMemo(() =>
     SETTINGS_SECTIONS.find((s) => s.id === displayedActiveId())?.label ?? SETTINGS_SECTIONS[0].label
   );
 
+  let scrollEndCleanup: (() => void) | undefined;
+
   function scrollToSection(id: string) {
+    scrollEndCleanup?.();
     setScrollingTo(id);
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.getElementById(id)?.scrollIntoView({
       behavior: prefersReduced ? "instant" : "smooth",
       block: "start",
     });
-    const clear = () => setScrollingTo(null);
+    const clear = () => {
+      setScrollingTo(null);
+      scrollEndCleanup = undefined;
+    };
     if ("onscrollend" in window) {
       window.addEventListener("scrollend", clear, { once: true });
+      scrollEndCleanup = () => window.removeEventListener("scrollend", clear);
     } else {
-      setTimeout(clear, 600);
+      const t = setTimeout(clear, 600);
+      scrollEndCleanup = () => clearTimeout(t);
     }
   }
+
+  onCleanup(() => scrollEndCleanup?.());
 
   let mobileContainerRef: HTMLDivElement | undefined;
 
@@ -131,6 +143,7 @@ export default function SettingsTOC() {
                   <button
                     type="button"
                     onClick={() => scrollToSection(item.id)}
+                    aria-current={displayedActiveId() === item.id ? "location" : undefined}
                     class={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
                       displayedActiveId() === item.id
                         ? "bg-primary/10 text-primary font-medium border-l-2 border-primary"
@@ -147,11 +160,12 @@ export default function SettingsTOC() {
       </nav>
 
       {/* Mobile dropdown */}
-      <div class="lg:hidden sticky top-20 z-30 bg-base-200 border-b border-base-300 shadow-sm relative" data-testid="mobile-toc" ref={(el) => (mobileContainerRef = el)}>
+      <div class="lg:hidden sticky top-20 z-30 bg-base-200 border-b border-base-300 shadow-sm" data-testid="mobile-toc" ref={(el) => (mobileContainerRef = el)}>
         <button
           type="button"
           onClick={() => setMobileOpen((v) => !v)}
-          class="btn btn-ghost btn-sm gap-1"
+          class="btn btn-ghost gap-1 w-full justify-start"
+          aria-label="Jump to section"
           aria-expanded={mobileOpen()}
           aria-controls="settings-toc-mobile"
         >
@@ -163,7 +177,7 @@ export default function SettingsTOC() {
         <Show when={mobileOpen()}>
           <div
             id="settings-toc-mobile"
-            class="absolute top-full left-0 right-0 bg-base-100 border-b border-base-300 shadow-lg z-30 px-4 py-2 max-h-[60vh] overflow-y-auto"
+            class="absolute top-full left-0 right-0 bg-base-100 border-b border-base-300 shadow-lg z-40 px-4 py-2 max-h-[60vh] overflow-y-auto"
           >
             <For each={SETTINGS_GROUPS}>
               {(group) => (
@@ -179,6 +193,7 @@ export default function SettingsTOC() {
                           scrollToSection(item.id);
                           setMobileOpen(false);
                         }}
+                        aria-current={displayedActiveId() === item.id ? "location" : undefined}
                         class={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
                           displayedActiveId() === item.id
                             ? "bg-primary/10 text-primary font-medium"

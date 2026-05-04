@@ -156,9 +156,10 @@ describe("SettingsTOC — scroll to section", () => {
 describe("SettingsTOC — mobile dropdown", () => {
   it("toggles dropdown on button click", () => {
     render(() => <SettingsTOC />);
-    const toggle = screen.getByRole("button", { expanded: false });
+    const mobileToc = screen.getByTestId("mobile-toc");
+    const toggle = within(mobileToc).getByRole("button", { expanded: false });
     fireEvent.click(toggle);
-    expect(screen.getByTestId("mobile-toc").querySelector("#settings-toc-mobile")).toBeTruthy();
+    expect(mobileToc.querySelector("#settings-toc-mobile")).toBeTruthy();
   });
 
   it("closes dropdown when a TOC item is clicked", () => {
