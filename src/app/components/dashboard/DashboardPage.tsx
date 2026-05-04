@@ -177,6 +177,18 @@ onAuthCleared(() => {
   clearHotSets();
 });
 
+function carryOverBodies(prev: PullRequest[], next: PullRequest[]): PullRequest[] {
+  const bodyMap = new Map<number, string>();
+  for (const pr of prev) {
+    if (pr.body) bodyMap.set(pr.id, pr.body);
+  }
+  if (bodyMap.size === 0) return next;
+  return next.map((pr) => {
+    const body = bodyMap.get(pr.id);
+    return body ? { ...pr, body } : pr;
+  });
+}
+
 async function pollFetch(): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
   // Subsequent refreshes keep existing data visible — the coordinator's
@@ -258,7 +270,7 @@ async function pollFetch(): Promise<DashboardData> {
             pr.starCount = e.starCount;
           }
         } else {
-          state.pullRequests = data.pullRequests;
+          state.pullRequests = carryOverBodies(state.pullRequests, data.pullRequests);
         }
       }));
     } else {
@@ -270,7 +282,7 @@ async function pollFetch(): Promise<DashboardData> {
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
-          pullRequests: data.pullRequests,
+          pullRequests: carryOverBodies(dashboardData.pullRequests, data.pullRequests),
           workflowRuns: config.enableActions ? data.workflowRuns : [],
           loading: false,
           lastRefreshedAt: now,
