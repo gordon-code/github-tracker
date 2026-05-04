@@ -95,7 +95,10 @@ export default function SettingsTOC() {
       setScrollingTo(null);
       scrollEndCleanup = undefined;
     };
-    if ("onscrollend" in window) {
+    if (prefersReduced) {
+      requestAnimationFrame(clear);
+      scrollEndCleanup = undefined;
+    } else if ("onscrollend" in window) {
       window.addEventListener("scrollend", clear, { once: true });
       scrollEndCleanup = () => window.removeEventListener("scrollend", clear);
     } else {
