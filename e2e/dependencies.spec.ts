@@ -73,7 +73,7 @@ test("settings toggle hides the dependencies tab", async ({ page }) => {
 // ── Status groups ───────────────────────────────────────────────────────────
 
 test("status groups render correctly", async ({ page }) => {
-  // Light PRs have enriched=false, so recent ones land in "Waiting" and old ones in "Stale"
+  // Light PRs lack enrichment data, so recent ones land in "Needs Action" and old ones in "Stale"
   const waitingPR = makeDepPR({
     id: "PR_wait_1",
     databaseId: 9002,

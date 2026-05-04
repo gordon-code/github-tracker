@@ -45,6 +45,7 @@ const EMPTY_MAPS = {
 const BASE_PROPS = {
   rebaseLabel: "rebase",
   userLogin: "testuser",
+  trackedBotLogins: new Set<string>(),
   ...EMPTY_MAPS,
 };
 

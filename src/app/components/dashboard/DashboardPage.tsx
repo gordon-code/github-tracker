@@ -1048,7 +1048,7 @@ export default function DashboardPage() {
 
     return {
       issues: visibleIssues().filter((i) =>
-        isIssueVisible(i, { ignoredIds: ignoredIssues, globalFilter: builtinFilter })
+        isIssueVisible(i, { ignoredIds: ignoredIssues, hideDepDashboard: viewState.hideDepDashboard && !config.dependencies.enabled, globalFilter: builtinFilter })
       ).length,
       pullRequests: visiblePullRequests().filter((p) =>
         isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: builtinFilter })
@@ -1327,6 +1327,7 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   rebaseLabel={config.dependencies.rebaseLabel}
                   userLogin={userLogin()}
+                  trackedBotLogins={trackedBotLogins()}
                   onRefresh={() => _coordinator()?.manualRefresh()}
                 />
               </Match>

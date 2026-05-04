@@ -334,6 +334,17 @@ describe("classifyDepStatus", () => {
     expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
+  it("returns stale for approved PR that has not been updated in over 14 days", () => {
+    const pr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: "success",
+      reviewDecision: "APPROVED",
+      updatedAt: OLD,
+    });
+    expect(classifyDepStatus(pr, "", 14)).toBe("stale");
+  });
+
   it("uses default stale threshold of 14 days when not provided", () => {
     const thirteenDaysAgo = new Date(Date.now() - 13 * 86_400_000).toISOString();
     const fifteenDaysAgo = new Date(Date.now() - 15 * 86_400_000).toISOString();
@@ -627,15 +638,6 @@ describe("needsBodyFallback", () => {
     const pr = makePullRequest({
       title: "Bump lodash from 3.0.0 to 4.0.0",
       nodeId: "PR_abc",
-    });
-    expect(needsBodyFallback(pr)).toBe(false);
-  });
-
-  it("returns false when body already present", () => {
-    const pr = makePullRequest({
-      title: "chore(deps): update something action to v5",
-      nodeId: "PR_abc",
-      body: "already fetched",
     });
     expect(needsBodyFallback(pr)).toBe(false);
   });

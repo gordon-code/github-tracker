@@ -10,7 +10,6 @@ import {
   extractVersionInfo,
   ALL_DEP_STATUSES,
   isKnownDepBot,
-  expandBotLogins,
   DEP_TOOL_LABEL_NAMES,
   type DepStatus,
   type VersionInfo,
@@ -41,11 +40,11 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
   ],
 };
 
-const STATUS_META: Record<DepStatus, { label: string; badgeClass: string; defaultExpanded: boolean }> = {
-  "mergeable":       { label: "Mergeable",      badgeClass: "badge-success",  defaultExpanded: true },
-  "pending-rebase":  { label: "Pending Rebase",  badgeClass: "badge-ghost",    defaultExpanded: false },
-  "needs-action":    { label: "Needs Action",    badgeClass: "badge-warning",  defaultExpanded: true },
-  "stale":           { label: "Stale",           badgeClass: "badge-error",    defaultExpanded: false },
+const STATUS_META: Record<DepStatus, { label: string }> = {
+  "mergeable":       { label: "Mergeable" },
+  "pending-rebase":  { label: "Pending Rebase" },
+  "needs-action":    { label: "Needs Action" },
+  "stale":           { label: "Stale" },
 };
 
 type DepCategory = "major" | "minor" | "patch" | "pin" | "maintenance" | "other";
@@ -64,30 +63,28 @@ const CATEGORY_SORT_ORDER: Record<DepCategory, number> = {
   other: 5,
 };
 
+const CATEGORY_BADGE_CLASS: Partial<Record<DepCategory, string>> = {
+  major: "badge-error",
+  minor: "badge-warning",
+  patch: "badge-success",
+  pin: "badge-success",
+};
+
 function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCategory {
   if (versionInfo?.updateType) return mapUpdateType(versionInfo.updateType);
 
   const titleLower = pr.title.toLowerCase();
-  if (/pin\s+dep/i.test(titleLower)) return "pin";
-  if (/lock\s*file\s+maintenance/i.test(titleLower)) return "maintenance";
+  if (/pin\s+dep/.test(titleLower)) return "pin";
+  if (/lock\s*file\s+maintenance/.test(titleLower)) return "maintenance";
 
-  if (!versionInfo) {
-    for (const l of pr.labels) {
-      const name = l.name.toLowerCase();
-      if (name === "major") return "major";
-      if (name === "minor") return "minor";
-      if (name === "patch") return "patch";
-    }
-    return "maintenance";
-  }
-
+  const fallback: DepCategory = versionInfo ? "other" : "maintenance";
   for (const l of pr.labels) {
     const name = l.name.toLowerCase();
     if (name === "major") return "major";
     if (name === "minor") return "minor";
     if (name === "patch") return "patch";
   }
-  return "other";
+  return fallback;
 }
 
 interface ClassifiedPR {
@@ -109,6 +106,7 @@ interface DependenciesTabProps {
   refreshTick?: number;
   rebaseLabel: string;
   userLogin: string;
+  trackedBotLogins: ReadonlySet<string>;
   onRefresh?: () => void;
 }
 
@@ -162,10 +160,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     config.enableTracking
       ? new Set(viewState.trackedItems.filter((t) => t.type === "pullRequest").map((t) => t.id))
       : new Set<number>()
-  );
-
-  const trackedBotLogins = createMemo(() =>
-    expandBotLogins(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
@@ -256,7 +250,10 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   const [dismissedBots, setDismissedBots] = createSignal(new Set<string>());
 
   const unknownBots = createMemo(() => {
-    const known = trackedBotLogins();
+    const known = new Set([
+      ...props.trackedBotLogins,
+      ...config.trackedUsers.map((u) => u.login.toLowerCase()),
+    ]);
     const userLower = props.userLogin.toLowerCase();
     const dismissed = dismissedBots();
     const seen = new Map<string, { login: string; avatarUrl: string }>();
@@ -463,11 +460,7 @@ function StatusGroup(props: StatusGroupProps) {
                     subtleRepo
                     titlePrefix={
                       <Show when={category !== "other"}>
-                        <span class={`badge badge-sm min-w-[4.5rem] justify-center ${
-                          category === "major" ? "badge-error" :
-                          category === "minor" ? "badge-warning" :
-                          "badge-success"
-                        }`}>
+                        <span class={`badge badge-sm min-w-[4.5rem] justify-center ${CATEGORY_BADGE_CLASS[category] ?? "badge-success"}`}>
                           {category}
                         </span>
                       </Show>

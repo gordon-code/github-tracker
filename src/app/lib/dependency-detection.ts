@@ -218,7 +218,7 @@ export function parseRenovateBody(body: string): VersionInfo | null {
 }
 
 export function needsBodyFallback(pr: PullRequest): boolean {
-  if (pr.body || !pr.nodeId) return false;
+  if (!pr.nodeId) return false;
   const vi = extractVersionInfo(pr.title);
   if (vi?.updateType) return false;
   if (/pin\s+dep/i.test(pr.title)) return false;
