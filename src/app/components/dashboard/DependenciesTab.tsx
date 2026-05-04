@@ -8,7 +8,6 @@ import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
   extractVersionInfo,
-  parseRenovateBody,
   ALL_DEP_STATUSES,
   isKnownDepBot,
   expandBotLogins,
@@ -102,7 +101,7 @@ interface ClassifiedPR {
 
 interface DependenciesTabProps {
   pullRequests: PullRequest[];
-  depBodies?: ReadonlyMap<number, string>;
+  depMeta?: ReadonlyMap<number, VersionInfo>;
   loading?: boolean;
   abandonedDepsMap: Map<string, AbandonedDependency[]>;
   dashboardIssueUrls: Map<string, string>;
@@ -172,22 +171,19 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
     const ignored = ignoredIds();
-    const bodies = props.depBodies;
+    const meta = props.depMeta;
     return props.pullRequests
       .map((pr) => {
         const titleInfo = extractVersionInfo(pr.title);
         let versionInfo = titleInfo;
-        const body = bodies?.get(pr.id);
-        if (body && (!titleInfo?.updateType || !titleInfo?.from)) {
-          const bodyInfo = parseRenovateBody(body);
-          if (bodyInfo) {
-            versionInfo = {
-              packageName: titleInfo?.packageName ?? bodyInfo.packageName,
-              from: bodyInfo.from ?? titleInfo?.from,
-              to: bodyInfo.to ?? titleInfo?.to,
-              updateType: bodyInfo.updateType ?? titleInfo?.updateType,
-            };
-          }
+        const cached = meta?.get(pr.id);
+        if (cached && (!titleInfo?.updateType || !titleInfo?.from)) {
+          versionInfo = {
+            packageName: titleInfo?.packageName ?? cached.packageName,
+            from: cached.from ?? titleInfo?.from,
+            to: cached.to ?? titleInfo?.to,
+            updateType: cached.updateType ?? titleInfo?.updateType,
+          };
         }
         const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
         const abandonedDep = matchAbandonedToPr(pr, abandonedDeps);

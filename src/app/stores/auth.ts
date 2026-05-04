@@ -24,6 +24,7 @@ export type { JiraAuthState } from "../../shared/jira-types";
 
 export const AUTH_STORAGE_KEY = "github-tracker:auth-token";
 export const DASHBOARD_STORAGE_KEY = "github-tracker:dashboard";
+export const DEP_META_STORAGE_KEY = "github-tracker:dep-meta";
 export const JIRA_AUTH_STORAGE_KEY = "github-tracker:jira-auth";
 
 export interface GitHubUser {

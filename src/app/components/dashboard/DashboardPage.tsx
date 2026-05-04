@@ -11,7 +11,7 @@ import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
-import { isDependencyPr, expandBotLogins, needsBodyFallback } from "../../lib/dependency-detection";
+import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies, fetchDepPRBodies } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
@@ -28,7 +28,7 @@ import {
   fetchAllData,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
 import { JiraApiError } from "../../services/jira-client";
 import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
 import type { JiraIssue } from "../../../shared/jira-types";
@@ -144,7 +144,33 @@ let _jiraFetching = false;
 // Dependency dashboard state — module-level for same reasons as jira state above
 const [abandonedDepsMap, setAbandonedDepsMap] = createSignal<Map<string, AbandonedDependency[]>>(new Map());
 const [dashboardIssueUrls, setDashboardIssueUrls] = createSignal<Map<string, string>>(new Map());
-const [depBodies, setDepBodies] = createSignal<ReadonlyMap<number, string>>(new Map());
+function loadDepMetaCache(): Map<number, VersionInfo> {
+  try {
+    const raw = localStorage.getItem?.(DEP_META_STORAGE_KEY);
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const map = new Map<number, VersionInfo>();
+    for (const [k, v] of Object.entries(parsed)) {
+      const id = Number(k);
+      if (!isNaN(id) && v && typeof v === "object") map.set(id, v as VersionInfo);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function persistDepMeta(meta: ReadonlyMap<number, VersionInfo>): void {
+  try {
+    const obj: Record<number, VersionInfo> = {};
+    for (const [k, v] of meta) obj[k] = v;
+    localStorage.setItem(DEP_META_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // Non-critical — storage may be full
+  }
+}
+
+const [depMeta, setDepMeta] = createSignal<ReadonlyMap<number, VersionInfo>>(loadDepMetaCache());
 let _fetchingDashboardBodies = false;
 let _fetchingDepBodies = false;
 
@@ -158,7 +184,8 @@ onAuthCleared(() => {
   _jiraFetching = false;
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
-  setDepBodies(new Map());
+  setDepMeta(new Map());
+  localStorage.removeItem?.(DEP_META_STORAGE_KEY);
   _fetchingDashboardBodies = false;
   resetAbandonedPatternCache();
   const coord = _coordinator();
@@ -1160,18 +1187,17 @@ export default function DashboardPage() {
   ));
 
   // Fetch PR bodies for dependency PRs where title parsing can't determine update type.
-  // Uses a separate reactive signal (depBodies) rather than mutating store PR objects,
-  // because dependencyPullRequests() returns filtered plain objects that lose store
-  // proxy tracking — produce() mutations to pr.body wouldn't trigger recomputation.
+  // Parses bodies immediately into VersionInfo and persists to localStorage so
+  // classification survives page refresh without visual jank.
   createEffect(() => {
     if (!config.dependencies.enabled) return;
     if (_fetchingDepBodies) return;
     const octokit = getClient();
     if (!octokit) return;
 
-    const bodies = depBodies();
+    const meta = depMeta();
     const depPrs = dependencyPullRequests();
-    const toFetch = depPrs.filter((pr) => !bodies.has(pr.id) && needsBodyFallback(pr));
+    const toFetch = depPrs.filter((pr) => !meta.has(pr.id) && needsBodyFallback(pr));
     if (toFetch.length === 0) return;
 
     _fetchingDepBodies = true;
@@ -1181,9 +1207,18 @@ export default function DashboardPage() {
         const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
         if (bodyMap.size === 0) return;
 
-        const merged = new Map(bodies);
-        for (const [id, body] of bodyMap) merged.set(id, body);
-        setDepBodies(merged);
+        const merged = new Map(meta);
+        for (const [id, body] of bodyMap) {
+          const parsed = parseRenovateBody(body);
+          if (parsed) merged.set(id, parsed);
+        }
+        // Prune entries for PRs no longer in the dependency set
+        const depPrIds = new Set(depPrs.map((pr) => pr.id));
+        for (const k of [...merged.keys()]) {
+          if (!depPrIds.has(k)) merged.delete(k);
+        }
+        setDepMeta(merged);
+        setTimeout(() => persistDepMeta(merged), 0);
       } finally {
         _fetchingDepBodies = false;
       }
@@ -1284,7 +1319,7 @@ export default function DashboardPage() {
               <Match when={activeTab() === "dependencies"}>
                 <DependenciesTab
                   pullRequests={dependencyPullRequests()}
-                  depBodies={depBodies()}
+                  depMeta={depMeta()}
                   loading={dashboardData.loading}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}
