@@ -11,9 +11,9 @@ import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
-import { isDependencyPr, expandBotLogins } from "../../lib/dependency-detection";
+import { isDependencyPr, expandBotLogins, needsBodyFallback } from "../../lib/dependency-detection";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -145,6 +145,7 @@ let _jiraFetching = false;
 const [abandonedDepsMap, setAbandonedDepsMap] = createSignal<Map<string, AbandonedDependency[]>>(new Map());
 const [dashboardIssueUrls, setDashboardIssueUrls] = createSignal<Map<string, string>>(new Map());
 let _fetchingDashboardBodies = false;
+let _fetchingDepBodies = false;
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
@@ -1035,7 +1036,7 @@ export default function DashboardPage() {
           return true;
         }).length };
       })() : {}),
-      ...(enableDependencies() ? { dependencies: dependencyPullRequests().filter((p) => !ignoredPRs.has(p.id)).length } : {}),
+      ...(enableDependencies() ? { dependencies: dependencyPullRequests().length } : {}),
       ...customCounts,
     };
   });
@@ -1150,6 +1151,41 @@ export default function DashboardPage() {
           setDashboardIssueUrls(newUrlMap);
         } finally {
           _fetchingDashboardBodies = false;
+        }
+      })();
+    },
+    { defer: true }
+  ));
+
+  // Fetch PR bodies for dependency PRs where title parsing can't determine update type.
+  // Bodies are stored on the PR objects so DependenciesTab can parse Renovate's table.
+  createEffect(on(
+    () => _coordinator()?.lastRefreshAt(),
+    () => {
+      if (!config.dependencies.enabled) return;
+      if (_fetchingDepBodies) return;
+      const octokit = getClient();
+      if (!octokit) return;
+
+      const depPrs = dependencyPullRequests();
+      const toFetch = depPrs.filter(needsBodyFallback);
+      if (toFetch.length === 0) return;
+
+      _fetchingDepBodies = true;
+      void (async () => {
+        try {
+          const nodeIds = toFetch.map((pr) => pr.nodeId!);
+          const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
+          if (bodyMap.size === 0) return;
+
+          setDashboardData(produce((s) => {
+            for (const pr of s.pullRequests) {
+              const body = bodyMap.get(pr.id);
+              if (body) pr.body = body;
+            }
+          }));
+        } finally {
+          _fetchingDepBodies = false;
         }
       })();
     },

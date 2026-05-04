@@ -95,7 +95,7 @@ export interface VersionInfo {
   packageName?: string;
   from?: string;
   to?: string;
-  updateType?: "major" | "minor" | "patch";
+  updateType?: "major" | "minor" | "patch" | "pin" | "digest";
 }
 
 export function extractVersionInfo(title: string): VersionInfo | null {
@@ -146,6 +146,50 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   }
 
   return null;
+}
+
+export function parseRenovateBody(body: string): VersionInfo | null {
+  const lines = body.split("\n");
+  for (const line of lines) {
+    const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
+    if (cells.length < 4) continue;
+
+    const updateCol = cells[2]?.toLowerCase();
+    if (!updateCol) continue;
+
+    const validTypes = ["major", "minor", "patch", "pin", "digest"] as const;
+    const matched = validTypes.find((t) => t === updateCol);
+    if (!matched) continue;
+
+    const result: VersionInfo = { updateType: matched };
+
+    const pkgCell = cells[0];
+    const linkMatch = /\[([^\]]+)\]/.exec(pkgCell);
+    result.packageName = linkMatch ? linkMatch[1] : pkgCell;
+
+    const changeCell = cells[3];
+    const changeMatch = /`?([^`\s]+)`?\s*→\s*`?([^`\s]+)`?/.exec(changeCell);
+    if (changeMatch) {
+      result.from = changeMatch[1];
+      result.to = changeMatch[2];
+    }
+
+    return result;
+  }
+  return null;
+}
+
+export function needsBodyFallback(pr: PullRequest): boolean {
+  if (pr.body || !pr.nodeId) return false;
+  const vi = extractVersionInfo(pr.title);
+  if (vi?.updateType) return false;
+  if (/pin\s+dep/i.test(pr.title)) return false;
+  if (/lock\s*file\s+maintenance/i.test(pr.title)) return false;
+  for (const l of pr.labels) {
+    const name = l.name.toLowerCase();
+    if (name === "major" || name === "minor" || name === "patch") return false;
+  }
+  return true;
 }
 
 export function isRebasing(pr: PullRequest, rebaseLabel: string): boolean {

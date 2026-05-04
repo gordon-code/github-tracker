@@ -7,6 +7,7 @@ import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
   extractVersionInfo,
+  parseRenovateBody,
   ALL_DEP_STATUSES,
   isKnownDepBot,
   expandBotLogins,
@@ -49,15 +50,19 @@ const STATUS_META: Record<DepStatus, { label: string; badgeClass: string; defaul
 
 type DepCategory = "major" | "minor" | "patch" | "pin" | "maintenance" | "other";
 
+function mapUpdateType(ut: NonNullable<VersionInfo["updateType"]>): DepCategory {
+  if (ut === "digest") return "patch";
+  return ut;
+}
+
 function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCategory {
-  if (versionInfo?.updateType) return versionInfo.updateType;
+  if (versionInfo?.updateType) return mapUpdateType(versionInfo.updateType);
 
   const titleLower = pr.title.toLowerCase();
   if (/pin\s+dep/i.test(titleLower)) return "pin";
   if (/lock\s*file\s+maintenance/i.test(titleLower)) return "maintenance";
 
   if (!versionInfo) {
-    // Label fallback — Renovate/Dependabot may label PRs with update type
     for (const l of pr.labels) {
       const name = l.name.toLowerCase();
       if (name === "major") return "major";
@@ -67,7 +72,6 @@ function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCateg
     return "maintenance";
   }
 
-  // Has versionInfo but no updateType — check labels before giving up
   for (const l of pr.labels) {
     const name = l.name.toLowerCase();
     if (name === "major") return "major";
@@ -134,10 +138,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const filterGroups = createMemo(() => [UPDATE_TYPE_OPTIONS, botOptions()]);
 
-  const ignoredIds = createMemo(
-    () => new Set(viewState.ignoredItems.filter((i) => i.type === "pullRequest").map((i) => i.id))
-  );
-
   const trackedPrIds = createMemo(() =>
     config.enableTracking
       ? new Set(viewState.trackedItems.filter((t) => t.type === "pullRequest").map((t) => t.id))
@@ -150,10 +150,21 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
-    const ignored = ignoredIds();
     return props.pullRequests
       .map((pr) => {
-        const versionInfo = extractVersionInfo(pr.title);
+        const titleInfo = extractVersionInfo(pr.title);
+        let versionInfo = titleInfo;
+        if (pr.body && (!titleInfo?.updateType || !titleInfo?.from)) {
+          const bodyInfo = parseRenovateBody(pr.body);
+          if (bodyInfo) {
+            versionInfo = {
+              packageName: titleInfo?.packageName ?? bodyInfo.packageName,
+              from: titleInfo?.from ?? bodyInfo.from,
+              to: titleInfo?.to ?? bodyInfo.to,
+              updateType: titleInfo?.updateType ?? bodyInfo.updateType,
+            };
+          }
+        }
         const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
         return {
           pr,
@@ -164,7 +175,6 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         };
       })
       .filter(({ pr, category }) => {
-        if (ignored.has(pr.id)) return false;
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
         if (filters.updateType !== "all" && category !== filters.updateType) return false;
         return true;
@@ -330,7 +340,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
       <Show when={!props.loading && sortedPRs().length === 0 && props.pullRequests.length > 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
-          <p class="text-sm font-medium">No PRs match your current filters</p>
+          <p class="text-sm font-medium">No dependency PRs match your current filters</p>
         </div>
       </Show>
 

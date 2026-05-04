@@ -2054,7 +2054,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
     });
   });
 
-  it("Dependencies tab count reflects dep PR count (excluding ignored)", async () => {
+  it("Dependencies tab count includes ignored dep PRs", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
       pullRequests: [
@@ -2075,7 +2075,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
     viewStore.ignoreItem({ id: 1, type: "pullRequest", repo: "owner/repo", title: "Bump lodash", ignoredAt: Date.now() });
     await waitFor(() => {
       const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
-      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("2");
     });
   });
 

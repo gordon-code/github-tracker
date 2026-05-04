@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   isDependencyPr,
   extractVersionInfo,
+  parseRenovateBody,
+  needsBodyFallback,
   classifyDepStatus,
   isRebasing,
   isKnownDepBot,
@@ -444,5 +446,169 @@ describe("DEP_TITLE_PATTERN", () => {
 
   it("does not match unrelated title", () => {
     expect(DEP_TITLE_PATTERN.test("Fix authentication bug")).toBe(false);
+  });
+});
+
+describe("parseRenovateBody", () => {
+  it("parses major update from Renovate table", () => {
+    const body = [
+      "| Package | Type | Update | Change |",
+      "|---|---|---|---|",
+      "| [determinatesystems/nix-installer-action](https://example.com) | action | major | `v21` → `v22` |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "determinatesystems/nix-installer-action",
+      updateType: "major",
+      from: "v21",
+      to: "v22",
+    });
+  });
+
+  it("parses minor update", () => {
+    const body = "| [react](url) | dependencies | minor | `18.2.0` → `18.3.0` |";
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "react",
+      updateType: "minor",
+      from: "18.2.0",
+      to: "18.3.0",
+    });
+  });
+
+  it("parses patch update", () => {
+    const body = "| [lodash](url) | devDependencies | patch | `4.17.20` → `4.17.21` |";
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "lodash",
+      updateType: "patch",
+      from: "4.17.20",
+      to: "4.17.21",
+    });
+  });
+
+  it("parses pin update", () => {
+    const body = "| [actions/checkout](url) | action | pin | `abc1234` → `def5678` |";
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "actions/checkout",
+      updateType: "pin",
+      from: "abc1234",
+      to: "def5678",
+    });
+  });
+
+  it("parses digest update", () => {
+    const body = "| [node](url) | final | digest | `sha256:abc` → `sha256:def` |";
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "node",
+      updateType: "digest",
+      from: "sha256:abc",
+      to: "sha256:def",
+    });
+  });
+
+  it("handles plain text package name (no markdown link)", () => {
+    const body = "| some-package | dependencies | major | `1.0.0` → `2.0.0` |";
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "some-package",
+      updateType: "major",
+      from: "1.0.0",
+      to: "2.0.0",
+    });
+  });
+
+  it("returns null when no valid table row found", () => {
+    expect(parseRenovateBody("This is just a PR description with no table.")).toBeNull();
+  });
+
+  it("returns null for header/separator rows", () => {
+    const body = [
+      "| Package | Type | Update | Change |",
+      "|---|---|---|---|",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toBeNull();
+  });
+
+  it("skips rows with unknown update type", () => {
+    const body = "| [pkg](url) | deps | rollback | `2.0` → `1.0` |";
+    expect(parseRenovateBody(body)).toBeNull();
+  });
+
+  it("handles body with surrounding text before table", () => {
+    const body = [
+      "This PR updates dependencies.",
+      "",
+      "| Package | Type | Update | Change |",
+      "|---|---|---|---|",
+      "| [webpack](url) | devDependencies | minor | `5.90.0` → `5.91.0` |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "webpack",
+      updateType: "minor",
+      from: "5.90.0",
+      to: "5.91.0",
+    });
+  });
+
+  it("returns result without from/to when Change column has no arrow", () => {
+    const body = "| [pkg](url) | action | major | see notes |";
+    const result = parseRenovateBody(body);
+    expect(result).toEqual({ packageName: "pkg", updateType: "major" });
+  });
+});
+
+describe("needsBodyFallback", () => {
+  it("returns true when title gives no updateType and no labels help", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update determinatesystems/nix-installer-action action to v22",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(true);
+  });
+
+  it("returns false when title gives updateType", () => {
+    const pr = makePullRequest({
+      title: "Bump lodash from 3.0.0 to 4.0.0",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false when body already present", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update something action to v5",
+      nodeId: "PR_abc",
+      body: "already fetched",
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false when no nodeId", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update something action to v5",
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false for pin dependencies title", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): pin dependencies",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false for lock file maintenance title", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): lock file maintenance",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false when major label present", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update something action to v5",
+      nodeId: "PR_abc",
+      labels: [{ name: "major", color: "ff0000" }],
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
   });
 });

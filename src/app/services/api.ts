@@ -1205,6 +1205,53 @@ export async function fetchDashboardIssueBodies(
   return result;
 }
 
+// ── Dependency PR body fetch ─────────────────────────────────────────────────
+
+const DEP_PR_BODIES_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest { databaseId body }
+    }
+    rateLimit { cost limit remaining resetAt }
+  }
+`;
+
+interface DepPRBodiesResponse {
+  nodes: Array<{ databaseId: number; body: string | null } | null>;
+  rateLimit?: GraphQLRateLimit;
+}
+
+export async function fetchDepPRBodies(
+  octokit: GitHubOctokit,
+  prNodeIds: string[]
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (prNodeIds.length === 0) return result;
+
+  const batches = chunkArray(prNodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch) => {
+    try {
+      const response = await octokit.graphql<DepPRBodiesResponse>(
+        DEP_PR_BODIES_QUERY,
+        { ids: batch, request: { apiSource: "depPRBodies" } }
+      );
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      for (const node of response.nodes) {
+        if (!node || node.databaseId == null || !node.body) continue;
+        result.set(node.databaseId, node.body);
+      }
+    } catch (err) {
+      const partialErr =
+        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+          ? (err.data as Partial<DepPRBodiesResponse>)
+          : null;
+      if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+    }
+  }));
+
+  return result;
+}
+
 /**
  * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
  * Also detects fork PRs for the statusCheckRollup fallback.

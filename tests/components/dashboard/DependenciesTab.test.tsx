@@ -146,7 +146,7 @@ describe("DependenciesTab — empty state", () => {
     });
     setTabFilter("dependencies", "updateType", "major");
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("No PRs match your current filters")).toBeDefined();
+    expect(screen.getByText("No dependency PRs match your current filters")).toBeDefined();
   });
 });
 
@@ -487,7 +487,7 @@ describe("DependenciesTab — label filtering", () => {
 // ── Ignore button ─────────────────────────────────────────────────────────────
 
 describe("DependenciesTab — ignore button", () => {
-  it("clicking the ignore button hides the PR from the list", () => {
+  it("clicking ignore keeps the PR visible (deps tab does not filter ignored items)", () => {
     const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
     expect(screen.getByText("lodash → v5")).toBeDefined();
@@ -495,7 +495,7 @@ describe("DependenciesTab — ignore button", () => {
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);
 
-    expect(screen.queryByText("lodash → v5")).toBeNull();
+    expect(screen.getByText("lodash → v5")).toBeDefined();
   });
 
   it("ignore button adds item to ignoredItems in viewState", () => {
@@ -508,7 +508,7 @@ describe("DependenciesTab — ignore button", () => {
     expect(viewState.ignoredItems.some((i) => i.id === 5001 && i.type === "pullRequest")).toBe(true);
   });
 
-  it("ignored PR is not rendered even when re-renderTab is called", () => {
+  it("ignored PR remains visible on re-render", () => {
     const pr = makeMergeablePR({ id: 5002, title: "Bump axios from 0.27.2 to 1.0.0" });
     const { unmount } = renderTab({ pullRequests: [pr] });
 
@@ -516,7 +516,7 @@ describe("DependenciesTab — ignore button", () => {
     unmount();
 
     renderTab({ pullRequests: [pr] });
-    expect(screen.queryByText(/axios/)).toBeNull();
+    expect(screen.getByText(/axios/)).toBeDefined();
   });
 });
 
