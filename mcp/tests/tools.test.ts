@@ -125,6 +125,22 @@ describe("get_dashboard_summary", () => {
     // isRelayConnected is mocked to return false, so staleness note should be present
     expect(result.content[0].text).toContain("data via GitHub API");
   });
+
+  it("shows actions disabled indicator when failingRunCount is null", async () => {
+    const disabledSummary: DashboardSummary = {
+      openPRCount: 2,
+      openIssueCount: 1,
+      failingRunCount: null,
+      needsReviewCount: 0,
+      approvedUnmergedCount: 0,
+    };
+    vi.mocked(ds.getDashboardSummary).mockResolvedValueOnce(disabledSummary);
+    const result = await callTool(server, "get_dashboard_summary");
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain("Actions monitoring disabled");
+    expect(text).not.toMatch(/Failing CI Runs:\s+\d/);
+  });
 });
 
 describe("get_open_prs", () => {
@@ -314,6 +330,41 @@ describe("get_failing_actions", () => {
     const result = await callTool(server, "get_failing_actions");
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Error fetching workflow runs");
+  });
+
+  it("returns disabled message when enableActions is false", async () => {
+    vi.mocked(ds.getConfig).mockResolvedValueOnce({
+      selectedRepos: [{ owner: "owner", name: "repo", fullName: "owner/repo" }],
+      trackedUsers: [],
+      upstreamRepos: [],
+      monitoredRepos: [],
+      enableActions: false,
+    });
+    const result = await callTool(server, "get_failing_actions");
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Actions monitoring is disabled");
+    expect(ds.getFailingActions).not.toHaveBeenCalled();
+  });
+
+  it("proceeds normally when enableActions is true", async () => {
+    vi.mocked(ds.getConfig).mockResolvedValueOnce({
+      selectedRepos: [{ owner: "owner", name: "repo", fullName: "owner/repo" }],
+      trackedUsers: [],
+      upstreamRepos: [],
+      monitoredRepos: [],
+      enableActions: true,
+    });
+    const result = await callTool(server, "get_failing_actions");
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("No failing or in-progress workflow runs found");
+    expect(ds.getFailingActions).toHaveBeenCalled();
+  });
+
+  it("proceeds normally when getConfig returns null", async () => {
+    vi.mocked(ds.getConfig).mockResolvedValueOnce(null);
+    const result = await callTool(server, "get_failing_actions");
+    expect(result.isError).toBeFalsy();
+    expect(ds.getFailingActions).toHaveBeenCalled();
   });
 });
 

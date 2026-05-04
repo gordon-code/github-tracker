@@ -15,6 +15,7 @@ vi.mock("../../src/app/stores/config", () => ({
     selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
     maxWorkflowsPerRepo: 5,
     maxRunsPerWorkflow: 3,
+    enableActions: true,
   },
 }));
 
@@ -98,7 +99,7 @@ describe("fetchAllData — first call", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("calls both fetch functions unconditionally on every call", async () => {
+  it("calls both fetch functions when enableActions is true", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
@@ -108,21 +109,17 @@ describe("fetchAllData — first call", () => {
     vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
     vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
 
-
     const { fetchAllData } = await import("../../src/app/services/poll");
 
     await fetchAllData();
 
-    // No notification gate — both data fetches always run
-    expect(mockOctokit.request).not.toHaveBeenCalled();
     expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
     expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
 
-    // Second call — still unconditional, no gate check
+    // Second call — both still run
     vi.mocked(fetchIssuesAndPullRequests).mockClear();
     vi.mocked(fetchWorkflowRuns).mockClear();
     await fetchAllData();
-    expect(mockOctokit.request).not.toHaveBeenCalled();
     expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
     expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
   });
@@ -284,6 +281,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
         trackedUsers: [],
         maxWorkflowsPerRepo: 5,
         maxRunsPerWorkflow: 3,
+        enableActions: true,
       },
     }));
 
@@ -315,6 +313,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
         trackedUsers: [],
         maxWorkflowsPerRepo: 5,
         maxRunsPerWorkflow: 3,
+        enableActions: true,
       },
     }));
 
@@ -349,6 +348,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
         trackedUsers,
         maxWorkflowsPerRepo: 5,
         maxRunsPerWorkflow: 3,
+        enableActions: true,
       },
     }));
 
@@ -378,6 +378,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
         trackedUsers: [],
         maxWorkflowsPerRepo: 5,
         maxRunsPerWorkflow: 3,
+        enableActions: true,
       },
     }));
 
@@ -427,6 +428,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
         trackedUsers: [],
         maxWorkflowsPerRepo: 5,
         maxRunsPerWorkflow: 3,
+        enableActions: true,
       },
     }));
 
@@ -567,6 +569,206 @@ describe("fetchAllData — 401 propagation from allSettled", () => {
   });
 });
 
+
+// ── enableActions gate ────────────────────────────────────────────────────────
+
+describe("fetchAllData — enableActions gate", () => {
+  it("skips fetchWorkflowRuns and returns empty workflowRuns when enableActions is false", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: false,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    const result = await fetchAllData();
+
+    expect(fetchWorkflowRuns).not.toHaveBeenCalled();
+    expect(result.workflowRuns).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("still calls fetchIssuesAndPullRequests when enableActions is false", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: false,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledOnce();
+  });
+
+  it("calls fetchWorkflowRuns when enableActions is true", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+        upstreamRepos: [],
+        trackedUsers: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: true,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData } = await import("../../src/app/services/poll");
+    await fetchAllData();
+
+    expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
+  });
+});
+
+describe("fetchTargetedRepoData — enableActions gate", () => {
+  it("skips fetchWorkflowRuns and returns empty workflowRuns when enableActions is false", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: false,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+
+    const { fetchTargetedRepoData } = await import("../../src/app/services/poll");
+
+    const repoSummaries = new Map([
+      ["octocat/Hello-World", {
+        repoFullName: "octocat/Hello-World",
+        eventTypes: new Set(["PushEvent"]),
+        hasIssueActivity: false,
+        hasPRActivity: false,
+        hasWorkflowActivity: true,
+        latestEventAt: new Date().toISOString(),
+      }],
+    ]);
+
+    const result = await fetchTargetedRepoData(repoSummaries);
+
+    expect(fetchWorkflowRuns).not.toHaveBeenCalled();
+    expect(result.workflowRuns).toEqual([]);
+  });
+
+  it("calls fetchWorkflowRuns for repos with hasWorkflowActivity when enableActions is true", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: true,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchTargetedRepoData } = await import("../../src/app/services/poll");
+
+    const repoSummaries = new Map([
+      ["octocat/Hello-World", {
+        repoFullName: "octocat/Hello-World",
+        eventTypes: new Set(["PushEvent"]),
+        hasIssueActivity: false,
+        hasPRActivity: false,
+        hasWorkflowActivity: true,
+        latestEventAt: new Date().toISOString(),
+      }],
+    ]);
+
+    await fetchTargetedRepoData(repoSummaries);
+
+    expect(fetchWorkflowRuns).toHaveBeenCalledOnce();
+    const callArgs = vi.mocked(fetchWorkflowRuns).mock.calls[0];
+    const passedRepos = callArgs[1] as Array<{ fullName: string }>;
+    expect(passedRepos[0].fullName).toBe("octocat/Hello-World");
+  });
+
+  it("does not call fetchWorkflowRuns for repos without hasWorkflowActivity even when enableActions is true", async () => {
+    vi.resetModules();
+
+    vi.doMock("../../src/app/stores/config", () => ({
+      config: {
+        selectedRepos: [],
+        maxWorkflowsPerRepo: 5,
+        maxRunsPerWorkflow: 3,
+        enableActions: true,
+      },
+    }));
+
+    const { getClient } = await import("../../src/app/services/github");
+    const { fetchIssuesAndPullRequests, fetchWorkflowRuns } = await import("../../src/app/services/api");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+
+    const { fetchTargetedRepoData } = await import("../../src/app/services/poll");
+
+    const repoSummaries = new Map([
+      ["octocat/Hello-World", {
+        repoFullName: "octocat/Hello-World",
+        eventTypes: new Set(["IssuesEvent"]),
+        hasIssueActivity: true,
+        hasPRActivity: false,
+        hasWorkflowActivity: false,
+        latestEventAt: new Date().toISOString(),
+      }],
+    ]);
+
+    await fetchTargetedRepoData(repoSummaries);
+
+    expect(fetchWorkflowRuns).not.toHaveBeenCalled();
+  });
+});
 
 // ── qa-4: Concurrency verification ────────────────────────────────────────────
 

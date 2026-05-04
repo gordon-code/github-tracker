@@ -114,7 +114,8 @@ export interface RateLimitInfo {
 export interface DashboardSummary {
   openPRCount: number;
   openIssueCount: number;
-  failingRunCount: number;
+  /** null when Actions monitoring is disabled */
+  failingRunCount: number | null;
   needsReviewCount: number;
   approvedUnmergedCount: number;
 }

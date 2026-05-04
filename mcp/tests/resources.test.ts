@@ -58,6 +58,7 @@ function makeConfig(overrides: Partial<CachedConfig> = {}): CachedConfig {
     trackedUsers: [],
     upstreamRepos: [],
     monitoredRepos: [],
+    enableActions: true,
     ...overrides,
   };
 }

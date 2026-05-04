@@ -8,7 +8,7 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, getCustomTab, isBuiltinTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
+import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
@@ -213,7 +213,7 @@ async function pollFetch(): Promise<DashboardData> {
 
       setDashboardData(produce((state) => {
         state.issues = data.issues;
-        state.workflowRuns = data.workflowRuns;
+        state.workflowRuns = config.enableActions ? data.workflowRuns : [];
         state.loading = false;
         state.lastRefreshedAt = now;
 
@@ -257,20 +257,21 @@ async function pollFetch(): Promise<DashboardData> {
         setDashboardData({
           issues: data.issues,
           pullRequests: data.pullRequests,
-          workflowRuns: data.workflowRuns,
+          workflowRuns: config.enableActions ? data.workflowRuns : [],
           loading: false,
           lastRefreshedAt: now,
         });
       });
     }
-    rebuildHotSets(data);
+    const filteredRuns = config.enableActions ? data.workflowRuns : [];
+    rebuildHotSets({ ...data, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted. Deferred to avoid blocking paint.
     const cachePayload = {
       _v: CACHE_VERSION,
       issues: data.issues,
       pullRequests: data.pullRequests,
-      workflowRuns: data.workflowRuns,
+      workflowRuns: filteredRuns,
       lastRefreshedAt: now.toISOString(),
     };
     setTimeout(() => {
@@ -356,14 +357,15 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
         ),
         ...data.pullRequests,
       ];
-      const newRunIds = new Set(data.workflowRuns.map(r => r.id));
-      state.workflowRuns = [
+      const targetedRuns = config.enableActions ? data.workflowRuns : [];
+      const newRunIds = new Set(targetedRuns.map(r => r.id));
+      state.workflowRuns = config.enableActions ? [
         ...state.workflowRuns.filter(r =>
           !affectedSet.has(r.repoFullName.toLowerCase()) ||
           !newRunIds.has(r.id)
         ),
-        ...data.workflowRuns,
-      ];
+        ...targetedRuns,
+      ] : [];
     }));
   });
 
@@ -532,6 +534,7 @@ export default function DashboardPage() {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
     if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
+    if (!config.enableActions && isActionsBasedTab(tab, config.customTabs)) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
@@ -542,6 +545,7 @@ export default function DashboardPage() {
   function handleTabChange(tab: TabId) {
     // Reject invalid tab IDs to prevent persisting stale state
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
+    if (!config.enableActions && isActionsBasedTab(tab, config.customTabs)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
@@ -565,6 +569,13 @@ export default function DashboardPage() {
   // Redirect away from Jira tab when Jira is disabled at runtime
   createEffect(() => {
     if (!config.jira?.enabled && activeTab() === "jiraAssigned") {
+      handleTabChange("issues");
+    }
+  });
+
+  // Redirect away from Actions tab (or actions-based custom tab) when Actions is disabled
+  createEffect(() => {
+    if (!config.enableActions && isActionsBasedTab(activeTab(), config.customTabs)) {
       handleTabChange("issues");
     }
   });
@@ -792,6 +803,7 @@ export default function DashboardPage() {
     const currentTabId = activeTab();
     const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
     for (const tab of config.customTabs) {
+      if (!config.enableActions && tab.baseType === "actions") continue;
       if (!tab.exclusive && tab.id !== currentTabId) continue;
       const matchesScope = buildTabScopeMatcher(tab);
       result[tab.id] = {
@@ -866,6 +878,7 @@ export default function DashboardPage() {
     const users = allUsers();
     const customCounts: Record<string, number> = {};
     for (const tab of config.customTabs) {
+      if (!config.enableActions && tab.baseType === "actions") continue;
       // customTabData skips non-exclusive inactive tabs (perf optimization),
       // so compute scope on demand for tabs absent from the memo.
       let data = customTabData()[tab.id];
@@ -968,9 +981,9 @@ export default function DashboardPage() {
       pullRequests: visiblePullRequests().filter((p) =>
         isPrVisible(p, { ignoredIds: ignoredPRs, globalFilter: builtinFilter })
       ).length,
-      actions: visibleWorkflowRuns().filter((w) =>
+      ...(config.enableActions ? { actions: visibleWorkflowRuns().filter((w) =>
         isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
-      ).length,
+      ).length } : {}),
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
       ...(config.jira?.enabled ? (() => {
         const f = viewState.tabFilters.jiraAssigned;
@@ -1053,6 +1066,13 @@ export default function DashboardPage() {
     { defer: true }
   ));
 
+  // When Actions is disabled, clear stale workflowRuns restored from cache.
+  createEffect(() => {
+    if (!config.enableActions && dashboardData.workflowRuns.length > 0) {
+      setDashboardData(produce((d) => { d.workflowRuns = []; }));
+    }
+  });
+
   // Push dashboard data into the MCP relay snapshot on each full refresh.
   // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
   // Hot poll updates are intentionally excluded — relay reflects full-refresh data only.
@@ -1064,6 +1084,7 @@ export default function DashboardPage() {
       issues: d.issues,
       pullRequests: d.pullRequests,
       workflowRuns: d.workflowRuns,
+      enableActions: config.enableActions,
       lastUpdatedAt: Date.now(),
     });
   });
@@ -1085,6 +1106,7 @@ export default function DashboardPage() {
               pullRequests={visiblePullRequests()}
               workflowRuns={visibleWorkflowRuns()}
               userLogin={userLogin()}
+              enableActions={config.enableActions}
               onTabChange={handleTabChange}
             />
             <TabBar
@@ -1092,8 +1114,9 @@ export default function DashboardPage() {
               onTabChange={handleTabChange}
               counts={tabCounts()}
               enableTracking={config.enableTracking}
+              enableActions={config.enableActions}
               enableJira={!!config.jira?.enabled}
-              customTabs={config.customTabs.map((t) => ({ id: t.id, name: t.name }))}
+              customTabs={config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ id: t.id, name: t.name }))}
               onAddTab={() => setShowCustomTabModal(true)}
               onEditTab={(id) => { setEditingTabId(id); setShowCustomTabModal(true); }}
             />
@@ -1156,7 +1179,7 @@ export default function DashboardPage() {
                   siteUrl={config.jira?.siteUrl ?? ""}
                 />
               </Match>
-              <Match when={activeTab() === "actions"}>
+              <Match when={activeTab() === "actions" && config.enableActions}>
                 <ActionsTab
                   workflowRuns={visibleWorkflowRuns()}
                   loading={dashboardData.loading}
@@ -1237,6 +1260,7 @@ export default function DashboardPage() {
             editingTab={editingTab()}
             availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
             availableRepos={config.selectedRepos}
+            enableActions={config.enableActions}
           />
         </div>
 

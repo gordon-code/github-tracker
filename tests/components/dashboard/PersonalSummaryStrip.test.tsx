@@ -21,6 +21,7 @@ function renderStrip(opts: {
   pullRequests?: PullRequest[];
   workflowRuns?: WorkflowRun[];
   userLogin?: string;
+  enableActions?: boolean;
   onTabChange?: (tab: import("../../../src/app/components/layout/TabBar").TabId) => void;
 }) {
   const onTabChange = opts.onTabChange ?? vi.fn();
@@ -30,6 +31,7 @@ function renderStrip(opts: {
       pullRequests={opts.pullRequests ?? []}
       workflowRuns={opts.workflowRuns ?? []}
       userLogin={opts.userLogin ?? "me"}
+      enableActions={opts.enableActions}
       onTabChange={onTabChange}
     />
   ));
@@ -443,6 +445,12 @@ describe("PersonalSummaryStrip — label context", () => {
     const runs = [makeWorkflowRun({ status: "in_progress" })];
     renderStrip({ workflowRuns: runs });
     screen.getByText(/action running/);
+  });
+
+  it("hides 'action running' when enableActions is false", () => {
+    const runs = [makeWorkflowRun({ status: "in_progress" })];
+    renderStrip({ workflowRuns: runs, enableActions: false });
+    expect(screen.queryByText(/action running/)).toBeNull();
   });
 });
 

@@ -34,6 +34,7 @@ const ConfigUpdatePayloadSchema = z.object({
   trackedUsers: TrackedUserSchema.array().max(MAX_TRACKED_USERS).default([]),
   upstreamRepos: RepoRefSchema.array().max(MAX_REPOS).default([]),
   monitoredRepos: RepoRefSchema.array().max(MAX_MONITORED_REPOS).default([]),
+  enableActions: z.boolean().default(true),
 });
 
 // ── Main entry point ──────────────────────────────────────────────────────────

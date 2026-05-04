@@ -14,6 +14,7 @@ interface RelaySnapshot {
   issues: Issue[];
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
+  enableActions: boolean;
   lastUpdatedAt: number;
 }
 
@@ -53,6 +54,7 @@ export function updateRelaySnapshot(data: {
   issues: Issue[];
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
+  enableActions: boolean;
   lastUpdatedAt: number;
 }): void {
   _snapshot = { ...data };
@@ -90,6 +92,7 @@ function sendConfigUpdate(ws: WebSocket): void {
       trackedUsers: config.trackedUsers,
       upstreamRepos: config.upstreamRepos,
       monitoredRepos: config.monitoredRepos,
+      enableActions: config.enableActions,
     },
   };
   ws.send(JSON.stringify(notification));
@@ -123,9 +126,9 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
       const result = {
         openPRCount: openPRs.length,
         openIssueCount: s.issues.filter((i) => i.state === "OPEN").length,
-        failingRunCount: s.workflowRuns.filter(
-          (r) => r.conclusion === "failure" || r.conclusion === "timed_out"
-        ).length,
+        failingRunCount: s.enableActions
+          ? s.workflowRuns.filter((r) => r.conclusion === "failure" || r.conclusion === "timed_out").length
+          : null,
         needsReviewCount: openPRs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED").length,
         approvedUnmergedCount: openPRs.filter((p) => p.reviewDecision === "APPROVED").length,
       };
@@ -172,6 +175,14 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
     }
 
     case METHODS.GET_FAILING_ACTIONS: {
+      if (!snapshot!.enableActions) {
+        sendResponse(ws, {
+          jsonrpc: "2.0",
+          id,
+          result: { disabled: true, message: "GitHub Actions monitoring is disabled in the dashboard. Enable it in Settings to track workflow runs." },
+        });
+        break;
+      }
       const params = req.params ?? {};
       let runs = snapshot!.workflowRuns.filter(
         (r) => r.status === "in_progress" || r.conclusion === "failure" || r.conclusion === "timed_out"
@@ -239,6 +250,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
           trackedUsers: config.trackedUsers,
           upstreamRepos: config.upstreamRepos,
           monitoredRepos: config.monitoredRepos,
+          enableActions: config.enableActions,
         },
       });
       break;
@@ -376,6 +388,7 @@ export function initMcpRelay(): void {
     void config.trackedUsers;
     void config.upstreamRepos;
     void config.monitoredRepos;
+    void config.enableActions;
 
     if (_ws && _ws.readyState === WebSocket.OPEN) {
       sendConfigUpdate(_ws);

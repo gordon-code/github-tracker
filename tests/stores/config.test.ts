@@ -54,6 +54,13 @@ describe("ConfigSchema", () => {
     expect(result.rememberLastTab).toBe(true);
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
+    expect(result.enableActions).toBe(true);
+  });
+
+  it("enableActions defaults to true (Actions tab enabled by default)", () => {
+    expect(ConfigSchema.parse({}).enableActions).toBe(true);
+    expect(ConfigSchema.parse({ enableActions: false }).enableActions).toBe(false);
+    expect(ConfigSchema.parse({ enableActions: true }).enableActions).toBe(true);
   });
 
   it("fills missing fields from defaults when partial input given", () => {

@@ -9,7 +9,7 @@ import { z } from "zod";
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
 export {
   ConfigSchema, RepoRefSchema, TrackedUserSchema, THEME_OPTIONS,
-  CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab,
+  CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab, isActionsBasedTab,
   type Config, type TrackedUser, type ThemeId, type CustomTab, type BuiltinTabId,
   type JiraConfig,
 } from "../../shared/schemas";

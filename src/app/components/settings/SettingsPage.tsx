@@ -2,7 +2,7 @@ import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-j
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
@@ -177,6 +177,7 @@ export default function SettingsPage() {
         defaultTab: config.defaultTab,
         rememberLastTab: config.rememberLastTab,
         enableTracking: config.enableTracking,
+        enableActions: config.enableActions,
         customTabs: config.customTabs,
         // Non-secret jira config fields only — no tokens, sealed blobs, or email
         jira: {
@@ -345,10 +346,10 @@ export default function SettingsPage() {
   const tabOptions = createMemo(() => [
     { value: "issues", label: "Issues" },
     { value: "pullRequests", label: "Pull Requests" },
-    { value: "actions", label: "GitHub Actions" },
+    ...(config.enableActions ? [{ value: "actions", label: "GitHub Actions" }] : []),
     ...(config.enableTracking ? [{ value: "tracked", label: "Tracked Items" }] : []),
     ...(config.jira?.enabled ? [{ value: "jiraAssigned", label: "Jira" }] : []),
-    ...config.customTabs.map((t) => ({ value: t.id, label: t.name })),
+    ...config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ value: t.id, label: t.name })),
   ]);
 
 
@@ -608,6 +609,32 @@ export default function SettingsPage() {
         {/* Section 5: GitHub Actions */}
         <Section title="GitHub Actions">
           <SettingRow
+            label="Show Actions tab"
+            description="Show the Actions tab and track workflow runs. Disable to reduce API usage and simplify the dashboard."
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.enableActions}
+              aria-label="Show Actions tab"
+              checked={config.enableActions}
+              onChange={(e) => {
+                const val = e.currentTarget.checked;
+                const needsDefaultReset = !val && isActionsBasedTab(config.defaultTab, config.customTabs);
+                const needsLastTabReset = !val && isActionsBasedTab(viewState.lastActiveTab, config.customTabs);
+                saveWithFeedback({
+                  enableActions: val,
+                  ...(needsDefaultReset ? { defaultTab: "issues" as const } : {}),
+                  ...(!val ? { notifications: { ...config.notifications, workflowRuns: false } } : {}),
+                });
+                if (needsLastTabReset) {
+                  updateViewState({ lastActiveTab: "issues" });
+                }
+              }}
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+          <SettingRow
             label="Max workflows per repo"
             description="Number of active workflows to track per repository (1–20)"
           >
@@ -616,13 +643,14 @@ export default function SettingsPage() {
               min={1}
               max={20}
               value={config.maxWorkflowsPerRepo}
+              disabled={!config.enableActions}
               onInput={(e) => {
                 const val = parseInt(e.currentTarget.value, 10);
                 if (!isNaN(val) && val >= 1 && val <= 20) {
                   saveWithFeedback({ maxWorkflowsPerRepo: val });
                 }
               }}
-              class="input input-sm w-20"
+              class={`input input-sm w-20${!config.enableActions ? " opacity-50" : ""}`}
             />
           </SettingRow>
           <SettingRow
@@ -634,13 +662,14 @@ export default function SettingsPage() {
               min={1}
               max={10}
               value={config.maxRunsPerWorkflow}
+              disabled={!config.enableActions}
               onInput={(e) => {
                 const val = parseInt(e.currentTarget.value, 10);
                 if (!isNaN(val) && val >= 1 && val <= 10) {
                   saveWithFeedback({ maxRunsPerWorkflow: val });
                 }
               }}
-              class="input input-sm w-20"
+              class={`input input-sm w-20${!config.enableActions ? " opacity-50" : ""}`}
             />
           </SettingRow>
         </Section>
@@ -719,14 +748,17 @@ export default function SettingsPage() {
               class="toggle toggle-primary"
             />
           </SettingRow>
-          <SettingRow label="Workflow Runs" description="Notify when workflow runs complete">
+          <SettingRow
+            label="Workflow Runs"
+            description={!config.enableActions ? "Disabled — GitHub Actions is off" : "Notify when workflow runs complete"}
+          >
             <input
               type="checkbox"
               role="switch"
               aria-checked={config.notifications.workflowRuns}
               aria-label="Workflow runs notifications"
               checked={config.notifications.workflowRuns}
-              disabled={!config.notifications.enabled}
+              disabled={!config.notifications.enabled || !config.enableActions}
               onChange={(e) =>
                 saveWithFeedback({
                   notifications: { ...config.notifications, workflowRuns: e.currentTarget.checked },

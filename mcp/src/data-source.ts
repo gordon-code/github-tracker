@@ -26,6 +26,7 @@ export interface CachedConfig {
   trackedUsers: TrackedUser[];
   upstreamRepos: RepoRef[];
   monitoredRepos: RepoRef[];
+  enableActions: boolean;
 }
 
 let _cachedConfig: CachedConfig | null = null;
@@ -341,6 +342,7 @@ export class OctokitDataSource implements DataSource {
   }
 
   async getFailingActions(repo?: string): Promise<WorkflowRun[]> {
+    if (_cachedConfig?.enableActions === false) return [];
     const repos = resolveRepos(repo);
 
     const pairs = repos.flatMap((r) =>
@@ -451,8 +453,9 @@ export class OctokitDataSource implements DataSource {
     const login = await this.getLogin();
     const repos = _cachedConfig?.selectedRepos ?? [];
 
+    const actionsEnabled = _cachedConfig?.enableActions !== false;
     if (repos.length === 0) {
-      return { openPRCount: 0, openIssueCount: 0, failingRunCount: 0, needsReviewCount: 0, approvedUnmergedCount: 0 };
+      return { openPRCount: 0, openIssueCount: 0, failingRunCount: actionsEnabled ? 0 : null, needsReviewCount: 0, approvedUnmergedCount: 0 };
     }
 
     const repoFilter = repos.map((r) => `repo:${r.owner}/${r.name}`).join("+");
@@ -463,7 +466,6 @@ export class OctokitDataSource implements DataSource {
     let needsReviewCount = 0;
     // REST search lacks reviewDecision data — approved count requires GraphQL (relay path only)
     const approvedUnmergedCount = 0;
-    let failingRunCount = 0;
 
     const [prResult, issueResult, reviewResult] = await Promise.allSettled([
       this.octokit.request("GET /search/issues", { q: `is:pr+is:open${involvesPart}+${repoFilter}`, per_page: 1 }),
@@ -487,21 +489,25 @@ export class OctokitDataSource implements DataSource {
       console.error("[mcp] getDashboardSummary review count error:", reviewResult.reason instanceof Error ? reviewResult.reason.message : String(reviewResult.reason));
     }
 
-    const failingRunResults = await Promise.allSettled(
-      repos.map((r) =>
-        this.octokit.request(
-          "GET /repos/{owner}/{repo}/actions/runs",
-          { owner: r.owner, repo: r.name, status: "failure", per_page: 5 }
+    let finalFailingRunCount: number | null = null;
+    if (actionsEnabled) {
+      const failingRunResults = await Promise.allSettled(
+        repos.map((r) =>
+          this.octokit.request(
+            "GET /repos/{owner}/{repo}/actions/runs",
+            { owner: r.owner, repo: r.name, status: "failure", per_page: 5 }
+          )
         )
-      )
-    );
-    for (const settled of failingRunResults) {
-      if (settled.status === "fulfilled") {
-        failingRunCount += (settled.value.data as { total_count: number }).total_count;
+      );
+      finalFailingRunCount = 0;
+      for (const settled of failingRunResults) {
+        if (settled.status === "fulfilled") {
+          finalFailingRunCount += (settled.value.data as { total_count: number }).total_count;
+        }
       }
     }
 
-    return { openPRCount, openIssueCount, failingRunCount, needsReviewCount, approvedUnmergedCount };
+    return { openPRCount, openIssueCount, failingRunCount: finalFailingRunCount, needsReviewCount, approvedUnmergedCount };
   }
 
   async getConfig(): Promise<CachedConfig | null> {
@@ -530,7 +536,11 @@ export class WebSocketDataSource implements DataSource {
   }
 
   async getFailingActions(repo?: string): Promise<WorkflowRun[]> {
-    return sendRelayRequest(METHODS.GET_FAILING_ACTIONS, { repo }) as Promise<WorkflowRun[]>;
+    const result = await sendRelayRequest(METHODS.GET_FAILING_ACTIONS, { repo });
+    if (result !== null && typeof result === "object" && !Array.isArray(result) && "disabled" in (result as Record<string, unknown>)) {
+      return [];
+    }
+    return result as WorkflowRun[];
   }
 
   async getPRDetails(repo: string, number: number): Promise<PullRequest | null> {

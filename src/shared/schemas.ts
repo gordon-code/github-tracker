@@ -50,6 +50,10 @@ export function isBuiltinTab(id: string): id is BuiltinTabId {
   return (BUILTIN_TAB_IDS as readonly string[]).includes(id);
 }
 
+export function isActionsBasedTab(id: string, customTabs: readonly CustomTab[]): boolean {
+  return id === "actions" || (!isBuiltinTab(id) && customTabs.some((t) => t.id === id && t.baseType === "actions"));
+}
+
 export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
 
 export const JiraCustomFieldSchema = z.object({
@@ -100,6 +104,7 @@ export const ConfigSchema = z.object({
   onboardingComplete: z.boolean().default(false),
   authMethod: z.enum(["oauth", "pat"]).default("oauth"),
   enableTracking: z.boolean().default(false),
+  enableActions: z.boolean().default(true),
   customTabs: z.array(CustomTabSchema).max(10).default([]),
   mcpRelayEnabled: z.boolean().default(false),
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),

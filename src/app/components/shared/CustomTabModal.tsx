@@ -19,6 +19,7 @@ interface CustomTabModalProps {
   editingTab?: CustomTab;
   availableOrgs: string[];
   availableRepos: RepoRef[];
+  enableActions?: boolean;
 }
 
 // Filter groups per base type — scope is included for issues/PRs since custom tabs always show it
@@ -241,7 +242,9 @@ export default function CustomTabModal(props: CustomTabModalProps) {
               >
                 <option value="issues">Issues</option>
                 <option value="pullRequests">Pull Requests</option>
-                <option value="actions">Actions</option>
+                <Show when={props.enableActions !== false}>
+                  <option value="actions">Actions</option>
+                </Show>
               </select>
             </div>
 
