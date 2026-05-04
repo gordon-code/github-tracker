@@ -52,7 +52,7 @@ describe("fetchUserEvents", () => {
     const octokit = makeOctokit(() =>
       Promise.resolve({
         data: [event],
-        headers: { etag: '"abc123"' },
+        headers: {},
       })
     );
 
@@ -63,7 +63,7 @@ describe("fetchUserEvents", () => {
     expect(result.events[0].id).toBe("500");
   });
 
-  it("returns empty events and changed=false on 304", async () => {
+  it("returns empty events and changed=false on proxy 304 without throwing", async () => {
     const octokit = makeOctokit(() => Promise.reject({ status: 304 }));
 
     const result = await fetchUserEvents(octokit as never, "someuser");
@@ -81,33 +81,19 @@ describe("fetchUserEvents", () => {
     expect(result.events).toHaveLength(0);
   });
 
-  it("sends If-None-Match header on second call after ETag received", async () => {
+  it("does not send If-None-Match header on subsequent calls", async () => {
     const octokit = makeOctokit(() =>
       Promise.resolve({
         data: [makeEvent({ id: "200" })],
-        headers: { etag: '"etag-value"' },
+        headers: {},
       })
     );
 
-    // First call — seeds ETag
     await fetchUserEvents(octokit as never, "someuser");
-
-    // Second call — ETag should be sent
     await fetchUserEvents(octokit as never, "someuser");
 
     const secondCallHeaders = (octokit.request.mock.calls[1][1] as { headers?: Record<string, string> }).headers ?? {};
-    expect(secondCallHeaders["If-None-Match"]).toBe('"etag-value"');
-  });
-
-  it("does NOT send If-None-Match on first call", async () => {
-    const octokit = makeOctokit(() =>
-      Promise.resolve({ data: [], headers: {} })
-    );
-
-    await fetchUserEvents(octokit as never, "someuser");
-
-    const firstCallHeaders = (octokit.request.mock.calls[0][1] as { headers?: Record<string, string> }).headers ?? {};
-    expect(firstCallHeaders["If-None-Match"]).toBeUndefined();
+    expect(secondCallHeaders["If-None-Match"]).toBeUndefined();
   });
 
   it("returns all events on first call (no ID filter)", async () => {
@@ -190,6 +176,35 @@ describe("fetchUserEvents", () => {
     expect(result.events).toHaveLength(0);
   });
 
+  it("advances _lastEventId to max ID even when highest ID is not first in response", async () => {
+    const firstOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "100" })], headers: {} })
+    );
+    await fetchUserEvents(firstOctokit as never, "someuser");
+
+    // Response with out-of-order IDs: highest (305) is not first
+    const secondOctokit = makeOctokit(() =>
+      Promise.resolve({
+        data: [makeEvent({ id: "301" }), makeEvent({ id: "305" }), makeEvent({ id: "302" })],
+        headers: {},
+      })
+    );
+    await fetchUserEvents(secondOctokit as never, "someuser");
+
+    // Third call: only events > 305 should appear (not > 301)
+    const thirdOctokit = makeOctokit(() =>
+      Promise.resolve({
+        data: [makeEvent({ id: "306" }), makeEvent({ id: "304" }), makeEvent({ id: "303" })],
+        headers: {},
+      })
+    );
+    const result = await fetchUserEvents(thirdOctokit as never, "someuser");
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].id).toBe("306");
+    expect(result.changed).toBe(true);
+  });
+
   it("returns empty events and changed=false for empty username (SEC-IMPL-001)", async () => {
     const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
 
@@ -198,6 +213,155 @@ describe("fetchUserEvents", () => {
     expect(result.changed).toBe(false);
     expect(result.events).toHaveLength(0);
     expect(octokit.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchUserEvents — pagination", () => {
+  beforeEach(() => {
+    resetEventsState();
+    vi.clearAllMocks();
+  });
+
+  it("fetches page 2 when page 1 returns exactly 100 events and merges results", async () => {
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(1000 + i) })
+    );
+    const page2Events = [makeEvent({ id: "900" }), makeEvent({ id: "901" })];
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() => Promise.resolve({ data: page2Events, headers: {} }));
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+    expect(result.events).toHaveLength(102);
+    expect(result.changed).toBe(true);
+  });
+
+  it("does not fetch page 2 when page 1 returns fewer than 100 events", async () => {
+    const page1Events = [makeEvent({ id: "500" }), makeEvent({ id: "501" })];
+
+    const octokit = makeOctokit(() =>
+      Promise.resolve({ data: page1Events, headers: {} })
+    );
+
+    await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches up to page 3 when pages 1 and 2 are both full, but not page 4", async () => {
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(3000 + i) })
+    );
+    const page2Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(2000 + i) })
+    );
+    const page3Events = [makeEvent({ id: "1000" }), makeEvent({ id: "1001" })];
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() => Promise.resolve({ data: page2Events, headers: {} }))
+      .mockImplementationOnce(() => Promise.resolve({ data: page3Events, headers: {} }));
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(3);
+    expect(result.events).toHaveLength(202);
+    expect(result.changed).toBe(true);
+  });
+
+  it("skips page 2 when _lastEventId is set and all page 1 events are not newer", async () => {
+    // Seed _lastEventId = "500"
+    const seedOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "500" })], headers: {} })
+    );
+    await fetchUserEvents(seedOctokit as never, "someuser");
+
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(400 + i) }) // IDs 400–499, all <= 500
+    );
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request.mockImplementationOnce(() =>
+      Promise.resolve({ data: page1Events, headers: {} })
+    );
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(1);
+    expect(result.changed).toBe(false);
+    expect(result.events).toHaveLength(0);
+  });
+
+  it("returns page 1 results and logs warning when page 2 request fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(1000 + i) })
+    );
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() => Promise.reject(new Error("rate limited")));
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+    expect(result.events).toHaveLength(100);
+    expect(result.changed).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[events] pagination error on page 2:",
+      "rate limited",
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("stops pagination when subsequent page returns zero events", async () => {
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(1000 + i) })
+    );
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() => Promise.resolve({ data: [], headers: {} }));
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+    expect(result.events).toHaveLength(100);
+    expect(result.changed).toBe(true);
+  });
+
+  it("triggers early-exit when page has mix of new and old events", async () => {
+    // Seed _lastEventId = "500"
+    const seedOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "500" })], headers: {} })
+    );
+    await fetchUserEvents(seedOctokit as never, "someuser");
+
+    // Page 1: 100 events straddling the threshold — IDs 450–549
+    // Events 501–549 are new (above 500), events 450–500 are old
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(450 + i) })
+    );
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request.mockImplementationOnce(() =>
+      Promise.resolve({ data: page1Events, headers: {} })
+    );
+
+    const result = await fetchUserEvents(octokit as never, "someuser");
+
+    // Early-exit fires: page has old events (450–500), so page 2 is not fetched
+    expect(octokit.request).toHaveBeenCalledTimes(1);
+    // New events (501–549) are still returned from page 1
+    expect(result.events).toHaveLength(49);
+    expect(result.changed).toBe(true);
   });
 });
 
@@ -316,27 +480,6 @@ describe("parseRepoEvents", () => {
 // ── resetEventsState ──────────────────────────────────────────────────────────
 
 describe("resetEventsState", () => {
-  it("clears ETag so next call sends no If-None-Match header", async () => {
-    const octokit = makeOctokit(() =>
-      Promise.resolve({
-        data: [makeEvent({ id: "100" })],
-        headers: { etag: '"etag-123"' },
-      })
-    );
-
-    // First call — seeds ETag
-    await fetchUserEvents(octokit as never, "someuser");
-
-    // Reset
-    resetEventsState();
-
-    // Next call should have no If-None-Match
-    await fetchUserEvents(octokit as never, "someuser");
-
-    const thirdCallHeaders = (octokit.request.mock.calls[1][1] as { headers?: Record<string, string> }).headers ?? {};
-    expect(thirdCallHeaders["If-None-Match"]).toBeUndefined();
-  });
-
   it("clears lastEventId so next call returns all events (first-call semantics)", async () => {
     // First call: seed lastEventId = "100"
     const firstOctokit = makeOctokit(() =>

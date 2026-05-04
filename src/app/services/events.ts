@@ -32,15 +32,13 @@ export const ACTIONABLE_EVENT_TYPES = [
   "PushEvent",
 ] as const;
 
-// ── Module-level ETag state ───────────────────────────────────────────────────
+// ── Module-level state ───────────────────────────────────────────────────────
 
-let _eventsETag: string | null = null;
 let _lastEventId: string | null = null;
 
 // ── Auth cleanup ──────────────────────────────────────────────────────────────
 
 export function resetEventsState(): void {
-  _eventsETag = null;
   _lastEventId = null;
 }
 
@@ -60,58 +58,76 @@ export async function fetchUserEvents(
     return { events: [], changed: false };
   }
 
-  const headers: Record<string, string> = {};
-  if (_eventsETag) {
-    headers["If-None-Match"] = _eventsETag;
-  }
-
   try {
+    // GitHub docs suggest per_page is capped at 30 for Events API, but empirical
+    // testing (2026-05-03) confirmed per_page: 100 returns 100 events successfully.
     const response = await octokit.request("GET /users/{username}/events", {
       username,
       per_page: 100,
-      headers,
     });
 
-    // Store ETag for next conditional request
-    const etag = (response.headers as Record<string, string>)["etag"];
-    if (etag) {
-      _eventsETag = etag;
+    let allEvents = (response.data as GitHubEvent[]);
+
+    // Paginate if page is full — older events on subsequent pages would be
+    // permanently missed since _lastEventId advances past them.
+    let page = 2;
+    let lastPageEvents = allEvents;
+    while (lastPageEvents.length === 100 && page <= 3) {
+      if (_lastEventId !== null) {
+        const threshold = parseInt(_lastEventId, 10);
+        if (lastPageEvents.some((e) => parseInt(e.id, 10) <= threshold)) break;
+      }
+      try {
+        const next = await octokit.request("GET /users/{username}/events", {
+          username,
+          per_page: 100,
+          page,
+        });
+        const nextEvents = (next.data as GitHubEvent[]);
+        if (nextEvents.length === 0) break;
+        allEvents = [...allEvents, ...nextEvents];
+        lastPageEvents = nextEvents;
+        page++;
+      } catch (err) {
+        console.warn(`[events] pagination error on page ${page}:`, err instanceof Error ? err.message : String(err));
+        break;
+      }
     }
 
-    const allEvents = (response.data as GitHubEvent[]);
+    const maxId = allEvents.reduce(
+      (max, e) => Math.max(max, parseInt(e.id, 10)),
+      0,
+    );
 
-    // First call: no ID filter — seed _lastEventId and return all events
+    // First call: seed _lastEventId and return all events
     if (_lastEventId === null) {
-      if (allEvents.length > 0) {
-        _lastEventId = allEvents[0].id; // events are newest-first
+      if (maxId > 0) {
+        _lastEventId = String(maxId);
       }
       return { events: allEvents, changed: allEvents.length > 0 };
     }
 
     // Subsequent calls: filter to only events newer than _lastEventId
-    // Use numeric comparison — event IDs are numeric strings; lexicographic
-    // comparison would break for IDs of different lengths (e.g. "9" > "10").
     const lastIdNum = parseInt(_lastEventId, 10);
     const newEvents = allEvents.filter(
       (e) => parseInt(e.id, 10) > lastIdNum,
     );
 
-    if (newEvents.length > 0) {
-      _lastEventId = allEvents[0].id; // newest event is always first
+    if (maxId > lastIdNum) {
+      _lastEventId = String(maxId);
     }
 
     return { events: newEvents, changed: newEvents.length > 0 };
   } catch (err) {
-    // Octokit throws RequestError on 304 — same pattern as hasNotificationChanges()
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      (err as { status?: number }).status === 304
-    ) {
-      return { events: [], changed: false };
+    const status =
+      err && typeof err === "object" && "status" in err
+        ? (err as { status: number }).status
+        : null;
+    if (status === 304) {
+      console.warn("[events] unexpected 304 from proxy/CDN; events suppressed this cycle");
+    } else {
+      console.warn("[events] fetchUserEvents error:", err instanceof Error ? err.message : String(err));
     }
-    // Silent fallback for all other errors — full refresh handles reconciliation
-    console.warn("[events] fetchUserEvents error:", err instanceof Error ? err.message : String(err));
     return { events: [], changed: false };
   }
 }
