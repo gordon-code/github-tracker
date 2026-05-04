@@ -902,7 +902,9 @@ export function createEventsPollCoordinator(
     schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
   }
 
-  // First cycle fires immediately (delay=0) to establish ETag baseline
+  // First cycle fires immediately (delay=0) to seed _lastEventId baseline.
+  // May trigger a targeted refresh if tracked repos have recent events — the
+  // isFullRefreshing() guard prevents doubling up with the initial full poll.
   const gen = chainGeneration;
   timeoutId = setTimeout(() => void cycle(gen), 0);
 
