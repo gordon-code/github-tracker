@@ -212,11 +212,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     const dir = direction === "asc" ? 1 : -1;
 
     items.sort((a, b) => {
-      // Category is always the primary sort axis (safest → least safe)
-      const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
-      if (catCmp !== 0) return catCmp;
-
-      // User-selected sort as secondary within same category
+      // User-selected sort as primary
       let cmp = 0;
       switch (field) {
         case "repo": cmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName); break;
@@ -233,6 +229,11 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           break;
       }
       if (cmp !== 0) return cmp * dir;
+
+      // Category as secondary (safest → least safe within each group)
+      const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
+      if (catCmp !== 0) return catCmp;
+
       return a.pr.repoFullName.localeCompare(b.pr.repoFullName);
     });
 
