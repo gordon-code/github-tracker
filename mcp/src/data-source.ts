@@ -455,7 +455,7 @@ export class OctokitDataSource implements DataSource {
 
     const actionsEnabled = _cachedConfig?.enableActions !== false;
     if (repos.length === 0) {
-      return { openPRCount: 0, openIssueCount: 0, failingRunCount: actionsEnabled ? 0 : null, needsReviewCount: 0, approvedUnmergedCount: 0, actionsMonitoringDisabled: !actionsEnabled };
+      return { openPRCount: 0, openIssueCount: 0, failingRunCount: actionsEnabled ? 0 : null, needsReviewCount: 0, approvedUnmergedCount: 0 };
     }
 
     const repoFilter = repos.map((r) => `repo:${r.owner}/${r.name}`).join("+");
@@ -507,7 +507,7 @@ export class OctokitDataSource implements DataSource {
       }
     }
 
-    return { openPRCount, openIssueCount, failingRunCount: finalFailingRunCount, needsReviewCount, approvedUnmergedCount, actionsMonitoringDisabled: !actionsEnabled };
+    return { openPRCount, openIssueCount, failingRunCount: finalFailingRunCount, needsReviewCount, approvedUnmergedCount };
   }
 
   async getConfig(): Promise<CachedConfig | null> {
@@ -536,7 +536,11 @@ export class WebSocketDataSource implements DataSource {
   }
 
   async getFailingActions(repo?: string): Promise<WorkflowRun[]> {
-    return sendRelayRequest(METHODS.GET_FAILING_ACTIONS, { repo }) as Promise<WorkflowRun[]>;
+    const result = await sendRelayRequest(METHODS.GET_FAILING_ACTIONS, { repo });
+    if (result !== null && typeof result === "object" && !Array.isArray(result) && "disabled" in (result as Record<string, unknown>)) {
+      return [];
+    }
+    return result as WorkflowRun[];
   }
 
   async getPRDetails(repo: string, number: number): Promise<PullRequest | null> {

@@ -171,6 +171,32 @@ describe("Actions enable toggle", () => {
     expect(viewState.lastActiveTab).toBe("issues");
   });
 
+  it("toggling off resets defaultTab to 'issues' when it is an actions-based custom tab", () => {
+    updateConfig({
+      customTabs: [
+        { id: "my-actions", name: "My Actions", baseType: "actions", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+      ],
+      defaultTab: "my-actions",
+    });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
+    fireEvent.click(toggle);
+    expect(config.defaultTab).toBe("issues");
+  });
+
+  it("toggling off resets lastActiveTab to 'issues' when it is an actions-based custom tab", () => {
+    updateConfig({
+      customTabs: [
+        { id: "my-actions", name: "My Actions", baseType: "actions", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+      ],
+    });
+    updateViewState({ lastActiveTab: "my-actions" });
+    renderSettings();
+    const toggle = screen.getByRole("switch", { name: /show actions tab/i });
+    fireEvent.click(toggle);
+    expect(viewState.lastActiveTab).toBe("issues");
+  });
+
   it("toggling off suppresses workflowRuns notification", () => {
     renderSettings();
     const toggle = screen.getByRole("switch", { name: /show actions tab/i });
@@ -280,5 +306,27 @@ describe("Actions toggle — default tab dropdown filtering", () => {
       }
     }
     expect(actionsOptionFound).toBe(true);
+  });
+
+  it("excludes actions-based custom tabs from default tab select when enableActions is false", () => {
+    updateConfig({
+      enableActions: false,
+      customTabs: [
+        { id: "my-actions", name: "My Actions", baseType: "actions", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+        { id: "my-issues", name: "My Issues", baseType: "issues", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+      ],
+    });
+    renderSettings();
+    const selects = document.querySelectorAll("select");
+    let actionsCustomFound = false;
+    let issuesCustomFound = false;
+    for (const sel of selects) {
+      for (const opt of sel.options) {
+        if (opt.value === "my-actions") actionsCustomFound = true;
+        if (opt.value === "my-issues") issuesCustomFound = true;
+      }
+    }
+    expect(actionsCustomFound).toBe(false);
+    expect(issuesCustomFound).toBe(true);
   });
 });

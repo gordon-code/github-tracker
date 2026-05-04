@@ -129,7 +129,6 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
         failingRunCount: s.enableActions
           ? s.workflowRuns.filter((r) => r.conclusion === "failure" || r.conclusion === "timed_out").length
           : null,
-        actionsMonitoringDisabled: !s.enableActions,
         needsReviewCount: openPRs.filter((p) => p.reviewDecision === "REVIEW_REQUIRED").length,
         approvedUnmergedCount: openPRs.filter((p) => p.reviewDecision === "APPROVED").length,
       };
@@ -251,6 +250,7 @@ function handleRequest(ws: WebSocket, req: JsonRpcRequest): void {
           trackedUsers: config.trackedUsers,
           upstreamRepos: config.upstreamRepos,
           monitoredRepos: config.monitoredRepos,
+          enableActions: config.enableActions,
         },
       });
       break;

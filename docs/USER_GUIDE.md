@@ -240,6 +240,8 @@ Sort by: Repo, Title, Author, Checks, Review, Size, Created, Updated (default: U
 
 ## Actions Tab
 
+The Actions tab is enabled by default. You can disable it in **Settings > GitHub Actions > Show Actions tab**. Disabling it hides the tab, skips all workflow run API calls (saving REST API rate limit budget), suppresses workflow run notifications, and hides the "actions running" count from the summary strip. Custom tabs based on Actions are also hidden when disabled. Re-enabling restores the tab immediately; workflow run data refreshes on the next poll cycle.
+
 ### Workflow Grouping
 
 Workflow runs are grouped first by repository, then by workflow name. Each workflow group shows its most recent runs up to the configured limit (default: 3 runs per workflow, up to 5 workflows per repo).
@@ -575,12 +577,13 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 |---------|---------|-------------|
 | Refresh interval | 5 minutes | How often to poll GitHub for new data. Options: 1, 2, 5, 10, 15, 30 minutes, or Off. |
 | CI status refresh (hot poll interval) | 30 seconds | How often to re-check in-flight CI checks and workflow runs. Range: 10–120 seconds. |
-| Max workflows per repo | 5 | Number of active workflows to track per repository. Range: 1–20. |
-| Max runs per workflow | 3 | Number of recent runs to show per workflow. Range: 1–10. |
+| Show Actions tab | On | Show the Actions tab and track workflow runs. Disable to skip all workflow run API calls and simplify the dashboard. |
+| Max workflows per repo | 5 | Number of active workflows to track per repository. Range: 1–20. Disabled when Actions is off. |
+| Max runs per workflow | 3 | Number of recent runs to show per workflow. Range: 1–10. Disabled when Actions is off. |
 | Notifications enabled | Off | Master toggle for browser push notifications. |
 | Notify: Issues | On | Notify when new issues open (requires notifications enabled). |
 | Notify: Pull Requests | On | Notify when PRs are opened or updated (requires notifications enabled). |
-| Notify: Workflow Runs | On | Notify when workflow runs complete (requires notifications enabled). |
+| Notify: Workflow Runs | On | Notify when workflow runs complete (requires notifications enabled). Disabled when Actions is off. |
 | Theme | Auto | UI color theme. Auto follows system dark/light preference (Corporate for light, Dim for dark). |
 | View density | Comfortable | Spacing between list items. Options: Comfortable, Compact. |
 | Items per page | 25 | Number of items per page in each tab. Options: 10, 25, 50, 100. |

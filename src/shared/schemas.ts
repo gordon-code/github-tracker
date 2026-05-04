@@ -50,6 +50,10 @@ export function isBuiltinTab(id: string): id is BuiltinTabId {
   return (BUILTIN_TAB_IDS as readonly string[]).includes(id);
 }
 
+export function isActionsBasedTab(id: string, customTabs: readonly CustomTab[]): boolean {
+  return id === "actions" || (!isBuiltinTab(id) && customTabs.some((t) => t.id === id && t.baseType === "actions"));
+}
+
 export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
 
 export const JiraCustomFieldSchema = z.object({

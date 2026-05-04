@@ -8,7 +8,7 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, getCustomTab, isBuiltinTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
+import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
@@ -530,15 +530,11 @@ export default function DashboardPage() {
     };
   }
 
-  function isActionsBasedTab(tab: TabId): boolean {
-    return tab === "actions" || (!isBuiltinTab(tab) && config.customTabs.some((t) => t.id === tab && t.baseType === "actions"));
-  }
-
   function resolveInitialTab(): TabId {
     const tab = config.rememberLastTab ? viewState.lastActiveTab : config.defaultTab;
     if (tab === "tracked" && !config.enableTracking) return "issues";
     if (tab === "jiraAssigned" && !config.jira?.enabled) return "issues";
-    if (!config.enableActions && isActionsBasedTab(tab)) return "issues";
+    if (!config.enableActions && isActionsBasedTab(tab, config.customTabs)) return "issues";
     // Validate custom tab still exists; fall back to "issues" if stale
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return "issues";
     return tab;
@@ -549,7 +545,7 @@ export default function DashboardPage() {
   function handleTabChange(tab: TabId) {
     // Reject invalid tab IDs to prevent persisting stale state
     if (!isBuiltinTab(tab) && !config.customTabs.some((t) => t.id === tab)) return;
-    if (!config.enableActions && isActionsBasedTab(tab)) return;
+    if (!config.enableActions && isActionsBasedTab(tab, config.customTabs)) return;
     setActiveTab(tab);
     updateViewState({ lastActiveTab: tab });
   }
@@ -579,7 +575,7 @@ export default function DashboardPage() {
 
   // Redirect away from Actions tab (or actions-based custom tab) when Actions is disabled
   createEffect(() => {
-    if (!config.enableActions && isActionsBasedTab(activeTab())) {
+    if (!config.enableActions && isActionsBasedTab(activeTab(), config.customTabs)) {
       handleTabChange("issues");
     }
   });
@@ -1110,6 +1106,7 @@ export default function DashboardPage() {
               pullRequests={visiblePullRequests()}
               workflowRuns={visibleWorkflowRuns()}
               userLogin={userLogin()}
+              enableActions={config.enableActions}
               onTabChange={handleTabChange}
             />
             <TabBar

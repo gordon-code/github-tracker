@@ -17,6 +17,7 @@ interface PersonalSummaryStripProps {
   pullRequests: PullRequest[];
   workflowRuns: WorkflowRun[];
   userLogin: string;
+  enableActions?: boolean;
   onTabChange: (tab: TabId) => void;
 }
 
@@ -142,7 +143,7 @@ export default function PersonalSummaryStrip(props: PersonalSummaryStripProps) {
         }));
       },
     });
-    if (running > 0) items.push({
+    if (running > 0 && props.enableActions !== false) items.push({
       label: running === 1 ? "action running" : "actions running",
       count: running,
       tab: "actions",

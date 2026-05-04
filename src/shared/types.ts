@@ -116,7 +116,6 @@ export interface DashboardSummary {
   openIssueCount: number;
   /** null when Actions monitoring is disabled */
   failingRunCount: number | null;
-  actionsMonitoringDisabled?: boolean;
   needsReviewCount: number;
   approvedUnmergedCount: number;
 }

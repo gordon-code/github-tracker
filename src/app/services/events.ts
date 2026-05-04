@@ -161,6 +161,7 @@ export function parseRepoEvents(
       summary.hasPRActivity = true;
     }
     if (event.type === "PushEvent") {
+      summary.hasPRActivity = true;
       summary.hasWorkflowActivity = true;
     }
 

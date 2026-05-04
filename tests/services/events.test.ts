@@ -257,11 +257,12 @@ describe("parseRepoEvents", () => {
     expect(summary.hasIssueActivity).toBe(false);
   });
 
-  it("sets hasWorkflowActivity for PushEvent", () => {
+  it("sets hasPRActivity and hasWorkflowActivity for PushEvent", () => {
     const events = [makeEvent({ type: "PushEvent", repoName: "owner/repo" })];
     const result = parseRepoEvents(events, new Set(["owner/repo"]));
 
     expect(result.get("owner/repo")!.hasWorkflowActivity).toBe(true);
+    expect(result.get("owner/repo")!.hasPRActivity).toBe(true);
   });
 
   it("does case-insensitive repo matching: Owner/Repo vs owner/repo", () => {

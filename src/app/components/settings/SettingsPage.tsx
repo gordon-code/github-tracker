@@ -2,7 +2,7 @@ import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-j
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo } from "../../stores/config";
+import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
@@ -620,10 +620,8 @@ export default function SettingsPage() {
               checked={config.enableActions}
               onChange={(e) => {
                 const val = e.currentTarget.checked;
-                const isActionsCustomTab = (id: string) =>
-                  config.customTabs.some((t) => t.id === id && t.baseType === "actions");
-                const needsDefaultReset = !val && (config.defaultTab === "actions" || isActionsCustomTab(config.defaultTab));
-                const needsLastTabReset = !val && (viewState.lastActiveTab === "actions" || isActionsCustomTab(viewState.lastActiveTab));
+                const needsDefaultReset = !val && isActionsBasedTab(config.defaultTab, config.customTabs);
+                const needsLastTabReset = !val && isActionsBasedTab(viewState.lastActiveTab, config.customTabs);
                 saveWithFeedback({
                   enableActions: val,
                   ...(needsDefaultReset ? { defaultTab: "issues" as const } : {}),

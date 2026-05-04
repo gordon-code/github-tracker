@@ -439,6 +439,7 @@ describe("Integration: Edge cases (with server)", () => {
       trackedUsers: [],
       upstreamRepos: [],
       monitoredRepos: [],
+      enableActions: true,
     });
 
     if (!wss) throw new Error("Server not started");
@@ -461,7 +462,7 @@ describe("Integration: Edge cases (with server)", () => {
       getRateLimit: vi.fn(),
       getConfig: vi.fn().mockResolvedValue({
         selectedRepos: [{ owner: "acme", name: "app", fullName: "acme/app" }],
-        trackedUsers: [], upstreamRepos: [], monitoredRepos: [],
+        trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true,
       }),
       getRepos: vi.fn().mockResolvedValue([{ owner: "acme", name: "app", fullName: "acme/app" }]),
     };

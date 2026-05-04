@@ -14,6 +14,7 @@ const mockConfigStore = {
   trackedUsers: [],
   upstreamRepos: [],
   monitoredRepos: [],
+  enableActions: true,
 };
 
 vi.mock("../../../src/app/stores/config", () => ({
@@ -299,7 +300,7 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
     expect(parsed.result.approvedUnmergedCount).toBe(1);
   });
 
-  it("returns failingRunCount=null and actionsMonitoringDisabled=true when enableActions is false", () => {
+  it("returns failingRunCount=null when enableActions is false", () => {
     const issues = [makeIssue({ state: "OPEN" })];
     const runs = [makeWorkflowRun({ conclusion: "failure" })];
     mod.updateRelaySnapshot({ issues, pullRequests: [], workflowRuns: runs, enableActions: false, lastUpdatedAt: Date.now() });
@@ -311,9 +312,8 @@ describe("GET_DASHBOARD_SUMMARY handler", () => {
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 11, method: "get_dashboard_summary", params: { scope: "involves_me" } }));
 
     const response = responses.find((r) => (JSON.parse(r) as { id?: number }).id === 11);
-    const parsed = JSON.parse(response!) as { result: { failingRunCount: number | null; actionsMonitoringDisabled?: boolean; openIssueCount: number } };
+    const parsed = JSON.parse(response!) as { result: { failingRunCount: number | null; openIssueCount: number } };
     expect(parsed.result.failingRunCount).toBeNull();
-    expect(parsed.result.actionsMonitoringDisabled).toBe(true);
     expect(parsed.result.openIssueCount).toBe(1);
   });
 });
@@ -642,10 +642,11 @@ describe("GET_CONFIG handler", () => {
     ws._triggerOpen();
     ws._triggerMessage(JSON.stringify({ jsonrpc: "2.0", id: 70, method: "get_config", params: {} }));
     const parsed = JSON.parse(responses.find((r) => (JSON.parse(r) as { id?: number }).id === 70)!) as {
-      result: { selectedRepos: unknown[]; trackedUsers: unknown[]; upstreamRepos: unknown[]; monitoredRepos: unknown[] };
+      result: { selectedRepos: unknown[]; trackedUsers: unknown[]; upstreamRepos: unknown[]; monitoredRepos: unknown[]; enableActions: boolean };
     };
     expect(parsed.result.selectedRepos).toBeDefined();
     expect(parsed.result.trackedUsers).toBeDefined();
+    expect(parsed.result.enableActions).toBe(true);
   });
 });
 

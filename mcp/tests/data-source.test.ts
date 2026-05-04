@@ -117,13 +117,14 @@ describe("OctokitDataSource", () => {
       trackedUsers: [],
       upstreamRepos: [],
       monitoredRepos: [],
+      enableActions: true,
     });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     // Clear cached config
-    setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [] });
+    setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
   });
 
   describe("getOpenPRs", () => {
@@ -189,7 +190,7 @@ describe("OctokitDataSource", () => {
 
     it("accepts explicit repo parameter and skips cached config", async () => {
       // Clear cached config to verify explicit param works without it
-      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [] });
+      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
 
       const responses = new Map([
         ["GET /user", makeUserResponse()],
@@ -208,7 +209,7 @@ describe("OctokitDataSource", () => {
 
     it("returns empty array when config has no repos and no explicit repo", async () => {
       // setCachedConfig with empty selectedRepos → resolveRepos returns []
-      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [] });
+      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
       const responses = new Map([["GET /user", makeUserResponse()]]);
       const octokit = makeMockOctokit(responses);
       const ds = new OctokitDataSource(octokit);
@@ -433,10 +434,25 @@ describe("OctokitDataSource", () => {
     });
 
     it("returns empty array when config has no repos and no explicit repo", async () => {
-      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [] });
+      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
       const ds = new OctokitDataSource({ request: vi.fn() });
       const runs = await ds.getFailingActions();
       expect(runs).toEqual([]);
+    });
+
+    it("returns empty array when enableActions is false", async () => {
+      setCachedConfig({
+        selectedRepos: [{ owner: "owner", name: "repo", fullName: "owner/repo" }],
+        trackedUsers: [],
+        upstreamRepos: [],
+        monitoredRepos: [],
+        enableActions: false,
+      });
+      const requestMock = vi.fn();
+      const ds = new OctokitDataSource({ request: requestMock });
+      const runs = await ds.getFailingActions();
+      expect(runs).toEqual([]);
+      expect(requestMock).not.toHaveBeenCalled();
     });
   });
 
@@ -502,7 +518,7 @@ describe("OctokitDataSource", () => {
 
   describe("getDashboardSummary", () => {
     it("returns zero counts when no repos are configured", async () => {
-      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [] });
+      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
       const octokit = makeMockOctokit(new Map([["GET /user", makeUserResponse()]]));
       const ds = new OctokitDataSource(octokit);
       const summary = await ds.getDashboardSummary("involves_me");
@@ -512,6 +528,16 @@ describe("OctokitDataSource", () => {
       expect(summary.failingRunCount).toBe(0);
       expect(summary.needsReviewCount).toBe(0);
       expect(summary.approvedUnmergedCount).toBe(0);
+    });
+
+    it("returns failingRunCount=null in early return when no repos and enableActions is false", async () => {
+      setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: false });
+      const octokit = makeMockOctokit(new Map([["GET /user", makeUserResponse()]]));
+      const ds = new OctokitDataSource(octokit);
+      const summary = await ds.getDashboardSummary("involves_me");
+
+      expect(summary.failingRunCount).toBeNull();
+      expect(summary.openPRCount).toBe(0);
     });
 
     it("constructs involves_me query with user login", async () => {
@@ -556,6 +582,30 @@ describe("OctokitDataSource", () => {
       expect(prCall).toBeDefined();
       expect(prCall![1].q).not.toContain("involves:");
     });
+
+    it("returns failingRunCount=null and skips actions API when enableActions is false", async () => {
+      setCachedConfig({
+        selectedRepos: [{ owner: "owner", name: "repo", fullName: "owner/repo" }],
+        trackedUsers: [],
+        upstreamRepos: [],
+        monitoredRepos: [],
+        enableActions: false,
+      });
+      const requestMock = vi.fn().mockImplementation(async (route: string) => {
+        if (route === "GET /user") return { data: { login: "testuser" }, headers: {} };
+        if (route === "GET /search/issues") return { data: { items: [], total_count: 0 }, headers: {} };
+        throw new Error(`Unexpected: ${route}`);
+      });
+
+      const ds = new OctokitDataSource({ request: requestMock });
+      const summary = await ds.getDashboardSummary("involves_me");
+
+      expect(summary.failingRunCount).toBeNull();
+      const actionsCalls = requestMock.mock.calls.filter(
+        ([route]: [string]) => route === "GET /repos/{owner}/{repo}/actions/runs"
+      );
+      expect(actionsCalls).toHaveLength(0);
+    });
   });
 
   describe("getConfig", () => {
@@ -565,6 +615,7 @@ describe("OctokitDataSource", () => {
         trackedUsers: [],
         upstreamRepos: [],
         monitoredRepos: [],
+        enableActions: true,
       };
       setCachedConfig(config);
       const ds = new OctokitDataSource({ request: vi.fn() });
@@ -641,6 +692,7 @@ describe("CompositeDataSource", () => {
       trackedUsers: [],
       upstreamRepos: [],
       monitoredRepos: [],
+      enableActions: true,
     });
   });
 
@@ -754,5 +806,14 @@ describe("CompositeDataSource", () => {
     expect(octokitDs.getFailingActions).toHaveBeenCalled();
     expect(octokitDs.getRateLimit).toHaveBeenCalled();
     expect(_mockSendRequest).not.toHaveBeenCalled();
+  });
+
+  it("WebSocketDataSource.getFailingActions returns empty array for disabled sentinel", async () => {
+    _mockIsConnected = true;
+    _mockSendRequest = vi.fn().mockResolvedValue({ disabled: true, message: "Actions monitoring is disabled" });
+
+    const wsDs = new WebSocketDataSource();
+    const result = await wsDs.getFailingActions();
+    expect(result).toEqual([]);
   });
 });
