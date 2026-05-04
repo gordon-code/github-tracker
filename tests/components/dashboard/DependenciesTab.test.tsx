@@ -342,10 +342,10 @@ describe("DependenciesTab — version badges", () => {
   });
 });
 
-// ── Abandoned dep pill ────────────────────────────────────────────────────────
+// ── Abandoned pill ────────────────────────────────────────────────────────
 
 describe("DependenciesTab — abandoned dep pill", () => {
-  it("shows 'Abandoned dep' pill when PR title matches abandoned package", () => {
+  it("shows 'Abandoned' pill when PR title matches abandoned package", () => {
     const pr = makeMergeablePR({
       title: "chore(deps): update dependency lodash to v5",
       repoFullName: "owner/repo",
@@ -357,7 +357,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
       ["owner/repo", "https://github.com/owner/repo/issues/1"],
     ]);
     renderTab({ pullRequests: [pr], abandonedDepsMap, dashboardIssueUrls });
-    expect(screen.getByText("Abandoned dep")).toBeDefined();
+    expect(screen.getByText("Abandoned")).toBeDefined();
   });
 
   it("does not show pill when no abandoned dep match", () => {
@@ -366,7 +366,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
       ["owner/repo", [{ datasource: "npm", packageName: "lodash", lastUpdated: "2024-01-01" }]],
     ]);
     renderTab({ pullRequests: [pr], abandonedDepsMap });
-    expect(screen.queryByText("Abandoned dep")).toBeNull();
+    expect(screen.queryByText("Abandoned")).toBeNull();
   });
 
   it("abandoned pill is an anchor when dashboard URL is safe (SEC-001)", () => {
@@ -381,7 +381,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
       ["owner/repo", "https://github.com/owner/repo/issues/1"],
     ]);
     renderTab({ pullRequests: [pr], abandonedDepsMap, dashboardIssueUrls });
-    const pill = screen.getByText("Abandoned dep");
+    const pill = screen.getByText("Abandoned");
     expect(pill.tagName.toLowerCase()).toBe("a");
     expect(pill.getAttribute("href")).toBe("https://github.com/owner/repo/issues/1");
   });
@@ -398,7 +398,7 @@ describe("DependenciesTab — abandoned dep pill", () => {
       ["owner/repo", "https://evil.example.com/phish"],
     ]);
     renderTab({ pullRequests: [pr], abandonedDepsMap, dashboardIssueUrls });
-    const pill = screen.getByText("Abandoned dep");
+    const pill = screen.getByText("Abandoned");
     expect(pill.tagName.toLowerCase()).not.toBe("a");
   });
 });

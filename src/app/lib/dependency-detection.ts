@@ -99,7 +99,7 @@ export interface VersionInfo {
 }
 
 export function extractVersionInfo(title: string): VersionInfo | null {
-  const cleaned = title.replace(/\s*\[[\w\s]+\]\s*$/, "").trim();
+  const cleaned = title.replace(/\s*\[[\w\s]+\]\s*$/, "").replace(/\s*-\s*abandoned$/i, "").trim();
 
   if (/pin dependencies/i.test(cleaned)) return null;
   if (/lock file maintenance/i.test(cleaned)) return null;

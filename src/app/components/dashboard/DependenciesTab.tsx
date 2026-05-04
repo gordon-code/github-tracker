@@ -56,6 +56,15 @@ function mapUpdateType(ut: NonNullable<VersionInfo["updateType"]>): DepCategory 
   return ut;
 }
 
+const CATEGORY_SORT_ORDER: Record<DepCategory, number> = {
+  maintenance: 0,
+  pin: 1,
+  patch: 2,
+  minor: 3,
+  major: 4,
+  other: 5,
+};
+
 function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCategory {
   if (versionInfo?.updateType) return mapUpdateType(versionInfo.updateType);
 
@@ -87,6 +96,7 @@ interface ClassifiedPR {
   status: DepStatus;
   versionInfo: VersionInfo | null;
   category: DepCategory;
+  abandoned: boolean;
   abandonedDep: AbandonedDependency | null;
 }
 
@@ -177,12 +187,15 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           }
         }
         const abandonedDeps = props.abandonedDepsMap.get(pr.repoFullName) ?? [];
+        const abandonedDep = matchAbandonedToPr(pr, abandonedDeps);
+        const abandoned = abandonedDep !== null || /\s-\s*abandoned$/i.test(pr.title);
         return {
           pr,
           status: classifyDepStatus(pr, props.rebaseLabel),
           versionInfo,
           category: depCategory(pr, versionInfo),
-          abandonedDep: matchAbandonedToPr(pr, abandonedDeps),
+          abandoned,
+          abandonedDep,
         };
       })
       .filter(({ pr, category }) => {
@@ -200,11 +213,11 @@ export default function DependenciesTab(props: DependenciesTabProps) {
     const isDefault = field === "updatedAt" && direction === "desc";
 
     items.sort((a, b) => {
-      // Default sort: cluster by repo, then newest first within each repo
+      // Default sort: category priority (maintenance→major), then repo
       if (isDefault) {
-        const repoCmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName);
-        if (repoCmp !== 0) return repoCmp;
-        return b.pr.updatedAt.localeCompare(a.pr.updatedAt);
+        const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
+        if (catCmp !== 0) return catCmp;
+        return a.pr.repoFullName.localeCompare(b.pr.repoFullName);
       }
 
       let cmp = 0;
@@ -399,7 +412,7 @@ interface StatusGroupProps {
 }
 
 function stripCommitPrefix(title: string): string {
-  const stripped = title.replace(/^(?:chore|fix|build)\(deps[^)]*\):\s*/i, "");
+  const stripped = title.replace(/^(?:chore|fix|build)\(deps[^)]*\):\s*/i, "").replace(/\s*-\s*abandoned$/i, "");
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
@@ -428,7 +441,7 @@ function StatusGroup(props: StatusGroupProps) {
 
         <div id={`dep-group-${props.status}`} role="list" class={`divide-y divide-base-300${props.expanded ? "" : " hidden"}`}>
           <For each={props.items}>
-            {({ pr, versionInfo, category, abandonedDep }) => {
+            {({ pr, versionInfo, category, abandoned, abandonedDep }) => {
               const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
               const title = () => displayTitle(pr, versionInfo);
               return (
@@ -484,11 +497,11 @@ function StatusGroup(props: StatusGroupProps) {
                         <span class="badge badge-ghost badge-sm">Draft</span>
                       </Show>
 
-                      <Show when={abandonedDep !== null}>
+                      <Show when={abandoned}>
                         <Show
-                          when={dashUrl() && isSafeGitHubUrl(dashUrl()!)}
+                          when={abandonedDep !== null && dashUrl() && isSafeGitHubUrl(dashUrl()!)}
                           fallback={
-                            <span class="badge badge-error badge-outline badge-sm">Abandoned dep</span>
+                            <span class="badge badge-error badge-outline badge-sm">Abandoned</span>
                           }
                         >
                           <a
@@ -498,7 +511,7 @@ function StatusGroup(props: StatusGroupProps) {
                             class="badge badge-error badge-outline badge-sm"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            Abandoned dep
+                            Abandoned
                           </a>
                         </Show>
                       </Show>
