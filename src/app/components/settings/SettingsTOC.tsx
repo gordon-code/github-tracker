@@ -1,0 +1,200 @@
+import { createSignal, createMemo, createEffect, onMount, onCleanup, For, Show } from "solid-js";
+
+export const SETTINGS_SECTIONS = [
+  { id: "orgs-repos", label: "Orgs & Repos", group: "Data Sources" },
+  { id: "tracked-users", label: "Tracked Users", group: "Data Sources" },
+  { id: "refresh", label: "Refresh", group: "Data Sources" },
+  { id: "api-usage", label: "API Usage", group: "Data Sources" },
+  { id: "appearance", label: "Appearance", group: "Display" },
+  { id: "tabs", label: "Tabs", group: "Display" },
+  { id: "custom-tabs", label: "Custom Tabs", group: "Display" },
+  { id: "actions", label: "Actions", group: "Integrations" },
+  { id: "notifications", label: "Notifications", group: "Integrations" },
+  { id: "mcp-relay", label: "MCP Relay", group: "Integrations" },
+  { id: "jira", label: "Jira", group: "Integrations" },
+  { id: "dependencies", label: "Dependencies", group: "Integrations" },
+  { id: "data", label: "Data", group: "Account" },
+] as const;
+
+const SETTINGS_GROUPS = Array.from(
+  Map.groupBy(SETTINGS_SECTIONS, (s) => s.group),
+  ([name, items]) => ({ name, items })
+);
+
+function useScrollSpy() {
+  const [activeId, setActiveId] = createSignal<string>(SETTINGS_SECTIONS[0].id);
+
+  onMount(() => {
+    const intersecting = new Map<string, IntersectionObserverEntry>();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            intersecting.set(entry.target.id, entry);
+          } else {
+            intersecting.delete(entry.target.id);
+          }
+        }
+
+        if (intersecting.size > 0) {
+          const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+          if (atBottom) {
+            setActiveId(SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1].id);
+          } else {
+            let nearest: string | null = null;
+            let nearestDist = Infinity;
+            for (const [id, entry] of intersecting) {
+              const dist = Math.abs(entry.boundingClientRect.top);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = id;
+              }
+            }
+            if (nearest) setActiveId(nearest);
+          }
+        }
+      },
+      { rootMargin: "-80px 0px -60% 0px", threshold: [0, 1] }
+    );
+
+    for (const section of SETTINGS_SECTIONS) {
+      const el = document.getElementById(section.id);
+      if (el) observer.observe(el);
+    }
+
+    onCleanup(() => observer.disconnect());
+  });
+
+  return activeId;
+}
+
+export default function SettingsTOC() {
+  const activeId = useScrollSpy();
+  const [scrollingTo, setScrollingTo] = createSignal<string | null>(null);
+  const [mobileOpen, setMobileOpen] = createSignal(false);
+
+  const displayedActiveId = () => scrollingTo() ?? activeId();
+  const activeLabel = createMemo(() =>
+    SETTINGS_SECTIONS.find((s) => s.id === displayedActiveId())?.label ?? SETTINGS_SECTIONS[0].label
+  );
+
+  function scrollToSection(id: string) {
+    setScrollingTo(id);
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(id)?.scrollIntoView({
+      behavior: prefersReduced ? "instant" : "smooth",
+      block: "start",
+    });
+    const clear = () => setScrollingTo(null);
+    if ("onscrollend" in window) {
+      window.addEventListener("scrollend", clear, { once: true });
+    } else {
+      setTimeout(clear, 600);
+    }
+  }
+
+  let mobileContainerRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!mobileOpen()) return;
+    const handleClickOutside = (e: PointerEvent) => {
+      if (mobileContainerRef && !mobileContainerRef.contains(e.target as Node)) {
+        setMobileOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobileOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    });
+  });
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <nav aria-label="Settings navigation" class="hidden lg:block w-44 shrink-0 sticky top-20 self-start">
+        <For each={SETTINGS_GROUPS}>
+          {(group) => (
+            <div class="mt-4 first:mt-0">
+              <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 mb-1 px-2">
+                {group.name}
+              </p>
+              <For each={group.items}>
+                {(item) => (
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection(item.id)}
+                    class={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
+                      displayedActiveId() === item.id
+                        ? "bg-primary/10 text-primary font-medium border-l-2 border-primary"
+                        : "text-base-content/60 hover:text-base-content hover:bg-base-200 border-l-2 border-transparent"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                )}
+              </For>
+            </div>
+          )}
+        </For>
+      </nav>
+
+      {/* Mobile dropdown */}
+      <div class="lg:hidden sticky top-20 z-30 bg-base-200 border-b border-base-300 shadow-sm relative" data-testid="mobile-toc" ref={(el) => (mobileContainerRef = el)}>
+        <button
+          type="button"
+          onClick={() => setMobileOpen((v) => !v)}
+          class="btn btn-ghost btn-sm gap-1"
+          aria-expanded={mobileOpen()}
+          aria-controls="settings-toc-mobile"
+        >
+          <span class="text-xs text-base-content/60">{activeLabel()}</span>
+          <svg class={`h-3 w-3 transition-transform ${mobileOpen() ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        <Show when={mobileOpen()}>
+          <div
+            id="settings-toc-mobile"
+            class="absolute top-full left-0 right-0 bg-base-100 border-b border-base-300 shadow-lg z-30 px-4 py-2 max-h-[60vh] overflow-y-auto"
+          >
+            <For each={SETTINGS_GROUPS}>
+              {(group) => (
+                <div class="mt-3 first:mt-0">
+                  <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 mb-1">
+                    {group.name}
+                  </p>
+                  <For each={group.items}>
+                    {(item) => (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          scrollToSection(item.id);
+                          setMobileOpen(false);
+                        }}
+                        class={`block w-full text-left text-sm px-2 py-1 rounded transition-colors ${
+                          displayedActiveId() === item.id
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-base-content/60 hover:text-base-content hover:bg-base-200"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
+    </>
+  );
+}

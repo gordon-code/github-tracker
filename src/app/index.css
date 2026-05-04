@@ -131,6 +131,27 @@
   animation: popover-fade-out 0.15s ease-in forwards;
 }
 
+/* ── Settings page: scroll-margin, sticky header ────────────────────────── */
+
+.settings-content > [id] {
+  scroll-margin-top: 7.5rem;
+}
+@media (min-width: 1024px) {
+  .settings-content > [id] {
+    scroll-margin-top: 6rem;
+  }
+}
+
+.settings-header {
+  padding-right: var(--scrollbar-width, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-header * {
+    transition: none;
+  }
+}
+
 /* ── Fixed-element scrollbar compensation ────────────────────────────────── */
 /* solid-prevent-scroll sets --scrollbar-width on body when scroll is locked;
    fixed elements don't inherit body padding-right, so compensate explicitly.
