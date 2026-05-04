@@ -319,13 +319,21 @@ The hot poll pauses automatically when the browser tab is hidden (since visual f
 
 Hover the rate limit display in the dashboard footer to see detailed remaining counts for the Core and GraphQL API pools, plus the reset time.
 
+### Events Poll
+
+A lightweight poll runs every **60 seconds** to detect new activity across all your tracked repos. Instead of re-fetching all issues, PRs, and workflow runs, it checks your recent GitHub events (pushes, PR updates, issue comments, etc.) and compares event IDs against the last seen ID.
+
+When new events are detected, the dashboard immediately runs **targeted refreshes** for only the affected repos — so a push to `my-org/api-server` refreshes just that repo's data, not everything.
+
+The events poll uses about **1 REST request per cycle** (~1% of your hourly rate-limit budget). If you have a high volume of recent activity (100+ events per cycle), it automatically fetches up to 3 pages to avoid missing older events.
+
 ### Tab Visibility Behavior
 
 When the tab is hidden:
 
 - The **hot poll always pauses** (it provides only visual feedback).
 - The **full refresh pauses** in background tabs — GraphQL requests have no 304 shortcut and every poll consumes real rate-limit budget.
-- The **events poll continues in background** — it uses ETag conditional requests (`If-None-Match`) that return 304 when nothing has changed, costing zero rate-limit points. When changes are detected, targeted per-repo refreshes run immediately.
+- The **events poll continues in background** — it is lightweight enough to run even when the tab is hidden, giving you near-real-time change detection without the cost of a full refresh.
 
 When you return to a tab that has been hidden for more than 2 minutes, a catch-up full refresh fires immediately regardless of where the timer is in its cycle.
 
