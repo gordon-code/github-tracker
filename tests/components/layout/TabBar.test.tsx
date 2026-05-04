@@ -310,6 +310,7 @@ describe("TabBar", () => {
     ));
     expect(screen.getByRole("tab", { name: /Issues/ })).toBeDefined();
     expect(screen.getByRole("tab", { name: /Pull Requests/ })).toBeDefined();
+  });
 
   // ── Dependencies tab ─────────────────────────────────────────────────────────
 

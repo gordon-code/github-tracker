@@ -99,6 +99,6 @@ test("status groups render correctly", async ({ page }) => {
   await page.getByRole("tab", { name: /dependencies/i }).click();
 
   // Both status groups should appear
-  await expect(page.getByText("Waiting")).toBeVisible();
+  await expect(page.getByText("Needs Action")).toBeVisible();
   await expect(page.getByText("Stale")).toBeVisible();
 });
