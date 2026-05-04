@@ -31,6 +31,7 @@ vi.mock("../../src/app/stores/auth", () => ({
   isAuthenticated: () => true,
   onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+  DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
   jiraAuth: vi.fn(() => null),
   isJiraAuthenticated: vi.fn(() => false),
   setJiraAuth: vi.fn(),
