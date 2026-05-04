@@ -448,28 +448,24 @@ function StatusGroup(props: StatusGroupProps) {
                     onTrack={props.enableTracking ? () => props.onTrack(pr) : undefined}
                     isTracked={props.enableTracking ? props.trackedPrIds.has(pr.id) : undefined}
                     isPolling={props.hotPollingPRIds?.has(pr.id)}
-                  >
-                    <div class="flex items-center gap-1.5 flex-wrap">
-                      <Show when={pr.userAvatarUrl}>
-                        <img
-                          src={pr.userAvatarUrl}
-                          alt={pr.userLogin}
-                          class="w-5 h-5 rounded-full ring-1 ring-base-100"
-                        />
-                      </Show>
-
-                      <Show when={pr.enriched !== false}>
-                        <StatusDot status={pr.checkStatus} />
-                      </Show>
-
+                    hideAuthor
+                    hideNumber
+                    subtleRepo
+                    titlePrefix={
                       <Show when={category !== "other"}>
-                        <span class={`badge badge-sm ${
+                        <span class={`badge badge-sm min-w-[4.5rem] justify-center ${
                           category === "major" ? "badge-error" :
                           category === "minor" ? "badge-warning" :
                           "badge-success"
                         }`}>
                           {category}
                         </span>
+                      </Show>
+                    }
+                  >
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <Show when={pr.enriched !== false}>
+                        <StatusDot status={pr.checkStatus} />
                       </Show>
 
                       <Show when={pr.enriched !== false}>
