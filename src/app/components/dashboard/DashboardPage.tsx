@@ -144,6 +144,7 @@ let _jiraFetching = false;
 // Dependency dashboard state — module-level for same reasons as jira state above
 const [abandonedDepsMap, setAbandonedDepsMap] = createSignal<Map<string, AbandonedDependency[]>>(new Map());
 const [dashboardIssueUrls, setDashboardIssueUrls] = createSignal<Map<string, string>>(new Map());
+const [depBodies, setDepBodies] = createSignal<ReadonlyMap<number, string>>(new Map());
 let _fetchingDashboardBodies = false;
 let _fetchingDepBodies = false;
 
@@ -157,6 +158,7 @@ onAuthCleared(() => {
   _jiraFetching = false;
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
+  setDepBodies(new Map());
   _fetchingDashboardBodies = false;
   resetAbandonedPatternCache();
   const coord = _coordinator();
@@ -176,18 +178,6 @@ onAuthCleared(() => {
   }
   clearHotSets();
 });
-
-function carryOverBodies(prev: PullRequest[], next: PullRequest[]): PullRequest[] {
-  const bodyMap = new Map<number, string>();
-  for (const pr of prev) {
-    if (pr.body) bodyMap.set(pr.id, pr.body);
-  }
-  if (bodyMap.size === 0) return next;
-  return next.map((pr) => {
-    const body = bodyMap.get(pr.id);
-    return body ? { ...pr, body } : pr;
-  });
-}
 
 async function pollFetch(): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
@@ -270,7 +260,7 @@ async function pollFetch(): Promise<DashboardData> {
             pr.starCount = e.starCount;
           }
         } else {
-          state.pullRequests = carryOverBodies(state.pullRequests, data.pullRequests);
+          state.pullRequests = data.pullRequests;
         }
       }));
     } else {
@@ -282,7 +272,7 @@ async function pollFetch(): Promise<DashboardData> {
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
-          pullRequests: carryOverBodies(dashboardData.pullRequests, data.pullRequests),
+          pullRequests: data.pullRequests,
           workflowRuns: config.enableActions ? data.workflowRuns : [],
           loading: false,
           lastRefreshedAt: now,
@@ -1170,18 +1160,18 @@ export default function DashboardPage() {
   ));
 
   // Fetch PR bodies for dependency PRs where title parsing can't determine update type.
-  // Bodies are stored on the PR objects so DependenciesTab can parse Renovate's table.
-  // Tracks dependencyPullRequests() directly (not lastRefreshAt) so it fires on both
-  // cache load and poll completion. needsBodyFallback returns false for PRs that already
-  // have body, preventing refetch loops after the produce() update.
+  // Uses a separate reactive signal (depBodies) rather than mutating store PR objects,
+  // because dependencyPullRequests() returns filtered plain objects that lose store
+  // proxy tracking — produce() mutations to pr.body wouldn't trigger recomputation.
   createEffect(() => {
     if (!config.dependencies.enabled) return;
     if (_fetchingDepBodies) return;
     const octokit = getClient();
     if (!octokit) return;
 
+    const bodies = depBodies();
     const depPrs = dependencyPullRequests();
-    const toFetch = depPrs.filter(needsBodyFallback);
+    const toFetch = depPrs.filter((pr) => !bodies.has(pr.id) && needsBodyFallback(pr));
     if (toFetch.length === 0) return;
 
     _fetchingDepBodies = true;
@@ -1191,24 +1181,9 @@ export default function DashboardPage() {
         const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
         if (bodyMap.size === 0) return;
 
-        setDashboardData(produce((s) => {
-          for (const pr of s.pullRequests) {
-            const body = bodyMap.get(pr.id);
-            if (body) pr.body = body;
-          }
-        }));
-
-        setTimeout(() => {
-          try {
-            localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
-              _v: CACHE_VERSION,
-              issues: dashboardData.issues,
-              pullRequests: dashboardData.pullRequests,
-              workflowRuns: dashboardData.workflowRuns,
-              lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
-            }));
-          } catch { /* non-critical */ }
-        }, 0);
+        const merged = new Map(bodies);
+        for (const [id, body] of bodyMap) merged.set(id, body);
+        setDepBodies(merged);
       } finally {
         _fetchingDepBodies = false;
       }
@@ -1309,6 +1284,7 @@ export default function DashboardPage() {
               <Match when={activeTab() === "dependencies"}>
                 <DependenciesTab
                   pullRequests={dependencyPullRequests()}
+                  depBodies={depBodies()}
                   loading={dashboardData.loading}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}

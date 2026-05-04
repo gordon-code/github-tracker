@@ -102,6 +102,7 @@ interface ClassifiedPR {
 
 interface DependenciesTabProps {
   pullRequests: PullRequest[];
+  depBodies?: ReadonlyMap<number, string>;
   loading?: boolean;
   abandonedDepsMap: Map<string, AbandonedDependency[]>;
   dashboardIssueUrls: Map<string, string>;
@@ -171,12 +172,14 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
     const ignored = ignoredIds();
+    const bodies = props.depBodies;
     return props.pullRequests
       .map((pr) => {
         const titleInfo = extractVersionInfo(pr.title);
         let versionInfo = titleInfo;
-        if (pr.body && (!titleInfo?.updateType || !titleInfo?.from)) {
-          const bodyInfo = parseRenovateBody(pr.body);
+        const body = bodies?.get(pr.id);
+        if (body && (!titleInfo?.updateType || !titleInfo?.from)) {
+          const bodyInfo = parseRenovateBody(body);
           if (bodyInfo) {
             versionInfo = {
               packageName: titleInfo?.packageName ?? bodyInfo.packageName,
