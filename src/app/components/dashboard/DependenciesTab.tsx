@@ -33,11 +33,11 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
   label: "Update type",
   field: "updateType",
   options: [
-    { value: "major", label: "Major" },
-    { value: "minor", label: "Minor" },
-    { value: "patch", label: "Patch" },
-    { value: "pin", label: "Pin" },
     { value: "maintenance", label: "Maintenance" },
+    { value: "pin", label: "Pin" },
+    { value: "patch", label: "Patch" },
+    { value: "minor", label: "Minor" },
+    { value: "major", label: "Major" },
     { value: "other", label: "Other" },
   ],
 };
