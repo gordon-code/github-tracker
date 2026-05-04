@@ -450,7 +450,7 @@ describe("DEP_TITLE_PATTERN", () => {
 });
 
 describe("parseRenovateBody", () => {
-  it("parses major update from Renovate table", () => {
+  it("parses 4-column table (Package | Type | Update | Change)", () => {
     const body = [
       "| Package | Type | Update | Change |",
       "|---|---|---|---|",
@@ -464,8 +464,40 @@ describe("parseRenovateBody", () => {
     });
   });
 
+  it("parses 3-column table (Package | Update | Change)", () => {
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| [gitleaks/gitleaks](url) | patch | `v8.30.0` → `v8.30.1` |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "gitleaks/gitleaks",
+      updateType: "patch",
+      from: "v8.30.0",
+      to: "v8.30.1",
+    });
+  });
+
+  it("derives updateType from semver when no Update column (Package | Change | Age | Confidence)", () => {
+    const body = [
+      "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |",
+      "|---|---|---|---|",
+      "| [pytest](url) ([changelog](url2)) | `8.3.4` → `9.0.3` | ![age](img) | ![confidence](img) |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "pytest",
+      updateType: "major",
+      from: "8.3.4",
+      to: "9.0.3",
+    });
+  });
+
   it("parses minor update", () => {
-    const body = "| [react](url) | dependencies | minor | `18.2.0` → `18.3.0` |";
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| [react](url) | minor | `18.2.0` → `18.3.0` |",
+    ].join("\n");
     expect(parseRenovateBody(body)).toEqual({
       packageName: "react",
       updateType: "minor",
@@ -474,18 +506,12 @@ describe("parseRenovateBody", () => {
     });
   });
 
-  it("parses patch update", () => {
-    const body = "| [lodash](url) | devDependencies | patch | `4.17.20` → `4.17.21` |";
-    expect(parseRenovateBody(body)).toEqual({
-      packageName: "lodash",
-      updateType: "patch",
-      from: "4.17.20",
-      to: "4.17.21",
-    });
-  });
-
   it("parses pin update", () => {
-    const body = "| [actions/checkout](url) | action | pin | `abc1234` → `def5678` |";
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| [actions/checkout](url) | pin | `abc1234` → `def5678` |",
+    ].join("\n");
     expect(parseRenovateBody(body)).toEqual({
       packageName: "actions/checkout",
       updateType: "pin",
@@ -495,7 +521,11 @@ describe("parseRenovateBody", () => {
   });
 
   it("parses digest update", () => {
-    const body = "| [node](url) | final | digest | `sha256:abc` → `sha256:def` |";
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| [node](url) | digest | `sha256:abc` → `sha256:def` |",
+    ].join("\n");
     expect(parseRenovateBody(body)).toEqual({
       packageName: "node",
       updateType: "digest",
@@ -505,7 +535,11 @@ describe("parseRenovateBody", () => {
   });
 
   it("handles plain text package name (no markdown link)", () => {
-    const body = "| some-package | dependencies | major | `1.0.0` → `2.0.0` |";
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| some-package | major | `1.0.0` → `2.0.0` |",
+    ].join("\n");
     expect(parseRenovateBody(body)).toEqual({
       packageName: "some-package",
       updateType: "major",
@@ -518,16 +552,11 @@ describe("parseRenovateBody", () => {
     expect(parseRenovateBody("This is just a PR description with no table.")).toBeNull();
   });
 
-  it("returns null for header/separator rows", () => {
+  it("returns null for header/separator rows only", () => {
     const body = [
-      "| Package | Type | Update | Change |",
-      "|---|---|---|---|",
+      "| Package | Update | Change |",
+      "|---|---|---|",
     ].join("\n");
-    expect(parseRenovateBody(body)).toBeNull();
-  });
-
-  it("skips rows with unknown update type", () => {
-    const body = "| [pkg](url) | deps | rollback | `2.0` → `1.0` |";
     expect(parseRenovateBody(body)).toBeNull();
   });
 
@@ -548,9 +577,40 @@ describe("parseRenovateBody", () => {
   });
 
   it("returns result without from/to when Change column has no arrow", () => {
-    const body = "| [pkg](url) | action | major | see notes |";
-    const result = parseRenovateBody(body);
-    expect(result).toEqual({ packageName: "pkg", updateType: "major" });
+    const body = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| [pkg](url) | major | see notes |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({ packageName: "pkg", updateType: "major" });
+  });
+
+  it("finds version arrow in any cell when no Change column exists", () => {
+    const body = [
+      "| Package | Version |",
+      "|---|---|",
+      "| [lodash](url) | `4.17.20` → `4.17.21` |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "lodash",
+      updateType: "patch",
+      from: "4.17.20",
+      to: "4.17.21",
+    });
+  });
+
+  it("strips markdown links from header cells", () => {
+    const body = [
+      "| Package | Change | [Age](https://example.com) |",
+      "|---|---|---|",
+      "| [pkg](url) | `1.0.0` → `2.0.0` | ![age](img) |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "pkg",
+      updateType: "major",
+      from: "1.0.0",
+      to: "2.0.0",
+    });
   });
 });
 

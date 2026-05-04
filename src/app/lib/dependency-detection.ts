@@ -148,34 +148,72 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   return null;
 }
 
+const VALID_UPDATE_TYPES = new Set(["major", "minor", "patch", "pin", "digest"]);
+const VERSION_ARROW_RE = /`?([^`\s]+)`?\s*→\s*`?([^`\s]+)`?/;
+
+function stripMarkdownLink(cell: string): string {
+  const m = /^\[([^\]]+)\]/.exec(cell);
+  return m ? m[1] : cell;
+}
+
 export function parseRenovateBody(body: string): VersionInfo | null {
   const lines = body.split("\n");
-  for (const line of lines) {
-    const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cells.length < 4) continue;
 
-    const updateCol = cells[2]?.toLowerCase();
-    if (!updateCol) continue;
+  let packageIdx = -1;
+  let updateIdx = -1;
+  let changeIdx = -1;
+  let headerLine = -1;
 
-    const validTypes = ["major", "minor", "patch", "pin", "digest"] as const;
-    const matched = validTypes.find((t) => t === updateCol);
-    if (!matched) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const cells = lines[i].split("|").map((c) => c.trim()).filter(Boolean);
+    if (cells.length < 2) continue;
+    const headers = cells.map((c) => stripMarkdownLink(c).toLowerCase());
+    const pIdx = headers.indexOf("package");
+    if (pIdx === -1) continue;
+    packageIdx = pIdx;
+    updateIdx = headers.indexOf("update");
+    changeIdx = headers.indexOf("change");
+    headerLine = i;
+    break;
+  }
 
-    const result: VersionInfo = { updateType: matched };
+  if (headerLine === -1) return null;
 
-    const pkgCell = cells[0];
-    const linkMatch = /\[([^\]]+)\]/.exec(pkgCell);
-    result.packageName = linkMatch ? linkMatch[1] : pkgCell;
+  for (let i = headerLine + 1; i < lines.length; i++) {
+    const cells = lines[i].split("|").map((c) => c.trim()).filter(Boolean);
+    if (cells.length < 2) continue;
+    if (cells.every((c) => /^[-:]+$/.test(c))) continue;
 
-    const changeCell = cells[3];
-    const changeMatch = /`?([^`\s]+)`?\s*→\s*`?([^`\s]+)`?/.exec(changeCell);
-    if (changeMatch) {
-      result.from = changeMatch[1];
-      result.to = changeMatch[2];
+    const result: VersionInfo = {};
+
+    if (packageIdx >= 0 && packageIdx < cells.length) {
+      result.packageName = stripMarkdownLink(cells[packageIdx]);
     }
 
-    return result;
+    if (updateIdx >= 0 && updateIdx < cells.length) {
+      const val = cells[updateIdx].toLowerCase();
+      if (VALID_UPDATE_TYPES.has(val)) result.updateType = val as VersionInfo["updateType"];
+    }
+
+    if (changeIdx >= 0 && changeIdx < cells.length) {
+      const m = VERSION_ARROW_RE.exec(cells[changeIdx]);
+      if (m) { result.from = m[1]; result.to = m[2]; }
+    }
+
+    if (!result.from) {
+      for (const cell of cells) {
+        const m = VERSION_ARROW_RE.exec(cell);
+        if (m) { result.from = m[1]; result.to = m[2]; break; }
+      }
+    }
+
+    if (!result.updateType && result.from && result.to) {
+      result.updateType = semverUpdateType(result.from, result.to) ?? undefined;
+    }
+
+    if (result.updateType || result.from) return result;
   }
+
   return null;
 }
 
