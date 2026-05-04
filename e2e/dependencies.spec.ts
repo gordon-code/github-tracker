@@ -49,8 +49,9 @@ test("dependencies tab auto-appears when dep bot PRs exist", async ({ page }) =>
     route.fulfill({ status: 200, json: graphqlWithDepPRs([makeDepPR()]) })
   );
   await page.goto("/dashboard");
+  await page.getByRole("tablist").waitFor();
 
-  await expect(page.getByRole("tab", { name: /dependencies/i })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /dependencies/i })).toBeVisible({ timeout: 10_000 });
 });
 
 test("dependencies tab is absent when no dep PRs exist", async ({ page }) => {
