@@ -1184,6 +1184,18 @@ export default function DashboardPage() {
               if (body) pr.body = body;
             }
           }));
+
+          setTimeout(() => {
+            try {
+              localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
+                _v: CACHE_VERSION,
+                issues: dashboardData.issues,
+                pullRequests: dashboardData.pullRequests,
+                workflowRuns: dashboardData.workflowRuns,
+                lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+              }));
+            } catch { /* non-critical */ }
+          }, 0);
         } finally {
           _fetchingDepBodies = false;
         }
