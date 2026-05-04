@@ -198,6 +198,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         };
       })
       .filter(({ pr, category }) => {
+        if (ignored.has(pr.id)) return false;
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
         if (filters.updateType !== "all" && category !== filters.updateType) return false;
         return true;

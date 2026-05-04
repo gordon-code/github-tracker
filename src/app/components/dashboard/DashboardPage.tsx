@@ -1065,7 +1065,7 @@ export default function DashboardPage() {
           return true;
         }).length };
       })() : {}),
-      ...(enableDependencies() ? { dependencies: dependencyPullRequests().length } : {}),
+      ...(enableDependencies() ? { dependencies: dependencyPullRequests().filter((p) => !ignoredPRs.has(p.id)).length } : {}),
       ...customCounts,
     };
   });
