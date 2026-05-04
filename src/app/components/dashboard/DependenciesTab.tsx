@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { config, updateConfig } from "../../stores/config";
-import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
+import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
+import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
@@ -138,6 +139,15 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const filterGroups = createMemo(() => [UPDATE_TYPE_OPTIONS, botOptions()]);
 
+  const ignoredIds = createMemo(
+    () => new Set(viewState.ignoredItems.filter((i) => i.type === "pullRequest").map((i) => i.id))
+  );
+
+  const ignoredDepPRs = createMemo(() => {
+    const depIds = new Set(props.pullRequests.map((p) => p.id));
+    return viewState.ignoredItems.filter((i) => i.type === "pullRequest" && depIds.has(i.id));
+  });
+
   const trackedPrIds = createMemo(() =>
     config.enableTracking
       ? new Set(viewState.trackedItems.filter((t) => t.type === "pullRequest").map((t) => t.id))
@@ -150,6 +160,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const classifiedPRs = createMemo<ClassifiedPR[]>(() => {
     const filters = activeFilters();
+    const ignored = ignoredIds();
     return props.pullRequests
       .map((pr) => {
         const titleInfo = extractVersionInfo(pr.title);
@@ -159,9 +170,9 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           if (bodyInfo) {
             versionInfo = {
               packageName: titleInfo?.packageName ?? bodyInfo.packageName,
-              from: titleInfo?.from ?? bodyInfo.from,
-              to: titleInfo?.to ?? bodyInfo.to,
-              updateType: titleInfo?.updateType ?? bodyInfo.updateType,
+              from: bodyInfo.from ?? titleInfo?.from,
+              to: bodyInfo.to ?? titleInfo?.to,
+              updateType: bodyInfo.updateType ?? titleInfo?.updateType,
             };
           }
         }
@@ -175,6 +186,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         };
       })
       .filter(({ pr, category }) => {
+        if (ignored.has(pr.id)) return false;
         if (filters.bot !== "all" && pr.userLogin !== filters.bot) return false;
         if (filters.updateType !== "all" && category !== filters.updateType) return false;
         return true;
@@ -290,6 +302,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
           />
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
+          <IgnoreBadge items={ignoredDepPRs()} onUnignore={unignoreItem} />
           <ExpandCollapseButtons
             onExpandAll={expandAllGroups}
             onCollapseAll={collapseAllGroups}
@@ -415,7 +428,7 @@ function StatusGroup(props: StatusGroupProps) {
 
         <div id={`dep-group-${props.status}`} role="list" class={`divide-y divide-base-300${props.expanded ? "" : " hidden"}`}>
           <For each={props.items}>
-            {({ pr, versionInfo, abandonedDep }) => {
+            {({ pr, versionInfo, category, abandonedDep }) => {
               const dashUrl = () => props.dashboardIssueUrls.get(pr.repoFullName);
               const title = () => displayTitle(pr, versionInfo);
               return (
@@ -449,16 +462,14 @@ function StatusGroup(props: StatusGroupProps) {
                         <StatusDot status={pr.checkStatus} />
                       </Show>
 
-                      <Show when={versionInfo?.updateType}>
-                        {(updateType) => (
-                          <span class={`badge badge-sm ${
-                            updateType() === "major" ? "badge-error" :
-                            updateType() === "minor" ? "badge-warning" :
-                            "badge-success"
-                          }`}>
-                            {updateType()}
-                          </span>
-                        )}
+                      <Show when={category !== "other"}>
+                        <span class={`badge badge-sm ${
+                          category === "major" ? "badge-error" :
+                          category === "minor" ? "badge-warning" :
+                          "badge-success"
+                        }`}>
+                          {category}
+                        </span>
                       </Show>
 
                       <Show when={pr.enriched !== false}>

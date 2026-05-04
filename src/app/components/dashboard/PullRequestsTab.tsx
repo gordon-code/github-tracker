@@ -42,6 +42,7 @@ export interface PullRequestsTabProps {
   customTabId?: string;
   filterPreset?: Record<string, string>;
   jiraKeyMap?: () => ReadonlyMap<string, import("../../../shared/jira-types").JiraIssue | null>;
+  depPrIds?: ReadonlySet<number>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -100,9 +101,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     return (props.monitoredRepos ?? []).length > 0 || (props.allUsers?.length ?? 0) > 1;
   });
 
-  const ignoredPullRequests = createMemo(() =>
-    viewState.ignoredItems.filter(i => i.type === "pullRequest")
-  );
+  const ignoredPullRequests = createMemo(() => {
+    const depIds = props.depPrIds;
+    return viewState.ignoredItems.filter(i => i.type === "pullRequest" && (!depIds || !depIds.has(i.id)));
+  });
 
   // Merge chain: schema defaults → preset → stored runtime overrides
   const activeFilters = createMemo(() =>

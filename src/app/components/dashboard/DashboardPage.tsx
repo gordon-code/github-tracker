@@ -1036,7 +1036,7 @@ export default function DashboardPage() {
           return true;
         }).length };
       })() : {}),
-      ...(enableDependencies() ? { dependencies: dependencyPullRequests().length } : {}),
+      ...(enableDependencies() ? { dependencies: dependencyPullRequests().filter((p) => !ignoredPRs.has(p.id)).length } : {}),
       ...customCounts,
     };
   });
@@ -1280,6 +1280,7 @@ export default function DashboardPage() {
                   configRepoNames={configRepoNames()}
                   refreshTick={refreshTick()}
                   jiraKeyMap={jiraKeyMap}
+                  depPrIds={dependencyPrIds()}
                 />
               </Match>
               <Match when={activeTab() === "dependencies"}>
