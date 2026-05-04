@@ -1159,50 +1159,49 @@ export default function DashboardPage() {
 
   // Fetch PR bodies for dependency PRs where title parsing can't determine update type.
   // Bodies are stored on the PR objects so DependenciesTab can parse Renovate's table.
-  createEffect(on(
-    () => _coordinator()?.lastRefreshAt(),
-    () => {
-      if (!config.dependencies.enabled) return;
-      if (_fetchingDepBodies) return;
-      const octokit = getClient();
-      if (!octokit) return;
+  // Tracks dependencyPullRequests() directly (not lastRefreshAt) so it fires on both
+  // cache load and poll completion. needsBodyFallback returns false for PRs that already
+  // have body, preventing refetch loops after the produce() update.
+  createEffect(() => {
+    if (!config.dependencies.enabled) return;
+    if (_fetchingDepBodies) return;
+    const octokit = getClient();
+    if (!octokit) return;
 
-      const depPrs = dependencyPullRequests();
-      const toFetch = depPrs.filter(needsBodyFallback);
-      if (toFetch.length === 0) return;
+    const depPrs = dependencyPullRequests();
+    const toFetch = depPrs.filter(needsBodyFallback);
+    if (toFetch.length === 0) return;
 
-      _fetchingDepBodies = true;
-      void (async () => {
-        try {
-          const nodeIds = toFetch.map((pr) => pr.nodeId!);
-          const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
-          if (bodyMap.size === 0) return;
+    _fetchingDepBodies = true;
+    void (async () => {
+      try {
+        const nodeIds = toFetch.map((pr) => pr.nodeId!);
+        const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
+        if (bodyMap.size === 0) return;
 
-          setDashboardData(produce((s) => {
-            for (const pr of s.pullRequests) {
-              const body = bodyMap.get(pr.id);
-              if (body) pr.body = body;
-            }
-          }));
+        setDashboardData(produce((s) => {
+          for (const pr of s.pullRequests) {
+            const body = bodyMap.get(pr.id);
+            if (body) pr.body = body;
+          }
+        }));
 
-          setTimeout(() => {
-            try {
-              localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
-                _v: CACHE_VERSION,
-                issues: dashboardData.issues,
-                pullRequests: dashboardData.pullRequests,
-                workflowRuns: dashboardData.workflowRuns,
-                lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
-              }));
-            } catch { /* non-critical */ }
-          }, 0);
-        } finally {
-          _fetchingDepBodies = false;
-        }
-      })();
-    },
-    { defer: true }
-  ));
+        setTimeout(() => {
+          try {
+            localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
+              _v: CACHE_VERSION,
+              issues: dashboardData.issues,
+              pullRequests: dashboardData.pullRequests,
+              workflowRuns: dashboardData.workflowRuns,
+              lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+            }));
+          } catch { /* non-critical */ }
+        }, 0);
+      } finally {
+        _fetchingDepBodies = false;
+      }
+    })();
+  });
 
   // Push dashboard data into the MCP relay snapshot on each full refresh.
   // Tracks lastRefreshedAt (always updated alongside data arrays in pollFetch).
