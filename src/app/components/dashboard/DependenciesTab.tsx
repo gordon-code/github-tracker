@@ -8,7 +8,6 @@ import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
   extractVersionInfo,
-  parseRenovateBody,
   ALL_DEP_STATUSES,
   isKnownDepBot,
   expandBotLogins,
