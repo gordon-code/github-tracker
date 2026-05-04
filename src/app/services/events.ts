@@ -34,6 +34,11 @@ export const ACTIONABLE_EVENT_TYPES = [
 
 // ── Module-level state ───────────────────────────────────────────────────────
 
+function eventIdNum(id: string): number {
+  const n = parseInt(id, 10);
+  return Number.isNaN(n) ? 0 : n;
+}
+
 let _lastEventId: string | null = null;
 
 // ── Auth cleanup ──────────────────────────────────────────────────────────────
@@ -74,8 +79,8 @@ export async function fetchUserEvents(
     let lastPageEvents = allEvents;
     while (lastPageEvents.length === 100 && page <= 3) {
       if (_lastEventId !== null) {
-        const threshold = parseInt(_lastEventId, 10);
-        if (lastPageEvents.some((e) => parseInt(e.id, 10) <= threshold)) break;
+        const threshold = eventIdNum(_lastEventId);
+        if (lastPageEvents.some((e) => eventIdNum(e.id) <= threshold)) break;
       }
       try {
         const next = await octokit.request("GET /users/{username}/events", {
@@ -95,7 +100,7 @@ export async function fetchUserEvents(
     }
 
     const maxId = allEvents.reduce(
-      (max, e) => Math.max(max, parseInt(e.id, 10)),
+      (max, e) => Math.max(max, eventIdNum(e.id)),
       0,
     );
 
@@ -108,9 +113,9 @@ export async function fetchUserEvents(
     }
 
     // Subsequent calls: filter to only events newer than _lastEventId
-    const lastIdNum = parseInt(_lastEventId, 10);
+    const lastIdNum = eventIdNum(_lastEventId);
     const newEvents = allEvents.filter(
-      (e) => parseInt(e.id, 10) > lastIdNum,
+      (e) => eventIdNum(e.id) > lastIdNum,
     );
 
     if (maxId > lastIdNum) {
