@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import type { Issue, RepoRef } from "../../services/api";
 import { isIssueVisible } from "../../lib/filters";
