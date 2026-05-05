@@ -201,7 +201,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-slow-pulse,
+  .animate-slow-pulse, .animate-pulse,
   .animate-toast-in, .animate-toast-out,
   .drawer-content[data-expanded], .drawer-content[data-closed],
   .drawer-overlay[data-expanded], .drawer-overlay[data-closed],

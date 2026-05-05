@@ -151,6 +151,25 @@ describe("SettingsTOC — scroll to section", () => {
       block: "start",
     });
   });
+
+  it("clears scrollingTo via rAF for instant scroll", async () => {
+    const mockScrollIntoView = vi.fn();
+    vi.spyOn(document, "getElementById").mockReturnValue({
+      scrollIntoView: mockScrollIntoView,
+    } as unknown as HTMLElement);
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true }));
+
+    const rAFSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+
+    render(() => <SettingsTOC />);
+    const nav = screen.getByRole("navigation", { name: "Settings navigation" });
+    fireEvent.click(within(nav).getByText("API Usage"));
+
+    expect(rAFSpy).toHaveBeenCalled();
+  });
 });
 
 describe("SettingsTOC — mobile dropdown", () => {
