@@ -18,6 +18,7 @@ import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpir
 import OrgSelector from "../onboarding/OrgSelector";
 import RepoSelector from "../onboarding/RepoSelector";
 import Section from "./Section";
+import SettingsTOC from "./SettingsTOC";
 import SettingRow from "./SettingRow";
 import ThemePicker from "./ThemePicker";
 import DensityPicker from "./DensityPicker";
@@ -30,6 +31,22 @@ import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+export const SETTINGS_PAGE_SECTION_IDS = [
+  "orgs-repos",
+  "tracked-users",
+  "refresh",
+  "api-usage",
+  "appearance",
+  "tabs",
+  "custom-tabs",
+  "actions",
+  "notifications",
+  "mcp-relay",
+  "jira",
+  "dependencies",
+  "data",
+] as const;
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -62,6 +79,18 @@ export default function SettingsPage() {
     if (pendingFocusHandler) {
       window.removeEventListener("focus", pendingFocusHandler);
     }
+  });
+
+  const [scrolled, setScrolled] = createSignal(false);
+  onMount(() => {
+    const onScroll = () => {
+      if (document.documentElement.dataset.scrollLock) return;
+      const y = window.scrollY;
+      if (scrolled() && y < 10) setScrolled(false);
+      else if (!scrolled() && y > 50) setScrolled(true);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onCleanup(() => window.removeEventListener("scroll", onScroll));
   });
 
   onMount(() => checkAndResetIfExpired());
@@ -365,8 +394,8 @@ export default function SettingsPage() {
   return (
     <div class="bg-base-200 min-h-screen">
       {/* Page header */}
-      <div class="border-b border-base-300 bg-base-100">
-        <div class="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+      <div class="settings-header sticky top-0 z-40 border-b border-base-300 bg-base-100">
+        <div class={`mx-auto max-w-5xl px-4 sm:px-6 transition-[padding] duration-200 ${scrolled() ? "py-2" : "py-6"}`}>
           <div class="flex items-center gap-3">
             <a
               href="/dashboard"
@@ -391,9 +420,14 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 flex flex-col gap-6">
+      <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+        <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
+          <SettingsTOC />
+          <div class="settings-content flex-1 min-w-0 flex flex-col gap-6 max-w-3xl">
+        {/* ── Data Sources ─────────────────────────────────────────────────── */}
+        <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Data Sources</p>
         {/* Section 1: Orgs & Repos */}
-        <Section title="Organizations & Repositories">
+        <Section id="orgs-repos" title="Organizations & Repositories">
           <div class="flex flex-col gap-3 px-4 py-3">
             <div class="flex items-center justify-between">
               <div>
@@ -492,7 +526,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 2: Tracked Users */}
-        <Section title="Tracked Users">
+        <Section id="tracked-users" title="Tracked Users">
           <div class="flex flex-col gap-3 px-4 py-3">
             <p class="text-xs text-base-content/60">
               Track another GitHub user's issues and pull requests alongside yours.
@@ -505,7 +539,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 3: Refresh */}
-        <Section title="Refresh">
+        <Section id="refresh" title="Refresh">
           <SettingRow
             label="Refresh interval"
             description="How often to poll GitHub for new data"
@@ -544,7 +578,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 4: API Usage */}
-        <Section title="API Usage">
+        <Section id="api-usage" title="API Usage">
           <div class="px-4 py-3 flex flex-col gap-3">
             <Show
               when={usageSnapshot().length > 0}
@@ -608,8 +642,105 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        {/* Section 5: GitHub Actions */}
-        <Section title="GitHub Actions">
+        {/* ── Display ────────────────────────────────────────────────────── */}
+        <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Display</p>
+        {/* Section 5: Appearance */}
+        <Section id="appearance" title="Appearance">
+          <div class="px-4 py-2 border-b border-base-300">
+            <p class="text-sm font-medium text-base-content mb-2">Theme</p>
+            <ThemePicker />
+          </div>
+          <div class="px-4 py-2 border-b border-base-300">
+            <p class="text-sm font-medium text-base-content mb-2">View density</p>
+            <DensityPicker />
+          </div>
+          <SettingRow
+            label="Items per page"
+            description="Number of items to show in each tab"
+          >
+            <select
+              value={String(config.itemsPerPage)}
+              onChange={(e) => {
+                saveWithFeedback({ itemsPerPage: Number(e.currentTarget.value) });
+              }}
+              class="select select-sm"
+            >
+              {itemsPerPageOptions.map((opt) => (
+                <option value={String(opt.value)}>{opt.label}</option>
+              ))}
+            </select>
+          </SettingRow>
+        </Section>
+
+        {/* Section 6: Tabs */}
+        <Section id="tabs" title="Tabs">
+          <SettingRow
+            label="Default tab"
+            description="Tab shown when opening the dashboard fresh"
+          >
+            <select
+              value={config.defaultTab}
+              onChange={(e) => {
+                saveWithFeedback({ defaultTab: e.currentTarget.value as Config["defaultTab"] });
+              }}
+              class="select select-sm"
+            >
+              {tabOptions().map((opt) => (
+                <option value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </SettingRow>
+          <SettingRow
+            label="Remember last tab"
+            description="Return to the last active tab on revisit"
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.rememberLastTab}
+              aria-label="Remember last tab"
+              checked={config.rememberLastTab}
+              onChange={(e) => saveWithFeedback({ rememberLastTab: e.currentTarget.checked })}
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+          <SettingRow
+            label="Enable tracked items"
+            description="Show a Tracked tab to pin issues and PRs for quick access"
+          >
+            <input
+              type="checkbox"
+              role="switch"
+              aria-checked={config.enableTracking}
+              aria-label="Enable tracked items"
+              checked={config.enableTracking}
+              onChange={(e) => {
+                const val = e.currentTarget.checked;
+                saveWithFeedback({
+                  enableTracking: val,
+                  ...(!val && config.defaultTab === "tracked" ? { defaultTab: "issues" as const } : {}),
+                });
+                if (!val && viewState.lastActiveTab === "tracked") {
+                  updateViewState({ lastActiveTab: "issues" });
+                }
+              }}
+              class="toggle toggle-primary"
+            />
+          </SettingRow>
+        </Section>
+
+        {/* Section 7: Custom Tabs */}
+        <Section id="custom-tabs" title="Custom Tabs" description="Create custom views with saved filters and scoping">
+          <CustomTabsSection
+            availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
+            availableRepos={config.selectedRepos}
+          />
+        </Section>
+
+        {/* ── Integrations ──────────────────────────────────────────────── */}
+        <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Integrations</p>
+        {/* Section 8: GitHub Actions */}
+        <Section id="actions" title="GitHub Actions">
           <SettingRow
             label="Show Actions tab"
             description="Show the Actions tab and track workflow runs. Disable to reduce API usage and simplify the dashboard."
@@ -676,8 +807,8 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 6: Notifications */}
-        <Section title="Notifications">
+        {/* Section 9: Notifications */}
+        <Section id="notifications" title="Notifications">
           <SettingRow
             label="Enable notifications"
             description="Show browser notifications for new activity"
@@ -771,101 +902,9 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Section 7: Appearance */}
-        <Section title="Appearance">
-          <div class="px-4 py-2 border-b border-base-300">
-            <p class="text-sm font-medium text-base-content mb-2">Theme</p>
-            <ThemePicker />
-          </div>
-          <div class="px-4 py-2 border-b border-base-300">
-            <p class="text-sm font-medium text-base-content mb-2">View density</p>
-            <DensityPicker />
-          </div>
-          <SettingRow
-            label="Items per page"
-            description="Number of items to show in each tab"
-          >
-            <select
-              value={String(config.itemsPerPage)}
-              onChange={(e) => {
-                saveWithFeedback({ itemsPerPage: Number(e.currentTarget.value) });
-              }}
-              class="select select-sm"
-            >
-              {itemsPerPageOptions.map((opt) => (
-                <option value={String(opt.value)}>{opt.label}</option>
-              ))}
-            </select>
-          </SettingRow>
-        </Section>
-
-        {/* Section 8: Tabs */}
-        <Section title="Tabs">
-          <SettingRow
-            label="Default tab"
-            description="Tab shown when opening the dashboard fresh"
-          >
-            <select
-              value={config.defaultTab}
-              onChange={(e) => {
-                saveWithFeedback({ defaultTab: e.currentTarget.value as Config["defaultTab"] });
-              }}
-              class="select select-sm"
-            >
-              {tabOptions().map((opt) => (
-                <option value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </SettingRow>
-          <SettingRow
-            label="Remember last tab"
-            description="Return to the last active tab on revisit"
-          >
-            <input
-              type="checkbox"
-              role="switch"
-              aria-checked={config.rememberLastTab}
-              aria-label="Remember last tab"
-              checked={config.rememberLastTab}
-              onChange={(e) => saveWithFeedback({ rememberLastTab: e.currentTarget.checked })}
-              class="toggle toggle-primary"
-            />
-          </SettingRow>
-          <SettingRow
-            label="Enable tracked items"
-            description="Show a Tracked tab to pin issues and PRs for quick access"
-          >
-            <input
-              type="checkbox"
-              role="switch"
-              aria-checked={config.enableTracking}
-              aria-label="Enable tracked items"
-              checked={config.enableTracking}
-              onChange={(e) => {
-                const val = e.currentTarget.checked;
-                saveWithFeedback({
-                  enableTracking: val,
-                  ...(!val && config.defaultTab === "tracked" ? { defaultTab: "issues" as const } : {}),
-                });
-                if (!val && viewState.lastActiveTab === "tracked") {
-                  updateViewState({ lastActiveTab: "issues" });
-                }
-              }}
-              class="toggle toggle-primary"
-            />
-          </SettingRow>
-        </Section>
-
-        {/* Section 9: Custom Tabs */}
-        <Section title="Custom Tabs" description="Create custom views with saved filters and scoping">
-          <CustomTabsSection
-            availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
-            availableRepos={config.selectedRepos}
-          />
-        </Section>
-
         {/* Section 10: MCP Server Relay */}
         <Section
+          id="mcp-relay"
           title="MCP Server Relay"
           description="Allow a local MCP server to read dashboard data. Enable this if you use Claude Code or another AI client with the GitHub Tracker MCP server."
         >
@@ -920,7 +959,7 @@ export default function SettingsPage() {
         </Section>
 
         {/* Section 11: Jira Cloud Integration */}
-        <Section title="Jira Cloud Integration">
+        <Section id="jira" title="Jira Cloud Integration">
             <Show
               when={isJiraAuthenticated()}
               fallback={
@@ -1132,8 +1171,8 @@ export default function SettingsPage() {
             </Show>
           </Section>
 
-        {/* Dependencies */}
-        <Section title="Dependencies">
+        {/* Section 12: Dependencies */}
+        <Section id="dependencies" title="Dependencies">
           <SettingRow
             label="Dependencies tab"
             description="Auto-show a Dependencies tab when dependency bot PRs are detected"
@@ -1162,8 +1201,10 @@ export default function SettingsPage() {
           </SettingRow>
         </Section>
 
-        {/* Data */}
-        <Section title="Data">
+        {/* ── Account ─────────────────────────────────────────────────── */}
+        <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Account</p>
+        {/* Section 13: Data */}
+        <Section id="data" title="Data">
           {/* Authentication method */}
           <SettingRow
             label="Authentication"
@@ -1275,6 +1316,8 @@ export default function SettingsPage() {
             </button>
           </SettingRow>
         </Section>
+          </div>
+        </div>
 
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">

@@ -635,6 +635,14 @@ Jira uses rotating refresh tokens — each refresh invalidates the previous toke
 
 ---
 
+## Settings Navigation
+
+The Settings page organizes its sections into four groups: **Data Sources** (Orgs & Repos, Tracked Users, Refresh, API Usage), **Display** (Appearance, Tabs, Custom Tabs), **Integrations** (GitHub Actions, Notifications, MCP Relay, Jira), and **Account** (Data).
+
+On desktop (1024px+), a sticky sidebar on the left shows a table of contents with all sections grouped and highlighted as you scroll. Click any item to jump to that section. On smaller screens, a dropdown bar appears below the header showing the current section name — tap it to open a section picker.
+
+The header shrinks as you scroll to maximize content space.
+
 ## Settings Reference
 
 Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**.

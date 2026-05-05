@@ -179,7 +179,7 @@ describe("SettingsPage — rendering", () => {
 
   it("renders Refresh section", () => {
     renderSettings();
-    screen.getByText("Refresh");
+    screen.getByRole("heading", { name: "Refresh" });
   });
 
   it("renders GitHub Actions section", () => {
@@ -190,22 +190,22 @@ describe("SettingsPage — rendering", () => {
 
   it("renders Notifications section", () => {
     renderSettings();
-    screen.getByText("Notifications");
+    screen.getByRole("heading", { name: "Notifications" });
   });
 
   it("renders Appearance section", () => {
     renderSettings();
-    screen.getByText("Appearance");
+    screen.getByRole("heading", { name: "Appearance" });
   });
 
   it("renders Tabs section", () => {
     renderSettings();
-    screen.getByText("Tabs");
+    screen.getByRole("heading", { name: "Tabs" });
   });
 
   it("renders Data section", () => {
     renderSettings();
-    screen.getByText("Data");
+    screen.getByRole("heading", { name: "Data" });
   });
 
   it("renders Manage Organizations and Manage Repositories buttons", () => {
