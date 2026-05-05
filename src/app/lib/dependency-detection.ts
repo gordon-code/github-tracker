@@ -72,8 +72,14 @@ export function isDependencyPr(pr: PullRequest, trackedBotLogins: Set<string>): 
   return false;
 }
 
+const VERSION_SPECIFIER_RE = /^[><=!~^]+/;
+
+function stripVersionSpecifier(v: string): string {
+  return v.replace(VERSION_SPECIFIER_RE, "");
+}
+
 function parseSemver(v: string): [number, number, number] | null {
-  const cleaned = v.replace(/^v/, "");
+  const cleaned = stripVersionSpecifier(v).replace(/^v/, "");
   const parts = cleaned.split(".");
   if (parts.length < 2) return null;
   const nums = parts.slice(0, 3).map(Number);
@@ -197,13 +203,13 @@ export function parseRenovateBody(body: string): VersionInfo | null {
 
     if (changeIdx >= 0 && changeIdx < cells.length) {
       const m = VERSION_ARROW_RE.exec(cells[changeIdx]);
-      if (m) { result.from = m[1]; result.to = m[2]; }
+      if (m) { result.from = stripVersionSpecifier(m[1]); result.to = stripVersionSpecifier(m[2]); }
     }
 
     if (!result.from) {
       for (const cell of cells) {
         const m = VERSION_ARROW_RE.exec(cell);
-        if (m) { result.from = m[1]; result.to = m[2]; break; }
+        if (m) { result.from = stripVersionSpecifier(m[1]); result.to = stripVersionSpecifier(m[2]); break; }
       }
     }
 

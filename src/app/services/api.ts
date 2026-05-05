@@ -922,7 +922,7 @@ async function graphqlLightCombinedSearch(
     return {
       issues: [],
       pullRequests: [],
-      errors: [{ repo: "search", statusCode: null, message: "Invalid userLogin", retryable: false }],
+      errors: [{ repo: "search", statusCode: null, message: `Invalid userLogin: "${userLogin}"`, retryable: false }],
     };
   }
 

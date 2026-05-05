@@ -1278,10 +1278,10 @@ export default function DashboardPage() {
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
               onRefresh={() => _coordinator()?.manualRefresh()}
-              sortOptions={globalSortOptions}
-              sortValue={viewState.globalSort.field}
-              sortDirection={viewState.globalSort.direction}
-              onSortChange={(field, dir) => setSortPreference(field, dir)}
+              sortOptions={activeTab() === "dependencies" ? undefined : globalSortOptions}
+              sortValue={activeTab() === "dependencies" ? undefined : viewState.globalSort.field}
+              sortDirection={activeTab() === "dependencies" ? undefined : viewState.globalSort.direction}
+              onSortChange={activeTab() === "dependencies" ? undefined : (field, dir) => setSortPreference(field, dir)}
               hideOrgRepo={!isBuiltinTab(activeTab()) || activeTab() === "dependencies"}
             />
           </div>

@@ -200,36 +200,16 @@ export default function DependenciesTab(props: DependenciesTabProps) {
   });
 
   const sortedPRs = createMemo(() => {
-    const { field, direction } = viewState.globalSort;
     const items = [...classifiedPRs()];
-    const dir = direction === "asc" ? 1 : -1;
-
     items.sort((a, b) => {
-      // User-selected sort as primary
-      let cmp = 0;
-      switch (field) {
-        case "repo": cmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName); break;
-        case "title": cmp = a.pr.title.localeCompare(b.pr.title); break;
-        case "author": cmp = a.pr.userLogin.localeCompare(b.pr.userLogin); break;
-        case "comments": cmp = a.pr.comments - b.pr.comments; break;
-        case "checkStatus": cmp = (a.pr.checkStatus ?? "").localeCompare(b.pr.checkStatus ?? ""); break;
-        case "reviewDecision": cmp = (a.pr.reviewDecision ?? "").localeCompare(b.pr.reviewDecision ?? ""); break;
-        case "size": cmp = (a.pr.additions + a.pr.deletions) - (b.pr.additions + b.pr.deletions); break;
-        case "createdAt": cmp = a.pr.createdAt.localeCompare(b.pr.createdAt); break;
-        case "updatedAt":
-        default:
-          cmp = a.pr.updatedAt.localeCompare(b.pr.updatedAt);
-          break;
-      }
-      if (cmp !== 0) return cmp * dir;
+      const repoCmp = a.pr.repoFullName.localeCompare(b.pr.repoFullName);
+      if (repoCmp !== 0) return repoCmp;
 
-      // Category as secondary (safest → least safe within each group)
       const catCmp = CATEGORY_SORT_ORDER[a.category] - CATEGORY_SORT_ORDER[b.category];
       if (catCmp !== 0) return catCmp;
 
-      return a.pr.repoFullName.localeCompare(b.pr.repoFullName);
+      return a.pr.updatedAt.localeCompare(b.pr.updatedAt);
     });
-
     return items;
   });
 

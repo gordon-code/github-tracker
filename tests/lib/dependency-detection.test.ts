@@ -531,6 +531,20 @@ describe("parseRenovateBody", () => {
     });
   });
 
+  it("strips Python version specifiers (==, >=, ~=) from versions", () => {
+    const body = [
+      "| Package | Change | [Age](url) | [Confidence](url) |",
+      "|---|---|---|---|",
+      "| [stamina](url) ([changelog](url2)) | `==25.2.0` → `==26.1.0` | ![age](img) | ![confidence](img) |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "stamina",
+      updateType: "major",
+      from: "25.2.0",
+      to: "26.1.0",
+    });
+  });
+
   it("parses digest update", () => {
     const body = [
       "| Package | Update | Change |",
