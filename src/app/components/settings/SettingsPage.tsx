@@ -190,6 +190,7 @@ export default function SettingsPage() {
           customFields: config.jira?.customFields ?? [],
           customScopes: config.jira?.customScopes ?? [],
         },
+        dependencies: config.dependencies,
       },
       null,
       2
@@ -348,6 +349,7 @@ export default function SettingsPage() {
     { value: "pullRequests", label: "Pull Requests" },
     ...(config.enableActions ? [{ value: "actions", label: "GitHub Actions" }] : []),
     ...(config.enableTracking ? [{ value: "tracked", label: "Tracked Items" }] : []),
+    ...(config.dependencies?.enabled ? [{ value: "dependencies", label: "Dependencies" }] : []),
     ...(config.jira?.enabled ? [{ value: "jiraAssigned", label: "Jira" }] : []),
     ...config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ value: t.id, label: t.name })),
   ]);
@@ -1129,6 +1131,36 @@ export default function SettingsPage() {
               </SettingRow>
             </Show>
           </Section>
+
+        {/* Dependencies */}
+        <Section title="Dependencies">
+          <SettingRow
+            label="Dependencies tab"
+            description="Auto-show a Dependencies tab when dependency bot PRs are detected"
+          >
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              aria-label="Enable dependencies tab"
+              checked={config.dependencies?.enabled ?? true}
+              onChange={() => saveWithFeedback({ dependencies: { ...config.dependencies, enabled: !(config.dependencies?.enabled ?? true) } })}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Rebase label"
+            description="Label name Renovate uses to signal a PR needs rebasing"
+          >
+            <input
+              type="text"
+              class="input input-sm w-40"
+              aria-label="Rebase label"
+              value={config.dependencies?.rebaseLabel ?? "rebase"}
+              maxLength={50}
+              placeholder="rebase"
+              onInput={(e) => saveWithFeedback({ dependencies: { ...config.dependencies, rebaseLabel: e.currentTarget.value || "rebase" } })}
+            />
+          </SettingRow>
+        </Section>
 
         {/* Data */}
         <Section title="Data">

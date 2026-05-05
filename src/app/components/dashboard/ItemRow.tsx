@@ -22,6 +22,10 @@ export interface ItemRowProps {
   isTracked?: boolean;
   commentCount?: number;
   hideRepo?: boolean;
+  hideAuthor?: boolean;
+  hideNumber?: boolean;
+  subtleRepo?: boolean;
+  titlePrefix?: JSX.Element;
   surfacedByBadge?: JSX.Element;
   isPolling?: boolean;
   isFlashing?: boolean;
@@ -113,8 +117,11 @@ export default function ItemRow(props: ItemRowProps) {
           when={isCompact()}
           fallback={
             <span
-              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
-                bg-primary/10 text-primary text-xs px-2.5 py-1"
+              class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium text-xs px-2.5 py-1 ${
+                props.subtleRepo
+                  ? "min-w-[9.5rem] text-base-content/50"
+                  : "bg-primary/10 text-primary"
+              }`}
             >
               {props.repo}
             </span>
@@ -122,8 +129,11 @@ export default function ItemRow(props: ItemRowProps) {
         >
           <Tooltip content={props.repo} class="shrink-0 relative z-10">
             <span
-              class="shrink-0 inline-flex items-center rounded-full font-mono font-medium
-                bg-primary/10 text-primary text-xs px-2 py-0.5"
+              class={`shrink-0 inline-flex items-center font-mono font-medium text-xs ${
+                props.subtleRepo
+                  ? "min-w-[9.5rem] text-base-content/50"
+                  : "rounded-full bg-primary/10 text-primary px-2 py-0.5"
+              }`}
             >
               {repoShortName()}
             </span>
@@ -134,7 +144,14 @@ export default function ItemRow(props: ItemRowProps) {
       {/* ── COMPACT LAYOUT: everything on one line ── */}
       <Show when={isCompact()}>
         {/* Number */}
-        <span class="text-xs text-base-content/50 shrink-0">#{props.number}</span>
+        <Show when={!props.hideNumber}>
+          <span class="text-xs text-base-content/50 shrink-0">#{props.number}</span>
+        </Show>
+
+        {/* Title prefix (e.g., category badge) — fixed width for column alignment */}
+        <Show when={props.titlePrefix !== undefined}>
+          <div class="relative z-10 shrink-0">{props.titlePrefix}</div>
+        </Show>
 
         {/* Title — truncated, fills available space */}
         <span class="font-medium text-sm truncate flex-1 min-w-0">
@@ -177,8 +194,10 @@ export default function ItemRow(props: ItemRowProps) {
 
         {/* Author + time — compact, inline */}
         <span class="shrink-0 text-xs text-base-content/50 whitespace-nowrap">
-          {props.author}
-          {" · "}
+          <Show when={!props.hideAuthor}>
+            {props.author}
+            {" · "}
+          </Show>
           <Tooltip content={compactDateTooltip()} contentClass="whitespace-pre-line" class="relative z-10">
             <time datetime={props.updatedAt} aria-label={dateDisplay().updatedLabel}>
               {dateDisplay().updated || dateDisplay().created}
@@ -193,9 +212,14 @@ export default function ItemRow(props: ItemRowProps) {
         {/* Main content */}
         <div class="flex-1 min-w-0">
           <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
-            <span class="text-base-content/60 shrink-0">
-              #{props.number}
-            </span>
+            <Show when={!props.hideNumber}>
+              <span class="text-base-content/60 shrink-0">
+                #{props.number}
+              </span>
+            </Show>
+            <Show when={props.titlePrefix !== undefined}>
+              <div class="relative z-10 shrink-0">{props.titlePrefix}</div>
+            </Show>
             <span class="font-medium text-base-content truncate">
               {props.title}
             </span>
@@ -224,7 +248,9 @@ export default function ItemRow(props: ItemRowProps) {
 
         {/* Author + time + comment count */}
         <div class="shrink-0 flex flex-col items-end gap-0.5 text-xs text-base-content/60 pt-0.5">
-          <span>{props.author}</span>
+          <Show when={!props.hideAuthor}>
+            <span>{props.author}</span>
+          </Show>
           <Show when={props.surfacedByBadge !== undefined}>
             <div class="relative z-10">{props.surfacedByBadge}</div>
           </Show>

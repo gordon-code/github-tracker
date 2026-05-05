@@ -124,7 +124,7 @@ export default function IssuesTab(props: IssuesTabProps) {
 
     let items = props.issues.filter((issue) => {
       if (issue.state !== "OPEN") return false;
-      if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: viewState.hideDepDashboard, globalFilter })) return false;
+      if (!isIssueVisible(issue, { ignoredIds, hideDepDashboard: !props.customTabId && viewState.hideDepDashboard && !config.dependencies.enabled, globalFilter })) return false;
 
       const roles = deriveInvolvementRoles(props.userLogin, issue.userLogin, issue.assigneeLogins, [], upstreamRepoSet().has(issue.repoFullName));
 
@@ -277,18 +277,20 @@ export default function IssuesTab(props: IssuesTabProps) {
               setPage(0);
             }}
           />
-          <Tooltip content="Show or hide Renovate Dependency Dashboard issues">
-            <button
-              onClick={() => {
-                updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
-                setPage(0);
-              }}
-              class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
-              aria-pressed={!viewState.hideDepDashboard}
-            >
-              Show Dep Dashboard
-            </button>
-          </Tooltip>
+          <Show when={!props.customTabId && !config.dependencies.enabled}>
+            <Tooltip content="Show or hide Renovate Dependency Dashboard issues">
+              <button
+                onClick={() => {
+                  updateViewState({ hideDepDashboard: !viewState.hideDepDashboard });
+                  setPage(0);
+                }}
+                class={`btn btn-xs rounded-full ${!viewState.hideDepDashboard ? "btn-primary" : "btn-ghost text-base-content/50"}`}
+                aria-pressed={!viewState.hideDepDashboard}
+              >
+                Show Dep Dashboard
+              </button>
+            </Tooltip>
+          </Show>
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons

@@ -659,6 +659,444 @@ test("capture dashboard screenshot", async ({ page }) => {
   await page.screenshot({ path: "docs/dashboard-screenshot-compact.png" });
 });
 
+test("capture dependencies screenshot", async ({ page }) => {
+  const now = Date.now();
+  const recentDate = new Date(now - 2 * 86_400_000).toISOString();     // 2 days ago
+  const olderDate = new Date(now - 5 * 86_400_000).toISOString();      // 5 days ago
+  const staleDate = new Date(now - 20 * 86_400_000).toISOString();     // 20 days ago
+  const veryStaleDate = new Date(now - 35 * 86_400_000).toISOString(); // 35 days ago
+
+  // Dep PR light nodes — detected via bot login, branch prefix, and title pattern
+  const depLightPRNodes = [
+    {
+      id: "PR_kgDOBdep001",
+      databaseId: 300001,
+      number: 501,
+      title: "Bump express from 4.18.2 to 4.19.0",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/web-platform/pull/501",
+      createdAt: "2026-04-01T10:00:00Z",
+      updatedAt: recentDate,
+      author: { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/29110?v=4" },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+      headRefName: "dependabot/npm_and_yarn/express-4.19.0",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "dependencies", color: "0366d6" }] },
+    },
+    {
+      id: "PR_kgDOBdep002",
+      databaseId: 300002,
+      number: 502,
+      title: "Bump webpack from 5.89.0 to 5.91.0",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/web-platform/pull/502",
+      createdAt: "2026-04-02T09:00:00Z",
+      updatedAt: recentDate,
+      author: { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/29110?v=4" },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+      headRefName: "dependabot/npm_and_yarn/webpack-5.91.0",
+      baseRefName: "main",
+      reviewDecision: "REVIEW_REQUIRED",
+      labels: { nodes: [{ name: "dependencies", color: "0366d6" }] },
+    },
+    {
+      id: "PR_kgDOBdep003",
+      databaseId: 300003,
+      number: 127,
+      title: "Update dependency typescript to v5.5.0",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/api-gateway/pull/127",
+      createdAt: "2026-04-01T14:00:00Z",
+      updatedAt: olderDate,
+      author: { login: "renovate[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/2740?v=4" },
+      repository: { nameWithOwner: "acme-corp/api-gateway", stargazerCount: 573 },
+      headRefName: "renovate/typescript-5.x",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "renovate", color: "1a7f37" }] },
+    },
+    {
+      id: "PR_kgDOBdep004",
+      databaseId: 300004,
+      number: 128,
+      title: "chore(deps): update react monorepo to v18.3.1",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/api-gateway/pull/128",
+      createdAt: "2026-03-28T11:00:00Z",
+      updatedAt: olderDate,
+      author: { login: "renovate[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/2740?v=4" },
+      repository: { nameWithOwner: "acme-corp/api-gateway", stargazerCount: 573 },
+      headRefName: "renovate/react-monorepo",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "renovate", color: "1a7f37" }] },
+    },
+    {
+      id: "PR_kgDOBdep005",
+      databaseId: 300005,
+      number: 503,
+      title: "Bump axios from 1.6.0 to 1.7.2",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/web-platform/pull/503",
+      createdAt: "2026-03-25T08:00:00Z",
+      updatedAt: olderDate,
+      author: { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/29110?v=4" },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+      headRefName: "dependabot/npm_and_yarn/axios-1.7.2",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "dependencies", color: "0366d6" }, { name: "rebase", color: "fbca04" }] },
+    },
+    {
+      id: "PR_kgDOBdep006",
+      databaseId: 300006,
+      number: 45,
+      title: "Update dependency @types/node to v20.12.0",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/design-system/pull/45",
+      createdAt: "2026-03-10T10:00:00Z",
+      updatedAt: staleDate,
+      author: { login: "renovate[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/2740?v=4" },
+      repository: { nameWithOwner: "acme-corp/design-system", stargazerCount: 228 },
+      headRefName: "renovate/types-node-20.x",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "renovate", color: "1a7f37" }] },
+    },
+    {
+      id: "PR_kgDOBdep007",
+      databaseId: 300007,
+      number: 504,
+      title: "Bump eslint from 8.56.0 to 9.0.0",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/web-platform/pull/504",
+      createdAt: "2026-02-20T09:00:00Z",
+      updatedAt: veryStaleDate,
+      author: { login: "dependabot[bot]", avatarUrl: "https://avatars.githubusercontent.com/in/29110?v=4" },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+      headRefName: "dependabot/npm_and_yarn/eslint-9.0.0",
+      baseRefName: "main",
+      reviewDecision: null,
+      labels: { nodes: [{ name: "dependencies", color: "0366d6" }] },
+    },
+  ];
+
+  // Heavy PR nodes for dep PRs — control check status to determine status grouping
+  const depHeavyPRNodes = [
+    {
+      // express → mergeable (CI success, not approved)
+      databaseId: 300001,
+      headRefOid: "aaa111aaa111aaa111aaa111aaa111aaa111aaa1",
+      headRepository: { owner: { login: "dependabot[bot]" }, nameWithOwner: "acme-corp/web-platform" },
+      mergeStateStatus: "CLEAN",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 12, deletions: 8, changedFiles: 2,
+      comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    },
+    {
+      // webpack → mergeable (CI success, review required but not approved)
+      databaseId: 300002,
+      headRefOid: "bbb222bbb222bbb222bbb222bbb222bbb222bbb2",
+      headRepository: { owner: { login: "dependabot[bot]" }, nameWithOwner: "acme-corp/web-platform" },
+      mergeStateStatus: "CLEAN",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 45, deletions: 12, changedFiles: 3,
+      comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    },
+    {
+      // typescript → needs-action (CI failure)
+      databaseId: 300003,
+      headRefOid: "ccc333ccc333ccc333ccc333ccc333ccc333ccc3",
+      headRepository: { owner: { login: "renovate[bot]" }, nameWithOwner: "acme-corp/api-gateway" },
+      mergeStateStatus: "BLOCKED",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 3, deletions: 3, changedFiles: 1,
+      comments: { totalCount: 2 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+    },
+    {
+      // react monorepo → needs-action (CI pending)
+      databaseId: 300004,
+      headRefOid: "ddd444ddd444ddd444ddd444ddd444ddd444ddd4",
+      headRepository: { owner: { login: "renovate[bot]" }, nameWithOwner: "acme-corp/api-gateway" },
+      mergeStateStatus: "BLOCKED",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 89, deletions: 34, changedFiles: 8,
+      comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+    },
+    {
+      // axios → pending-rebase (has "rebase" label, CI success)
+      databaseId: 300005,
+      headRefOid: "eee555eee555eee555eee555eee555eee555eee5",
+      headRepository: { owner: { login: "dependabot[bot]" }, nameWithOwner: "acme-corp/web-platform" },
+      mergeStateStatus: "BEHIND",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 18, deletions: 6, changedFiles: 2,
+      comments: { totalCount: 1 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    },
+    {
+      // @types/node → stale (updatedAt 20 days ago)
+      databaseId: 300006,
+      headRefOid: "fff666fff666fff666fff666fff666fff666fff6",
+      headRepository: { owner: { login: "renovate[bot]" }, nameWithOwner: "acme-corp/design-system" },
+      mergeStateStatus: "BLOCKED",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 2, deletions: 2, changedFiles: 1,
+      comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+    },
+    {
+      // eslint → stale (updatedAt 35 days ago, major bump)
+      databaseId: 300007,
+      headRefOid: "ggg777ggg777ggg777ggg777ggg777ggg777ggg7",
+      headRepository: { owner: { login: "dependabot[bot]" }, nameWithOwner: "acme-corp/web-platform" },
+      mergeStateStatus: "BLOCKED",
+      assignees: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      additions: 312, deletions: 145, changedFiles: 18,
+      comments: { totalCount: 5 }, reviewThreads: { totalCount: 1 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+    },
+  ];
+
+  // A few regular PRs for realistic tab bar counts
+  const regularLightPRNodes = [
+    {
+      id: "PR_kgDOBreg001",
+      databaseId: 100001,
+      number: 247,
+      title: "feat: migrate authentication to passkey support",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/web-platform/pull/247",
+      createdAt: "2026-03-28T09:15:00Z",
+      updatedAt: recentDate,
+      author: { login: "jdoe", avatarUrl: "https://avatars.githubusercontent.com/u/12345?v=4" },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+      headRefName: "feat/passkey-auth",
+      baseRefName: "main",
+      reviewDecision: "APPROVED",
+      labels: { nodes: [{ name: "feature", color: "0075ca" }] },
+    },
+    {
+      id: "PR_kgDOBreg002",
+      databaseId: 100002,
+      number: 312,
+      title: "fix: resolve N+1 query in user profile endpoint",
+      state: "OPEN",
+      isDraft: false,
+      url: "https://github.com/acme-corp/api-gateway/pull/312",
+      createdAt: "2026-04-01T14:20:00Z",
+      updatedAt: recentDate,
+      author: { login: "msmith", avatarUrl: "https://avatars.githubusercontent.com/u/67890?v=4" },
+      repository: { nameWithOwner: "acme-corp/api-gateway", stargazerCount: 573 },
+      headRefName: "fix/n-plus-one-profile",
+      baseRefName: "main",
+      reviewDecision: "CHANGES_REQUESTED",
+      labels: { nodes: [{ name: "bug", color: "d73a4a" }] },
+    },
+  ];
+
+  const regularHeavyPRNodes = [
+    {
+      databaseId: 100001,
+      headRefOid: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      headRepository: { owner: { login: "jdoe" }, nameWithOwner: "jdoe/web-platform-fork" },
+      mergeStateStatus: "CLEAN",
+      assignees: { nodes: [] }, reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 1, nodes: [{ author: { login: "msmith" } }] },
+      additions: 312, deletions: 47, changedFiles: 8,
+      comments: { totalCount: 6 }, reviewThreads: { totalCount: 1 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    },
+    {
+      databaseId: 100002,
+      headRefOid: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+      headRepository: { owner: { login: "msmith" }, nameWithOwner: "acme-corp/api-gateway" },
+      mergeStateStatus: "BLOCKED",
+      assignees: { nodes: [{ login: "jdoe" }] }, reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 1, nodes: [{ author: { login: "jdoe" } }] },
+      additions: 89, deletions: 23, changedFiles: 4,
+      comments: { totalCount: 12 }, reviewThreads: { totalCount: 3 },
+      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    },
+  ];
+
+  const depIssueNodes = [
+    {
+      databaseId: 200001,
+      number: 1023,
+      title: "OAuth login fails on Safari when third-party cookies are blocked",
+      state: "OPEN",
+      url: "https://github.com/acme-corp/web-platform/issues/1023",
+      createdAt: "2026-03-29T10:00:00Z",
+      updatedAt: recentDate,
+      author: { login: "bwilson", avatarUrl: "https://avatars.githubusercontent.com/u/44444?v=4" },
+      assignees: { nodes: [{ login: "jdoe" }] },
+      labels: { nodes: [{ name: "bug", color: "d73a4a" }] },
+      comments: { totalCount: 14 },
+      repository: { nameWithOwner: "acme-corp/web-platform", stargazerCount: 1842 },
+    },
+  ];
+
+  // Seed localStorage
+  await page.addInitScript(() => {
+    localStorage.removeItem("github-tracker:view");
+    localStorage.setItem("github-tracker:auth-token", "fake-screenshot-token");
+    localStorage.setItem(
+      "github-tracker:config",
+      JSON.stringify({
+        onboardingComplete: true,
+        selectedOrgs: ["acme-corp"],
+        selectedRepos: [
+          { owner: "acme-corp", name: "web-platform", fullName: "acme-corp/web-platform" },
+          { owner: "acme-corp", name: "api-gateway", fullName: "acme-corp/api-gateway" },
+          { owner: "acme-corp", name: "design-system", fullName: "acme-corp/design-system" },
+        ],
+        trackedUsers: [
+          {
+            login: "jdoe",
+            avatarUrl: "https://avatars.githubusercontent.com/u/12345?v=4",
+            name: "Jane Doe",
+            type: "user",
+          },
+        ],
+        theme: "dark",
+        dependencies: { enabled: true, rebaseLabel: "rebase" },
+      })
+    );
+    // Seed dep version metadata for richer display
+    localStorage.setItem(
+      "github-tracker:dep-meta",
+      JSON.stringify({
+        "300003": { packageName: "typescript", from: "5.4.5", to: "5.5.0", updateType: "minor" },
+        "300004": { packageName: "react", from: "18.2.0", to: "18.3.1", updateType: "minor" },
+        "300006": { packageName: "@types/node", from: "20.11.0", to: "20.12.0", updateType: "minor" },
+      })
+    );
+  });
+
+  // API mocks — catch-all first, specific routes override
+  await page.route("https://api.github.com/**", (route) => route.abort());
+
+  await page.route("https://api.github.com/notifications*", (route) =>
+    route.fulfill({ status: 200, json: [] })
+  );
+
+  await page.route("https://api.github.com/repos/*/*/actions/runs*", (route) =>
+    route.fulfill({ status: 200, json: { total_count: 0, workflow_runs: [] } })
+  );
+
+  await page.route("https://api.github.com/graphql", async (route) => {
+    const body = route.request().postDataJSON() as { variables?: Record<string, unknown> } | null;
+    const variables = body?.variables ?? {};
+
+    // Heavy backfill
+    if ("ids" in variables) {
+      return route.fulfill({
+        status: 200,
+        json: {
+          data: {
+            nodes: [...depHeavyPRNodes, ...regularHeavyPRNodes],
+            rateLimit: { limit: 5000, remaining: 4900, resetAt: RESET_AT },
+          },
+        },
+      });
+    }
+
+    // Light combined search
+    if ("issueQ" in variables || "prInvQ" in variables || "prRevQ" in variables) {
+      const allPRs = [...depLightPRNodes, ...regularLightPRNodes];
+      return route.fulfill({
+        status: 200,
+        json: {
+          data: {
+            issues: {
+              issueCount: depIssueNodes.length,
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: depIssueNodes,
+            },
+            prInvolves: {
+              issueCount: allPRs.length,
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: allPRs,
+            },
+            prReviewReq: {
+              issueCount: 0,
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [],
+            },
+            rateLimit: { limit: 5000, remaining: 4950, resetAt: RESET_AT },
+          },
+        },
+      });
+    }
+
+    return route.fulfill({
+      status: 200,
+      json: {
+        data: {
+          rateLimit: { limit: 5000, remaining: 4900, resetAt: RESET_AT },
+        },
+      },
+    });
+  });
+
+  await page.route("https://api.github.com/user", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        login: "jdoe",
+        name: "Jane Doe",
+        avatar_url: "https://avatars.githubusercontent.com/u/12345?v=4",
+        id: 12345,
+      },
+    })
+  );
+
+  // Navigate and capture
+  await page.goto("/dashboard");
+  await page.getByRole("tablist").waitFor();
+
+  // Switch to Dependencies tab
+  await page.getByRole("tab", { name: /dependencies/i }).click();
+  await page.getByRole("tab", { name: /dependencies/i, selected: true }).waitFor();
+
+  // Wait for dep PRs to render (status group header text)
+  await page.getByText("Mergeable").waitFor();
+
+  // Expand all status groups for a comprehensive screenshot
+  await page.getByRole("button", { name: /expand all/i }).click();
+  await page.getByText("express").first().waitFor();
+
+  await page.screenshot({ path: "docs/dependencies-screenshot.png" });
+});
+
 test("capture jira screenshot", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.removeItem("github-tracker:view");

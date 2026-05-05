@@ -28,6 +28,12 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Workflow Grouping](#workflow-grouping)
   - [Show PR Runs](#show-pr-runs)
   - [Filters](#actions-filters)
+- [Dependencies Tab](#dependencies-tab)
+  - [Auto-Detection](#auto-detection)
+  - [Status Grouping](#status-grouping)
+  - [Abandoned Dependencies](#abandoned-dependencies)
+  - [Settings](#dependencies-settings)
+  - [Filters](#dependencies-filters)
 - [Multi-User Tracking](#multi-user-tracking)
 - [Monitor-All Mode](#monitor-all-mode)
 - [Upstream Repos](#upstream-repos)
@@ -256,6 +262,60 @@ By default, runs triggered by pull request events are hidden to reduce noise. To
 |--------|---------|---------|
 | Conclusion | All / Success / Failure / Cancelled / Running / Other | All |
 | Event | All / Push / Pull request / Schedule / Workflow dispatch / Other | All |
+
+---
+
+## Dependencies Tab
+
+The Dependencies tab is a built-in tab that groups dependency bot PRs separately from your regular Pull Requests view. It appears automatically when the app detects dependency bot PRs in your tracked repos and is enabled in **Settings > Dependencies**.
+
+### Auto-Detection
+
+The tab uses a multi-layer detection pipeline to identify dependency PRs:
+
+1. **Known bot logins** — PRs from known dependency bots (dependabot[bot], renovate[bot], snyk-bot, depfu[bot], pyup-bot, scala-steward, mend-renovate-bot) are detected automatically.
+2. **Tracked bot users** — any user added to your tracked users list with type "bot" in Settings is also detected.
+3. **Branch name prefix** — branches starting with `dependabot/`, `renovate/`, `snyk-fix-`, `snyk-upgrade-`, or `pyup-update-` are flagged as dependency updates.
+4. **Title pattern** — PR titles matching common dependency update patterns (e.g., "Bump X from Y to Z", "chore(deps): ...", "[Snyk] ...") are detected.
+5. **Label match** — PRs with the `dependencies` label are included.
+
+Dependency PRs claimed by the Dependencies tab are excluded from the standard Pull Requests tab and any custom tabs with exclusivity enabled. The tab title shows the current count of open dependency PRs.
+
+### Status Grouping
+
+Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups items by their update status:
+
+| Group | Criteria |
+|-------|----------|
+| **Needs Review** | CI passing (all checks green), PR not yet approved — these are ready to merge |
+| **Waiting** | CI pending, checks still running, or PR is a draft — not yet actionable |
+| **Stale** | PR has been open more than 14 days without merging — may need a rebase or manual review |
+
+Within each group, PRs are sorted by updated date (most recent first).
+
+### Abandoned Dependencies
+
+If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Abandoned" section are shown as pill badges on matching PR rows. Each pill links directly to the Renovate Dashboard issue so you can investigate further.
+
+The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table.
+
+### Dependencies Settings
+
+Go to **Settings > Dependencies** to configure:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enable Dependencies tab | On | Show or hide the tab. When disabled, dependency PRs appear in the standard Pull Requests tab. |
+| Rebase label | `rebase` | PRs with this label are shown with a "Rebasing" indicator in the Dependencies tab. Change to match the label name your dependency bot uses to signal rebase-needed status. |
+
+### Dependencies Filters
+
+| Filter | Options | Default |
+|--------|---------|---------|
+| Update type | All / Major / Minor / Patch | All |
+| Bot | All / (detected bot logins) | All (shown when multiple bots are active) |
+
+The update type filter reads the PR title for SemVer version bump signals (e.g., `1.x → 2.x` = Major). PRs with titles that do not contain recognizable version patterns are grouped under the currently active filter if it is set to All.
 
 ---
 

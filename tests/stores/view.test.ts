@@ -13,6 +13,7 @@ import {
   resetAllTabFilters,
   initViewPersistence,
   ViewStateSchema,
+  DependencyFiltersSchema,
   toggleExpandedRepo,
   setAllExpanded,
   pruneExpandedRepos,
@@ -239,7 +240,6 @@ describe("ViewStateSchema", () => {
     expect(result.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
     expect(result.ignoredItems).toEqual([]);
     expect(result.globalFilter).toEqual({ org: null, repo: null });
-    expect(result.hideDepDashboard).toBe(true);
   });
 
   it("handles missing fields with defaults", () => {
@@ -381,27 +381,6 @@ describe("resetViewState", () => {
   });
 });
 
-describe("hideDepDashboard", () => {
-  beforeEach(() => resetViewState());
-
-  it("defaults to true", () => {
-    expect(viewState.hideDepDashboard).toBe(true);
-  });
-
-  it("can be toggled via updateViewState", () => {
-    updateViewState({ hideDepDashboard: false });
-    expect(viewState.hideDepDashboard).toBe(false);
-    updateViewState({ hideDepDashboard: true });
-    expect(viewState.hideDepDashboard).toBe(true);
-  });
-
-  it("is not affected by resetAllTabFilters", () => {
-    updateViewState({ hideDepDashboard: false });
-    resetAllTabFilters("issues");
-    expect(viewState.hideDepDashboard).toBe(false);
-  });
-});
-
 describe("resetAllTabFilters — scope reset", () => {
   it("resets issues scope from 'all' back to 'involves_me'", () => {
     setTabFilter("issues", "scope", "all");
@@ -415,12 +394,6 @@ describe("resetAllTabFilters — scope reset", () => {
     expect(viewState.tabFilters.pullRequests.scope).toBe("all");
     resetAllTabFilters("pullRequests");
     expect(viewState.tabFilters.pullRequests.scope).toBe("involves_me");
-  });
-
-  it("is reset by resetViewState", () => {
-    updateViewState({ hideDepDashboard: false });
-    resetViewState();
-    expect(viewState.hideDepDashboard).toBe(true);
   });
 
   it("resets jiraAssigned filters back to defaults", () => {
@@ -881,6 +854,92 @@ describe("expandedRepos — dynamic tab keys", () => {
     toggleExpandedRepo("tab-new", "owner/repo");
     expect(viewState.expandedRepos["tab-new"]).toBeDefined();
     expect(viewState.expandedRepos["tab-new"]["owner/repo"]).toBe(true);
+  });
+});
+
+// ── DependencyFiltersSchema ───────────────────────────────────────────────────
+
+describe("DependencyFiltersSchema", () => {
+  it("parse({}) returns defaults: updateType='all', bot='all'", () => {
+    const result = DependencyFiltersSchema.parse({});
+    expect(result.updateType).toBe("all");
+    expect(result.bot).toBe("all");
+  });
+
+  it("accepts valid updateType values", () => {
+    for (const v of ["all", "major", "minor", "patch"] as const) {
+      expect(DependencyFiltersSchema.parse({ updateType: v }).updateType).toBe(v);
+    }
+  });
+
+  it("rejects invalid updateType values", () => {
+    const result = DependencyFiltersSchema.safeParse({ updateType: "invalid" });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts any string value for bot", () => {
+    const result = DependencyFiltersSchema.parse({ bot: "renovate[bot]" });
+    expect(result.bot).toBe("renovate[bot]");
+  });
+
+  it("defaults bot to 'all' when not provided", () => {
+    const result = DependencyFiltersSchema.parse({ updateType: "major" });
+    expect(result.bot).toBe("all");
+  });
+});
+
+describe("setTabFilter / resetAllTabFilters — dependencies", () => {
+  beforeEach(() => resetViewState());
+
+  it("setTabFilter('dependencies', 'updateType', 'major') persists in viewState", () => {
+    setTabFilter("dependencies", "updateType", "major");
+    expect(viewState.tabFilters.dependencies.updateType).toBe("major");
+  });
+
+  it("setTabFilter('dependencies', 'bot', 'renovate[bot]') persists in viewState", () => {
+    setTabFilter("dependencies", "bot", "renovate[bot]");
+    expect(viewState.tabFilters.dependencies.bot).toBe("renovate[bot]");
+  });
+
+  it("setTabFilter for one field does not change other dependency filter fields", () => {
+    setTabFilter("dependencies", "bot", "dependabot[bot]");
+    // updateType should remain at its default
+    expect(viewState.tabFilters.dependencies.updateType).toBe("all");
+  });
+
+  it("resetAllTabFilters('dependencies') resets updateType to 'all'", () => {
+    setTabFilter("dependencies", "updateType", "patch");
+    expect(viewState.tabFilters.dependencies.updateType).toBe("patch");
+    resetAllTabFilters("dependencies");
+    expect(viewState.tabFilters.dependencies.updateType).toBe("all");
+  });
+
+  it("resetAllTabFilters('dependencies') resets bot to 'all'", () => {
+    setTabFilter("dependencies", "bot", "renovate[bot]");
+    resetAllTabFilters("dependencies");
+    expect(viewState.tabFilters.dependencies.bot).toBe("all");
+  });
+
+  it("resetAllTabFilters('dependencies') resets both fields simultaneously", () => {
+    setTabFilter("dependencies", "updateType", "minor");
+    setTabFilter("dependencies", "bot", "dependabot[bot]");
+    resetAllTabFilters("dependencies");
+    expect(viewState.tabFilters.dependencies.updateType).toBe("all");
+    expect(viewState.tabFilters.dependencies.bot).toBe("all");
+  });
+
+  it("ViewStateSchema.parse({}) includes dependencies tabFilter defaults", () => {
+    const result = ViewStateSchema.parse({});
+    expect(result.tabFilters.dependencies.updateType).toBe("all");
+    expect(result.tabFilters.dependencies.bot).toBe("all");
+  });
+
+  it("dependencies filter state is not affected by resetAllTabFilters('issues')", () => {
+    setTabFilter("dependencies", "updateType", "minor");
+    setTabFilter("issues", "role", "author");
+    resetAllTabFilters("issues");
+    // dependencies should be unchanged — only issues was reset
+    expect(viewState.tabFilters.dependencies.updateType).toBe("minor");
   });
 });
 

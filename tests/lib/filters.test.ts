@@ -22,28 +22,6 @@ describe("isIssueVisible", () => {
     });
   });
 
-  describe("hideDepDashboard", () => {
-    it("hides issue titled 'Dependency Dashboard' when hideDepDashboard is true", () => {
-      const issue = makeIssue({ title: "Dependency Dashboard" });
-      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: true })).toBe(false);
-    });
-
-    it("shows issue titled 'Dependency Dashboard' when hideDepDashboard is false", () => {
-      const issue = makeIssue({ title: "Dependency Dashboard" });
-      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: false })).toBe(true);
-    });
-
-    it("shows issue titled 'Dependency Dashboard' when hideDepDashboard is undefined", () => {
-      const issue = makeIssue({ title: "Dependency Dashboard" });
-      expect(isIssueVisible(issue, { ignoredIds: new Set() })).toBe(true);
-    });
-
-    it("does not hide non-Dependency-Dashboard issues when hideDepDashboard is true", () => {
-      const issue = makeIssue({ title: "Regular bug" });
-      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: true })).toBe(true);
-    });
-  });
-
   describe("globalFilter — org", () => {
     it("shows issue when org matches", () => {
       const issue = makeIssue({ repoFullName: "myorg/repo" });
@@ -71,6 +49,28 @@ describe("isIssueVisible", () => {
     it("hides issue when repo does not match", () => {
       const issue = makeIssue({ repoFullName: "owner/other" });
       expect(isIssueVisible(issue, { ignoredIds: new Set(), globalFilter: { org: null, repo: "owner/repo" } })).toBe(false);
+    });
+  });
+
+  describe("hideDepDashboard", () => {
+    it("hides issue titled 'Dependency Dashboard' when hideDepDashboard is true", () => {
+      const issue = makeIssue({ title: "Dependency Dashboard" });
+      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: true })).toBe(false);
+    });
+
+    it("shows issue titled 'Dependency Dashboard' when hideDepDashboard is false", () => {
+      const issue = makeIssue({ title: "Dependency Dashboard" });
+      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: false })).toBe(true);
+    });
+
+    it("shows issue titled 'Dependency Dashboard' when hideDepDashboard is omitted", () => {
+      const issue = makeIssue({ title: "Dependency Dashboard" });
+      expect(isIssueVisible(issue, { ignoredIds: new Set() })).toBe(true);
+    });
+
+    it("does not hide issues with other titles when hideDepDashboard is true", () => {
+      const issue = makeIssue({ title: "Fix login bug" });
+      expect(isIssueVisible(issue, { ignoredIds: new Set(), hideDepDashboard: true })).toBe(true);
     });
   });
 

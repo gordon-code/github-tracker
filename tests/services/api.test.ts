@@ -548,10 +548,10 @@ describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => 
     );
     expect(result).not.toBeNull();
     expect(result?.type).toBe("bot");
-    expect(result?.login).toBe("dependabot[bot]");
+    expect(result?.login).toBe("dependabot");
   });
 
-  it("accepts another bot login — khepri-bot[bot]", async () => {
+  it("accepts another bot login — khepri-bot[bot] normalized to khepri-bot", async () => {
     const octokit = makeUserOctokit({
       login: "khepri-bot[bot]",
       avatar_url: "https://avatars.githubusercontent.com/u/999",
@@ -564,6 +564,7 @@ describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => 
     );
     expect(result).not.toBeNull();
     expect(result?.type).toBe("bot");
+    expect(result?.login).toBe("khepri-bot");
   });
 
   it("returns type:user when API returns type:User", async () => {
@@ -598,22 +599,61 @@ describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => 
     expect(result).toBeNull();
   });
 
-  it("returns null for [Bot] (case-sensitive — only [bot] accepted)", async () => {
-    const octokit = makeOctokit(async () => ({ data: {} }));
-    const result = await validateGitHubUser(
-      octokit as never,
-      "user[Bot]"
-    );
+  it("strips [Bot] case-insensitively and tries base login first", async () => {
+    const octokit = makeUserOctokit({
+      login: "user",
+      avatar_url: "https://avatars.githubusercontent.com/u/1",
+      name: null,
+      type: "User",
+    });
+    const result = await validateGitHubUser(octokit as never, "user[Bot]");
+    expect(result).not.toBeNull();
+    expect(result?.login).toBe("user");
+  });
+
+  it("returns null for user[bot][bot] (base 'user[bot]' validated but both API calls 404)", async () => {
+    const octokit = makeOctokit(async () => {
+      throw Object.assign(new Error("Not Found"), { status: 404 });
+    });
+    const result = await validateGitHubUser(octokit as never, "user[bot][bot]");
     expect(result).toBeNull();
   });
 
-  it("returns null for user[bot][bot] (double suffix)", async () => {
-    const octokit = makeOctokit(async () => ({ data: {} }));
-    const result = await validateGitHubUser(
-      octokit as never,
-      "user[bot][bot]"
-    );
-    expect(result).toBeNull();
+  it("strips [bot] from API response login for storage normalization", async () => {
+    const octokit = makeUserOctokit({
+      login: "khepri-bot[bot]",
+      avatar_url: "https://avatars.githubusercontent.com/u/1",
+      name: null,
+      type: "Bot",
+    });
+    const result = await validateGitHubUser(octokit as never, "khepri-bot[bot]");
+    expect(result).not.toBeNull();
+    expect(result?.login).toBe("khepri-bot");
+    expect(result?.type).toBe("bot");
+  });
+
+  it("falls back to [bot] suffix when base login returns 404", async () => {
+    let callCount = 0;
+    const octokit = makeOctokit(async (_url: string, opts: unknown) => {
+      const { username } = opts as { username: string };
+      callCount++;
+      if (!username.endsWith("[bot]")) {
+        throw Object.assign(new Error("Not Found"), { status: 404 });
+      }
+      return {
+        data: {
+          login: "khepri-bot[bot]",
+          avatar_url: "https://avatars.githubusercontent.com/u/99",
+          name: null,
+          type: "Bot",
+        },
+      };
+    });
+    const result = await validateGitHubUser(octokit as never, "khepri-bot");
+    expect(callCount).toBe(2);
+    expect(result).not.toBeNull();
+    expect(result?.login).toBe("khepri-bot");
+    expect(result?.type).toBe("bot");
   });
 
   it("returns null on 404 for bot login", async () => {

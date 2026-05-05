@@ -158,6 +158,7 @@ export async function pooledAllSettled<T>(
 // ── GraphQL search types ─────────────────────────────────────────────────────
 
 interface GraphQLIssueNode {
+  id: string;
   databaseId: number;
   number: number;
   title: string;
@@ -201,6 +202,7 @@ interface ForkQueryResponse {
 
 const LIGHT_ISSUE_FRAGMENT = `
   fragment LightIssueFields on Issue {
+    id
     databaseId
     number
     title
@@ -627,6 +629,7 @@ function processIssueNode(
     repoFullName: node.repository.nameWithOwner,
     comments: node.comments.totalCount,
     starCount: node.repository.stargazerCount,
+    nodeId: node.id,
   });
   return true;
 }
@@ -1153,6 +1156,102 @@ export async function fetchPREnrichment(
   return { enrichments, errors };
 }
 
+// ── Dashboard issue body fetch ────────────────────────────────────────────────
+
+const DASHBOARD_ISSUE_BODIES_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Issue { id body }
+    }
+    rateLimit { cost limit remaining resetAt }
+  }
+`;
+
+interface DashboardIssueBodiesResponse {
+  nodes: Array<{ id: string; body: string | null } | null>;
+  rateLimit?: GraphQLRateLimit;
+}
+
+/** Fetches issue bodies for Dashboard issues by node ID (single nodes() batch query). */
+export async function fetchDashboardIssueBodies(
+  octokit: GitHubOctokit,
+  issueNodeIds: string[]
+): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  if (issueNodeIds.length === 0) return result;
+
+  const batches = chunkArray(issueNodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch) => {
+    try {
+      const response = await octokit.graphql<DashboardIssueBodiesResponse>(
+        DASHBOARD_ISSUE_BODIES_QUERY,
+        { ids: batch, request: { apiSource: "dashboardBodies" } }
+      );
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      for (const node of response.nodes) {
+        if (!node || !node.id) continue;
+        result.set(node.id, node.body);
+      }
+    } catch (err) {
+      const partialErr =
+        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+          ? (err.data as Partial<DashboardIssueBodiesResponse>)
+          : null;
+      if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+      // Partial failures return null bodies — callers handle missing entries gracefully
+    }
+  }));
+
+  return result;
+}
+
+// ── Dependency PR body fetch ─────────────────────────────────────────────────
+
+const DEP_PR_BODIES_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest { databaseId body }
+    }
+    rateLimit { cost limit remaining resetAt }
+  }
+`;
+
+interface DepPRBodiesResponse {
+  nodes: Array<{ databaseId: number; body: string | null } | null>;
+  rateLimit?: GraphQLRateLimit;
+}
+
+export async function fetchDepPRBodies(
+  octokit: GitHubOctokit,
+  prNodeIds: string[]
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (prNodeIds.length === 0) return result;
+
+  const batches = chunkArray(prNodeIds, NODES_BATCH_SIZE);
+  await Promise.allSettled(batches.map(async (batch) => {
+    try {
+      const response = await octokit.graphql<DepPRBodiesResponse>(
+        DEP_PR_BODIES_QUERY,
+        { ids: batch, request: { apiSource: "depPRBodies" } }
+      );
+      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
+      for (const node of response.nodes) {
+        if (!node || node.databaseId == null || !node.body) continue;
+        result.set(node.databaseId, node.body);
+      }
+    } catch (err) {
+      const partialErr =
+        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+          ? (err.data as Partial<DepPRBodiesResponse>)
+          : null;
+      if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+    }
+  }));
+
+  return result;
+}
+
 /**
  * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
  * Also detects fork PRs for the statusCheckRollup fallback.
@@ -1302,8 +1401,19 @@ export async function fetchIssuesAndPullRequests(
   // Tracked user searches — scoped to normalRepos only. Monitored repos are already
   // covered by graphqlUnfilteredSearch (all open items, no user qualifier), so running
   // involves: on them would duplicate work and add spurious surfacedBy annotations.
-  const trackedSearchPromise = hasTrackedUsers && normalRepos.length > 0
-    ? Promise.allSettled(trackedUsers!.map((u) => graphqlLightCombinedSearch(octokit, normalRepos, u.login, "globalUserSearch")))
+  // Bot users get both base and [bot] variant searches for coverage.
+  const trackedSearchTasks: { login: string; promise: Promise<LightSearchResult> }[] = [];
+  if (hasTrackedUsers && normalRepos.length > 0) {
+    for (const u of trackedUsers!) {
+      trackedSearchTasks.push({ login: u.login, promise: graphqlLightCombinedSearch(octokit, normalRepos, u.login, "globalUserSearch") });
+      if (u.type === "bot") {
+        const botVariant = `${u.login}[bot]`;
+        trackedSearchTasks.push({ login: u.login, promise: graphqlLightCombinedSearch(octokit, normalRepos, botVariant, "globalUserSearch") });
+      }
+    }
+  }
+  const trackedSearchPromise = trackedSearchTasks.length > 0
+    ? Promise.allSettled(trackedSearchTasks.map((t) => t.promise))
     : Promise.resolve([] as PromiseSettledResult<LightSearchResult>[]);
 
   // Unfiltered search for monitored repos — runs in parallel with tracked searches
@@ -1342,11 +1452,11 @@ export async function fetchIssuesAndPullRequests(
 
   // Merge tracked user results and collect new (delta) node IDs for both
   // monitored repo PRs (added above) and tracked user PRs (added below).
-  if (hasTrackedUsers) {
+  if (trackedSearchTasks.length > 0) {
     const settled = trackedResults as PromiseSettledResult<LightSearchResult>[];
     for (let i = 0; i < settled.length; i++) {
       const result = settled[i];
-      const trackedLogin = trackedUsers![i].login;
+      const trackedLogin = trackedSearchTasks[i].login;
       if (result.status === "fulfilled") {
         allErrors.push(...result.value.errors);
         mergeTrackedUserResults(issueMap, prMap, nodeIdMap, result.value, trackedLogin);
@@ -1761,15 +1871,13 @@ interface RawGitHubUser {
  * Returns null if the login is invalid or the user does not exist (404).
  * Throws on network or server errors.
  */
-export async function validateGitHubUser(
+async function tryGetUser(
   octokit: GitHubOctokit,
-  login: string
-): Promise<TrackedUser | null> {
-  if (!VALID_TRACKED_LOGIN.test(login)) return null;
-
-  let response: { data: RawGitHubUser; headers: Record<string, string> };
+  username: string
+): Promise<RawGitHubUser | null> {
   try {
-    response = await octokit.request("GET /users/{username}", { username: login }) as { data: RawGitHubUser; headers: Record<string, string> };
+    const response = await octokit.request("GET /users/{username}", { username }) as { data: RawGitHubUser };
+    return response.data;
   } catch (err) {
     const status =
       typeof err === "object" && err !== null && "status" in err
@@ -1778,13 +1886,27 @@ export async function validateGitHubUser(
     if (status === 404) return null;
     throw err;
   }
-  const raw = response.data;
+}
+
+export async function validateGitHubUser(
+  octokit: GitHubOctokit,
+  login: string
+): Promise<TrackedUser | null> {
+  const base = login.replace(/\[bot\]$/i, "");
+  if (!VALID_TRACKED_LOGIN.test(base)) return null;
+
+  let raw = await tryGetUser(octokit, base);
+  if (!raw) {
+    raw = await tryGetUser(octokit, `${base}[bot]`);
+  }
+  if (!raw) return null;
+
   const avatarUrl = raw.avatar_url.startsWith(AVATAR_CDN_PREFIX)
     ? raw.avatar_url
     : AVATAR_FALLBACK;
 
   return {
-    login: raw.login.toLowerCase(),
+    login: raw.login.toLowerCase().replace(/\[bot\]$/, ""),
     avatarUrl,
     name: raw.name ?? null,
     type: raw.type === "Bot" ? "bot" : "user",

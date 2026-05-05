@@ -36,6 +36,7 @@ export interface Issue {
   comments: number;
   starCount?: number;
   surfacedBy?: string[];
+  nodeId?: string;
 }
 
 export interface CheckStatus {
@@ -73,6 +74,8 @@ export interface PullRequest {
   enriched?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;
+  /** PR body — fetched on demand for dependency update type detection */
+  body?: string;
   surfacedBy?: string[];
 }
 

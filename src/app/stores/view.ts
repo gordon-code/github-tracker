@@ -46,6 +46,14 @@ export const ActionsFiltersSchema = z.object({
   event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
 });
 
+export const DependencyFiltersSchema = z.object({
+  updateType: z.enum(["all", "major", "minor", "patch", "pin", "maintenance", "other"]).default("all"),
+  bot: z.string().default("all"),
+});
+
+export type DependencyFilters = z.infer<typeof DependencyFiltersSchema>;
+export type DependencyFilterField = keyof DependencyFilters;
+
 // "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
 export const JiraFiltersSchema = z.object({
   scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100)).default("assigned"),
@@ -93,11 +101,13 @@ export const ViewStateSchema = z.object({
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
     jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" }),
+    dependencies: DependencyFiltersSchema.default({ updateType: "all", bot: "all" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
     jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+    dependencies: { updateType: "all", bot: "all" },
   }),
   showPrRuns: z.boolean().default(false),
   hideDepDashboard: z.boolean().default(true),
@@ -116,6 +126,7 @@ export const ViewStateSchema = z.object({
   }),
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
+  dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -199,6 +210,7 @@ export function resetViewState(): void {
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
           jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+          dependencies: { updateType: "all", bot: "all" },
         },
         showPrRuns: false,
         hideDepDashboard: true,
@@ -206,6 +218,7 @@ export function resetViewState(): void {
         expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
+        dependencyExpandedGroups: ["mergeable"],
       });
     })
   );
@@ -282,6 +295,7 @@ type TabFilterField = {
   pullRequests: keyof PullRequestFilters;
   actions: keyof ActionsFilters;
   jiraAssigned: keyof JiraFilters;
+  dependencies: keyof DependencyFilters;
 };
 
 export function setTabFilter<T extends keyof TabFilterField>(
@@ -297,7 +311,7 @@ export function setTabFilter<T extends keyof TabFilterField>(
 }
 
 export function resetAllTabFilters(
-  tab: "issues" | "pullRequests" | "actions" | "jiraAssigned"
+  tab: "issues" | "pullRequests" | "actions" | "jiraAssigned" | "dependencies"
 ): void {
   setViewState(
     produce((draft) => {
@@ -307,9 +321,19 @@ export function resetAllTabFilters(
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else if (tab === "jiraAssigned") {
         draft.tabFilters.jiraAssigned = JiraFiltersSchema.parse({});
-      } else {
+      } else if (tab === "actions") {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
+      } else if (tab === "dependencies") {
+        draft.tabFilters.dependencies = DependencyFiltersSchema.parse({});
       }
+    })
+  );
+}
+
+export function setDependencyExpandedGroups(groups: string[]): void {
+  setViewState(
+    produce((draft) => {
+      draft.dependencyExpandedGroups = groups;
     })
   );
 }
