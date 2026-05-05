@@ -132,7 +132,7 @@ export default function ItemRow(props: ItemRowProps) {
             <span
               class={`shrink-0 font-mono font-medium text-xs ${
                 props.subtleRepo
-                  ? "inline-block w-[11rem] truncate align-middle text-base-content/50"
+                  ? "inline-block w-[9rem] truncate align-middle text-base-content/50"
                   : "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
               }`}
             >
