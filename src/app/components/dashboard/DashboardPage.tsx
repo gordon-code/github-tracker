@@ -187,6 +187,7 @@ onAuthCleared(() => {
   setDepMeta(new Map());
   localStorage.removeItem?.(DEP_META_STORAGE_KEY);
   _fetchingDashboardBodies = false;
+  _fetchingDepBodies = false;
   resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {

@@ -287,11 +287,12 @@ Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups
 
 | Group | Criteria |
 |-------|----------|
-| **Needs Review** | CI passing (all checks green), PR not yet approved — these are ready to merge |
-| **Waiting** | CI pending, checks still running, or PR is a draft — not yet actionable |
+| **Mergeable** | CI passing (all checks green), not yet approved — awaiting review |
+| **Pending Rebase** | PR has the configured rebase label — waiting for the bot to rebase |
+| **Needs Action** | CI pending, checks still running, or PR is a draft — not yet actionable |
 | **Stale** | PR has been open more than 14 days without merging — may need a rebase or manual review |
 
-Within each group, PRs are sorted by updated date (most recent first).
+Within each group, PRs are sorted by repository name, then update category (maintenance, pin, patch, minor, major), then update date.
 
 ### Abandoned Dependencies
 

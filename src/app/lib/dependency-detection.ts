@@ -18,7 +18,7 @@ export const DEP_BRANCH_PREFIXES = [
   "pyup-update-",
 ];
 
-export const DEP_TITLE_PATTERN = /^(Bump |Update dependency |chore\(deps|fix\(deps|build\(deps|\[Snyk\])/i;
+export const DEP_TITLE_PATTERN = /^(Bump |Update dependency |\[Snyk\]|(?:chore|fix|build)\(deps[^)]*\):\s*(?:update |pin |lock file |bump ))/i;
 
 export const DEP_TOOL_LABEL_NAMES = new Set([
   "dependencies",
@@ -128,8 +128,8 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // "update X requirement from >=A to >=B" (Dependabot Python)
   const reqMatch = /^update\s+(.+?)\s+requirement\s+from\s+([^\s]+)\s+to\s+([^\s]+)/i.exec(body);
   if (reqMatch) {
-    const from = reqMatch[2]!.replace(/^[><=!~^]+/, "");
-    const to = reqMatch[3]!.replace(/^[><=!~^]+/, "");
+    const from = stripVersionSpecifier(reqMatch[2]!);
+    const to = stripVersionSpecifier(reqMatch[3]!);
     return { packageName: reqMatch[1]!, from, to, updateType: semverUpdateType(from, to) ?? undefined };
   }
 
