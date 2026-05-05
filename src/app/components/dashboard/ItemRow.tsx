@@ -119,9 +119,10 @@ export default function ItemRow(props: ItemRowProps) {
             <span
               class={`shrink-0 font-mono font-medium text-xs px-2.5 py-1 ${
                 props.subtleRepo
-                  ? "inline-block min-w-[9.5rem] max-w-[16rem] truncate align-middle text-base-content/50"
+                  ? "inline-block min-w-[9.5rem] truncate align-middle text-base-content/50"
                   : "inline-flex items-center rounded-full bg-primary/10 text-primary"
               }`}
+              style={props.subtleRepo ? { "max-width": "16rem" } : undefined}
               title={props.subtleRepo ? props.repo : undefined}
             >
               {props.repo}
@@ -132,9 +133,10 @@ export default function ItemRow(props: ItemRowProps) {
             <span
               class={`shrink-0 font-mono font-medium text-xs ${
                 props.subtleRepo
-                  ? "inline-block min-w-[9.5rem] max-w-[14rem] truncate align-middle text-base-content/50"
+                  ? "inline-block min-w-[9.5rem] truncate align-middle text-base-content/50"
                   : "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
               }`}
+              style={props.subtleRepo ? { "max-width": "14rem" } : undefined}
             >
               {repoShortName()}
             </span>
