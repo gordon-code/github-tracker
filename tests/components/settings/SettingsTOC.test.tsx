@@ -36,8 +36,8 @@ afterEach(() => {
 });
 
 describe("SettingsTOC — section registry", () => {
-  it("has exactly 12 entries", () => {
-    expect(SETTINGS_SECTIONS).toHaveLength(12);
+  it("has exactly 13 entries", () => {
+    expect(SETTINGS_SECTIONS).toHaveLength(13);
   });
 
   it("has all 4 groups", () => {
