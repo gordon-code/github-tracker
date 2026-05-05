@@ -110,11 +110,14 @@ export default function SettingsTOC() {
   function scrollToSection(id: string) {
     scrollEndCleanup?.();
     setScrollingTo(id);
+    document.documentElement.dataset.scrollLock = "1";
     const el = document.getElementById(id);
-    if (!el) { setScrollingTo(null); return; }
+    if (!el) { setScrollingTo(null); delete document.documentElement.dataset.scrollLock; return; }
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const clear = () => {
       setScrollingTo(null);
+      delete document.documentElement.dataset.scrollLock;
+      window.dispatchEvent(new Event("scroll"));
       scrollEndCleanup = undefined;
     };
     if (prefersReduced) {

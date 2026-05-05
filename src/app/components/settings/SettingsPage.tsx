@@ -83,7 +83,10 @@ export default function SettingsPage() {
 
   const [scrolled, setScrolled] = createSignal(false);
   onMount(() => {
-    const onScroll = () => setScrolled(window.scrollY > 50);
+    const onScroll = () => {
+      if (document.documentElement.dataset.scrollLock) return;
+      setScrolled(window.scrollY > 50);
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => window.removeEventListener("scroll", onScroll));
   });
