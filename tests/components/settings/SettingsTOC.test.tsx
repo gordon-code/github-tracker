@@ -128,24 +128,39 @@ describe("SettingsTOC — active highlighting", () => {
 });
 
 describe("SettingsTOC — scroll to section", () => {
-  it("calls scrollIntoView with smooth behavior on click", () => {
-    const mockScrollIntoView = vi.fn();
-    vi.spyOn(document, "getElementById").mockReturnValue({
-      scrollIntoView: mockScrollIntoView,
-    } as unknown as HTMLElement);
+  it("uses JS-driven smooth scroll on click", () => {
     vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
+    const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    const targetEl = document.getElementById("api-usage")!;
+    vi.spyOn(targetEl, "getBoundingClientRect").mockReturnValue({
+      top: 800, bottom: 900, left: 0, right: 0, width: 0, height: 100, x: 0, y: 800, toJSON: () => {},
+    });
+    const origGetComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo?) => {
+      const style = origGetComputedStyle(el, pseudo);
+      if (el === targetEl) {
+        return { ...style, scrollMarginTop: "96px", getPropertyValue: style.getPropertyValue.bind(style) } as CSSStyleDeclaration;
+      }
+      return style;
+    });
+
+    let time = 0;
+    const rAFSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      time += 600;
+      cb(time);
+      return 0;
+    });
 
     render(() => <SettingsTOC />);
     const nav = screen.getByRole("navigation", { name: "Settings navigation" });
     fireEvent.click(within(nav).getByText("API Usage"));
 
-    expect(mockScrollIntoView).toHaveBeenCalledWith({
-      behavior: "smooth",
-      block: "start",
-    });
+    expect(rAFSpy).toHaveBeenCalled();
+    expect(scrollToSpy).toHaveBeenCalled();
   });
 
-  it("uses instant scroll with prefers-reduced-motion", () => {
+  it("uses instant scrollIntoView with prefers-reduced-motion", () => {
     const mockScrollIntoView = vi.fn();
     vi.spyOn(document, "getElementById").mockReturnValue({
       scrollIntoView: mockScrollIntoView,
@@ -192,6 +207,10 @@ describe("SettingsTOC — mobile dropdown", () => {
   });
 
   it("closes dropdown when a TOC item is clicked", () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { cb(1000); return 0; });
+
     render(() => <SettingsTOC />);
     const mobileToc = screen.getByTestId("mobile-toc");
     const toggle = within(mobileToc).getByRole("button", { expanded: false });
@@ -199,22 +218,9 @@ describe("SettingsTOC — mobile dropdown", () => {
 
     const dropdown = document.getElementById("settings-toc-mobile")!;
     const refreshBtn = within(dropdown).getByText("Refresh");
-
-    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false }));
-    const origGetById = document.getElementById.bind(document);
-    vi.spyOn(document, "getElementById").mockImplementation((id: string) => {
-      if (id === "settings-toc-mobile") return origGetById(id);
-      const el = origGetById(id);
-      if (el) {
-        el.scrollIntoView = vi.fn();
-        return el;
-      }
-      return null;
-    });
-
     fireEvent.click(refreshBtn);
 
-    expect(origGetById("settings-toc-mobile")).toBeNull();
+    expect(document.getElementById("settings-toc-mobile")).toBeNull();
   });
 
   it("closes dropdown on Escape key", () => {

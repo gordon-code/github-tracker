@@ -83,27 +83,49 @@ export default function SettingsTOC() {
 
   let scrollEndCleanup: (() => void) | undefined;
 
+  function smoothScrollTo(targetY: number, onDone: () => void) {
+    const startY = window.scrollY;
+    const diff = targetY - startY;
+    if (Math.abs(diff) < 1) { onDone(); return; }
+    const duration = Math.min(500, Math.max(200, Math.abs(diff) * 0.3));
+    const startTime = performance.now();
+    let raf: number;
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const ease = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      window.scrollTo(0, startY + diff * ease);
+      if (progress < 1) {
+        raf = requestAnimationFrame(step);
+      } else {
+        onDone();
+      }
+    };
+    raf = requestAnimationFrame(step);
+    scrollEndCleanup = () => { cancelAnimationFrame(raf); onDone(); };
+  }
+
   function scrollToSection(id: string) {
     scrollEndCleanup?.();
     setScrollingTo(id);
+    const el = document.getElementById(id);
+    if (!el) { setScrollingTo(null); return; }
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    document.getElementById(id)?.scrollIntoView({
-      behavior: prefersReduced ? "instant" : "smooth",
-      block: "start",
-    });
     const clear = () => {
       setScrollingTo(null);
       scrollEndCleanup = undefined;
     };
     if (prefersReduced) {
+      el.scrollIntoView({ behavior: "instant", block: "start" });
       requestAnimationFrame(clear);
       scrollEndCleanup = undefined;
-    } else if ("onscrollend" in window) {
-      window.addEventListener("scrollend", clear, { once: true });
-      scrollEndCleanup = () => window.removeEventListener("scrollend", clear);
     } else {
-      const t = setTimeout(clear, 600);
-      scrollEndCleanup = () => clearTimeout(t);
+      const style = getComputedStyle(el);
+      const scrollMargin = parseFloat(style.scrollMarginTop) || 0;
+      const targetY = el.getBoundingClientRect().top + window.scrollY - scrollMargin;
+      smoothScrollTo(targetY, clear);
     }
   }
 
