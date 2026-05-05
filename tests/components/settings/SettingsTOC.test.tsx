@@ -86,6 +86,16 @@ describe("SettingsTOC — desktop rendering", () => {
 });
 
 describe("SettingsTOC — active highlighting", () => {
+  const origInnerHeight = window.innerHeight;
+  const origScrollY = window.scrollY;
+  const origScrollHeight = document.documentElement.scrollHeight;
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerHeight", { value: origInnerHeight, configurable: true });
+    Object.defineProperty(window, "scrollY", { value: origScrollY, configurable: true, writable: true });
+    Object.defineProperty(document.documentElement, "scrollHeight", { value: origScrollHeight, configurable: true });
+  });
+
   it("highlights the active section", async () => {
     Object.defineProperty(window, "innerHeight", { value: 768, configurable: true });
     Object.defineProperty(window, "scrollY", { value: 200, configurable: true });
