@@ -642,7 +642,7 @@ describe("DependenciesTab — ignore button", () => {
   it("clicking the ignore button hides the PR from the list", () => {
     const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
     renderTab({ pullRequests: [pr] });
-    expect(screen.getByText("lodash")).toBeDefined();
+    expect(screen.getByText("lodash → v5")).toBeDefined();
 
     const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
     fireEvent.click(ignoreBtn);

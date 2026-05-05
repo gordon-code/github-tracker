@@ -1342,6 +1342,7 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   rebaseLabel={config.dependencies.rebaseLabel}
                   userLogin={userLogin()}
+                  trackedBotLogins={trackedBotLogins()}
                   onRefresh={() => _coordinator()?.manualRefresh()}
                 />
               </Match>
