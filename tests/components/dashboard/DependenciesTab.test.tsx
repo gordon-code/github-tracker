@@ -528,6 +528,148 @@ describe("DependenciesTab — ignore button", () => {
 
     expect(screen.getByLabelText(/ignored items/i)).toBeDefined();
   });
+
+  it("ignored dep PRs appear in the IgnoreBadge", () => {
+    const pr = makeMergeablePR({ id: 5003, title: "chore(deps): update dependency chalk to v6" });
+    renderTab({ pullRequests: [pr] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ignore #/ }));
+
+    expect(screen.getByLabelText(/ignored items/i)).toBeDefined();
+  });
+});
+
+// ── Track button ──────────────────────────────────────────────────────────────
+
+describe("DependenciesTab — track button", () => {
+  it("track button is not rendered when enableTracking is false", () => {
+    updateConfig({ enableTracking: false });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
+    renderTab({ pullRequests: [pr] });
+
+    expect(screen.queryByRole("button", { name: /^Pin #/ })).toBeNull();
+  });
+
+  it("track button renders when enableTracking is true", () => {
+    updateConfig({ enableTracking: true });
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
+    renderTab({ pullRequests: [pr] });
+
+    expect(screen.getByRole("button", { name: /^Pin #/ })).toBeDefined();
+  });
+
+  it("clicking track button adds the PR to trackedItems", () => {
+    updateConfig({ enableTracking: true });
+    const pr = makeMergeablePR({ id: 6001, title: "Bump react from 17.0.0 to 18.0.0" });
+    renderTab({ pullRequests: [pr] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
+
+    expect(viewState.trackedItems.some((t) => t.id === 6001 && t.type === "pullRequest")).toBe(true);
+  });
+
+  it("clicking track button a second time removes the PR from trackedItems (toggle)", () => {
+    updateConfig({ enableTracking: true });
+    const pr = makeMergeablePR({ id: 6002, title: "Bump typescript from 4.0.0 to 5.0.0" });
+    renderTab({ pullRequests: [pr] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Pin #/ }));
+    expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Unpin #/ }));
+    expect(viewState.trackedItems.some((t) => t.id === 6002)).toBe(false);
+  });
+});
+
+// ── Unknown bot detection ────────────────────────────────────────────────────
+
+describe("DependenciesTab — unknown bot banner", () => {
+  it("shows banner for unknown bot authors", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByRole("button", { name: "Track bot" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+  });
+
+  it("does not show banner for known dep bots", () => {
+    const pr = makeMergeablePR({ userLogin: "renovate[bot]" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("does not show banner for known bots without [bot] suffix", () => {
+    const pr = makeMergeablePR({ userLogin: "dependabot" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("does not show banner for the authenticated user", () => {
+    const pr = makeMergeablePR({ userLogin: "testuser" });
+    renderTab({ pullRequests: [pr], userLogin: "testuser" });
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("dismiss button hides the banner for the session", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("button", { name: "Track bot" })).toBeNull();
+  });
+
+  it("track button adds bot to config.trackedUsers", () => {
+    const pr = makeMergeablePR({
+      userLogin: "custom-dep-bot",
+      userAvatarUrl: "https://avatars.githubusercontent.com/u/12345",
+    });
+    renderTab({ pullRequests: [pr] });
+    fireEvent.click(screen.getByRole("button", { name: "Track bot" }));
+
+    expect(config.trackedUsers.some((u) => u.login === "custom-dep-bot" && u.type === "bot")).toBe(true);
+  });
+});
+
+// ── Ignore button ─────────────────────────────────────────────────────────────
+
+describe("DependenciesTab — ignore button", () => {
+  it("clicking the ignore button hides the PR from the list", () => {
+    const pr = makeMergeablePR({ title: "chore(deps): update dependency lodash to v5" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("lodash → v5")).toBeDefined();
+
+    const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
+    fireEvent.click(ignoreBtn);
+
+    expect(screen.queryByText("lodash → v5")).toBeNull();
+  });
+
+  it("ignore button adds item to ignoredItems in viewState", () => {
+    const pr = makeMergeablePR({ id: 5001, title: "chore(deps): update dependency react to v19" });
+    renderTab({ pullRequests: [pr] });
+
+    const ignoreBtn = screen.getByRole("button", { name: /^Ignore #/ });
+    fireEvent.click(ignoreBtn);
+
+    expect(viewState.ignoredItems.some((i) => i.id === 5001 && i.type === "pullRequest")).toBe(true);
+  });
+
+  it("ignored PR is not rendered even when re-renderTab is called", () => {
+    const pr = makeMergeablePR({ id: 5002, title: "Bump axios from 0.27.2 to 1.0.0" });
+    const { unmount } = renderTab({ pullRequests: [pr] });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ignore #/ }));
+    unmount();
+
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByText(/axios/)).toBeNull();
+  });
 });
 
 // ── Track button ──────────────────────────────────────────────────────────────

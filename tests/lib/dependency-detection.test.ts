@@ -91,6 +91,21 @@ describe("isDependencyPr", () => {
     expect(isDependencyPr(pr, NO_TRACKED_BOTS)).toBe(false);
   });
 
+  it("returns false for human fix(deps) PR that is not a bot update", () => {
+    const pr = makePullRequest({
+      userLogin: "octocat",
+      headRef: "fix/deps-tab-fixes",
+      title: "fix(deps): post-deploy dependency tab fixes",
+      labels: [],
+    });
+    expect(isDependencyPr(pr, NO_TRACKED_BOTS)).toBe(false);
+  });
+
+  it("returns true for bot fix(deps) PR with update action", () => {
+    const pr = makePullRequest({ title: "fix(deps): update all non-major dependencies" });
+    expect(isDependencyPr(pr, NO_TRACKED_BOTS)).toBe(true);
+  });
+
   it("returns false for regular PR even with tracked users of type user", () => {
     const pr = makePullRequest({ userLogin: "alice" });
     const tracked = new Set(["bob"]);
@@ -178,6 +193,11 @@ describe("extractVersionInfo", () => {
   it("handles various pip requirement operators", () => {
     const result = extractVersionInfo("chore(deps): update mypy requirement from ~=1.15.0 to ~=1.20.1");
     expect(result).toEqual({ packageName: "mypy", from: "1.15.0", to: "1.20.1", updateType: "minor" });
+  });
+
+  it("handles pinned == pip requirement specifier", () => {
+    const result = extractVersionInfo("update boto3 requirement from ==1.26.0 to ==1.34.0");
+    expect(result).toEqual({ packageName: "boto3", from: "1.26.0", to: "1.34.0", updateType: "minor" });
   });
 
   it("returns null for unrecognized title format", () => {
@@ -528,6 +548,20 @@ describe("parseRenovateBody", () => {
       updateType: "pin",
       from: "abc1234",
       to: "def5678",
+    });
+  });
+
+  it("strips Python version specifiers (==, >=, ~=) from versions", () => {
+    const body = [
+      "| Package | Change | [Age](url) | [Confidence](url) |",
+      "|---|---|---|---|",
+      "| [stamina](url) ([changelog](url2)) | `==25.2.0` → `==26.1.0` | ![age](img) | ![confidence](img) |",
+    ].join("\n");
+    expect(parseRenovateBody(body)).toEqual({
+      packageName: "stamina",
+      updateType: "major",
+      from: "25.2.0",
+      to: "26.1.0",
     });
   });
 

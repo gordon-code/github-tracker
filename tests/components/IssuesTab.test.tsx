@@ -573,3 +573,56 @@ describe("IssuesTab", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 });
+
+describe("IssuesTab — hideDepDashboard + dependencies.enabled interaction", () => {
+  it("shows Dependency Dashboard in custom tab even when hideDepDashboard=true and deps disabled", () => {
+    viewStore.updateViewState({ hideDepDashboard: true });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo", userLogin: "me" }),
+    ];
+    setAllExpanded("my-custom-tab", ["org/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="me" customTabId="my-custom-tab" />);
+    screen.getByText("Dependency Dashboard");
+  });
+});
+
+describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
+  it("hides Dependency Dashboard issue when hideDepDashboard=true and dependencies.enabled=false", () => {
+    viewStore.updateViewState({ hideDepDashboard: true });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
+      makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    expect(screen.queryByText("Dependency Dashboard")).toBeNull();
+    screen.getByText("Regular issue");
+  });
+
+  it("shows Dependency Dashboard issue when hideDepDashboard=true but dependencies.enabled=true", () => {
+    viewStore.updateViewState({ hideDepDashboard: true });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
+      makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Dependency Dashboard");
+    screen.getByText("Regular issue");
+  });
+
+  it("shows Dependency Dashboard issue when hideDepDashboard=false regardless of dependencies.enabled", () => {
+    viewStore.updateViewState({ hideDepDashboard: false });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    const issues = [
+      makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
+    ];
+    setAllExpanded("issues", ["org/repo"], true);
+    render(() => <IssuesTab issues={issues} userLogin="" />);
+    screen.getByText("Dependency Dashboard");
+  });
+
+});

@@ -117,22 +117,23 @@ export default function ItemRow(props: ItemRowProps) {
           when={isCompact()}
           fallback={
             <span
-              class={`shrink-0 inline-flex items-center rounded-full font-mono font-medium text-xs px-2.5 py-1 ${
+              class={`shrink-0 font-mono font-medium text-xs px-2.5 py-1 ${
                 props.subtleRepo
-                  ? "min-w-[9.5rem] text-base-content/50"
-                  : "bg-primary/10 text-primary"
+                  ? "inline-block w-[11rem] truncate align-middle text-base-content/50"
+                  : "inline-flex items-center rounded-full bg-primary/10 text-primary"
               }`}
+              title={props.subtleRepo ? props.repo : undefined}
             >
-              {props.repo}
+              {props.subtleRepo ? repoShortName() : props.repo}
             </span>
           }
         >
           <Tooltip content={props.repo} class="shrink-0 relative z-10">
             <span
-              class={`shrink-0 inline-flex items-center font-mono font-medium text-xs ${
+              class={`shrink-0 font-mono font-medium text-xs ${
                 props.subtleRepo
-                  ? "min-w-[9.5rem] text-base-content/50"
-                  : "rounded-full bg-primary/10 text-primary px-2 py-0.5"
+                  ? "inline-block w-[9rem] truncate align-middle text-base-content/50"
+                  : "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
               }`}
             >
               {repoShortName()}

@@ -371,4 +371,64 @@ describe("TabBar", () => {
     await user.click(depTab);
     expect(onTabChange).toHaveBeenCalledWith("dependencies");
   });
+
+  // ── Dependencies tab ─────────────────────────────────────────────────────────
+
+  it("does not render Dependencies tab when enableDependencies is false", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableDependencies={false} />
+    ));
+    expect(screen.queryByRole("tab", { name: /Dependencies/i })).toBeNull();
+  });
+
+  it("does not render Dependencies tab when enableDependencies is undefined", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} />
+    ));
+    expect(screen.queryByRole("tab", { name: /Dependencies/i })).toBeNull();
+  });
+
+  it("renders Dependencies tab when enableDependencies is true", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableDependencies={true} />
+    ));
+    screen.getByRole("tab", { name: /Dependencies/i });
+  });
+
+  it("renders Dependencies tab between Pull Requests and Actions", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableDependencies={true} />
+    ));
+    const tabs = screen.getAllByRole("tab");
+    const names = tabs.map((t) => t.textContent?.trim() ?? "");
+    const prIdx = names.findIndex((n) => /Pull Requests/i.test(n));
+    const depIdx = names.findIndex((n) => /Dependencies/i.test(n));
+    const actionsIdx = names.findIndex((n) => /^Actions/i.test(n));
+    expect(depIdx).toBeGreaterThan(prIdx);
+    expect(depIdx).toBeLessThan(actionsIdx);
+  });
+
+  it("shows dependencies count badge when enableDependencies is true and count provided", () => {
+    const onTabChange = vi.fn();
+    const counts: TabCounts = { dependencies: 8 };
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableDependencies={true} counts={counts} />
+    ));
+    screen.getByText("8");
+  });
+
+  it("calls onTabChange with 'dependencies' when Dependencies tab clicked", async () => {
+    const user = userEvent.setup();
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar activeTab="issues" onTabChange={onTabChange} enableDependencies={true} />
+    ));
+    const depTab = screen.getByRole("tab", { name: /Dependencies/i });
+    await user.click(depTab);
+    expect(onTabChange).toHaveBeenCalledWith("dependencies");
+  });
 });

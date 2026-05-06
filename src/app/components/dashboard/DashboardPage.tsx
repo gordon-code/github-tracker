@@ -187,6 +187,7 @@ onAuthCleared(() => {
   setDepMeta(new Map());
   localStorage.removeItem?.(DEP_META_STORAGE_KEY);
   _fetchingDashboardBodies = false;
+  _fetchingDepBodies = false;
   resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {
@@ -1278,10 +1279,10 @@ export default function DashboardPage() {
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
               onRefresh={() => _coordinator()?.manualRefresh()}
-              sortOptions={globalSortOptions}
-              sortValue={viewState.globalSort.field}
-              sortDirection={viewState.globalSort.direction}
-              onSortChange={(field, dir) => setSortPreference(field, dir)}
+              sortOptions={activeTab() === "dependencies" ? undefined : globalSortOptions}
+              sortValue={activeTab() === "dependencies" ? undefined : viewState.globalSort.field}
+              sortDirection={activeTab() === "dependencies" ? undefined : viewState.globalSort.direction}
+              onSortChange={activeTab() === "dependencies" ? undefined : (field, dir) => setSortPreference(field, dir)}
               hideOrgRepo={!isBuiltinTab(activeTab()) || activeTab() === "dependencies"}
             />
           </div>
@@ -1320,6 +1321,20 @@ export default function DashboardPage() {
                 <DependenciesTab
                   pullRequests={dependencyPullRequests()}
                   depMeta={depMeta()}
+                  loading={dashboardData.loading}
+                  abandonedDepsMap={abandonedDepsMap()}
+                  dashboardIssueUrls={dashboardIssueUrls()}
+                  hotPollingPRIds={hotPollingPRIds()}
+                  refreshTick={refreshTick()}
+                  rebaseLabel={config.dependencies.rebaseLabel}
+                  userLogin={userLogin()}
+                  trackedBotLogins={trackedBotLogins()}
+                  onRefresh={() => _coordinator()?.manualRefresh()}
+                />
+              </Match>
+              <Match when={activeTab() === "dependencies"}>
+                <DependenciesTab
+                  pullRequests={dependencyPullRequests()}
                   loading={dashboardData.loading}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}

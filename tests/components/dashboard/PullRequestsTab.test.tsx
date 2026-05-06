@@ -31,7 +31,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import { produce } from "solid-js/store";
 import PullRequestsTab from "../../../src/app/components/dashboard/PullRequestsTab";
-import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState, setCustomTabFilter } from "../../../src/app/stores/view";
+import { viewState, setViewState, setTabFilter, setAllExpanded, resetViewState, updateViewState, setCustomTabFilter, ignoreItem } from "../../../src/app/stores/view";
 import type { TrackedUser } from "../../../src/app/stores/config";
 import { updateConfig, resetConfig } from "../../../src/app/stores/config";
 
@@ -867,5 +867,36 @@ describe("PullRequestsTab — customTabId filter preset", () => {
     ));
 
     screen.getByText("My PR");
+  });
+});
+
+// ── PullRequestsTab — depPrIds ignored-item filtering ───────────────────────
+
+describe("PullRequestsTab — depPrIds ignored-item filtering", () => {
+  it("excludes dep PR IDs from ignored items when depPrIds is provided", () => {
+    ignoreItem({ id: 100, type: "pullRequest", repo: "owner/repo", title: "Dep PR", ignoredAt: Date.now() });
+    ignoreItem({ id: 200, type: "pullRequest", repo: "owner/repo", title: "Normal PR", ignoredAt: Date.now() });
+
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="me" depPrIds={new Set([100])} />);
+
+    screen.getByRole("button", { name: /1 ignored/i });
+    expect(screen.queryByRole("button", { name: /2 ignored/i })).toBeNull();
+  });
+
+  it("includes all ignored PRs when depPrIds is undefined", () => {
+    ignoreItem({ id: 100, type: "pullRequest", repo: "owner/repo", title: "PR A", ignoredAt: Date.now() });
+    ignoreItem({ id: 200, type: "pullRequest", repo: "owner/repo", title: "PR B", ignoredAt: Date.now() });
+
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="me" />);
+
+    screen.getByRole("button", { name: /2 ignored/i });
+  });
+
+  it("shows no badge when all ignored PRs belong to depPrIds", () => {
+    ignoreItem({ id: 100, type: "pullRequest", repo: "owner/repo", title: "Dep only", ignoredAt: Date.now() });
+
+    render(() => <PullRequestsTab pullRequests={[]} userLogin="me" depPrIds={new Set([100])} />);
+
+    expect(screen.queryByRole("button", { name: /ignored/i })).toBeNull();
   });
 });

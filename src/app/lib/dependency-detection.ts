@@ -18,7 +18,7 @@ export const DEP_BRANCH_PREFIXES = [
   "pyup-update-",
 ];
 
-export const DEP_TITLE_PATTERN = /^(Bump |Update dependency |chore\(deps|fix\(deps|build\(deps|\[Snyk\])/i;
+export const DEP_TITLE_PATTERN = /^(Bump |Update dependency |\[Snyk\]|(?:chore|fix|build)\(deps[^)]*\):\s*(?:update |pin |lock file |bump ))/i;
 
 export const DEP_TOOL_LABEL_NAMES = new Set([
   "dependencies",
@@ -72,8 +72,14 @@ export function isDependencyPr(pr: PullRequest, trackedBotLogins: Set<string>): 
   return false;
 }
 
+const VERSION_SPECIFIER_RE = /^[><=!~^]+/;
+
+function stripVersionSpecifier(v: string): string {
+  return v.replace(VERSION_SPECIFIER_RE, "");
+}
+
 function parseSemver(v: string): [number, number, number] | null {
-  const cleaned = v.replace(/^v/, "");
+  const cleaned = stripVersionSpecifier(v).replace(/^v/, "");
   const parts = cleaned.split(".");
   if (parts.length < 2) return null;
   const nums = parts.slice(0, 3).map(Number);
@@ -122,8 +128,8 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // "update X requirement from >=A to >=B" (Dependabot Python)
   const reqMatch = /^update\s+(.+?)\s+requirement\s+from\s+([^\s]+)\s+to\s+([^\s]+)/i.exec(body);
   if (reqMatch) {
-    const from = reqMatch[2]!.replace(/^[><=!~^]+/, "");
-    const to = reqMatch[3]!.replace(/^[><=!~^]+/, "");
+    const from = stripVersionSpecifier(reqMatch[2]!);
+    const to = stripVersionSpecifier(reqMatch[3]!);
     return { packageName: reqMatch[1]!, from, to, updateType: semverUpdateType(from, to) ?? undefined };
   }
 
@@ -197,13 +203,13 @@ export function parseRenovateBody(body: string): VersionInfo | null {
 
     if (changeIdx >= 0 && changeIdx < cells.length) {
       const m = VERSION_ARROW_RE.exec(cells[changeIdx]);
-      if (m) { result.from = m[1]; result.to = m[2]; }
+      if (m) { result.from = stripVersionSpecifier(m[1]); result.to = stripVersionSpecifier(m[2]); }
     }
 
     if (!result.from) {
       for (const cell of cells) {
         const m = VERSION_ARROW_RE.exec(cell);
-        if (m) { result.from = m[1]; result.to = m[2]; break; }
+        if (m) { result.from = stripVersionSpecifier(m[1]); result.to = stripVersionSpecifier(m[2]); break; }
       }
     }
 

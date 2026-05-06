@@ -38,6 +38,17 @@ export function loadConfig(): Config {
         (parsed as Record<string, unknown>).theme = "auto";
       }
     }
+    // Migrate tracked user logins: strip [bot] suffix from stored logins.
+    // handleTrackBot now stores base names only, but pre-migration data may
+    // have "renovate[bot]" which causes a doubled "renovate[bot][bot]" variant.
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).trackedUsers)) {
+      const users = (parsed as Record<string, unknown>).trackedUsers as { login?: string }[];
+      for (const u of users) {
+        if (typeof u.login === "string" && /\[bot\]$/i.test(u.login)) {
+          u.login = u.login.replace(/\[bot\]$/i, "");
+        }
+      }
+    }
     const result = ConfigSchema.safeParse(parsed);
     if (result.success) {
       const data = result.data;
