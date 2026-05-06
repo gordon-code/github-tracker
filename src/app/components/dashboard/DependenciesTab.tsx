@@ -8,6 +8,7 @@ import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
   extractVersionInfo,
+  stripVersionSpecifier,
   ALL_DEP_STATUSES,
   isKnownDepBot,
   DEP_TOOL_LABEL_NAMES,
@@ -174,8 +175,8 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         if (cached && (!titleInfo?.updateType || !titleInfo?.from)) {
           versionInfo = {
             packageName: titleInfo?.packageName ?? cached.packageName,
-            from: cached.from ?? titleInfo?.from,
-            to: cached.to ?? titleInfo?.to,
+            from: stripVersionSpecifier(cached.from ?? titleInfo?.from ?? "") || undefined,
+            to: stripVersionSpecifier(cached.to ?? titleInfo?.to ?? "") || undefined,
             updateType: cached.updateType ?? titleInfo?.updateType,
           };
         }

@@ -74,7 +74,7 @@ export function isDependencyPr(pr: PullRequest, trackedBotLogins: Set<string>): 
 
 const VERSION_SPECIFIER_RE = /^[><=!~^]+/;
 
-function stripVersionSpecifier(v: string): string {
+export function stripVersionSpecifier(v: string): string {
   return v.replace(VERSION_SPECIFIER_RE, "");
 }
 

@@ -8,6 +8,7 @@ import {
   isRebasing,
   isKnownDepBot,
   expandBotLogins,
+  stripVersionSpecifier,
   KNOWN_DEP_BOT_LOGINS,
   DEP_BRANCH_PREFIXES,
   DEP_TITLE_PATTERN,
@@ -207,6 +208,37 @@ describe("extractVersionInfo", () => {
   it("returns null updateType when from and to are identical versions", () => {
     const result = extractVersionInfo("Bump lodash from 4.17.21 to 4.17.21");
     expect(result).toEqual({ packageName: "lodash", from: "4.17.21", to: "4.17.21", updateType: undefined });
+  });
+});
+
+describe("stripVersionSpecifier", () => {
+  it("strips == prefix", () => {
+    expect(stripVersionSpecifier("==9.0.2")).toBe("9.0.2");
+  });
+
+  it("strips >= prefix", () => {
+    expect(stripVersionSpecifier(">=1.5.0")).toBe("1.5.0");
+  });
+
+  it("strips ~= prefix", () => {
+    expect(stripVersionSpecifier("~=1.15.0")).toBe("1.15.0");
+  });
+
+  it("strips ^ prefix (npm caret)", () => {
+    expect(stripVersionSpecifier("^1.2.3")).toBe("1.2.3");
+  });
+
+  it("strips <= prefix", () => {
+    expect(stripVersionSpecifier("<=2.0.0")).toBe("2.0.0");
+  });
+
+  it("leaves plain versions unchanged", () => {
+    expect(stripVersionSpecifier("4.17.21")).toBe("4.17.21");
+    expect(stripVersionSpecifier("v2.0.0")).toBe("v2.0.0");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(stripVersionSpecifier("")).toBe("");
   });
 });
 
