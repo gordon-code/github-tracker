@@ -349,7 +349,7 @@ if (typeof window !== "undefined") {
       fetch("https://api.github.com/user", {
         headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
       })
-        .then((r) => r.ok ? r.json() as Promise<GitHubUser> : null)
+        .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
         .then((data) => {
           if (data && _token() === newToken && _crossTabFetchGen === gen) {
             setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });

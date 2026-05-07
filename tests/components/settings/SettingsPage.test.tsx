@@ -566,8 +566,13 @@ describe("SettingsPage — replace token", () => {
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     await user.click(cancelBtn);
 
-    // Form is gone and input is cleared
+    // Form is gone
     expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+
+    // Reopen and verify input was cleared
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    const reopenedInput = screen.getByLabelText(/new personal access token/i) as HTMLInputElement;
+    expect(reopenedInput.value).toBe("");
   });
 
   it("shows format error and does not fetch when token has wrong format", async () => {
