@@ -26,10 +26,11 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   clearJiraAuth: vi.fn(),
   setJiraAuth: vi.fn(),
+  setAuthFromPat: vi.fn(),
   jiraAuth: () => null,
   isJiraAuthenticated: () => false,
   ensureJiraTokenValid: vi.fn(),
-  token: () => "fake-token",
+  token: vi.fn(() => "fake-token"),
   user: () => ({ login: "testuser", name: "Test User" }),
   onAuthCleared: vi.fn(),
 }));
@@ -526,6 +527,223 @@ describe("SettingsPage — Data: Sign out", () => {
 });
 
 // Theme application tests removed — theme is now handled by createEffect in App.tsx, not SettingsPage
+
+describe("SettingsPage — replace token", () => {
+  beforeEach(() => {
+    // Ensure authMethod is "pat" for most tests; individual tests override as needed
+    updateConfig({ authMethod: "pat" });
+    // Reset token mock to return "fake-token" (default)
+    vi.mocked(authStore.token).mockReturnValue("fake-token");
+  });
+
+  afterEach(() => {
+    vi.mocked(authStore.token).mockReturnValue("fake-token");
+  });
+
+  it("Replace button is visible when authMethod is pat", () => {
+    renderSettings();
+    screen.getByRole("button", { name: "Replace" });
+  });
+
+  it("Replace button is NOT in DOM when authMethod is oauth", () => {
+    updateConfig({ authMethod: "oauth" });
+    renderSettings();
+    expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
+  });
+
+  it("clicking Replace opens the form; clicking Cancel hides it and clears input", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const replaceBtn = screen.getByRole("button", { name: "Replace" });
+    await user.click(replaceBtn);
+
+    // Form is now visible
+    screen.getByRole("button", { name: "Replace token" });
+    const input = screen.getByLabelText(/new personal access token/i);
+    await user.type(input, "ghp_someinput");
+
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    await user.click(cancelBtn);
+
+    // Form is gone and input is cleared
+    expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+  });
+
+  it("shows format error and does not fetch when token has wrong format", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "bad-token" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      screen.getByText(/token should start with ghp_/i);
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows same-token error and does not fetch when entering current token", async () => {
+    const currentToken = "ghp_existingtoken123456789012345678901234";
+    vi.mocked(authStore.token).mockReturnValue(currentToken);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: currentToken } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      screen.getByText(/this is already your current token/i);
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("calls setAuthFromPat and closes form on successful replacement", async () => {
+    const newToken = "ghp_newtoken9876543210abcdefghijklmnopqrst";
+    const userData = { login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(userData),
+    } as Response);
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: newToken } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData);
+    });
+    // Form closed
+    expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+  });
+
+  it("shows invalid-token error on 401 response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({}),
+    } as Response);
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "ghp_newtoken9876543210abcdefghijklmnopqrst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      screen.getByText(/token is invalid — check that you entered it correctly/i);
+    });
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+  });
+
+  it("shows network error message when fetch throws", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "ghp_newtoken9876543210abcdefghijklmnopqrst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      screen.getByText(/network error — please try again/i);
+    });
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+  });
+
+  it("shows 'GitHub returned 500' error and does not call setAuthFromPat on 500 response", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({}),
+    } as Response);
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "ghp_newtoken9876543210abcdefghijklmnopqrst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      screen.getByText(/GitHub returned 500/i);
+    });
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    expect(pushNotification).not.toHaveBeenCalled();
+  });
+
+  it("calls pushNotification with pat-replace on successful replacement", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    const newToken = "ghp_newtoken9876543210abcdefghijklmnopqrst";
+    const userData = { login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(userData),
+    } as Response);
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: newToken } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith("pat-replace", "Token replaced successfully", "info");
+    });
+  });
+
+  it("stale-form guard: setAuthFromPat not called when Cancel clicked before fetch resolves", async () => {
+    let resolveFetch!: (v: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise<Response>((r) => { resolveFetch = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "ghp_newtoken9876543210abcdefghijklmnopqrst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    // Cancel while fetch is in-flight
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    await user.click(cancelBtn);
+
+    // Form is closed immediately on Cancel
+    expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+    expect(screen.queryByLabelText(/new personal access token/i)).toBeNull();
+
+    // Now resolve the fetch
+    resolveFetch({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" }),
+    } as Response);
+
+    // Wait for microtasks to flush
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    // Form remains closed — no error or success state leaked through
+    expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+  });
+});
 
 describe("SettingsPage — Auth method display", () => {
   it("shows 'OAuth' when authMethod is 'oauth'", () => {
