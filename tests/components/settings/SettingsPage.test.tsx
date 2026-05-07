@@ -743,6 +743,29 @@ describe("SettingsPage — replace token", () => {
     // Form remains closed — no error or success state leaked through
     expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
   });
+
+  it("stale-form guard: no error shown when Cancel clicked before error response resolves", async () => {
+    let resolveFetch!: (v: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise<Response>((r) => { resolveFetch = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+
+    const input = screen.getByLabelText(/new personal access token/i);
+    fireEvent.input(input, { target: { value: "ghp_newtoken9876543210abcdefghijklmnopqrst" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    resolveFetch({ ok: false, status: 401 } as Response);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    expect(screen.queryByText(/token is invalid/i)).toBeNull();
+  });
 });
 
 describe("SettingsPage — Auth method display", () => {

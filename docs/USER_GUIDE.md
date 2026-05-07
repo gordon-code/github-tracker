@@ -74,6 +74,8 @@ Two token formats are accepted:
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
+To replace your token later (e.g., after expiration or rotation), go to **Settings > Data > Authentication** and click **Replace**. The new token is validated before it replaces the old one. Other open tabs update automatically.
+
 ### Repository Selection
 
 After signing in, the onboarding wizard asks you to select repositories to track. Search by name or browse by organization. You can change your selection at any time in **Settings > Repositories**.
