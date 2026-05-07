@@ -71,6 +71,7 @@ export default function SettingsPage() {
   const [replaceSubmitting, setReplaceSubmitting] = createSignal(false);
   let replaceInputRef: HTMLInputElement | undefined;
   let replaceButtonRef: HTMLButtonElement | undefined;
+  let replaceAbortCtrl: AbortController | undefined;
 
   // Save indicator
   const [showSaved, setShowSaved] = createSignal(false);
@@ -273,6 +274,7 @@ export default function SettingsPage() {
       return;
     }
 
+    replaceAbortCtrl = new AbortController();
     try {
       const resp = await fetch("https://api.github.com/user", {
         headers: {
@@ -280,6 +282,7 @@ export default function SettingsPage() {
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
         },
+        signal: replaceAbortCtrl.signal,
       });
       if (!showReplaceToken()) return;
       if (!resp.ok) {
@@ -297,6 +300,7 @@ export default function SettingsPage() {
       replaceButtonRef?.focus();
       pushNotification("pat-replace", "Token replaced successfully", "info");
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       Sentry.captureException(err, { tags: { source: "pat-replace" } });
       setReplacePatError("Network error — please try again");
     } finally {
@@ -1282,6 +1286,7 @@ export default function SettingsPage() {
                     if (opening) {
                       setTimeout(() => replaceInputRef?.focus(), 0);
                     } else {
+                      replaceAbortCtrl?.abort();
                       setReplacePatInput(""); setReplacePatError(null);
                     }
                   }}
@@ -1324,7 +1329,7 @@ export default function SettingsPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setShowReplaceToken(false); setReplacePatInput(""); setReplacePatError(null); replaceButtonRef?.focus(); }}
+                      onClick={() => { replaceAbortCtrl?.abort(); setShowReplaceToken(false); setReplacePatInput(""); setReplacePatError(null); replaceButtonRef?.focus(); }}
                       class="btn btn-sm btn-ghost"
                     >
                       Cancel

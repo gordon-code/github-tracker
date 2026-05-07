@@ -521,7 +521,6 @@ describe("cross-tab auth sync", () => {
       newValue: "ghs_abc",
     }));
 
-    // Same value — no change expected
     expect(mod.token()).toBe("ghs_abc");
   });
 
@@ -562,7 +561,8 @@ describe("cross-tab auth sync", () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetchMock);
 
-    mod.setAuth({ access_token: "ghs_abc" });
+    mod.setAuthFromPat("ghs_abc", { login: "origuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Orig" });
+    expect(mod.user()?.login).toBe("origuser");
 
     window.dispatchEvent(new StorageEvent("storage", {
       key: "github-tracker:auth-token",
@@ -571,8 +571,8 @@ describe("cross-tab auth sync", () => {
 
     await new Promise((r) => setTimeout(r, 50));
 
-    // user() was never set (no prior validateToken), so it remains null — no crash
-    expect(mod.user()).toBeNull();
+    // user() preserved from before — fetch failure does not clear it
+    expect(mod.user()?.login).toBe("origuser");
     // Token still updated synchronously
     expect(mod.token()).toBe("ghs_replacement");
   });
