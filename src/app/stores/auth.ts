@@ -329,6 +329,8 @@ onAuthCleared(() => {
   _setJiraAuth(null);
 });
 
+let _crossTabFetchGen = 0;
+
 // Cross-tab auth sync: if another tab clears the token, this tab should also clear.
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
 // Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
@@ -340,6 +342,20 @@ if (typeof window !== "undefined") {
       if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
       expireToken();
       window.location.replace("/login");
+    } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
+      _setToken(e.newValue);
+      const gen = ++_crossTabFetchGen;
+      const newToken = e.newValue;
+      fetch("https://api.github.com/user", {
+        headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+      })
+        .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
+        .then((data) => {
+          if (data && _token() === newToken && _crossTabFetchGen === gen) {
+            setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
+          }
+        })
+        .catch(() => {});
     }
     if (e.key === JIRA_AUTH_STORAGE_KEY) {
       try {

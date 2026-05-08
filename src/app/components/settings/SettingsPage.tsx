@@ -5,7 +5,9 @@ import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
-import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated } from "../../stores/auth";
+import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
+import type { GitHubUser } from "../../stores/auth";
+import { isValidPatFormat } from "../../lib/pat";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
@@ -61,6 +63,15 @@ export default function SettingsPage() {
   const [notifPermission, setNotifPermission] = createSignal<NotificationPermission>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
+
+  // Replace token panel
+  const [showReplaceToken, setShowReplaceToken] = createSignal(false);
+  const [replacePatInput, setReplacePatInput] = createSignal("");
+  const [replacePatError, setReplacePatError] = createSignal<string | null>(null);
+  const [replaceSubmitting, setReplaceSubmitting] = createSignal(false);
+  let replaceInputRef: HTMLInputElement | undefined;
+  let replaceButtonRef: HTMLButtonElement | undefined;
+  let replaceAbortCtrl: AbortController | undefined;
 
   // Save indicator
   const [showSaved, setShowSaved] = createSignal(false);
@@ -242,6 +253,59 @@ export default function SettingsPage() {
     // IndexedDB cache, and onAuthCleared callbacks
     clearAuth();
     window.location.reload();
+  }
+
+  async function handleReplaceToken() {
+    if (replaceSubmitting()) return;
+    setReplaceSubmitting(true);
+    setReplacePatError(null);
+    const trimmedToken = replacePatInput().trim();
+
+    if (trimmedToken === token()) {
+      setReplacePatError("This is already your current token");
+      setReplaceSubmitting(false);
+      return;
+    }
+
+    const validation = isValidPatFormat(trimmedToken);
+    if (!validation.valid) {
+      setReplacePatError(validation.error);
+      setReplaceSubmitting(false);
+      return;
+    }
+
+    replaceAbortCtrl = new AbortController();
+    try {
+      const resp = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${trimmedToken}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        signal: replaceAbortCtrl.signal,
+      });
+      if (!showReplaceToken()) return;
+      if (!resp.ok) {
+        setReplacePatError(
+          resp.status === 401
+            ? "Token is invalid — check that you entered it correctly"
+            : `GitHub returned ${resp.status} — try again later`
+        );
+        return;
+      }
+      const userData = (await resp.json()) as GitHubUser;
+      setAuthFromPat(trimmedToken, userData);
+      setReplacePatInput("");
+      setShowReplaceToken(false);
+      replaceButtonRef?.focus();
+      pushNotification("pat-replace", "Token replaced successfully", "info");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      Sentry.captureException(err, { tags: { source: "pat-replace" } });
+      setReplacePatError("Network error — please try again");
+    } finally {
+      setReplaceSubmitting(false);
+    }
   }
 
   function handleSignOut() {
@@ -1208,10 +1272,73 @@ export default function SettingsPage() {
           {/* Authentication method */}
           <SettingRow
             label="Authentication"
-            description="Current sign-in method"
+            description={config.authMethod === "pat" ? "Signed in with Personal Access Token" : "Signed in with OAuth"}
           >
-            <span class="text-sm">{config.authMethod === "pat" ? "Personal Access Token" : "OAuth"}</span>
+            <div class="flex items-center gap-2">
+              <span class="text-sm">{config.authMethod === "pat" ? "Personal Access Token" : "OAuth"}</span>
+              <Show when={config.authMethod === "pat"}>
+                <button
+                  ref={replaceButtonRef}
+                  type="button"
+                  onClick={() => {
+                    const opening = !showReplaceToken();
+                    setShowReplaceToken(opening);
+                    if (opening) {
+                      setTimeout(() => replaceInputRef?.focus(), 0);
+                    } else {
+                      replaceAbortCtrl?.abort();
+                      setReplacePatInput(""); setReplacePatError(null);
+                    }
+                  }}
+                  class="btn btn-xs btn-outline"
+                  aria-expanded={showReplaceToken()}
+                  aria-controls="replace-token-panel"
+                >
+                  Replace
+                </button>
+              </Show>
+            </div>
           </SettingRow>
+          <Show when={showReplaceToken()}>
+            <div id="replace-token-panel" class="px-4 py-3 flex flex-col gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); void handleReplaceToken(); }}>
+                <div class="flex flex-col gap-2">
+                  <input
+                    ref={replaceInputRef}
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="ghp_... or github_pat_..."
+                    class={`input input-sm w-full${replacePatError() ? " input-error" : ""}`}
+                    aria-label="New personal access token"
+                    aria-invalid={!!replacePatError()}
+                    aria-describedby={replacePatError() ? "replace-pat-error" : undefined}
+                    value={replacePatInput()}
+                    onInput={(e) => setReplacePatInput(e.currentTarget.value)}
+                  />
+                  <Show when={replacePatError()}>
+                    <p id="replace-pat-error" role="alert" class="text-error text-xs">{replacePatError()}</p>
+                  </Show>
+                  <div class="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={replaceSubmitting()}
+                      aria-busy={replaceSubmitting()}
+                      class="btn btn-sm btn-primary"
+                    >
+                      {replaceSubmitting() ? "Validating..." : "Replace token"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { replaceAbortCtrl?.abort(); setShowReplaceToken(false); setReplacePatInput(""); setReplacePatError(null); replaceButtonRef?.focus(); }}
+                      class="btn btn-sm btn-ghost"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </Show>
 
           {/* Clear cache */}
           <SettingRow

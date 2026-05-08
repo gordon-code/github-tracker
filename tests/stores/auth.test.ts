@@ -501,16 +501,80 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_abc");
   });
 
-  it("does not call expireToken when newValue is not null", () => {
+  it("updates token signal when another tab writes a different non-null value", () => {
     mod.setAuth({ access_token: "ghs_abc" });
 
     window.dispatchEvent(new StorageEvent("storage", {
       key: "github-tracker:auth-token",
-      newValue: "ghs_new-token",
+      newValue: "ghs_replacement",
     }));
 
-    // Token unchanged — non-null newValue means no sign-out occurred
+    // Token updated to the replacement value
+    expect(mod.token()).toBe("ghs_replacement");
+  });
+
+  it("same-value StorageEvent is a no-op (dedup guard)", () => {
+    mod.setAuth({ access_token: "ghs_abc" });
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_abc",
+    }));
+
     expect(mod.token()).toBe("ghs_abc");
+  });
+
+  it("fires /user fetch on token replacement and updates user() on success", async () => {
+    const userData = { login: "replaceduser", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "Replaced" };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(userData),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mod.setAuth({ access_token: "ghs_abc" });
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_replacement",
+    }));
+
+    // Token is updated synchronously
+    expect(mod.token()).toBe("ghs_replacement");
+
+    // Wait for microtasks from fire-and-forget fetch to settle
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/user",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer ghs_replacement",
+        }),
+      })
+    );
+    expect(mod.user()?.login).toBe("replaceduser");
+  });
+
+  it("user preserved when /user fetch fails after token replacement", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    mod.setAuthFromPat("ghs_abc", { login: "origuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Orig" });
+    expect(mod.user()?.login).toBe("origuser");
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_replacement",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // user() preserved from before — fetch failure does not clear it
+    expect(mod.user()?.login).toBe("origuser");
+    // Token still updated synchronously
+    expect(mod.token()).toBe("ghs_replacement");
   });
 
   it("does not call expireToken when no token is set in memory", () => {
