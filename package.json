@@ -2,7 +2,7 @@
   "name": "github-tracker",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.5.3",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -45,7 +45,7 @@
     "happy-dom": "20.10.6",
     "tailwindcss": "4.3.2",
     "typescript": "6.0.3",
-    "vite": "8.0.8",
+    "vite": "8.0.16",
     "vite-plugin-solid": "2.11.12",
     "vitest": "4.1.10",
     "wrangler": "4.110.0"
