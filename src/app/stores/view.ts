@@ -224,12 +224,25 @@ export function resetViewState(): void {
   );
 }
 
+// KNOWN LIMITATION: ViewStateSchema.pick() only prevents inflation of TOP-LEVEL fields
+// absent from `partial`. It does NOT protect a nested field's own missing sub-keys from
+// being backfilled with schema defaults if a caller ever passes a partially-populated
+// nested object (e.g. `{ globalFilter: { org: "x" } }` without `repo`) — Zod's per-field
+// `.default()` still fires within a nested object's own schema regardless of `.pick()` at
+// the parent level. Not a regression: no current call site passes anything but flat scalar
+// fields, and `updateConfig()` in config.ts has this same limitation today.
 export function updateViewState(partial: Partial<ViewState>): void {
-  setViewState(
-    produce((draft) => {
-      Object.assign(draft, partial);
-    })
-  );
+  const keys = Object.keys(partial) as (keyof ViewState)[];
+  if (keys.length === 0) return;
+  const shape = Object.fromEntries(keys.map((k) => [k, true])) as Partial<Record<keyof ViewState, true>>;
+  const validated = ViewStateSchema.pick(shape).safeParse(partial);
+  if (!validated.success) {
+    pushNotification("view:updateViewState", "Some view settings could not be saved due to invalid data.", "warning");
+    return;
+  }
+  setViewState(produce((draft) => {
+    Object.assign(draft, validated.data);
+  }));
 }
 
 export function ignoreItem(item: IgnoredItem): void {
