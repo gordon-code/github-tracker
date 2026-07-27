@@ -1206,6 +1206,16 @@ describe("Dependencies settings section", () => {
     expect(config.defaultTab).toBe("pullRequests");
   });
 
+  it("disabling dependencies resets lastActiveTab to 'issues' when it was 'dependencies'", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateViewState({ lastActiveTab: "dependencies" });
+    renderSettings();
+    const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
+    fireEvent.click(toggle);
+    expect(config.dependencies.enabled).toBe(false);
+    expect(viewState.lastActiveTab).toBe("issues");
+  });
+
   it("renders rebase label input with current value", () => {
     updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase-please" } });
     renderSettings();
