@@ -55,7 +55,7 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
 
         <Popover.Portal>
           <Popover.Content
-            class="w-80 bg-base-100 border border-base-300 rounded-lg shadow-lg"
+            class="w-80 bg-base-100 border border-base-300 rounded-lg shadow-lg z-50"
             aria-label="Ignored items"
           >
             <div class="px-3 py-2 border-b border-base-300 text-xs font-semibold text-base-content/60 uppercase tracking-wide">
