@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@solidjs/testing-library";
+import userEvent from "@testing-library/user-event";
 
 // ── localStorage mock ────────────────────────────────────────────────────────
 
@@ -277,38 +278,25 @@ describe("Actions toggle — negative cases", () => {
 });
 
 describe("Actions toggle — default tab dropdown filtering", () => {
-  it("excludes GitHub Actions option from default tab select when enableActions is false", () => {
+  // The default tab select is a Kobalte Select — options only mount in the DOM once
+  // the trigger is opened, so each test must open it before asserting presence/absence.
+  it("excludes GitHub Actions option from default tab select when enableActions is false", async () => {
+    const user = userEvent.setup();
     updateConfig({ enableActions: false });
     renderSettings();
-    const selects = document.querySelectorAll("select");
-    let actionsOptionFound = false;
-    for (const sel of selects) {
-      for (const opt of sel.options) {
-        if (opt.value === "actions") {
-          actionsOptionFound = true;
-          break;
-        }
-      }
-    }
-    expect(actionsOptionFound).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    expect(screen.queryByRole("option", { name: "GitHub Actions" })).toBeNull();
   });
 
-  it("includes GitHub Actions option in default tab select when enableActions is true", () => {
+  it("includes GitHub Actions option in default tab select when enableActions is true", async () => {
+    const user = userEvent.setup();
     renderSettings();
-    const selects = document.querySelectorAll("select");
-    let actionsOptionFound = false;
-    for (const sel of selects) {
-      for (const opt of sel.options) {
-        if (opt.value === "actions") {
-          actionsOptionFound = true;
-          break;
-        }
-      }
-    }
-    expect(actionsOptionFound).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    screen.getByRole("option", { name: "GitHub Actions" });
   });
 
-  it("excludes actions-based custom tabs from default tab select when enableActions is false", () => {
+  it("excludes actions-based custom tabs from default tab select when enableActions is false", async () => {
+    const user = userEvent.setup();
     updateConfig({
       enableActions: false,
       customTabs: [
@@ -317,16 +305,8 @@ describe("Actions toggle — default tab dropdown filtering", () => {
       ],
     });
     renderSettings();
-    const selects = document.querySelectorAll("select");
-    let actionsCustomFound = false;
-    let issuesCustomFound = false;
-    for (const sel of selects) {
-      for (const opt of sel.options) {
-        if (opt.value === "my-actions") actionsCustomFound = true;
-        if (opt.value === "my-issues") issuesCustomFound = true;
-      }
-    }
-    expect(actionsCustomFound).toBe(false);
-    expect(issuesCustomFound).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    expect(screen.queryByRole("option", { name: "My Actions" })).toBeNull();
+    screen.getByRole("option", { name: "My Issues" });
   });
 });

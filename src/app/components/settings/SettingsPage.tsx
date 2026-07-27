@@ -1,9 +1,9 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import { Select } from "@kobalte/core/select";
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
-import type { Config } from "../../stores/config";
 import { viewState, updateViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
@@ -33,6 +33,16 @@ import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+interface NumberSelectOption {
+  value: number;
+  label: string;
+}
+
+interface StringSelectOption {
+  value: string;
+  label: string;
+}
 
 export const SETTINGS_PAGE_SECTION_IDS = [
   "orgs-repos",
@@ -427,7 +437,7 @@ export default function SettingsPage() {
 
   // ── Refresh interval options ──────────────────────────────────────────────
 
-  const refreshOptions = [
+  const refreshOptions: NumberSelectOption[] = [
     { value: 60, label: "1 minute" },
     { value: 120, label: "2 minutes" },
     { value: 300, label: "5 minutes (default)" },
@@ -437,7 +447,7 @@ export default function SettingsPage() {
     { value: 0, label: "Off" },
   ];
 
-  const tabOptions = createMemo(() => [
+  const tabOptions = createMemo<StringSelectOption[]>(() => [
     { value: "issues", label: "Issues" },
     { value: "pullRequests", label: "Pull Requests" },
     ...(config.enableActions ? [{ value: "actions", label: "GitHub Actions" }] : []),
@@ -448,7 +458,7 @@ export default function SettingsPage() {
   ]);
 
 
-  const itemsPerPageOptions = [
+  const itemsPerPageOptions: NumberSelectOption[] = [
     { value: 10, label: "10" },
     { value: 25, label: "25" },
     { value: 50, label: "50" },
@@ -608,17 +618,32 @@ export default function SettingsPage() {
             label="Refresh interval"
             description="How often to poll GitHub for new data"
           >
-            <select
-              value={String(config.refreshInterval)}
-              onChange={(e) => {
-                saveWithFeedback({ refreshInterval: Number(e.currentTarget.value) });
-              }}
-              class="select select-sm"
+            <Select
+              options={refreshOptions}
+              optionValue="value"
+              optionTextValue="label"
+              value={refreshOptions.find((opt) => opt.value === config.refreshInterval) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ refreshInterval: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {refreshOptions.map((opt) => (
-                <option value={String(opt.value)}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<NumberSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
           <SettingRow
             label="CI status refresh"
@@ -722,17 +747,32 @@ export default function SettingsPage() {
             label="Items per page"
             description="Number of items to show in each tab"
           >
-            <select
-              value={String(config.itemsPerPage)}
-              onChange={(e) => {
-                saveWithFeedback({ itemsPerPage: Number(e.currentTarget.value) });
-              }}
-              class="select select-sm"
+            <Select
+              options={itemsPerPageOptions}
+              optionValue="value"
+              optionTextValue="label"
+              value={itemsPerPageOptions.find((opt) => opt.value === config.itemsPerPage) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ itemsPerPage: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {itemsPerPageOptions.map((opt) => (
-                <option value={String(opt.value)}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<NumberSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
         </Section>
 
@@ -742,17 +782,32 @@ export default function SettingsPage() {
             label="Default tab"
             description="Tab shown when opening the dashboard fresh"
           >
-            <select
-              value={config.defaultTab}
-              onChange={(e) => {
-                saveWithFeedback({ defaultTab: e.currentTarget.value as Config["defaultTab"] });
-              }}
-              class="select select-sm"
+            <Select
+              options={tabOptions()}
+              optionValue="value"
+              optionTextValue="label"
+              value={tabOptions().find((opt) => opt.value === config.defaultTab) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ defaultTab: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {tabOptions().map((opt) => (
-                <option value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<StringSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
           <SettingRow
             label="Remember last tab"

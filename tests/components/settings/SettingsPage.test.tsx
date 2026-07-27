@@ -219,14 +219,15 @@ describe("SettingsPage — rendering", () => {
 describe("SettingsPage — Refresh interval", () => {
   it("shows current refresh interval value", () => {
     renderSettings();
-    screen.getByDisplayValue("5 minutes (default)");
+    screen.getByRole("button", { name: "5 minutes (default)" });
   });
 
   it("changing refresh interval calls updateConfig", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const select = screen.getByDisplayValue("5 minutes (default)");
-    await user.selectOptions(select, "60");
+    const trigger = screen.getByRole("button", { name: "5 minutes (default)" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "1 minute" }));
     expect(config.refreshInterval).toBe(60);
   });
 });
@@ -261,14 +262,15 @@ describe("SettingsPage — Appearance", () => {
 
   it("shows current items per page value", () => {
     renderSettings();
-    screen.getByDisplayValue("25");
+    screen.getByRole("button", { name: "25" });
   });
 
   it("changing items per page updates config", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const ippSelect = screen.getByDisplayValue("25");
-    await user.selectOptions(ippSelect, "50");
+    const trigger = screen.getByRole("button", { name: "25" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "50" }));
     expect(config.itemsPerPage).toBe(50);
   });
 });
@@ -276,14 +278,15 @@ describe("SettingsPage — Appearance", () => {
 describe("SettingsPage — Tabs", () => {
   it("shows current default tab value", () => {
     renderSettings();
-    screen.getByDisplayValue("Issues");
+    screen.getByRole("button", { name: "Issues" });
   });
 
   it("changing default tab updates config", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const tabSelect = screen.getByDisplayValue("Issues");
-    await user.selectOptions(tabSelect, "pullRequests");
+    const trigger = screen.getByRole("button", { name: "Issues" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Pull Requests" }));
     expect(config.defaultTab).toBe("pullRequests");
   });
 
@@ -978,15 +981,21 @@ describe("SettingsPage — enableTracking toggle", () => {
     expect(config.defaultTab).toBe("pullRequests");
   });
 
-  it("shows 'Tracked Items' option in defaultTab select when enableTracking is true", () => {
+  it("shows 'Tracked Items' option in defaultTab select when enableTracking is true", async () => {
+    const user = userEvent.setup();
     updateConfig({ enableTracking: true });
     renderSettings();
+    await user.click(screen.getByRole("button", { name: "Issues" }));
     screen.getByRole("option", { name: "Tracked Items" });
   });
 
-  it("hides 'Tracked Items' option in defaultTab select when enableTracking is false", () => {
+  it("hides 'Tracked Items' option in defaultTab select when enableTracking is false", async () => {
+    const user = userEvent.setup();
     updateConfig({ enableTracking: false });
     renderSettings();
+    // Open the trigger first — Kobalte doesn't mount role="option" elements until the
+    // listbox opens, so querying for absence without opening would pass vacuously.
+    await user.click(screen.getByRole("button", { name: "Issues" }));
     expect(screen.queryByRole("option", { name: "Tracked Items" })).toBeNull();
   });
 
@@ -1027,7 +1036,8 @@ describe("SettingsPage — custom tabs in default tab dropdown", () => {
     updateConfig({ customTabs: [] });
   });
 
-  it("custom tab name appears as an option in the default tab select", () => {
+  it("custom tab name appears as an option in the default tab select", async () => {
+    const user = userEvent.setup();
     updateConfig({
       customTabs: [{
         id: "custom-tab-1",
@@ -1040,10 +1050,12 @@ describe("SettingsPage — custom tabs in default tab dropdown", () => {
       }],
     });
     renderSettings();
+    await user.click(screen.getByRole("button", { name: "Issues" }));
     screen.getByRole("option", { name: "My Custom Tab" });
   });
 
-  it("multiple custom tabs all appear in the default tab select", () => {
+  it("multiple custom tabs all appear in the default tab select", async () => {
+    const user = userEvent.setup();
     updateConfig({
       customTabs: [
         {
@@ -1067,6 +1079,7 @@ describe("SettingsPage — custom tabs in default tab dropdown", () => {
       ],
     });
     renderSettings();
+    await user.click(screen.getByRole("button", { name: "Issues" }));
     screen.getByRole("option", { name: "Alpha Tab" });
     screen.getByRole("option", { name: "Beta Tab" });
   });
@@ -1085,8 +1098,9 @@ describe("SettingsPage — custom tabs in default tab dropdown", () => {
       }],
     });
     renderSettings();
-    const tabSelect = screen.getByDisplayValue("Issues");
-    await user.selectOptions(tabSelect, "my-tab");
+    const trigger = screen.getByRole("button", { name: "Issues" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "My Tab" }));
     expect(config.defaultTab).toBe("my-tab");
   });
 });
