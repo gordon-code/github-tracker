@@ -49,6 +49,11 @@ describe("IgnoreBadge", () => {
 
     // Now open
     expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    // Regression guard: popover content must retain z-50 so it stacks above
+    // surrounding dashboard content (fix(ui): adds missing z-50 to IgnoreBadge popover content).
+    const content = document.querySelector("[aria-label='Ignored items']");
+    expect(content?.className).toContain("z-50");
   });
 
   it("clicking badge again closes popover", async () => {
@@ -84,14 +89,20 @@ describe("IgnoreBadge", () => {
     const onUnignore = vi.fn();
     const items = [
       makeIgnoredItem({ id: 123, title: "My Issue" }),
+      makeIgnoredItem({ id: 456, title: "Another Issue" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
-    await user.click(getTrigger(1));
+    const button = getTrigger(2);
+    await user.click(button);
 
-    const unignoreBtn = screen.getByText("Unignore");
-    await user.click(unignoreBtn);
+    const unignoreBtns = screen.getAllByText("Unignore");
+    await user.click(unignoreBtns[0]);
 
     expect(onUnignore).toHaveBeenCalledWith(123);
+    // Deliberate behavior: individual "Unignore" clicks must NOT close the
+    // popover — only "Unignore All" does. Verify with 2+ items remaining so
+    // the click doesn't trivially empty the list.
+    expect(button.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("'Unignore All' calls onUnignore for every item", async () => {
