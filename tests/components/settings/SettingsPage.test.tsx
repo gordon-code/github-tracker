@@ -1188,6 +1188,24 @@ describe("Dependencies settings section", () => {
     expect(config.dependencies.enabled).toBe(false);
   });
 
+  it("disabling dependencies resets defaultTab to 'issues' when it was 'dependencies'", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" }, defaultTab: "dependencies" });
+    renderSettings();
+    const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
+    fireEvent.click(toggle);
+    expect(config.dependencies.enabled).toBe(false);
+    expect(config.defaultTab).toBe("issues");
+  });
+
+  it("disabling dependencies preserves defaultTab when it was not 'dependencies'", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" }, defaultTab: "pullRequests" });
+    renderSettings();
+    const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
+    fireEvent.click(toggle);
+    expect(config.dependencies.enabled).toBe(false);
+    expect(config.defaultTab).toBe("pullRequests");
+  });
+
   it("renders rebase label input with current value", () => {
     updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase-please" } });
     renderSettings();

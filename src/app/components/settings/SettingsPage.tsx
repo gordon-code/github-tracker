@@ -1301,7 +1301,16 @@ export default function SettingsPage() {
               class="toggle toggle-primary"
               aria-label="Enable dependencies tab"
               checked={config.dependencies?.enabled ?? true}
-              onChange={() => saveWithFeedback({ dependencies: { ...config.dependencies, enabled: !(config.dependencies?.enabled ?? true) } })}
+              onChange={() => {
+                const val = !(config.dependencies?.enabled ?? true);
+                saveWithFeedback({
+                  dependencies: { ...config.dependencies, enabled: val },
+                  ...(!val && config.defaultTab === "dependencies" ? { defaultTab: "issues" as const } : {}),
+                });
+                if (!val && viewState.lastActiveTab === "dependencies") {
+                  updateViewState({ lastActiveTab: "issues" });
+                }
+              }}
             />
           </SettingRow>
           <SettingRow
