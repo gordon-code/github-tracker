@@ -4,7 +4,8 @@ import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
-import { viewState, updateViewState } from "../../stores/view";
+import type { JiraCustomField } from "../../../shared/schemas";
+import { viewState, updateViewState, setTabFilter } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
 import { isValidPatFormat } from "../../lib/pat";
@@ -59,6 +60,21 @@ export const SETTINGS_PAGE_SECTION_IDS = [
   "dependencies",
   "data",
 ] as const;
+
+// Built-in Jira scope values, duplicated from JiraAssignedTab.tsx's BUILTIN_SCOPE_OPTIONS
+// (not exported there to avoid a cross-component coupling for 3 literal strings).
+const BUILTIN_JIRA_SCOPES = ["assigned", "reported", "watching"];
+
+/**
+ * Returns the scope value to fall back to if `activeScope` no longer exists in
+ * `scopes` (e.g. the custom scope backing it was just deleted, or Jira was
+ * disconnected and `scopes` is empty) — otherwise null. Guards against firing
+ * an invalid JQL query with a stale custom scope ID (BUG-008).
+ */
+export function staleJiraScopeReset(activeScope: string, scopes: JiraCustomField[]): string | null {
+  const validScopeIds = new Set([...BUILTIN_JIRA_SCOPES, ...scopes.map((s) => s.id)]);
+  return validScopeIds.has(activeScope) ? null : "assigned";
+}
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -433,6 +449,11 @@ export default function SettingsPage() {
     if (viewState.lastActiveTab === "jiraAssigned") {
       updateViewState({ lastActiveTab: "issues" });
     }
+    // Stale scope guard: clearJiraConfigFull() wipes customScopes, so a tab
+    // filter pointing at a custom scope ID would otherwise survive reconnect
+    // and fire an invalid JQL query against the new Jira instance (BUG-008).
+    const reset = staleJiraScopeReset(viewState.tabFilters.jiraAssigned.scope, []);
+    if (reset) setTabFilter("jiraAssigned", "scope", reset);
   }
 
   // ── Refresh interval options ──────────────────────────────────────────────
@@ -1270,7 +1291,15 @@ export default function SettingsPage() {
                   <JiraScopePicker
                     client={jiraClient()!}
                     selectedScopes={config.jira?.customScopes ?? []}
-                    onSave={(scopes) => { updateJiraCustomScopes(scopes); setShowScopePicker(false); }}
+                    onSave={(scopes) => {
+                      updateJiraCustomScopes(scopes);
+                      setShowScopePicker(false);
+                      // Stale scope guard: if the active Jira tab filter pointed at a
+                      // custom scope that was just removed, reset it before it can fire
+                      // an invalid JQL query (BUG-008).
+                      const reset = staleJiraScopeReset(viewState.tabFilters.jiraAssigned.scope, scopes);
+                      if (reset) setTabFilter("jiraAssigned", "scope", reset);
+                    }}
                     onCancel={() => setShowScopePicker(false)}
                   />
                 </div>

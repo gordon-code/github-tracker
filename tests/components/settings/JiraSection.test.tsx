@@ -103,9 +103,10 @@ vi.mock("../../../src/app/stores/config", () => ({
 }));
 
 vi.mock("../../../src/app/stores/view", () => ({
-  viewState: { lastActiveTab: "issues", tabFilters: {}, expandedRepos: {}, lockedRepos: {}, trackedItems: [], activeScopeTab: "involved" },
+  viewState: { lastActiveTab: "issues", tabFilters: { jiraAssigned: { scope: "assigned" } }, expandedRepos: {}, lockedRepos: {}, trackedItems: [], activeScopeTab: "involved" },
   updateViewState: vi.fn(),
   resetViewState: vi.fn(),
+  setTabFilter: vi.fn(),
   ViewStateSchema: { parse: vi.fn((x: unknown) => x) },
 }));
 
@@ -163,7 +164,8 @@ vi.mock("../../../src/app/services/jira-keys", () => ({
 }));
 
 // Component imports after all mocks
-import SettingsPage from "../../../src/app/components/settings/SettingsPage";
+import SettingsPage, { staleJiraScopeReset } from "../../../src/app/components/settings/SettingsPage";
+import { viewState, setTabFilter } from "../../../src/app/stores/view";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -525,6 +527,31 @@ describe("SettingsPage Jira section — connected state", () => {
     expect(mockClearJiraConfigFull).toHaveBeenCalled();
   });
 
+  it("Disconnect resets a stale custom jiraAssigned scope to 'assigned' (BUG-008)", async () => {
+    viewState.tabFilters.jiraAssigned.scope = "customfield_10001";
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Disconnect/i }));
+
+    expect(setTabFilter).toHaveBeenCalledWith("jiraAssigned", "scope", "assigned");
+  });
+
+  it("Disconnect does not touch jiraAssigned scope when it's already 'assigned'", async () => {
+    viewState.tabFilters.jiraAssigned.scope = "assigned";
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+    });
+
+    vi.mocked(setTabFilter).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /Disconnect/i }));
+
+    expect(setTabFilter).not.toHaveBeenCalled();
+  });
+
   it("Disconnect does not show OAuth connect buttons (only when disconnected)", async () => {
     renderSettings();
     await waitFor(() => {
@@ -533,5 +560,26 @@ describe("SettingsPage Jira section — connected state", () => {
 
     expect(screen.queryByText(/Connect with Jira OAuth/i)).toBeNull();
     expect(screen.queryByText(/Use API token/i)).toBeNull();
+  });
+});
+
+describe("staleJiraScopeReset (BUG-008)", () => {
+  it("returns null when the active scope is a built-in value", () => {
+    expect(staleJiraScopeReset("assigned", [])).toBeNull();
+    expect(staleJiraScopeReset("reported", [{ id: "customfield_1", name: "Foo" }])).toBeNull();
+    expect(staleJiraScopeReset("watching", [])).toBeNull();
+  });
+
+  it("returns null when the active scope matches a surviving custom scope id", () => {
+    expect(
+      staleJiraScopeReset("customfield_10001", [{ id: "customfield_10001", name: "Epic Filter" }])
+    ).toBeNull();
+  });
+
+  it("returns 'assigned' when the active scope is a custom id no longer present", () => {
+    expect(staleJiraScopeReset("customfield_10001", [])).toBe("assigned");
+    expect(
+      staleJiraScopeReset("customfield_10001", [{ id: "customfield_9999", name: "Other" }])
+    ).toBe("assigned");
   });
 });
