@@ -1,4 +1,9 @@
 packages:
   - "mcp"
 
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+
 strictDepBuilds: false

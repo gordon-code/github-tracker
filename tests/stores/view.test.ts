@@ -28,7 +28,8 @@ import {
   untrackJiraItem,
   moveJiraItem,
 } from "../../src/app/stores/view";
-import type { IgnoredItem, TrackedItem } from "../../src/app/stores/view";
+import type { IgnoredItem, TrackedItem, ViewState } from "../../src/app/stores/view";
+import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
 
 // view.ts uses createStore — setters work outside reactive context.
 // We use createRoot only for initViewPersistence (which calls createEffect).
@@ -78,6 +79,67 @@ describe("updateViewState", () => {
     updateViewState({ lastActiveTab: "actions" });
     expect(viewState.globalFilter).toEqual({ org: null, repo: null });
     expect(viewState.ignoredItems).toEqual([]);
+  });
+
+  it("is a safe no-op when called with an empty object", () => {
+    updateViewState({ lastActiveTab: "pullRequests" });
+    updateViewState({});
+    expect(viewState.lastActiveTab).toBe("pullRequests");
+  });
+
+  // Real call sites (DashboardPage, SettingsPage, config.ts, IssuesTab) only ever pass
+  // these two field/type shapes — verify both validate and apply correctly.
+  it("applies a real call-site shape: { lastActiveTab: string }", () => {
+    updateViewState({ lastActiveTab: "jiraAssigned" });
+    expect(viewState.lastActiveTab).toBe("jiraAssigned");
+  });
+
+  it("applies a real call-site shape: { hideDepDashboard: boolean }", () => {
+    expect(viewState.hideDepDashboard).toBe(true);
+    updateViewState({ hideDepDashboard: false });
+    expect(viewState.hideDepDashboard).toBe(false);
+    updateViewState({ hideDepDashboard: true });
+    expect(viewState.hideDepDashboard).toBe(true);
+  });
+
+  // Structural guard: updating ANY single field must never wipe other fields.
+  // Catches Zod v4 .partial().safeParse() default inflation (BUG-001 class, mirrors config.test.ts).
+  it.each([
+    ["lastActiveTab", { lastActiveTab: "actions" }],
+    ["showPrRuns", { showPrRuns: true }],
+    ["hideDepDashboard", { hideDepDashboard: false }],
+    ["dependencyExpandedGroups", { dependencyExpandedGroups: ["patch"] }],
+  ] satisfies [string, Partial<ViewState>][])("updating only %s preserves other non-default fields", (_fieldName, patch) => {
+    // Seed an unrelated field with a non-default value first.
+    updateViewState({ lastActiveTab: "pullRequests" });
+    expect(viewState.lastActiveTab).toBe("pullRequests");
+
+    // Now update a (possibly different) single field.
+    updateViewState(patch);
+
+    // The previously-seeded field must still hold its non-default value
+    // unless this iteration's patch targeted it directly.
+    if (!("lastActiveTab" in patch)) {
+      expect(viewState.lastActiveTab).toBe("pullRequests");
+    }
+  });
+
+  describe("invalid data", () => {
+    beforeEach(() => {
+      clearNotifications();
+    });
+
+    it("rejects a single field with the wrong type, pushes a warning notification, and leaves the store unchanged", () => {
+      const before = viewState.hideDepDashboard;
+      updateViewState({ hideDepDashboard: "not-a-boolean" as unknown as boolean });
+
+      expect(viewState.hideDepDashboard).toBe(before);
+
+      const notifications = getNotifications();
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].source).toBe("view:updateViewState");
+      expect(notifications[0].severity).toBe("warning");
+    });
   });
 });
 

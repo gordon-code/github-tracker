@@ -1,8 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import ScopeToggle from "../../../src/app/components/shared/ScopeToggle";
 
 describe("ScopeToggle", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders checkbox checked when value is 'involves_me'", () => {
     render(() => <ScopeToggle value="involves_me" onChange={() => {}} />);
     const checkbox = screen.getByRole("checkbox", { name: /Scope filter/i });
@@ -45,5 +53,20 @@ describe("ScopeToggle", () => {
     render(() => <ScopeToggle value="involves_me" onChange={() => {}} />);
     const checkbox = screen.getByRole("checkbox", { name: "Scope filter" });
     expect(checkbox).toBeDefined();
+  });
+
+  it("shows a tooltip explaining the toggle after hovering the label", () => {
+    const { container } = render(() => (
+      <ScopeToggle value="involves_me" onChange={() => {}} />
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    expect(document.body.textContent).not.toContain(
+      "Toggle between items involving you and all tracked activity"
+    );
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain(
+      "Toggle between items involving you and all tracked activity"
+    );
   });
 });

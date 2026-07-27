@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
+import { Popover } from "@kobalte/core/popover";
 import type { IgnoredItem } from "../../stores/view";
 import { Tooltip } from "../shared/Tooltip";
 
@@ -28,12 +29,6 @@ function formatDate(ts: number): string {
 export default function IgnoreBadge(props: IgnoreBadgeProps) {
   const [open, setOpen] = createSignal(false);
 
-  function handleBackdropClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) {
-      setOpen(false);
-    }
-  }
-
   function handleUnignoreAll() {
     for (const item of props.items) {
       props.onUnignore(item.id);
@@ -43,13 +38,11 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
 
   return (
     <Show when={props.items.length > 0}>
-      <div class="relative">
+      <Popover open={open()} onOpenChange={setOpen} placement="bottom-end">
         <Tooltip content={`${props.items.length} ignored item${props.items.length === 1 ? "" : "s"}`}>
-          <button
-            onClick={() => setOpen((v) => !v)}
+          <Popover.Trigger
+            as="button"
             class="btn btn-ghost btn-sm compact:btn-xs relative"
-            aria-haspopup="true"
-            aria-expanded={open()}
             aria-label={`${props.items.length} ignored items`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 compact:h-3.5 compact:w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -57,21 +50,12 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
               <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
             </svg>
             <span class="badge badge-neutral badge-xs absolute -top-1 -right-1 compact:text-[8px] compact:-top-0.5 compact:-right-0.5 compact:px-0.5 compact:min-w-3 compact:h-3">{props.items.length}</span>
-          </button>
+          </Popover.Trigger>
         </Tooltip>
 
-        <Show when={open()}>
-          {/* Backdrop */}
-          <div
-            class="fixed inset-0 z-10"
-            onClick={handleBackdropClick}
-            aria-hidden="true"
-          />
-
-          {/* Popover */}
-          <div
-            class="absolute right-0 top-full mt-1 z-20 w-80 bg-base-100 border border-base-300 rounded-lg shadow-lg"
-            role="dialog"
+        <Popover.Portal>
+          <Popover.Content
+            class="w-80 bg-base-100 border border-base-300 rounded-lg shadow-lg z-50"
             aria-label="Ignored items"
           >
             <div class="px-3 py-2 border-b border-base-300 text-xs font-semibold text-base-content/60 uppercase tracking-wide">
@@ -120,9 +104,9 @@ export default function IgnoreBadge(props: IgnoreBadgeProps) {
                 Unignore All
               </button>
             </div>
-          </div>
-        </Show>
-      </div>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover>
     </Show>
   );
 }

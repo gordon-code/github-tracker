@@ -1,3 +1,5 @@
+import { Tooltip } from "./Tooltip";
+
 interface ScopeToggleProps {
   value: string;
   onChange: (field: string, value: string) => void;
@@ -17,9 +19,11 @@ export default function ScopeToggle(props: ScopeToggleProps) {
           props.onChange("scope", e.currentTarget.checked ? "involves_me" : "all")
         }
       />
-      <span class="text-base-content/70 text-sm compact:text-xs">
-        {checked() ? "Involves me" : "All activity"}
-      </span>
+      <Tooltip content="Toggle between items involving you and all tracked activity" focusable>
+        <span class="text-base-content/70 text-sm compact:text-xs">
+          {checked() ? "Involves me" : "All activity"}
+        </span>
+      </Tooltip>
     </label>
   );
 }

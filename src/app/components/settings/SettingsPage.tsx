@@ -1,10 +1,11 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import { Select } from "@kobalte/core/select";
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
-import type { Config } from "../../stores/config";
-import { viewState, updateViewState } from "../../stores/view";
+import type { JiraCustomField } from "../../../shared/schemas";
+import { viewState, updateViewState, setTabFilter } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
 import { isValidPatFormat } from "../../lib/pat";
@@ -34,6 +35,16 @@ import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 
+interface NumberSelectOption {
+  value: number;
+  label: string;
+}
+
+interface StringSelectOption {
+  value: string;
+  label: string;
+}
+
 export const SETTINGS_PAGE_SECTION_IDS = [
   "orgs-repos",
   "tracked-users",
@@ -49,6 +60,21 @@ export const SETTINGS_PAGE_SECTION_IDS = [
   "dependencies",
   "data",
 ] as const;
+
+// Built-in Jira scope values, duplicated from JiraAssignedTab.tsx's BUILTIN_SCOPE_OPTIONS
+// (not exported there to avoid a cross-component coupling for 3 literal strings).
+const BUILTIN_JIRA_SCOPES = ["assigned", "reported", "watching"];
+
+/**
+ * Returns the scope value to fall back to if `activeScope` no longer exists in
+ * `scopes` (e.g. the custom scope backing it was just deleted, or Jira was
+ * disconnected and `scopes` is empty) — otherwise null. Guards against firing
+ * an invalid JQL query with a stale custom scope ID (BUG-008).
+ */
+export function staleJiraScopeReset(activeScope: string, scopes: JiraCustomField[]): string | null {
+  const validScopeIds = new Set([...BUILTIN_JIRA_SCOPES, ...scopes.map((s) => s.id)]);
+  return validScopeIds.has(activeScope) ? null : "assigned";
+}
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -423,11 +449,16 @@ export default function SettingsPage() {
     if (viewState.lastActiveTab === "jiraAssigned") {
       updateViewState({ lastActiveTab: "issues" });
     }
+    // Stale scope guard: clearJiraConfigFull() wipes customScopes, so a tab
+    // filter pointing at a custom scope ID would otherwise survive reconnect
+    // and fire an invalid JQL query against the new Jira instance (BUG-008).
+    const reset = staleJiraScopeReset(viewState.tabFilters.jiraAssigned.scope, []);
+    if (reset) setTabFilter("jiraAssigned", "scope", reset);
   }
 
   // ── Refresh interval options ──────────────────────────────────────────────
 
-  const refreshOptions = [
+  const refreshOptions: NumberSelectOption[] = [
     { value: 60, label: "1 minute" },
     { value: 120, label: "2 minutes" },
     { value: 300, label: "5 minutes (default)" },
@@ -437,7 +468,7 @@ export default function SettingsPage() {
     { value: 0, label: "Off" },
   ];
 
-  const tabOptions = createMemo(() => [
+  const tabOptions = createMemo<StringSelectOption[]>(() => [
     { value: "issues", label: "Issues" },
     { value: "pullRequests", label: "Pull Requests" },
     ...(config.enableActions ? [{ value: "actions", label: "GitHub Actions" }] : []),
@@ -448,7 +479,7 @@ export default function SettingsPage() {
   ]);
 
 
-  const itemsPerPageOptions = [
+  const itemsPerPageOptions: NumberSelectOption[] = [
     { value: 10, label: "10" },
     { value: 25, label: "25" },
     { value: 50, label: "50" },
@@ -608,17 +639,32 @@ export default function SettingsPage() {
             label="Refresh interval"
             description="How often to poll GitHub for new data"
           >
-            <select
-              value={String(config.refreshInterval)}
-              onChange={(e) => {
-                saveWithFeedback({ refreshInterval: Number(e.currentTarget.value) });
-              }}
-              class="select select-sm"
+            <Select
+              options={refreshOptions}
+              optionValue="value"
+              optionTextValue="label"
+              value={refreshOptions.find((opt) => opt.value === config.refreshInterval) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ refreshInterval: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {refreshOptions.map((opt) => (
-                <option value={String(opt.value)}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<NumberSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
           <SettingRow
             label="CI status refresh"
@@ -722,17 +768,32 @@ export default function SettingsPage() {
             label="Items per page"
             description="Number of items to show in each tab"
           >
-            <select
-              value={String(config.itemsPerPage)}
-              onChange={(e) => {
-                saveWithFeedback({ itemsPerPage: Number(e.currentTarget.value) });
-              }}
-              class="select select-sm"
+            <Select
+              options={itemsPerPageOptions}
+              optionValue="value"
+              optionTextValue="label"
+              value={itemsPerPageOptions.find((opt) => opt.value === config.itemsPerPage) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ itemsPerPage: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {itemsPerPageOptions.map((opt) => (
-                <option value={String(opt.value)}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<NumberSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
         </Section>
 
@@ -742,17 +803,32 @@ export default function SettingsPage() {
             label="Default tab"
             description="Tab shown when opening the dashboard fresh"
           >
-            <select
-              value={config.defaultTab}
-              onChange={(e) => {
-                saveWithFeedback({ defaultTab: e.currentTarget.value as Config["defaultTab"] });
-              }}
-              class="select select-sm"
+            <Select
+              options={tabOptions()}
+              optionValue="value"
+              optionTextValue="label"
+              value={tabOptions().find((opt) => opt.value === config.defaultTab) ?? null}
+              onChange={(opt) => opt && saveWithFeedback({ defaultTab: opt.value })}
+              itemComponent={(itemProps) => (
+                <Select.Item
+                  item={itemProps.item}
+                  class="px-3 py-2 cursor-pointer hover:bg-base-200 data-[highlighted]:bg-base-200 outline-none"
+                >
+                  <Select.ItemLabel>{itemProps.item.rawValue.label}</Select.ItemLabel>
+                </Select.Item>
+              )}
             >
-              {tabOptions().map((opt) => (
-                <option value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+              <Select.Trigger class="select select-sm">
+                <Select.Value<StringSelectOption>>
+                  {(state) => state.selectedOption()?.label ?? ""}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 py-1">
+                  <Select.Listbox />
+                </Select.Content>
+              </Select.Portal>
+            </Select>
           </SettingRow>
           <SettingRow
             label="Remember last tab"
@@ -1215,7 +1291,15 @@ export default function SettingsPage() {
                   <JiraScopePicker
                     client={jiraClient()!}
                     selectedScopes={config.jira?.customScopes ?? []}
-                    onSave={(scopes) => { updateJiraCustomScopes(scopes); setShowScopePicker(false); }}
+                    onSave={(scopes) => {
+                      updateJiraCustomScopes(scopes);
+                      setShowScopePicker(false);
+                      // Stale scope guard: if the active Jira tab filter pointed at a
+                      // custom scope that was just removed, reset it before it can fire
+                      // an invalid JQL query (BUG-008).
+                      const reset = staleJiraScopeReset(viewState.tabFilters.jiraAssigned.scope, scopes);
+                      if (reset) setTabFilter("jiraAssigned", "scope", reset);
+                    }}
                     onCancel={() => setShowScopePicker(false)}
                   />
                 </div>
@@ -1246,7 +1330,16 @@ export default function SettingsPage() {
               class="toggle toggle-primary"
               aria-label="Enable dependencies tab"
               checked={config.dependencies?.enabled ?? true}
-              onChange={() => saveWithFeedback({ dependencies: { ...config.dependencies, enabled: !(config.dependencies?.enabled ?? true) } })}
+              onChange={() => {
+                const val = !(config.dependencies?.enabled ?? true);
+                saveWithFeedback({
+                  dependencies: { ...config.dependencies, enabled: val },
+                  ...(!val && config.defaultTab === "dependencies" ? { defaultTab: "issues" as const } : {}),
+                });
+                if (!val && viewState.lastActiveTab === "dependencies") {
+                  updateViewState({ lastActiveTab: "issues" });
+                }
+              }}
             />
           </SettingRow>
           <SettingRow

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import IgnoreBadge from "../../src/app/components/dashboard/IgnoreBadge";
 import type { IgnoredItem } from "../../src/app/stores/view";
@@ -49,6 +49,11 @@ describe("IgnoreBadge", () => {
 
     // Now open
     expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    // Regression guard: popover content must retain z-50 so it stacks above
+    // surrounding dashboard content (fix(ui): adds missing z-50 to IgnoreBadge popover content).
+    const content = document.querySelector("[aria-label='Ignored items']");
+    expect(content?.className).toContain("z-50");
   });
 
   it("clicking badge again closes popover", async () => {
@@ -84,14 +89,20 @@ describe("IgnoreBadge", () => {
     const onUnignore = vi.fn();
     const items = [
       makeIgnoredItem({ id: 123, title: "My Issue" }),
+      makeIgnoredItem({ id: 456, title: "Another Issue" }),
     ];
     render(() => <IgnoreBadge items={items} onUnignore={onUnignore} />);
-    await user.click(getTrigger(1));
+    const button = getTrigger(2);
+    await user.click(button);
 
-    const unignoreBtn = screen.getByText("Unignore");
-    await user.click(unignoreBtn);
+    const unignoreBtns = screen.getAllByText("Unignore");
+    await user.click(unignoreBtns[0]);
 
     expect(onUnignore).toHaveBeenCalledWith(123);
+    // Deliberate behavior: individual "Unignore" clicks must NOT close the
+    // popover — only "Unignore All" does. Verify with 2+ items remaining so
+    // the click doesn't trivially empty the list.
+    expect(button.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("'Unignore All' calls onUnignore for every item", async () => {
@@ -114,7 +125,7 @@ describe("IgnoreBadge", () => {
     expect(onUnignore).toHaveBeenCalledWith(3);
   });
 
-  it("clicking backdrop closes popover", async () => {
+  it("clicking outside closes popover", async () => {
     const user = userEvent.setup();
     const items = [makeIgnoredItem()];
     render(() => <IgnoreBadge items={items} onUnignore={() => {}} />);
@@ -122,11 +133,13 @@ describe("IgnoreBadge", () => {
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    // The backdrop is aria-hidden div with fixed positioning
-    const backdrop = document.querySelector('[aria-hidden="true"]') as HTMLElement;
-    expect(backdrop).toBeDefined();
-    // Simulate clicking the backdrop itself (target === currentTarget)
-    await user.click(backdrop);
+    // Kobalte's createInteractOutside registers its document pointerdown listener
+    // inside a setTimeout(0) (to avoid catching the click that opened the popover).
+    // This file uses userEvent's real-timer async model throughout, so wait a real
+    // tick rather than introducing fake timers.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fireEvent.pointerDown(document.body);
+
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 });
