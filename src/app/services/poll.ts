@@ -52,6 +52,11 @@ const _hotRuns = new Map<number, { owner: string; repo: string }>();
 const MAX_HOT_RUNS = 30;
 const HOT_RUNS_CONCURRENCY = 10;
 
+/** Consecutive prior hot-poll cycle failures required before a fetch error is
+ * reported to Sentry. Backoff/retry already self-heals isolated network blips
+ * (e.g. TypeError: Failed to fetch) — only escalate once it's clearly stuck. */
+const HOT_POLL_SENTRY_THRESHOLD = 3;
+
 /** Incremented each time rebuildHotSets() is called (full refresh completed).
  * Allows hot poll callbacks to detect stale results that overlap with a fresh
  * full refresh — if the captured generation no longer matches the current one,
@@ -465,13 +470,18 @@ export function rebuildHotSets(data: DashboardData): void {
  * Evicts items from the hot sets when they settle (PR closed/merged/resolved,
  * run completed). Returns captured generation alongside results so callers can
  * detect staleness.
+ *
+ * @param priorConsecutiveFailures - Failures from prior cycles (before this one).
+ * Below HOT_POLL_SENTRY_THRESHOLD, fetch errors are logged/surfaced to the user
+ * but not reported to Sentry — retry/backoff already self-heals isolated blips.
  */
-export async function fetchHotData(): Promise<{
+export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
   prUpdates: Map<number, HotPRStatusUpdate>;
   runUpdates: Map<number, HotWorkflowRunUpdate>;
   generation: number;
   hadErrors: boolean;
 }> {
+  const reportToSentry = priorConsecutiveFailures >= HOT_POLL_SENTRY_THRESHOLD;
   // Capture generation BEFORE any async work so callers can detect if a full
   // refresh occurred while this fetch was in flight.
   const generation = _hotPollGeneration;
@@ -488,7 +498,7 @@ export async function fetchHotData(): Promise<{
   // PR status fetch — wrap in try/catch so failures don't crash the hot poll
   const nodeIds = [..._hotPRs.keys()];
   try {
-    const prResult = await fetchHotPRStatus(octokit, nodeIds);
+    const prResult = await fetchHotPRStatus(octokit, nodeIds, { reportToSentry });
     if (prResult.hadErrors) hadErrors = true;
     for (const [id, update] of prResult.results) {
       prUpdates.set(id, update);
@@ -497,7 +507,9 @@ export async function fetchHotData(): Promise<{
     if (isUnauthorizedError(err)) throw err;
     hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
-    Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
+    if (reportToSentry) {
+      Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
+    }
     // Items stay in _hotPRs for retry next cycle
   }
 
@@ -514,7 +526,9 @@ export async function fetchHotData(): Promise<{
       if (isUnauthorizedError(result.reason)) throw result.reason;
       hadErrors = true;
       console.warn("[hot-poll] Workflow run fetch failed:", result.reason);
-      Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
+      if (reportToSentry) {
+        Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
+      }
     }
   }
 
@@ -629,7 +643,7 @@ export function createHotPollCoordinator(
     startedCycle = true;
     options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
     try {
-      const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData();
+      const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData(consecutiveFailures);
       if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
       if (hadErrors) {
         consecutiveFailures++;
