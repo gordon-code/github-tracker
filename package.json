@@ -32,7 +32,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@amiceli/vitest-cucumber": "6.3.0",
+    "@amiceli/vitest-cucumber": "7.0.0",
     "@cloudflare/vite-plugin": "1.44.0",
     "@cloudflare/vitest-pool-workers": "0.18.4",
     "@fast-check/vitest": "0.4.1",
@@ -44,7 +44,7 @@
     "fake-indexeddb": "6.2.5",
     "happy-dom": "20.10.6",
     "tailwindcss": "4.3.2",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vite": "8.1.4",
     "vite-plugin-solid": "2.11.12",
     "vitest": "4.1.10",
