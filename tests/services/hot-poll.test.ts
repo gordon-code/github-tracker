@@ -47,6 +47,10 @@ vi.mock("../../src/app/lib/notifications", () => ({
   _resetNotificationState: vi.fn(),
 }));
 
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+}));
+
 vi.mock("../../src/app/stores/config", () => ({
   config: {
     selectedRepos: [],
@@ -704,6 +708,49 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("only reports to Sentry once consecutiveFailures reaches the threshold across real cycles", async () => {
+    const onHotData = vi.fn();
+    const graphqlFn = vi.fn(() => Promise.reject(new Error("api error")));
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+
+      // Cycle 1 (priorConsecutiveFailures=0) at 10s — below threshold
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(graphqlFn.mock.calls.length).toBe(1);
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+
+      // Cycle 2 (priorConsecutiveFailures=1) at +20s (10s * 2^1) — below threshold
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(graphqlFn.mock.calls.length).toBe(2);
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+
+      // Cycle 3 (priorConsecutiveFailures=2) at +40s (10s * 2^2) — below threshold
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(graphqlFn.mock.calls.length).toBe(3);
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+
+      // Cycle 4 (priorConsecutiveFailures=3) at +80s (10s * min(2^3, 8)) — threshold met
+      await vi.advanceTimersByTimeAsync(80_000);
+      expect(graphqlFn.mock.calls.length).toBe(4);
+      expect(Sentry.captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        { tags: { source: "hot-poll-pr-batch" } }
+      );
+      dispose();
+    });
+  });
+
   it("silently reschedules when getClient throws", async () => {
     const onHotData = vi.fn();
     // getClient() throw is caught by the pre-onStart guard — schedules next cycle without pushError
@@ -993,6 +1040,40 @@ describe("fetchHotPRStatus edge cases", () => {
 
     await expect(fetchHotPRStatus(octokit as never, ["PR_a"])).rejects.toMatchObject({ status: 401 });
   });
+
+  it("does not report to Sentry when reportToSentry option is omitted", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(undefined, () => Promise.reject(new Error("api error")));
+
+    await fetchHotPRStatus(octokit as never, ["PR_a"]);
+
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("does not report to Sentry when reportToSentry is false", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(undefined, () => Promise.reject(new Error("api error")));
+
+    await fetchHotPRStatus(octokit as never, ["PR_a"], { reportToSentry: false });
+
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("reports to Sentry when reportToSentry is true", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const error = new Error("api error");
+    const octokit = makeOctokit(undefined, () => Promise.reject(error));
+
+    await fetchHotPRStatus(octokit as never, ["PR_a"], { reportToSentry: true });
+
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      error,
+      { tags: { source: "hot-poll-pr-batch" } }
+    );
+  });
 });
 
 describe("rebuildHotSets caps", () => {
@@ -1257,6 +1338,82 @@ describe("fetchHotData hadErrors", () => {
     });
 
     await expect(fetchHotData()).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("does not report PR fetch failure to Sentry below HOT_POLL_SENTRY_THRESHOLD", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(undefined, () => Promise.reject(new Error("graphql error")));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    await fetchHotData(2); // 2 prior failures — still below the threshold of 3
+
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("reports PR fetch failure to Sentry once priorConsecutiveFailures reaches HOT_POLL_SENTRY_THRESHOLD", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(undefined, () => Promise.reject(new Error("graphql error")));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    await fetchHotData(3); // 3 prior failures — meets the threshold
+
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      { tags: { source: "hot-poll-pr-batch" } }
+    );
+  });
+
+  it("does not report run fetch failure to Sentry below HOT_POLL_SENTRY_THRESHOLD", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(
+      () => Promise.reject(new Error("network error")),
+      () => Promise.resolve({ nodes: [], rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
+    );
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await fetchHotData(2); // still below threshold
+
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("reports run fetch failure to Sentry once priorConsecutiveFailures reaches HOT_POLL_SENTRY_THRESHOLD", async () => {
+    const Sentry = await import("@sentry/solid");
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+    const octokit = makeOctokit(
+      () => Promise.reject(new Error("network error")),
+      () => Promise.resolve({ nodes: [], rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" } }),
+    );
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await fetchHotData(3); // meets threshold
+
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      { tags: { source: "hot-poll-run-fetch" } }
+    );
   });
 });
 
