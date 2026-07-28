@@ -2,7 +2,7 @@ import { createSignal, createEffect, createRoot, untrack, onCleanup } from "soli
 import * as Sentry from "@sentry/solid";
 import { getClient, fetchRateLimitDetails } from "./github";
 import { config } from "../stores/config";
-import { user, onAuthCleared } from "../stores/auth";
+import { user, onAuthCleared, expireToken } from "../stores/auth";
 import { checkAndResetIfExpired } from "./api-usage";
 import {
   fetchIssuesAndPullRequests,
@@ -10,6 +10,7 @@ import {
   fetchHotPRStatus,
   fetchWorkflowRunById,
   pooledAllSettled,
+  isUnauthorizedError,
   type Issue,
   type PullRequest,
   type WorkflowRun,
@@ -228,7 +229,7 @@ export async function fetchAllData(
     if (result.status === "rejected") {
       const err = result.reason;
       // Propagate 401 to outer handler for re-auth (don't absorb as generic error)
-      if (err?.status === 401 || err?.response?.status === 401) throw err;
+      if (isUnauthorizedError(err)) throw err;
       const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
         ? (err as Record<string, unknown>).status as number
         : null;
@@ -493,6 +494,7 @@ export async function fetchHotData(): Promise<{
       prUpdates.set(id, update);
     }
   } catch (err) {
+    if (isUnauthorizedError(err)) throw err;
     hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
     Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
@@ -509,6 +511,7 @@ export async function fetchHotData(): Promise<{
     if (result.status === "fulfilled") {
       runUpdates.set(result.value.id, result.value);
     } else {
+      if (isUnauthorizedError(result.reason)) throw result.reason;
       hadErrors = true;
       console.warn("[hot-poll] Workflow run fetch failed:", result.reason);
       Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
@@ -639,6 +642,15 @@ export function createHotPollCoordinator(
         onHotData(prUpdates, runUpdates, generation);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        // Token invalid — same re-auth path as the full poll (poll.ts throw at
+        // fetchAllData) and cross-tab sync (auth.ts storage listener): clear the
+        // token and hard-redirect. Don't schedule another cycle — page is navigating.
+        Sentry.captureException(err, { tags: { source: "hot-poll-auth-expired" } });
+        expireToken();
+        window.location.replace("/login");
+        return;
+      }
       consecutiveFailures++;
       const message = err instanceof Error ? err.message : "Unknown hot-poll error";
       pushError("hot-poll", message, true);
