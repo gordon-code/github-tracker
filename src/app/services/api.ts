@@ -1778,7 +1778,8 @@ export interface HotPRStatusUpdate {
  */
 export async function fetchHotPRStatus(
   octokit: GitHubOctokit,
-  nodeIds: string[]
+  nodeIds: string[],
+  options?: { reportToSentry?: boolean }
 ): Promise<{ results: Map<number, HotPRStatusUpdate>; hadErrors: boolean }> {
   const results = new Map<number, HotPRStatusUpdate>();
   if (nodeIds.length === 0) return { results, hadErrors: false };
@@ -1814,7 +1815,9 @@ export async function fetchHotPRStatus(
       if (isUnauthorizedError(s.reason)) throw s.reason;
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
-      Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
+      if (options?.reportToSentry) {
+        Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
+      }
       const reason = s.reason;
       const partialErr = (reason && typeof reason === "object" && "data" in reason && reason.data && typeof reason.data === "object")
         ? reason.data as Partial<HotPRStatusResponse>
