@@ -30,6 +30,11 @@ vi.mock("../../src/app/services/api", () => ({
   fetchIssuesAndPullRequests: vi.fn(),
   fetchWorkflowRuns: vi.fn(),
   resetEmptyActionRepos: vi.fn(),
+  isUnauthorizedError: (err: unknown) => {
+    if (typeof err !== "object" || err === null) return false;
+    const e = err as { status?: unknown; response?: { status?: unknown } };
+    return e.status === 401 || e.response?.status === 401;
+  },
 }));
 
 // Mock notifications

@@ -84,6 +84,12 @@ export function resetEmptyActionRepos(): void {
  * Normalizes a Promise.allSettled rejection reason into a structured error shape.
  * Handles both Octokit RequestError (has `.status`) and plain Error objects.
  */
+export function isUnauthorizedError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { status?: unknown; response?: { status?: unknown } };
+  return e.status === 401 || e.response?.status === 401;
+}
+
 function extractRejectionError(reason: unknown): { statusCode: number | null; message: string } {
   const statusCode =
     typeof reason === "object" &&
@@ -1804,6 +1810,8 @@ export async function fetchHotPRStatus(
 
   for (const s of settled) {
     if (s.status === "rejected") {
+      // Token is invalid — let the caller trigger re-auth instead of retrying forever.
+      if (isUnauthorizedError(s.reason)) throw s.reason;
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
       Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });

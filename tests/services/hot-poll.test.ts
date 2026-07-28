@@ -4,6 +4,16 @@ import { makePullRequest, makeWorkflowRun } from "../helpers/index";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+const mockLocationReplace = vi.fn();
+// createHotPollCoordinator hard-redirects to /login on 401, mirroring the
+// full-poll and cross-tab-sync auth paths. Stub window.location so we can
+// assert on the redirect without actually navigating.
+Object.defineProperty(window, "location", {
+  configurable: true,
+  writable: true,
+  value: { replace: mockLocationReplace, href: "" },
+});
+
 // Mock github module so getClient returns our fake octokit
 const mockGetClient = vi.fn();
 vi.mock("../../src/app/services/github", () => ({
@@ -49,6 +59,7 @@ vi.mock("../../src/app/stores/config", () => ({
 vi.mock("../../src/app/stores/auth", () => ({
   user: vi.fn(() => null),
   onAuthCleared: vi.fn(),
+  expireToken: vi.fn(),
 }));
 
 // Import AFTER mocks are set up
@@ -65,6 +76,7 @@ import {
 import {
   fetchHotPRStatus,
   fetchWorkflowRunById,
+  isUnauthorizedError,
 } from "../../src/app/services/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -88,6 +100,28 @@ const emptyData: DashboardData = {
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe("isUnauthorizedError", () => {
+  it("returns true for a top-level status 401", () => {
+    expect(isUnauthorizedError({ status: 401 })).toBe(true);
+  });
+
+  it("returns true for a nested response.status 401", () => {
+    expect(isUnauthorizedError({ response: { status: 401 } })).toBe(true);
+  });
+
+  it("returns false for other status codes", () => {
+    expect(isUnauthorizedError({ status: 500 })).toBe(false);
+    expect(isUnauthorizedError({ response: { status: 403 } })).toBe(false);
+  });
+
+  it("returns false for non-object and null values", () => {
+    expect(isUnauthorizedError(null)).toBe(false);
+    expect(isUnauthorizedError(undefined)).toBe(false);
+    expect(isUnauthorizedError("Bad credentials")).toBe(false);
+    expect(isUnauthorizedError(new Error("network failure"))).toBe(false);
+  });
+});
 
 describe("fetchHotPRStatus", () => {
   it("returns empty map for empty nodeIds", async () => {
@@ -800,6 +834,60 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("redirects to /login via expireToken on 401 instead of generic backoff", async () => {
+    const onHotData = vi.fn();
+    const octokit = makeOctokit(undefined, () =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    const { expireToken } = await import("../../src/app/stores/auth");
+    const { pushError } = await import("../../src/app/lib/errors");
+    (expireToken as ReturnType<typeof vi.fn>).mockClear();
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+    mockLocationReplace.mockClear();
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(expireToken).toHaveBeenCalledOnce();
+      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+      // Not treated as a generic retryable failure
+      expect(pushError).not.toHaveBeenCalledWith("hot-poll", expect.any(String), true);
+      dispose();
+    });
+  });
+
+  it("does not schedule another cycle after a 401 redirect", async () => {
+    const onHotData = vi.fn();
+    const octokit = makeOctokit(undefined, () =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    const graphqlFn = octokit.graphql as ReturnType<typeof vi.fn>;
+
+    await createRoot(async (dispose) => {
+      createHotPollCoordinator(() => 10, onHotData);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(graphqlFn).toHaveBeenCalledTimes(1);
+
+      // Advance well past several would-be cycles — no further fetch attempts
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(graphqlFn).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
   it("does not schedule when interval is 0", async () => {
     const onHotData = vi.fn();
     mockGetClient.mockReturnValue(makeOctokit());
@@ -897,6 +985,13 @@ describe("fetchHotPRStatus edge cases", () => {
     expect(results.size).toBe(1);
     expect(results.get(1)).toBeDefined();
     expect(hadErrors).toBe(true);
+  });
+
+  it("throws (does not swallow into hadErrors) when a batch rejects with 401", async () => {
+    const octokit = makeOctokit(undefined, () =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+
+    await expect(fetchHotPRStatus(octokit as never, ["PR_a"])).rejects.toMatchObject({ status: 401 });
   });
 });
 
@@ -1136,6 +1231,32 @@ describe("fetchHotData hadErrors", () => {
     const { hadErrors, runUpdates } = await fetchHotData();
     expect(hadErrors).toBe(true);
     expect(runUpdates.size).toBe(0); // failed, no results
+  });
+
+  it("propagates (throws) a 401 from the PR fetch instead of returning hadErrors", async () => {
+    const octokit = makeOctokit(undefined, () =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    await expect(fetchHotData()).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("propagates (throws) a 401 from a workflow run fetch instead of returning hadErrors", async () => {
+    const octokit = makeOctokit(() =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 })));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
+    });
+
+    await expect(fetchHotData()).rejects.toMatchObject({ status: 401 });
   });
 });
 
