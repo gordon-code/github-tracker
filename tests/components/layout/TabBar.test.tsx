@@ -176,6 +176,30 @@ describe("TabBar", () => {
     screen.getByText("7");
   });
 
+  it("shows a warning icon on an unscoped custom tab", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar
+        activeTab="issues"
+        onTabChange={onTabChange}
+        customTabs={[{ id: "tab-alpha", name: "Alpha", isUnscoped: true }]}
+      />
+    ));
+    screen.getByLabelText("Unscoped tab");
+  });
+
+  it("does not show a warning icon on a scoped custom tab", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar
+        activeTab="issues"
+        onTabChange={onTabChange}
+        customTabs={[{ id: "tab-alpha", name: "Alpha", isUnscoped: false }]}
+      />
+    ));
+    expect(screen.queryByLabelText("Unscoped tab")).toBeNull();
+  });
+
   it("does not render a count badge when count is undefined for a custom tab", () => {
     const onTabChange = vi.fn();
     render(() => (

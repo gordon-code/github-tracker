@@ -534,6 +534,193 @@ describe("updateConfig — monitoredRepos pruning on selectedRepos change", () =
   });
 });
 
+// ── customTabs orgScope/repoScope pruning on selectedRepos change ───────────
+// Same reconciliation bug class as monitoredRepos above: CustomTabModal's
+// availableOrgs/availableRepos derive from selectedRepos (not selectedOrgs),
+// so a custom tab's scope must be reconciled against selectedRepos, not
+// against config.selectedOrgs.
+
+describe("updateConfig — customTabs scope pruning on selectedRepos change", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  function seedTab() {
+    updateConfig({
+      selectedRepos: [
+        { owner: "org", name: "a", fullName: "org/a" },
+        { owner: "org", name: "b", fullName: "org/b" },
+        { owner: "other", name: "c", fullName: "other/c" },
+      ],
+      customTabs: [
+        {
+          id: "t1", name: "Mixed Scope", baseType: "issues",
+          orgScope: ["org"],
+          repoScope: [{ owner: "other", name: "c", fullName: "other/c" }],
+          filterPreset: {}, exclusive: false,
+        },
+      ],
+    });
+  }
+
+  it("prunes repoScope entries whose repo is no longer selected", () => {
+    createRoot((dispose) => {
+      seedTab();
+      updateConfig({
+        selectedRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+        ],
+      });
+      expect(config.customTabs[0].repoScope).toEqual([]);
+      // orgScope("org") is untouched — org/a and org/b are both still selected
+      expect(config.customTabs[0].orgScope).toEqual(["org"]);
+      dispose();
+    });
+  });
+
+  it("prunes orgScope entries once no selected repo has that owner", () => {
+    createRoot((dispose) => {
+      seedTab();
+      updateConfig({
+        selectedRepos: [{ owner: "other", name: "c", fullName: "other/c" }],
+      });
+      expect(config.customTabs[0].orgScope).toEqual([]);
+      // repoScope(other/c) is untouched — still selected
+      expect(config.customTabs[0].repoScope).toEqual([
+        { owner: "other", name: "c", fullName: "other/c" },
+      ]);
+      dispose();
+    });
+  });
+
+  it("matches orgScope against selectedRepos owners case-insensitively", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [{ owner: "Org", name: "a", fullName: "Org/a" }],
+        customTabs: [{
+          id: "t2", name: "Case Test", baseType: "issues",
+          orgScope: ["org"], repoScope: [], filterPreset: {}, exclusive: false,
+        }],
+      });
+      // Re-apply the same selectedRepos (still "Org") — orgScope("org") must survive
+      updateConfig({ selectedRepos: [{ owner: "Org", name: "a", fullName: "Org/a" }] });
+      expect(config.customTabs[0].orgScope).toEqual(["org"]);
+      dispose();
+    });
+  });
+
+  it("preserves object identity when pruning removes nothing", () => {
+    createRoot((dispose) => {
+      seedTab();
+      const before = config.customTabs[0];
+      // selectedRepos changes but every scoped repo/owner survives
+      updateConfig({
+        selectedRepos: [
+          { owner: "org", name: "a", fullName: "org/a" },
+          { owner: "org", name: "b", fullName: "org/b" },
+          { owner: "other", name: "c", fullName: "other/c" },
+          { owner: "extra", name: "d", fullName: "extra/d" },
+        ],
+      });
+      expect(config.customTabs[0]).toBe(before);
+      dispose();
+    });
+  });
+
+  it("does not prune customTabs scope when selectedRepos is not in the update", () => {
+    createRoot((dispose) => {
+      seedTab();
+      updateConfig({ theme: "dark" });
+      expect(config.customTabs[0].orgScope).toEqual(["org"]);
+      expect(config.customTabs[0].repoScope).toEqual([
+        { owner: "other", name: "c", fullName: "other/c" },
+      ]);
+      dispose();
+    });
+  });
+});
+
+// ── Structural invariant: repo-referencing config fields must reconcile
+// against selectedRepos when it shrinks ──────────────────────────────────────
+//
+// Regression guard for a bug class where a persisted list references repos
+// (or orgs derived from repos) but nothing prunes it when selectedRepos
+// shrinks — the stale entry then survives forever (see the customTabs scope
+// and monitoredRepos fixes above). Add a row to `dependentFields` for every
+// NEW config field that stores a repo/org reference derived from
+// selectedRepos — a missing row means a future field could reintroduce this
+// bug class without any test catching it.
+//
+// Fields reviewed and confirmed INTENTIONALLY independent (do NOT need a row
+// here — they are not derived from selectedRepos):
+//   - upstreamRepos: a disjoint category from selectedRepos (repos the user
+//     doesn't own), not a value derived from it — see discoverUpstreamRepos.
+//   - trackedUsers: references GitHub user logins, not repos/orgs; manually
+//     curated via explicit add/remove UI, never auto-merged from a live fetch.
+//   - selectedOrgs: reconciled against a live fetchOrgs() result rather than
+//     a sibling config field — covered separately in OrgSelector.test.tsx.
+describe("updateConfig — structural invariant: repo-referencing fields reconcile with selectedRepos", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  const STALE_REPO = { owner: "stale", name: "repo", fullName: "stale/repo" };
+  const SURVIVING_REPO = { owner: "keep", name: "repo", fullName: "keep/repo" };
+
+  const dependentFields: Array<{ name: string; seed: () => void; getValue: () => unknown }> = [
+    {
+      name: "monitoredRepos",
+      seed: () => updateConfig({
+        selectedRepos: [STALE_REPO, SURVIVING_REPO],
+        monitoredRepos: [STALE_REPO, SURVIVING_REPO],
+      }),
+      getValue: () => config.monitoredRepos,
+    },
+    {
+      name: "customTabs[].repoScope",
+      seed: () => updateConfig({
+        selectedRepos: [STALE_REPO, SURVIVING_REPO],
+        customTabs: [{
+          id: "dep-repo-scope", name: "T", baseType: "issues",
+          orgScope: [], repoScope: [STALE_REPO, SURVIVING_REPO],
+          filterPreset: {}, exclusive: false,
+        }],
+      }),
+      getValue: () => config.customTabs[0].repoScope,
+    },
+    {
+      name: "customTabs[].orgScope",
+      seed: () => updateConfig({
+        selectedRepos: [STALE_REPO, SURVIVING_REPO],
+        customTabs: [{
+          id: "dep-org-scope", name: "T", baseType: "issues",
+          orgScope: [STALE_REPO.owner, SURVIVING_REPO.owner], repoScope: [],
+          filterPreset: {}, exclusive: false,
+        }],
+      }),
+      getValue: () => config.customTabs[0].orgScope,
+    },
+  ];
+
+  it.each(dependentFields.map((f) => [f.name, f] as const))(
+    "%s drops references to a repo removed from selectedRepos",
+    (_name, field) => {
+      createRoot((dispose) => {
+        field.seed();
+        // Remove STALE_REPO from selectedRepos — every dependent field above
+        // referenced it and must no longer contain any trace of it.
+        updateConfig({ selectedRepos: [SURVIVING_REPO] });
+
+        const serialized = JSON.stringify(field.getValue());
+        expect(serialized).not.toContain(STALE_REPO.owner);
+        expect(serialized).toContain(SURVIVING_REPO.owner);
+        dispose();
+      });
+    }
+  );
+});
+
 describe("setMonitoredRepo (C3)", () => {
   beforeEach(() => {
     resetConfig();

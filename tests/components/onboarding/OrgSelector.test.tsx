@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { createSignal } from "solid-js";
 import { render, screen, fireEvent, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { OrgEntry } from "../../../src/app/services/api";
@@ -17,7 +18,12 @@ vi.mock("../../../src/app/services/api", async (importOriginal) => {
   };
 });
 
+vi.mock("../../../src/app/lib/errors", () => ({
+  pushNotification: vi.fn(),
+}));
+
 import * as api from "../../../src/app/services/api";
+import { pushNotification } from "../../../src/app/lib/errors";
 import OrgSelector from "../../../src/app/components/onboarding/OrgSelector";
 
 const mockOrgs: OrgEntry[] = [
@@ -180,6 +186,73 @@ describe("OrgSelector", () => {
 
     await waitFor(() => {
       screen.getByText(/1 of 3 selected/i);
+    });
+  });
+
+  // ── Stale selectedOrgs pruning (revoked/removed org access) ────────────────
+  // Regression coverage for the "N of M selected" counter going out of range
+  // (selected.length > orgs().length) when config.selectedOrgs retains a login
+  // no longer returned by a fresh fetchOrgs() — e.g. revoked org access.
+
+  describe("stale org pruning", () => {
+    it("prunes a selected login no longer present in the live fetch and notifies", async () => {
+      vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
+      const onChange = vi.fn();
+      render(() => (
+        <OrgSelector selected={["myorg", "revoked-org"]} onChange={onChange} />
+      ));
+
+      await waitFor(() => {
+        expect(onChange).toHaveBeenCalledWith(["myorg"]);
+      });
+      expect(pushNotification).toHaveBeenCalledWith(
+        "org-prune",
+        expect.stringContaining("revoked-org"),
+        "warning"
+      );
+    });
+
+    it("is case-insensitive when matching selected logins against the live fetch", async () => {
+      vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
+      const onChange = vi.fn();
+      render(() => <OrgSelector selected={["MyOrg"]} onChange={onChange} />);
+
+      await waitFor(() => {
+        screen.getByText("myorg");
+      });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(pushNotification).not.toHaveBeenCalled();
+    });
+
+    it("does not prune or notify when every selected login is still present", async () => {
+      vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
+      const onChange = vi.fn();
+      render(() => (
+        <OrgSelector selected={["myorg", "anotheorg"]} onChange={onChange} />
+      ));
+
+      await waitFor(() => {
+        screen.getByText("myorg");
+      });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(pushNotification).not.toHaveBeenCalled();
+    });
+
+    it("settles on a valid 'N of M' count once the parent applies the pruned selection", async () => {
+      // End-to-end reproduction of the "21 of 20 selected" bug: a parent that
+      // wires onChange back into its own selected state (as SettingsPage does
+      // via localOrgs/handleOrgsChange) must land on a numerator <= denominator.
+      vi.mocked(api.fetchOrgs).mockResolvedValue(mockOrgs);
+
+      function Wrapper() {
+        const [selected, setSelected] = createSignal(["myorg", "anotheorg", "revoked-org"]);
+        return <OrgSelector selected={selected()} onChange={setSelected} />;
+      }
+      render(() => <Wrapper />);
+
+      await waitFor(() => {
+        screen.getByText(/2 of 3 selected/i);
+      });
     });
   });
 });

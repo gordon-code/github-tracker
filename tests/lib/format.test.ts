@@ -378,8 +378,8 @@ describe("formatCount", () => {
 });
 
 describe("formatScopeSummary", () => {
-  it("returns 'All repos' when both orgCount and repoCount are 0", () => {
-    expect(formatScopeSummary(0, 0)).toBe("All repos");
+  it("returns 'No repos selected' when both orgCount and repoCount are 0", () => {
+    expect(formatScopeSummary(0, 0)).toBe("No repos selected");
   });
 
   it("elideZero=true with only orgCount returns '1 org'", () => {

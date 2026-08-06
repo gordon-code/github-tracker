@@ -1050,12 +1050,12 @@ describe("DashboardPage — tracked tab", () => {
 
 describe("DashboardPage — exclusive custom tabs", () => {
   it("exclusive issues tab removes claimed items from the builtin Issues badge", async () => {
-    // Add an exclusive issues custom tab that claims all repos
+    // Add an exclusive issues custom tab scoped to the fixture's default owner
     configStore.addCustomTab({
       id: "excl01",
       name: "My Issues",
       baseType: "issues",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: {},
       exclusive: true,
@@ -1083,7 +1083,7 @@ describe("DashboardPage — exclusive custom tabs", () => {
       id: "excl02",
       name: "Exclusive PRs",
       baseType: "pullRequests",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: {},
       exclusive: true,
@@ -1144,7 +1144,7 @@ describe("DashboardPage — exclusive custom tabs", () => {
       id: "first01",
       name: "First Exclusive",
       baseType: "issues",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: {},
       exclusive: true,
@@ -1153,7 +1153,7 @@ describe("DashboardPage — exclusive custom tabs", () => {
       id: "second01",
       name: "Second Exclusive",
       baseType: "issues",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: {},
       exclusive: true,
@@ -1183,7 +1183,7 @@ describe("DashboardPage — exclusive custom tabs", () => {
       id: "exclact01",
       name: "My Actions",
       baseType: "actions",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: {},
       exclusive: true,
@@ -1380,6 +1380,37 @@ describe("DashboardPage — custom tab scoping", () => {
       expect(customTab.textContent?.replace(/\D+/g, "")).toBe("1");
     });
   });
+
+  it("a tab with empty orgScope and repoScope matches no items and shows the unscoped icon", async () => {
+    configStore.addCustomTab({
+      id: "unscoped01",
+      name: "Unscoped Tab",
+      baseType: "issues",
+      orgScope: [],
+      repoScope: [],
+      filterPreset: { scope: "all" },
+      exclusive: false,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({ id: 60, title: "Some issue", repoFullName: "owner/repo" }),
+      ],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      // Empty scope now matches nothing — not "all repos" as it did previously.
+      const customTab = screen.getByRole("tab", { name: /Unscoped Tab/ });
+      expect(customTab.textContent?.replace(/\D+/g, "")).toBe("0");
+      // The builtin Issues tab is unaffected — it still shows the item.
+      const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+      expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("1");
+      expect(screen.getByLabelText("Unscoped tab")).toBeDefined();
+    });
+  });
 });
 
 // ── resolveInitialTab stale custom tab fallback ──────────────────────────────
@@ -1535,7 +1566,7 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       id: "selfuser",
       name: "My Items",
       baseType: "issues",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: { scope: "all", user: "_self" },
       exclusive: false,
@@ -1567,7 +1598,7 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       id: "failures",
       name: "Failed Runs",
       baseType: "actions",
-      orgScope: [],
+      orgScope: ["owner"],
       repoScope: [],
       filterPreset: { conclusion: "failure" },
       exclusive: false,

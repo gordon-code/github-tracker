@@ -1,6 +1,7 @@
-import { createSignal, createResource, For, Show } from "solid-js";
+import { createSignal, createResource, createEffect, untrack, For, Show } from "solid-js";
 import { fetchOrgs, OrgEntry } from "../../services/api";
 import { getClient } from "../../services/github";
+import { pushNotification } from "../../lib/errors";
 import LoadingSpinner from "../shared/LoadingSpinner";
 import FilterInput from "../shared/FilterInput";
 
@@ -24,6 +25,26 @@ export default function OrgSelector(props: OrgSelectorProps) {
     if (!q) return all;
     return all.filter((o) => o.login.toLowerCase().includes(q));
   };
+
+  // Prune selectedOrgs entries no longer present in a fresh, fully-paginated
+  // fetchOrgs() result — e.g. revoked/removed org access. Without this, a
+  // stale login would inflate the "N selected" counters below past the live
+  // total (selected.length could exceed orgs().length).
+  createEffect(() => {
+    const list = orgs();
+    if (orgs.loading || orgs.error || !list) return;
+    const liveLogins = new Set(list.map((o) => o.login.toLowerCase()));
+    const current = untrack(() => props.selected);
+    const stale = current.filter((login) => !liveLogins.has(login.toLowerCase()));
+    if (stale.length === 0) return;
+    const pruned = current.filter((login) => liveLogins.has(login.toLowerCase()));
+    untrack(() => props.onChange(pruned));
+    pushNotification(
+      "org-prune",
+      `Removed ${stale.length} organization${stale.length !== 1 ? "s" : ""} you no longer have access to (${stale.join(", ")})`,
+      "warning"
+    );
+  });
 
   const isSelected = (login: string) => props.selected.includes(login);
 

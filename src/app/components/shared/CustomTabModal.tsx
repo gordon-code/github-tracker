@@ -68,6 +68,8 @@ export default function CustomTabModal(props: CustomTabModalProps) {
 
   const nameValid = createMemo(() => name().trim().length > 0 && name().trim().length <= 30);
 
+  const scopeIsEmpty = createMemo(() => selectedOrgs().size === 0 && selectedRepos().size === 0);
+
   // User field group — dynamic, includes tracked user logins
   const userFieldGroup = createMemo((): FilterChipGroupDef => ({
     label: "User",
@@ -258,7 +260,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                 onClick={() => setScopeOpen((v) => !v)}
               >
                 <span>Scope</span>
-                <span class="text-base-content/50 text-xs">
+                <span class="text-base-content/50 text-xs flex items-center gap-1">
+                  <Show when={scopeIsEmpty()}>
+                    <svg class="h-3.5 w-3.5 text-warning" fill="currentColor" viewBox="0 0 20 20" aria-label="Unscoped — matches no repos" role="img">
+                      <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.28 11.163c.75 1.333-.213 2.987-1.742 2.987H3.72c-1.53 0-2.492-1.654-1.743-2.987L8.257 3.1zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                  </Show>
                   {formatScopeSummary(selectedOrgs().size, selectedRepos().size)}
                   <span class="ml-2">{scopeOpen() ? "▲" : "▼"}</span>
                 </span>
@@ -266,7 +273,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
               <Show when={scopeOpen()}>
                 <div id="custom-tab-scope-panel" class="p-3 space-y-3">
                   <p class="text-xs text-base-content/50">
-                    Leave empty to include all repos. Org selection includes all repos in that org.
+                    Leave empty to match no repos — the tab will show a warning icon until scoped. Org selection includes all repos in that org.
                   </p>
                   <Show
                     when={props.availableOrgs.length > 0}
