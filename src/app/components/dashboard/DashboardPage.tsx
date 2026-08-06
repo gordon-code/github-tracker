@@ -8,7 +8,7 @@ import IssuesTab from "./IssuesTab";
 import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
-import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, updateJiraConfig, type TrackedUser } from "../../stores/config";
+import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, isTabUnscoped, updateJiraConfig, type TrackedUser } from "../../stores/config";
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
@@ -54,14 +54,18 @@ const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
 const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
 const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
-/** Build a scope matcher for a custom tab's org/repo scope. Shared between customTabData and tabCounts. */
+/**
+ * Build a scope matcher for a custom tab's org/repo scope. Shared between
+ * customTabData and tabCounts. An empty scope (no orgs, no repos) matches
+ * nothing — see isTabUnscoped, which flags this state for the UI.
+ */
 function buildTabScopeMatcher(tab: CustomTab): (repoFullName: string) => boolean {
   const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
   const repoSet = tab.repoScope.length > 0 ? new Set(tab.repoScope.map((r) => r.fullName.toLowerCase())) : null;
   return (repoFullName: string) => {
     if (repoSet && repoSet.has(repoFullName.toLowerCase())) return true;
     if (orgSet && orgSet.has(repoFullName.split("/")[0].toLowerCase())) return true;
-    return !orgSet && !repoSet;
+    return false;
   };
 }
 
@@ -1270,7 +1274,7 @@ export default function DashboardPage() {
               enableActions={config.enableActions}
               enableJira={!!config.jira?.enabled}
               enableDependencies={enableDependencies()}
-              customTabs={config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ id: t.id, name: t.name }))}
+              customTabs={config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ id: t.id, name: t.name, isUnscoped: isTabUnscoped(t) }))}
               onAddTab={() => setShowCustomTabModal(true)}
               onEditTab={(id) => { setEditingTabId(id); setShowCustomTabModal(true); }}
             />

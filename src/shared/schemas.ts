@@ -54,6 +54,11 @@ export function isActionsBasedTab(id: string, customTabs: readonly CustomTab[]):
   return id === "actions" || (!isBuiltinTab(id) && customTabs.some((t) => t.id === id && t.baseType === "actions"));
 }
 
+/** A tab with no orgScope and no repoScope matches no repos — see buildTabScopeMatcher in DashboardPage.tsx. */
+export function isTabUnscoped(tab: Pick<CustomTab, "orgScope" | "repoScope">): boolean {
+  return tab.orgScope.length === 0 && tab.repoScope.length === 0;
+}
+
 export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
 
 export const JiraCustomFieldSchema = z.object({

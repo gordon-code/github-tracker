@@ -22,7 +22,7 @@ export function rateLimitCssClass(remaining: number, limit: number): string {
 
 /** Format scope counts as "N org(s), M repo(s)". When elideZero is true, omit zero-count segments. */
 export function formatScopeSummary(orgCount: number, repoCount: number, elideZero = false): string {
-  if (orgCount === 0 && repoCount === 0) return "All repos";
+  if (orgCount === 0 && repoCount === 0) return "No repos selected";
   if (elideZero) {
     const parts: string[] = [];
     if (orgCount > 0) parts.push(`${orgCount} org${orgCount !== 1 ? "s" : ""}`);

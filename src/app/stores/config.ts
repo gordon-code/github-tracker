@@ -9,7 +9,7 @@ import { z } from "zod";
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
 export {
   ConfigSchema, RepoRefSchema, TrackedUserSchema, THEME_OPTIONS,
-  CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab, isActionsBasedTab,
+  CustomTabSchema, BUILTIN_TAB_IDS, isBuiltinTab, isActionsBasedTab, isTabUnscoped,
   type Config, type TrackedUser, type ThemeId, type CustomTab, type BuiltinTabId,
   type JiraConfig,
 } from "../../shared/schemas";
@@ -82,6 +82,19 @@ export function updateConfig(partial: Partial<Config>): void {
       if ("selectedRepos" in partial) {
         const selectedSet = new Set(draft.selectedRepos.map((r) => r.fullName));
         draft.monitoredRepos = draft.monitoredRepos.filter((r) => selectedSet.has(r.fullName));
+
+        // customTabs scope is derived from selectedRepos (see CustomTabModal's
+        // availableOrgs/availableRepos props) — prune scope entries that no
+        // longer correspond to a tracked repo, same as monitoredRepos above.
+        const ownerSet = new Set(draft.selectedRepos.map((r) => r.owner.toLowerCase()));
+        draft.customTabs = draft.customTabs.map((tab) => {
+          const filteredOrgScope = tab.orgScope.filter((o) => ownerSet.has(o.toLowerCase()));
+          const filteredRepoScope = tab.repoScope.filter((r) => selectedSet.has(r.fullName));
+          if (filteredOrgScope.length === tab.orgScope.length && filteredRepoScope.length === tab.repoScope.length) {
+            return tab;
+          }
+          return { ...tab, orgScope: filteredOrgScope, repoScope: filteredRepoScope };
+        });
       }
     })
   );

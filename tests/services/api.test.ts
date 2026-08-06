@@ -40,7 +40,9 @@ function makeOctokit(
         void params; // captured for test assertions
         // For tests that need paginate.iterator, return a single page
         const data =
-          route.includes("/orgs/") || route.includes("/user/repos")
+          route === "GET /user/orgs"
+            ? orgsFixture.filter((o) => o.type === "Organization")
+            : route.includes("/orgs/") || route.includes("/user/repos")
             ? reposFixture
             : [];
         return (async function* () {
@@ -104,6 +106,33 @@ describe("fetchOrgs", () => {
 
   it("throws when octokit is null", async () => {
     await expect(fetchOrgs(null)).rejects.toThrow("No GitHub client available");
+  });
+
+  it("paginates past a single page of 100 orgs", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      login: `org-${i}`, avatar_url: "https://avatars.githubusercontent.com/u/1", type: "Organization",
+    }));
+    const page2 = [{ login: "org-101", avatar_url: "https://avatars.githubusercontent.com/u/2", type: "Organization" }];
+    const octokit = {
+      request: vi.fn(async (route: string) => {
+        if (route === "GET /user") {
+          return { data: { login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif" }, headers: {} };
+        }
+        return { data: [], headers: {} };
+      }),
+      graphql: vi.fn(),
+      paginate: {
+        iterator: vi.fn(() => (async function* () {
+          yield { data: page1 };
+          yield { data: page2 };
+        })()),
+      },
+    };
+    const result = await fetchOrgs(octokit as unknown as ReturnType<typeof import("../../src/app/services/github").getClient>);
+
+    // Personal account + 101 orgs across two pages — none dropped.
+    expect(result.length).toBe(102);
+    expect(result.some((o) => o.login === "org-101")).toBe(true);
   });
 });
 

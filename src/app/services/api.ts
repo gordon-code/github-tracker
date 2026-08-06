@@ -1553,31 +1553,35 @@ function mapReviewDecision(
 
 /**
  * Returns orgs and the personal user account. Personal account is first.
+ * Fully paginates GET /user/orgs — a single-page fetch would silently
+ * truncate at 100 orgs for heavily-affiliated accounts.
  */
 export async function fetchOrgs(
   octokit: ReturnType<typeof getClient>
 ): Promise<OrgEntry[]> {
   if (!octokit) throw new Error("No GitHub client available");
 
-  const [userResult, orgsResult] = await Promise.all([
-    cachedRequest(octokit, "orgs:user", "GET /user"),
-    cachedRequest(octokit, "orgs:all", "GET /user/orgs", { per_page: 100 }),
-  ]);
+  const userPromise = cachedRequest(octokit, "orgs:user", "GET /user");
 
+  const orgEntries: OrgEntry[] = [];
+  const ORG_CAP = 1000;
+  for await (const response of octokit.paginate.iterator("GET /user/orgs", {
+    per_page: 100,
+  })) {
+    for (const org of response.data as RawOrg[]) {
+      orgEntries.push({ login: org.login, avatarUrl: org.avatar_url, type: "org" });
+    }
+    if (orgEntries.length >= ORG_CAP) break;
+  }
+
+  const userResult = await userPromise;
   const user = userResult.data as RawUser;
-  const orgs = orgsResult.data as RawOrg[];
 
   const personal: OrgEntry = {
     login: user.login,
     avatarUrl: user.avatar_url,
     type: "user",
   };
-
-  const orgEntries: OrgEntry[] = orgs.map((o) => ({
-    login: o.login,
-    avatarUrl: o.avatar_url,
-    type: "org",
-  }));
 
   return [personal, ...orgEntries];
 }

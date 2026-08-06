@@ -38,6 +38,8 @@ vi.mock("../../../src/app/stores/config", () => ({
   reorderCustomTab: mockReorderCustomTab,
   addCustomTab: mockAddCustomTab,
   updateCustomTab: mockUpdateCustomTab,
+  isTabUnscoped: (tab: { orgScope: string[]; repoScope: unknown[] }) =>
+    tab.orgScope.length === 0 && tab.repoScope.length === 0,
 }));
 
 vi.mock("../../../src/app/stores/view", () => ({
@@ -148,9 +150,15 @@ describe("CustomTabsSection — table rendering", () => {
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows 'All repos' when no scope is configured", () => {
+  it("shows 'No repos selected' and a warning icon when no scope is configured", () => {
     renderSection([makeTab({ orgScope: [], repoScope: [] })]);
-    expect(screen.getByText("All repos")).toBeDefined();
+    expect(screen.getByText("No repos selected")).toBeDefined();
+    expect(screen.getByLabelText("Unscoped tab")).toBeDefined();
+  });
+
+  it("does not show the unscoped warning icon when scope is configured", () => {
+    renderSection([makeTab({ orgScope: ["myorg"], repoScope: [] })]);
+    expect(screen.queryByLabelText("Unscoped tab")).toBeNull();
   });
 
   it("shows org count summary in scope column", () => {

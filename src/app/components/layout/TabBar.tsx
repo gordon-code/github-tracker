@@ -14,7 +14,7 @@ interface TabBarProps {
   enableActions?: boolean;
   enableJira?: boolean;
   enableDependencies?: boolean;
-  customTabs?: Array<{ id: string; name: string }>;
+  customTabs?: Array<{ id: string; name: string; isUnscoped?: boolean }>;
   onAddTab?: () => void;
   onEditTab?: (id: string) => void;
 }
@@ -77,6 +77,13 @@ export default function TabBar(props: TabBarProps) {
                 {(tab) => (
                   <div class="relative group/tab flex items-center">
                     <Tabs.Trigger value={tab.id} class="tab compact:tab-sm data-[selected]:tab-active">
+                      <Show when={tab.isUnscoped}>
+                        <Tooltip content="Unscoped — this tab won't match any repos until you add scope">
+                          <svg class="h-3.5 w-3.5 text-warning mr-1" fill="currentColor" viewBox="0 0 20 20" aria-label="Unscoped tab" role="img">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.28 11.163c.75 1.333-.213 2.987-1.742 2.987H3.72c-1.53 0-2.492-1.654-1.743-2.987L8.257 3.1zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                          </svg>
+                        </Tooltip>
+                      </Show>
                       {tab.name}
                       <Show when={props.counts?.[tab.id] !== undefined}>
                         <span class="badge badge-sm badge-neutral ml-1">{props.counts?.[tab.id]}</span>
