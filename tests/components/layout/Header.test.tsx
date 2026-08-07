@@ -43,9 +43,15 @@ vi.mock("../../../src/app/lib/errors", () => ({
   clearMutedSources: vi.fn(),
 }));
 
+// Mock github-status module so Header's GitHubStatusBadge import works
+vi.mock("../../../src/app/services/github-status", () => ({
+  getGitHubStatus: vi.fn(() => null),
+}));
+
 import Header from "../../../src/app/components/layout/Header";
 import * as authStore from "../../../src/app/stores/auth";
 import * as errorsModule from "../../../src/app/lib/errors";
+import * as githubStatusModule from "../../../src/app/services/github-status";
 import { render } from "@solidjs/testing-library";
 
 beforeEach(() => {
@@ -53,6 +59,7 @@ beforeEach(() => {
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
   vi.mocked(errorsModule.markAllAsRead).mockClear();
+  vi.mocked(githubStatusModule.getGitHubStatus).mockReturnValue(null);
 });
 
 describe("Header", () => {
@@ -150,5 +157,30 @@ describe("Header", () => {
     fireEvent.click(closeBtn);
     expect(bellBtn.getAttribute("aria-expanded")).toBe("false");
     expect(errorsModule.markAllAsRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders GitHub status badge with checking state before first fetch", () => {
+    render(() => <Header />);
+    expect(screen.getByLabelText("Checking GitHub status…")).toBeDefined();
+  });
+
+  it("renders GitHub status badge reflecting operational status", () => {
+    vi.mocked(githubStatusModule.getGitHubStatus).mockReturnValue({
+      severity: "none",
+      incidents: [],
+      fetchedAt: new Date(),
+    });
+    render(() => <Header />);
+    expect(screen.getByLabelText("All systems operational")).toBeDefined();
+  });
+
+  it("renders GitHub status badge reflecting an active critical incident", () => {
+    vi.mocked(githubStatusModule.getGitHubStatus).mockReturnValue({
+      severity: "critical",
+      incidents: [{ id: "1", name: "Actions Outage", latestUpdateBody: "Investigating", affectedComponents: ["Actions"] }],
+      fetchedAt: new Date(),
+    });
+    render(() => <Header />);
+    expect(screen.getByLabelText("Critical GitHub service outage")).toBeDefined();
   });
 });
