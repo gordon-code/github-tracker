@@ -118,7 +118,7 @@ function stripHtml(html: string): string {
 // Tested indirectly via fetchGitHubStatus.
 function parseSummary(raw: RawSummaryResponse): GitHubStatusSummary {
   const trackedComponents = raw.components.filter((c) => TRACKED_COMPONENT_NAMES.has(c.name));
-  const severity = blendSeverity(trackedComponents);
+  let severity = blendSeverity(trackedComponents);
 
   const relevantIncidents: GitHubStatusIncident[] = raw.incidents.flatMap((inc) => {
     const affected = inc.components.filter((c) => TRACKED_COMPONENT_NAMES.has(c.name));
@@ -130,6 +130,16 @@ function parseSummary(raw: RawSummaryResponse): GitHubStatusSummary {
       affectedComponents: affected.map((c) => c.name),
     }];
   });
+
+  // Statuspage commonly resets a component's status back to "operational" during
+  // an incident's "Monitoring" phase while the incident itself stays open, which
+  // would otherwise blend to "none" here even though a relevant incident is still
+  // active. Floor severity at "minor" in that case so the badge/notification can
+  // never claim "all systems operational" while an open incident is still being
+  // surfaced (CR-001) — avoids a green badge whose own popover lists an incident.
+  if (severity === "none" && relevantIncidents.length > 0) {
+    severity = "minor";
+  }
 
   return { severity, incidents: relevantIncidents, fetchedAt: new Date() };
 }
@@ -180,6 +190,10 @@ export function getGitHubStatus(): GitHubStatusSummary | null {
 
 let _fetchInProgress = false;
 
+// Consecutive-failure gate for the catch block below (CR-002) — see comment there.
+const CONSECUTIVE_FAILURE_THRESHOLD = 3;
+let _consecutiveFailures = 0;
+
 export async function fetchGitHubStatus(): Promise<void> {
   if (_fetchInProgress) return; // in-flight guard — avoid pile-up if refreshInterval is very short/0 or the endpoint is slow to respond
   _fetchInProgress = true;
@@ -214,20 +228,25 @@ export async function fetchGitHubStatus(): Promise<void> {
     const summary = parseSummary(validated.data);
     notifyTransitions(summary);
     _setGitHubStatus(summary);
+    _consecutiveFailures = 0;
   } catch (err) {
     console.warn("[github-status] fetch failed:", err instanceof Error ? err.message : String(err));
     // Best-effort, ancillary external signal — deliberately no pushError, don't
     // pollute the notification center with transient network blips for a
     // non-critical feature the user can't act on anyway. Still DO dismiss any
-    // active "github-status" incident notification: notifyTransitions() owns
-    // this notification's entire lifecycle end-to-end, and poll.ts deliberately
-    // excludes github-status from poll-level reconciliation (POLL_MANAGED_SOURCES),
-    // so if this fetch starts failing persistently while an incident notification
-    // is showing, nothing else would ever clear it. A single fetch failure just
-    // means "we don't currently know," not "the incident is still ongoing," so
-    // unconditional dismiss-on-any-failure is preferred over tracking a
-    // consecutive-failure counter (simpler, guarantees no stuck state).
-    dismissNotificationBySource(NOTIFICATION_SOURCE);
+    // active "github-status" incident notification once failures persist:
+    // notifyTransitions() owns this notification's entire lifecycle end-to-end,
+    // and poll.ts deliberately excludes github-status from poll-level
+    // reconciliation (POLL_MANAGED_SOURCES), so if this fetch keeps failing while
+    // an incident notification is showing, nothing else would ever clear it.
+    // A single blip doesn't mean the incident resolved, though — dismissing on
+    // every failure made the next successful poll re-push an unchanged incident
+    // as if newly announced (CR-002). Gate dismissal on
+    // CONSECUTIVE_FAILURE_THRESHOLD consecutive failures instead of any single one.
+    _consecutiveFailures++;
+    if (_consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD) {
+      dismissNotificationBySource(NOTIFICATION_SOURCE);
+    }
   } finally {
     _fetchInProgress = false;
   }
@@ -241,4 +260,5 @@ export function resetGitHubStatusState(): void {
   _previousIncidents = new Map();
   _setGitHubStatus(null);
   _fetchInProgress = false;
+  _consecutiveFailures = 0;
 }

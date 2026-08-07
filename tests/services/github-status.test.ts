@@ -130,6 +130,26 @@ describe("fetchGitHubStatus", () => {
     expect(result!.incidents).toEqual([]);
   });
 
+  it("floors severity at minor when an incident is still open but its tracked components blend to operational (CR-001)", async () => {
+    // Statuspage's "Monitoring" phase: component status resets to operational
+    // while the incident itself remains open and still affects a tracked
+    // component — severity must not fall back to "none" in that window.
+    const incidents = [makeIncident({
+      id: "monitoring-1",
+      name: "Actions Degradation",
+      body: "We are continuing to monitor.",
+      componentNames: ["Actions"],
+      componentStatus: "operational",
+    })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+
+    await fetchGitHubStatus();
+
+    const result = getGitHubStatus();
+    expect(result!.severity).toBe("minor");
+    expect(result!.incidents).toHaveLength(1);
+  });
+
   it("dismisses the github-status notification and pushes a resolved notification when an incident clears", async () => {
     const incidents = [makeIncident({ id: "abc", name: "Actions Outage", body: "Investigating", componentNames: ["Actions"] })];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
@@ -242,19 +262,65 @@ describe("fetchGitHubStatus", () => {
     expect(result!.incidents[0].name).toBe("Cached Incident");
   });
 
-  it("keeps the prior value and dismisses the notification when fetch throws (network error)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({
-      incidents: [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })],
-    }))));
+  it("keeps the prior value on a single fetch failure and does not dismiss the notification (CR-002)", async () => {
+    const incidents = [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
     await fetchGitHubStatus();
     const before = getGitHubStatus();
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     mockDismissNotificationBySource.mockClear();
+    mockPushNotification.mockClear();
     await expect(fetchGitHubStatus()).resolves.toBeUndefined();
 
     expect(getGitHubStatus()).toEqual(before);
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+
+    // A subsequent successful poll with the same unchanged incident must not
+    // look like a fresh announcement — it should be pushed with the exact same
+    // source+message as before, which the real errors.ts dedup treats as a no-op.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus();
+    expect(mockPushNotification).toHaveBeenCalledTimes(1);
+    expect(mockPushNotification).toHaveBeenCalledWith("github-status", "X", "warning", false);
+  });
+
+  it("dismisses the notification only after 3 consecutive fetch failures (CR-002)", async () => {
+    const incidents = [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus();
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    mockDismissNotificationBySource.mockClear();
+
+    await fetchGitHubStatus(); // failure 1
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+    await fetchGitHubStatus(); // failure 2
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+    await fetchGitHubStatus(); // failure 3
     expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
+  });
+
+  it("resets the consecutive-failure counter after a successful fetch (CR-002)", async () => {
+    const incidents = [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus();
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await fetchGitHubStatus(); // failure 1
+    await fetchGitHubStatus(); // failure 2
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus(); // success — must reset the counter
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    mockDismissNotificationBySource.mockClear();
+    await fetchGitHubStatus(); // failure 1 (post-reset)
+    await fetchGitHubStatus(); // failure 2 (post-reset)
+
+    // If the counter hadn't reset, this would be the 4th consecutive failure
+    // overall and would already have crossed the threshold.
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
   });
 
   it("first call with no successful fetch yet leaves getGitHubStatus() at null on a network error", async () => {
