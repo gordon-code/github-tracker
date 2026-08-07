@@ -331,14 +331,51 @@ describe("fetchGitHubStatus", () => {
     expect(getGitHubStatus()).toBeNull();
   });
 
-  it("logs a schema-drift warning and dismisses the notification when the response fails validation, without throwing", async () => {
+  it("logs a schema-drift warning without throwing, and does not dismiss the notification on a single failure", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ components: "not-an-array", incidents: [] })));
 
     await expect(fetchGitHubStatus()).resolves.toBeUndefined();
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("schema drift"), expect.anything());
-    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
     expect(getGitHubStatus()).toBeNull();
+  });
+
+  it("keeps the prior value on a single schema-drift failure and does not dismiss the notification", async () => {
+    const incidents = [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus();
+    const before = getGitHubStatus();
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ components: "not-an-array", incidents: [] })));
+    mockDismissNotificationBySource.mockClear();
+
+    await expect(fetchGitHubStatus()).resolves.toBeUndefined();
+
+    expect(getGitHubStatus()).toEqual(before);
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the notification after 3 consecutive schema-drift failures, sharing the counter with network failures", async () => {
+    const incidents = [makeIncident({ id: "x", name: "X", body: "y", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }))));
+    await fetchGitHubStatus();
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const badResponse = () => jsonResponse({ components: "not-an-array", incidents: [] });
+    mockDismissNotificationBySource.mockClear();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(badResponse()));
+    await fetchGitHubStatus(); // schema failure 1
+    expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await fetchGitHubStatus(); // network failure 2 — shares the same counter
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(badResponse()));
+    await fetchGitHubStatus(); // schema failure 3
+    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
   });
 });

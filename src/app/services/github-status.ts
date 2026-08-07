@@ -217,11 +217,11 @@ export async function fetchGitHubStatus(): Promise<void> {
     // Validate the raw shape before parsing — catches API drift (e.g. a field
     // renamed/removed upstream) as a distinct, loud log message instead of an
     // unexplained TypeError deep inside parseSummary. Treated the same as any
-    // other fetch failure: no throw, dismiss any active incident notification.
+    // other fetch failure (see recordFetchFailure()).
     const validated = RawSummaryResponseSchema.safeParse(data);
     if (!validated.success) {
       console.warn("[github-status] response schema drift — validation failed:", validated.error);
-      dismissNotificationBySource(NOTIFICATION_SOURCE);
+      recordFetchFailure();
       return;
     }
 
@@ -231,24 +231,30 @@ export async function fetchGitHubStatus(): Promise<void> {
     _consecutiveFailures = 0;
   } catch (err) {
     console.warn("[github-status] fetch failed:", err instanceof Error ? err.message : String(err));
-    // Best-effort, ancillary external signal — deliberately no pushError, don't
-    // pollute the notification center with transient network blips for a
-    // non-critical feature the user can't act on anyway. Still DO dismiss any
-    // active "github-status" incident notification once failures persist:
-    // notifyTransitions() owns this notification's entire lifecycle end-to-end,
-    // and poll.ts deliberately excludes github-status from poll-level
-    // reconciliation (POLL_MANAGED_SOURCES), so if this fetch keeps failing while
-    // an incident notification is showing, nothing else would ever clear it.
-    // A single blip doesn't mean the incident resolved, though — dismissing on
-    // every failure made the next successful poll re-push an unchanged incident
-    // as if newly announced (CR-002). Gate dismissal on
-    // CONSECUTIVE_FAILURE_THRESHOLD consecutive failures instead of any single one.
-    _consecutiveFailures++;
-    if (_consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD) {
-      dismissNotificationBySource(NOTIFICATION_SOURCE);
-    }
+    recordFetchFailure();
   } finally {
     _fetchInProgress = false;
+  }
+}
+
+// Best-effort, ancillary external signal — deliberately no pushError, don't
+// pollute the notification center with transient network blips or schema drift
+// for a non-critical feature the user can't act on anyway. Still DO dismiss any
+// active "github-status" incident notification once failures persist:
+// notifyTransitions() owns this notification's entire lifecycle end-to-end, and
+// poll.ts deliberately excludes github-status from poll-level reconciliation
+// (POLL_MANAGED_SOURCES), so if this fetch keeps failing while an incident
+// notification is showing, nothing else would ever clear it. A single blip
+// doesn't mean the incident resolved, though — dismissing on every failure made
+// the next successful poll re-push an unchanged incident as if newly announced
+// (CR-002). Gate dismissal on CONSECUTIVE_FAILURE_THRESHOLD consecutive
+// failures instead of any single one. Shared by both failure modes (network/
+// parse errors in the catch block, and schema-validation failures above) so
+// neither can bypass the gate.
+function recordFetchFailure(): void {
+  _consecutiveFailures++;
+  if (_consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD) {
+    dismissNotificationBySource(NOTIFICATION_SOURCE);
   }
 }
 
