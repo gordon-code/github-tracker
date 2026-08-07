@@ -98,7 +98,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 type(scope): description
 ```
 
-Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
+Scope is optional. Use present-indicative mood: "adds feature", not "add feature" or "added feature".
 
 ## Releasing the MCP server
 
