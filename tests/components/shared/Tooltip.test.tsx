@@ -177,6 +177,46 @@ describe("Tooltip", () => {
     // Advance past Kobalte's globalSkipDelayTimeout (300ms) so global state resets
     vi.advanceTimersByTime(500);
   });
+
+  it("forceClosed suppresses tooltip even after hover delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="X" forceClosed={true}>
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).not.toContain("X");
+  });
+
+  it("forceClosed={false} or omitted does not change existing hover behavior", () => {
+    const { container: containerFalse } = render(() => (
+      <Tooltip content="X" forceClosed={false}>
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const triggerFalse = containerFalse.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(triggerFalse);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("X");
+    fireEvent.pointerLeave(triggerFalse);
+    vi.advanceTimersByTime(500);
+
+    const { container: containerOmitted } = render(() => (
+      <Tooltip content="Y">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const triggerOmitted = containerOmitted.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(triggerOmitted);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("Y");
+    // Clean up: close the tooltip and let Kobalte's global skip-delay warm state
+    // reset, so later tests (e.g. InfoTooltip's real openDelay) aren't affected.
+    fireEvent.pointerLeave(triggerOmitted);
+    vi.advanceTimersByTime(500);
+  });
 });
 
 describe("InfoTooltip", () => {

@@ -12,13 +12,14 @@ interface TooltipProps {
   focusable?: boolean;
   class?: string;
   contentClass?: string;
+  forceClosed?: boolean;
   children: JSX.Element;
 }
 
 export function Tooltip(props: TooltipProps) {
   const [isHovered, setIsHovered] = createSignal(false);
   const [isFocused, setIsFocused] = createSignal(false);
-  const open = createMemo(() => isHovered() || isFocused());
+  const open = createMemo(() => !props.forceClosed && (isHovered() || isFocused()));
 
   // openDelay is ignored in controlled mode; implement the delay manually
   let hoverTimer: ReturnType<typeof setTimeout> | undefined;
