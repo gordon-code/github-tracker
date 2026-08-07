@@ -93,6 +93,22 @@ describe("public/_headers CSP validation", () => {
     expect(connectSrc).toContain("https://api.github.com");
   });
 
+  it("connect-src includes https://www.githubstatus.com", () => {
+    expect(csp).not.toBeNull();
+    const connectSrc = csp!.get("connect-src") ?? "";
+    expect(connectSrc).toContain("https://www.githubstatus.com");
+  });
+
+  it("connect-src does NOT include regional GitHub status subdomains", () => {
+    // Regional Enterprise Cloud status pages are out of scope for this feature
+    expect(csp).not.toBeNull();
+    const connectSrc = csp!.get("connect-src") ?? "";
+    expect(connectSrc).not.toContain("au.githubstatus.com");
+    expect(connectSrc).not.toContain("eu.githubstatus.com");
+    expect(connectSrc).not.toContain("jp.githubstatus.com");
+    expect(connectSrc).not.toContain("us.githubstatus.com");
+  });
+
   it("connect-src includes 'self' (same-origin Worker calls)", () => {
     expect(csp).not.toBeNull();
     const connectSrc = csp!.get("connect-src") ?? "";
