@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
 import * as githubMod from "../../src/app/services/github";
+import * as githubStatusMod from "../../src/app/services/github-status";
 
 // Mock pushError so we can spy on it
 const mockPushError = vi.fn();
@@ -39,6 +40,12 @@ vi.mock("../../src/app/services/github", () => ({
   fetchRateLimitDetails: vi.fn(() => Promise.resolve(null)),
   onApiRequest: vi.fn(),
   initClientWatcher: vi.fn(),
+}));
+
+// Mock github-status module — fetchGitHubStatus runs concurrently (fire-and-forget)
+// in doFetch, same pattern as fetchRateLimitDetails above.
+vi.mock("../../src/app/services/github-status", () => ({
+  fetchGitHubStatus: vi.fn(() => Promise.resolve()),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
@@ -598,6 +605,40 @@ describe("createPollCoordinator", () => {
       await flushPromises();
 
       expect(fetchRateLimitDetailsSpy).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("fetchGitHubStatus is called once on initial mount", async () => {
+    const fetchGitHubStatusSpy = vi.mocked(githubStatusMod.fetchGitHubStatus);
+    fetchGitHubStatusSpy.mockClear();
+
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchGitHubStatusSpy).toHaveBeenCalledTimes(1);
+      dispose();
+    });
+  });
+
+  it("manualRefresh() triggers another fetchGitHubStatus call", async () => {
+    const fetchGitHubStatusSpy = vi.mocked(githubStatusMod.fetchGitHubStatus);
+    fetchGitHubStatusSpy.mockClear();
+
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+      expect(fetchGitHubStatusSpy).toHaveBeenCalledTimes(1);
+
+      coordinator.manualRefresh();
+      await flushPromises();
+
+      expect(fetchGitHubStatusSpy).toHaveBeenCalledTimes(2);
       dispose();
     });
   });

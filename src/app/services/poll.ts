@@ -1,6 +1,7 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import * as Sentry from "@sentry/solid";
 import { getClient, fetchRateLimitDetails } from "./github";
+import { fetchGitHubStatus } from "./github-status";
 import { config } from "../stores/config";
 import { user, onAuthCleared, expireToken } from "../stores/auth";
 import { checkAndResetIfExpired } from "./api-usage";
@@ -310,6 +311,11 @@ export function createPollCoordinator(
     // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
     // resolves after a GraphQL response, the footer briefly shows pre-query remaining (cosmetic).
     void fetchRateLimitDetails();
+    // Fire-and-forget, same pattern as above: checks GitHub's own status page for
+    // outages affecting tracked components. Fully self-contained (own try/catch,
+    // own notification push/dismiss) — no interaction with this cycle's error
+    // handling or the fetchAll() try/catch below.
+    void fetchGitHubStatus();
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(
