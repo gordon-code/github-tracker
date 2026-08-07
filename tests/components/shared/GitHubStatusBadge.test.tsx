@@ -45,7 +45,7 @@ describe("GitHubStatusBadge", () => {
     expect(link.getAttribute("href")).toBe("https://www.githubstatus.com");
   });
 
-  it("severity 'minor' shows warning dot without pulse class", () => {
+  it("severity 'minor' shows warning dot without pulse class and popover shows incident details", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "minor",
       incidents: [{ id: "1", name: "Degraded search", latestUpdateBody: "", affectedComponents: ["Search"] }],
@@ -55,6 +55,12 @@ describe("GitHubStatusBadge", () => {
     const dot = container.querySelector("span.rounded-full.w-2.h-2")!;
     expect(dot.classList.contains("bg-warning")).toBe(true);
     expect(container.querySelector(".animate-slow-pulse")).toBeNull();
+
+    const button = screen.getByRole("button", { name: "Minor GitHub service disruption" });
+    fireEvent.click(button);
+    vi.advanceTimersByTime(0);
+    expect(screen.getByText("Degraded search")).toBeTruthy();
+    expect(document.body.textContent).toContain("Affects: Search");
   });
 
   it("severity 'major' shows orange dot with pulse class", () => {
@@ -134,6 +140,49 @@ describe("GitHubStatusBadge", () => {
     vi.advanceTimersByTime(0);
     expect(button.getAttribute("aria-expanded")).toBe("true");
     // Tooltip is suppressed (forceClosed) once the Popover opens...
+    tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(false);
+    // ...while the Popover's own content is present.
+    expect(document.body.textContent).toContain("Some outage");
+  });
+
+  it("popover lists all incidents when multiple are present simultaneously", () => {
+    mockGetGitHubStatus.mockReturnValue({
+      severity: "major",
+      incidents: [
+        { id: "1", name: "API outage", latestUpdateBody: "", affectedComponents: ["API Requests"] },
+        { id: "2", name: "Actions delays", latestUpdateBody: "", affectedComponents: ["Actions"] },
+      ],
+      fetchedAt: new Date(),
+    });
+    render(() => <GitHubStatusBadge />);
+    const button = screen.getByRole("button", { name: "Major GitHub service outage" });
+    fireEvent.click(button);
+    vi.advanceTimersByTime(0);
+    expect(screen.getByText("API outage")).toBeTruthy();
+    expect(screen.getByText("Actions delays")).toBeTruthy();
+    expect(document.body.textContent).toContain("Affects: API Requests");
+    expect(document.body.textContent).toContain("Affects: Actions");
+  });
+
+  it("focusing the trigger shows the tooltip via keyboard access, and opening the popover suppresses it", () => {
+    mockGetGitHubStatus.mockReturnValue({
+      severity: "major",
+      incidents: [{ id: "1", name: "Some outage", latestUpdateBody: "We are investigating", affectedComponents: ["Actions"] }],
+      fetchedAt: new Date(),
+    });
+    const { container } = render(() => <GitHubStatusBadge />);
+    const tooltipTrigger = container.querySelector("span.inline-flex")!;
+    fireEvent.focusIn(tooltipTrigger);
+    // focusIn opens the Tooltip immediately (no hover delay) — see Tooltip.tsx onFocusIn.
+    let tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(true);
+
+    const button = screen.getByRole("button", { name: "Major GitHub service outage" });
+    fireEvent.click(button);
+    vi.advanceTimersByTime(0);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    // Tooltip is suppressed (forceClosed) once the Popover opens, even though focus never left...
     tooltipContent = document.querySelector('[role="tooltip"]');
     expect(tooltipContent?.hasAttribute("data-expanded")).toBe(false);
     // ...while the Popover's own content is present.
