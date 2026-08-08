@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { Tooltip as KobalteTooltip } from "@kobalte/core/tooltip";
 import type { JSX } from "solid-js";
 
@@ -12,13 +12,14 @@ interface TooltipProps {
   focusable?: boolean;
   class?: string;
   contentClass?: string;
+  forceClosed?: boolean;
   children: JSX.Element;
 }
 
 export function Tooltip(props: TooltipProps) {
   const [isHovered, setIsHovered] = createSignal(false);
   const [isFocused, setIsFocused] = createSignal(false);
-  const open = createMemo(() => isHovered() || isFocused());
+  const open = createMemo(() => !props.forceClosed && (isHovered() || isFocused()));
 
   // openDelay is ignored in controlled mode; implement the delay manually
   let hoverTimer: ReturnType<typeof setTimeout> | undefined;
@@ -27,6 +28,23 @@ export function Tooltip(props: TooltipProps) {
     clearTimeout(hoverTimer);
     clearTimeout(closeTimer);
   });
+
+  // A consumer (e.g. GitHubStatusBadge) can force this tooltip closed while something else,
+  // like a Popover, is open. Dismissing that Popover via Escape or an outside click never
+  // fires a pointerleave/blur on this tooltip's own trigger, so isHovered/isFocused can be
+  // left stale as `true`. Reset them when forceClosed transitions back to false so the
+  // tooltip doesn't flash back open on its own — a fresh hover/focus is required to reopen it.
+  createEffect(on(
+    () => !!props.forceClosed,
+    (forceClosed, prevForceClosed) => {
+      if (prevForceClosed && !forceClosed) {
+        clearTimeout(hoverTimer);
+        clearTimeout(closeTimer);
+        setIsHovered(false);
+        setIsFocused(false);
+      }
+    }
+  ));
 
   return (
     <KobalteTooltip

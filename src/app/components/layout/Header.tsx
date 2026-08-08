@@ -5,6 +5,7 @@ import { getUnreadCount, markAllAsRead } from "../../lib/errors";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
 import { Tooltip } from "../shared/Tooltip";
+import GitHubStatusBadge from "../shared/GitHubStatusBadge";
 
 export default function Header() {
   const navigate = useNavigate();
@@ -55,6 +56,8 @@ export default function Header() {
             </div>
           )}
         </Show>
+
+        <GitHubStatusBadge />
 
         <Tooltip content="Settings">
           <a

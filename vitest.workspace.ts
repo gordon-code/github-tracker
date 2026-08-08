@@ -18,7 +18,7 @@ export default defineConfig({
           hookTimeout: 30_000,
           setupFiles: ["tests/setup.ts"],
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.steps.tsx"],
-          exclude: ["tests/worker/**"],
+          exclude: ["tests/worker/**", "tests/**/*.smoke.test.ts"],
         },
       }),
       // Cloudflare Worker tests

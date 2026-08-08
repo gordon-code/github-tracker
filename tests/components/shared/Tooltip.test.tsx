@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createSignal } from "solid-js";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { Tooltip, InfoTooltip } from "../../../src/app/components/shared/Tooltip";
 
@@ -175,6 +176,84 @@ describe("Tooltip", () => {
     fireEvent.keyDown(trigger, { key: "Escape" });
     expect(trigger.hasAttribute("data-expanded")).toBe(false);
     // Advance past Kobalte's globalSkipDelayTimeout (300ms) so global state resets
+    vi.advanceTimersByTime(500);
+  });
+
+  it("forceClosed suppresses tooltip even after hover delay", () => {
+    const { container } = render(() => (
+      <Tooltip content="X" forceClosed={true}>
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).not.toContain("X");
+  });
+
+  it("forceClosed={false} or omitted does not change existing hover behavior", () => {
+    const { container: containerFalse } = render(() => (
+      <Tooltip content="X" forceClosed={false}>
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const triggerFalse = containerFalse.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(triggerFalse);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("X");
+    fireEvent.pointerLeave(triggerFalse);
+    vi.advanceTimersByTime(500);
+
+    const { container: containerOmitted } = render(() => (
+      <Tooltip content="Y">
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const triggerOmitted = containerOmitted.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(triggerOmitted);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("Y");
+    // Clean up: close the tooltip and let Kobalte's global skip-delay warm state
+    // reset, so later tests (e.g. InfoTooltip's real openDelay) aren't affected.
+    fireEvent.pointerLeave(triggerOmitted);
+    vi.advanceTimersByTime(500);
+  });
+
+  it("resets stale hover state when forceClosed transitions back to false", () => {
+    const [forceClosed, setForceClosed] = createSignal(false);
+    const { container } = render(() => (
+      <Tooltip content="X" forceClosed={forceClosed()}>
+        <span>Trigger</span>
+      </Tooltip>
+    ));
+    const trigger = container.querySelector("span.inline-flex")!;
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    // Kobalte keeps the tooltip's content node mounted (for exit transitions) even once
+    // closed, marking it data-closed rather than removing it — so once opened, textContent
+    // checks can't distinguish open/closed. Check the data-expanded state instead, matching
+    // this file's existing convention (see "forceClosed suppresses tooltip..." above).
+    let tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(true);
+
+    // Force-close while the pointer never leaves the trigger — isHovered stays stale as true.
+    setForceClosed(true);
+    tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(false);
+
+    // Un-force-closing must not let the stale hover reopen the tooltip on its own.
+    setForceClosed(false);
+    tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(false);
+
+    // A fresh hover still works normally afterward.
+    fireEvent.pointerLeave(trigger);
+    vi.advanceTimersByTime(500);
+    fireEvent.pointerEnter(trigger);
+    vi.advanceTimersByTime(300);
+    tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(true);
+    fireEvent.pointerLeave(trigger);
     vi.advanceTimersByTime(500);
   });
 });

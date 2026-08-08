@@ -63,6 +63,10 @@ A second, faster poll loop (default 30s, configurable 10–120s) targets only in
 
 Browser notifications for new issues, PRs, and failed runs. Per-type toggles in settings. Notification permission requested on first enable. New items are detected via the Events API polling loop and full refresh cycles.
 
+### GitHub Status Badge
+
+A status dot in the header reflects GitHub's own reported status for the services this dashboard depends on (Actions, API Requests, Git Operations, Issues, Pull Requests). Click it for incident details and a link to githubstatus.com. Toast and drawer notifications fire on incident start and resolution.
+
 ### Repo Pinning and Reordering
 
 Lock repos to the top of each tab's list so they don't shift around as activity changes. Drag-to-reorder within the locked set. Lock controls appear on hover on desktop, always visible on mobile.

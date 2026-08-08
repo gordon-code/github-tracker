@@ -15,6 +15,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Personal Summary Strip](#personal-summary-strip)
   - [Repo Grouping and Expand/Collapse](#repo-grouping-and-expandcollapse)
   - [Scope Filter](#scope-filter)
+  - [GitHub Status Badge](#github-status-badge)
 - [Issues Tab](#issues-tab)
   - [Filters](#issues-filters)
   - [Dependency Dashboard Toggle](#dependency-dashboard-toggle)
@@ -147,6 +148,12 @@ The **Scope** filter chip appears on the Issues and Pull Requests tabs when you 
 - **All activity** — shows every open item across your selected repos. Items involving you or your tracked users are highlighted with a colored left border.
 
 The scope filter is hidden (and always set to "Involves me") when you have no tracked users and no monitor-all repos, because in that configuration all fetched data already involves you.
+
+### GitHub Status Badge
+
+A small status dot appears in the header, next to your avatar. It reflects GitHub's own reported status for the services this dashboard depends on — Actions, API Requests, Git Operations, Issues, and Pull Requests. Green means all tracked services are operational; yellow, orange, or red indicate minor, major, or critical disruption respectively.
+
+Click the badge to see details on any active incident, including affected components and the latest status update, plus a link to [githubstatus.com](https://www.githubstatus.com). Other GitHub services (Copilot, Codespaces, Pages, Packages, etc.) are not tracked by this badge.
 
 ---
 
@@ -369,6 +376,10 @@ Setting the interval to **Off** disables automatic polling; manual refresh still
 
 A ±30 second jitter is applied to the refresh interval to avoid synchronized API spikes from multiple browser tabs.
 
+### GitHub Status Checks
+
+Each full refresh also checks GitHub's own status page for outages affecting Actions, API Requests, Git Operations, Issues, or Pull Requests. This is a single lightweight, unauthenticated request and does not count against your GitHub API rate limit. It follows the same schedule as the full refresh — including the same visibility-based pausing — rather than running on its own timer.
+
 ### Hot Poll
 
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
@@ -409,6 +420,10 @@ When you return to a tab that has been hidden for more than 2 minutes, a catch-u
 ### Notification Drawer
 
 The bell icon in the header opens the notification drawer, which shows API errors, rate limit warnings, and other system messages. Notifications are dismissed automatically when the underlying condition clears on the next poll cycle.
+
+### GitHub Outage Notifications
+
+When a GitHub outage affecting a tracked service starts, a toast appears and an entry is added to the notification drawer. A second notification confirms it once the outage resolves. These always appear via the in-app toast and drawer — they are not part of the **Browser Push Notifications** toggles below and cannot be disabled.
 
 ### Browser Push Notifications
 
