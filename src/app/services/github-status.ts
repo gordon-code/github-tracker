@@ -145,8 +145,9 @@ function parseSummary(raw: RawSummaryResponse): GitHubStatusSummary {
 }
 
 // Side-effecting: consumes a parsed summary and dispatches notification
-// transitions. Mirrors the detectNewItems() (pure) / dispatchNotifications()
-// (side-effecting) split already established in src/app/lib/notifications.ts.
+// transitions. Mirrors the change-detector (detectNewItems()) / dispatcher
+// (dispatchNotifications()) split already established in
+// src/app/lib/notifications.ts.
 //
 // Both pushNotification calls pass retryable=false — an outage announcement is
 // not a failed/retryable operation. Message text is just the incident name(s),
