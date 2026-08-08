@@ -33,11 +33,12 @@ Fine-grained PATs need Actions (read), Contents (read), Issues (read), and Pull 
 ## Running checks
 
 ```bash
-pnpm test           # unit tests (Vitest — root + mcp/)
-pnpm test:e2e       # Playwright E2E tests (chromium)
-pnpm run typecheck  # TypeScript validation (root + mcp/)
-pnpm run screenshot # Capture dashboard screenshot (saves to docs/)
-pnpm mcp:serve      # Start the MCP server (requires GITHUB_TOKEN)
+pnpm test              # unit tests (Vitest — root + mcp/)
+pnpm test:e2e          # Playwright E2E tests (chromium)
+pnpm test:status-smoke # Live-network check that githubstatus.com still reports the tracked component names (also runs on a weekly schedule in CI)
+pnpm run typecheck     # TypeScript validation (root + mcp/)
+pnpm run screenshot    # Capture dashboard screenshot (saves to docs/)
+pnpm mcp:serve         # Start the MCP server (requires GITHUB_TOKEN)
 ```
 
 To test MCP tools interactively, use the MCP Inspector:
