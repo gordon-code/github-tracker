@@ -18,6 +18,16 @@ export default function GitHubStatusBadge() {
       ? SEVERITY_CONFIG[s.severity]
       : { bg: "bg-base-content/20", label: "Checking GitHub status…", pulse: false };
   });
+  const statusSummaryRow = () => (
+    <div class="flex items-center gap-2">
+      <span class={`inline-flex rounded-full w-2 h-2 ${cfg().bg}`} />
+      <span>{cfg().label}</span>
+    </div>
+  );
+  const incidentList = createMemo(() => {
+    const s = status();
+    return s && s.incidents.length > 0 ? s.incidents : null;
+  });
   const [popoverOpen, setPopoverOpen] = createSignal(false);
 
   return (
@@ -34,28 +44,22 @@ export default function GitHubStatusBadge() {
       </Tooltip>
       <Popover.Portal>
         <Popover.Content aria-label="GitHub status" class="bg-base-100 border border-base-300 rounded-lg shadow-lg z-50 p-3 w-72 text-sm">
-          <Show
-            when={status() && status()!.incidents.length > 0}
-            fallback={
-              <div class="flex items-center gap-2">
-                <span class={`inline-flex rounded-full w-2 h-2 ${cfg().bg}`} />
-                <span>{cfg().label}</span>
-              </div>
-            }
-          >
-            <ul class="flex flex-col gap-3">
-              <For each={status()!.incidents}>
-                {(incident) => (
-                  <li>
-                    <div class="font-medium">{incident.name}</div>
-                    <div class="text-xs text-base-content/60">Affects: {incident.affectedComponents.join(", ")}</div>
-                    <Show when={incident.latestUpdateBody}>
-                      <p class="mt-1 text-xs whitespace-pre-line">{incident.latestUpdateBody}</p>
-                    </Show>
-                  </li>
-                )}
-              </For>
-            </ul>
+          <Show when={incidentList()} fallback={statusSummaryRow()}>
+            {(list) => (
+              <ul class="flex flex-col gap-3">
+                <For each={list()}>
+                  {(incident) => (
+                    <li>
+                      <div class="font-medium">{incident.name}</div>
+                      <div class="text-xs text-base-content/60">Affects: {incident.affectedComponents.join(", ")}</div>
+                      <Show when={incident.latestUpdateBody}>
+                        <p class="mt-1 text-xs whitespace-pre-line">{incident.latestUpdateBody}</p>
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            )}
           </Show>
           <a href="https://www.githubstatus.com" target="_blank" rel="noopener noreferrer" class="link link-hover text-xs mt-2 inline-block">
             View githubstatus.com

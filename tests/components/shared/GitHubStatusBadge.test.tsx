@@ -28,6 +28,11 @@ describe("GitHubStatusBadge", () => {
     expect(button).toBeTruthy();
     const dot = container.querySelector("span.rounded-full.w-2.h-2");
     expect(dot?.classList.contains("bg-base-content/20")).toBe(true);
+
+    fireEvent.click(button);
+    vi.advanceTimersByTime(0);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(document.body.textContent).toContain("Checking GitHub status…");
   });
 
   it("severity 'none' shows success dot without pulse and popover shows operational message", () => {
@@ -187,5 +192,37 @@ describe("GitHubStatusBadge", () => {
     expect(tooltipContent?.hasAttribute("data-expanded")).toBe(false);
     // ...while the Popover's own content is present.
     expect(document.body.textContent).toContain("Some outage");
+  });
+
+  it("does not let a stale hover reopen the tooltip after Escape dismisses the popover", () => {
+    mockGetGitHubStatus.mockReturnValue({
+      severity: "major",
+      incidents: [{ id: "1", name: "Some outage", latestUpdateBody: "We are investigating", affectedComponents: ["Actions"] }],
+      fetchedAt: new Date(),
+    });
+    const { container } = render(() => <GitHubStatusBadge />);
+    const tooltipTrigger = container.querySelector("span.inline-flex")!;
+    const button = screen.getByRole("button", { name: "Major GitHub service outage" });
+
+    // Open the popover first (e.g. via click).
+    fireEvent.click(button);
+    vi.advanceTimersByTime(0);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    // The pointer rests on the trigger *while the popover is open* — a real pointerenter
+    // event, independent of whatever happened before the popover opened.
+    fireEvent.pointerEnter(tooltipTrigger);
+    vi.advanceTimersByTime(300);
+
+    // Dismiss the popover via Escape. The pointer never leaves the trigger, so no
+    // pointerleave/blur fires on it — Kobalte's DismissableLayer closes the popover directly,
+    // bypassing the Tooltip trigger's own hover/click handlers entirely.
+    fireEvent.keyDown(document, { key: "Escape" });
+    vi.advanceTimersByTime(0);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    // The tooltip must not flash back open from the now-stale hover state.
+    const tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).not.toBe(true);
   });
 });
