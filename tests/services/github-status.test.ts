@@ -130,6 +130,18 @@ describe("fetchGitHubStatus", () => {
     expect(result!.incidents).toEqual([]);
   });
 
+  it("treats an unrecognized component status as none severity without throwing", async () => {
+    const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+      makeComponent(n, n === "Actions" ? "under_maintenance" : "operational")
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components }))));
+
+    await expect(fetchGitHubStatus()).resolves.toBeUndefined();
+
+    const result = getGitHubStatus();
+    expect(result!.severity).toBe("none");
+  });
+
   it("floors severity at minor when an incident is still open but its tracked components blend to operational (CR-001)", async () => {
     // Statuspage's "Monitoring" phase: component status resets to operational
     // while the incident itself remains open and still affects a tracked
@@ -197,6 +209,20 @@ describe("fetchGitHubStatus", () => {
 
     const result = getGitHubStatus();
     expect(result!.incidents[0].latestUpdateBody).not.toContain("<br");
+  });
+
+  it("empty incident_updates array yields an empty latestUpdateBody without throwing", async () => {
+    const incident = {
+      ...makeIncident({ id: "empty-1", name: "No Updates Yet", body: "unused", componentNames: ["Actions"] }),
+      incident_updates: [] as { body: string }[],
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents: [incident] }))));
+
+    await expect(fetchGitHubStatus()).resolves.toBeUndefined();
+
+    const result = getGitHubStatus();
+    expect(result!.incidents).toHaveLength(1);
+    expect(result!.incidents[0].latestUpdateBody).toBe("");
   });
 
   it("pins the raw, unescaped incident name through to pushNotification (toast/drawer escaping boundary)", async () => {
@@ -377,5 +403,15 @@ describe("fetchGitHubStatus", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(badResponse()));
     await fetchGitHubStatus(); // schema failure 3
     expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
+  });
+
+  it("resetGitHubStatusState clears the current status back to null", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary())));
+    await fetchGitHubStatus();
+    expect(getGitHubStatus()).not.toBeNull();
+
+    resetGitHubStatusState();
+
+    expect(getGitHubStatus()).toBeNull();
   });
 });
