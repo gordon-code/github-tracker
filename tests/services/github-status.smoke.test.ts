@@ -13,8 +13,10 @@ describe("github-status live API shape (smoke)", () => {
     const json = (await res.json()) as { components: Array<{ name: string }> };
     const liveNames = new Set(json.components.map((c) => c.name));
 
-    for (const tracked of TRACKED_COMPONENT_NAMES) {
-      expect(liveNames.has(tracked)).toBe(true);
-    }
+    // Assert on the missing-names array (not one expect() per name) so a failure names
+    // exactly which tracked component drifted — e.g. `Expected: [] / Received: ["Actions"]`
+    // — instead of an undifferentiated `Expected: true / Received: false`.
+    const missing = [...TRACKED_COMPONENT_NAMES].filter((name) => !liveNames.has(name));
+    expect(missing).toEqual([]);
   });
 });
