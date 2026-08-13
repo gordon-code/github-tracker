@@ -288,7 +288,7 @@ The tab uses a multi-layer detection pipeline to identify dependency PRs:
 4. **Title pattern** — PR titles matching common dependency update patterns (e.g., "Bump X from Y to Z", "chore(deps): ...", "[Snyk] ...") are detected.
 5. **Label match** — PRs with the `dependencies` label are included.
 
-Dependency PRs claimed by the Dependencies tab are excluded from the standard Pull Requests tab and any custom tabs with exclusivity enabled. The tab title shows the current count of open dependency PRs.
+Dependency PRs claimed by the Dependencies tab are excluded from the standard Pull Requests tab and any custom tabs with exclusivity enabled. The tab title shows the current count of open dependency PRs. This exclusivity still applies to repos you've excluded from the Dependencies tab — their dependency PRs disappear entirely rather than reappearing in Pull Requests.
 
 ### Status Grouping
 
@@ -307,7 +307,7 @@ Within each group, PRs are sorted by repository name, then update category (main
 
 If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Abandoned" section are shown as pill badges on matching PR rows. Each pill links directly to the Renovate Dashboard issue so you can investigate further.
 
-The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table.
+The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table. Repos excluded from the Dependencies tab (see Dependencies Settings below) are skipped for abandoned-package detection too — their Renovate Dashboard issue is never checked.
 
 ### Dependencies Settings
 
@@ -317,6 +317,7 @@ Go to **Settings > Dependencies** to configure:
 |---------|---------|-------------|
 | Enable Dependencies tab | On | Show or hide the tab. When disabled, dependency PRs appear in the standard Pull Requests tab. |
 | Rebase label | `rebase` | PRs with this label are shown with a "Rebasing" indicator in the Dependencies tab. Change to match the label name your dependency bot uses to signal rebase-needed status. |
+| Excluded repos/orgs | (none) | Hide specific repos or entire orgs from the Dependencies tab — including their Renovate Dashboard "Abandoned" package badges. Picked from your selected, upstream, and monitored repos. Excluding an org covers all repos under it, including ones added later. Excluded items still appear normally in Issues, Pull Requests, and Actions. |
 
 ### Dependencies Filters
 
