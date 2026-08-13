@@ -767,6 +767,30 @@ describe("updateConfig — structural invariant: repo-referencing fields reconci
       });
     }
   );
+
+  it("dependencies.excludedOrgs/excludedRepos survive a selectedRepos update that drops a repo still present via upstreamRepos", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [STALE_REPO, SURVIVING_REPO],
+        upstreamRepos: [STALE_REPO],
+        dependencies: {
+          ...config.dependencies,
+          excludedOrgs: ["unrelated-org"],
+          excludedRepos: [STALE_REPO],
+        },
+      });
+
+      // STALE_REPO drops out of selectedRepos but remains available via
+      // upstreamRepos — its exclusion entries must NOT be pruned, unlike
+      // monitoredRepos/customTabs above (see the block comment before this
+      // describe for why excludedOrgs/excludedRepos are intentionally exempt).
+      updateConfig({ selectedRepos: [SURVIVING_REPO] });
+
+      expect(config.dependencies.excludedRepos).toEqual([STALE_REPO]);
+      expect(config.dependencies.excludedOrgs).toEqual(["unrelated-org"]);
+      dispose();
+    });
+  });
 });
 
 describe("setMonitoredRepo (C3)", () => {
