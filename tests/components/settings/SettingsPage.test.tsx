@@ -1238,4 +1238,74 @@ describe("Dependencies settings section", () => {
     fireEvent.input(input, { target: { value: "" } });
     expect(config.dependencies.rebaseLabel).toBe("rebase");
   });
+
+  it("renders 'None excluded' when excludedOrgs/excludedRepos are both empty", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
+    renderSettings();
+    screen.getByText("None excluded");
+  });
+
+  it("renders the count summary when both excluded lists are non-empty", () => {
+    updateConfig({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: ["excluded-org"],
+        excludedRepos: [
+          { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+          { owner: "org1", name: "repo2", fullName: "org1/repo2" },
+        ],
+      },
+    });
+    renderSettings();
+    screen.getByText("1 org, 2 repos");
+  });
+
+  it("renders '2 repos' (elideZero) when only excludedRepos is non-empty", () => {
+    updateConfig({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: [],
+        excludedRepos: [
+          { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+          { owner: "org1", name: "repo2", fullName: "org1/repo2" },
+        ],
+      },
+    });
+    renderSettings();
+    screen.getByText("2 repos");
+    expect(screen.queryByText("0 orgs, 2 repos")).toBeNull();
+  });
+
+  it("clicking Manage opens the exclusion modal", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
+    renderSettings();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    screen.getByText("Exclude from Dependencies");
+  });
+
+  it("saving an exclusion updates config and the Section 12 summary re-renders", () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] },
+    });
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    const repoCheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("repo1")) as HTMLInputElement;
+    fireEvent.click(repoCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(config.dependencies.excludedRepos).toEqual([
+      { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+    ]);
+    expect(config.dependencies.excludedOrgs).toEqual([]);
+    screen.getByText("1 repo");
+  });
 });

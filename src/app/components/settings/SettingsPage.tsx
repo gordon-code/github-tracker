@@ -14,7 +14,7 @@ import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
-import { relativeTime } from "../../lib/format";
+import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
 import { getUsageSnapshot, getUsageResetAt, resetUsageData, checkAndResetIfExpired, SOURCE_LABELS } from "../../services/api-usage";
@@ -27,6 +27,7 @@ import ThemePicker from "./ThemePicker";
 import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
+import DependencyExclusionModal from "./DependencyExclusionModal";
 import { InfoTooltip } from "../shared/Tooltip";
 import { createJiraClient } from "../../lib/jira-utils";
 import JiraFieldPicker from "./JiraFieldPicker";
@@ -140,6 +141,17 @@ export default function SettingsPage() {
 
   const monitoredRepoNames = createMemo(() =>
     config.monitoredRepos.map(r => r.fullName).join(", ")
+  );
+
+  const dependencyExclusionPool = createMemo(() => {
+    const seen = new Map<string, RepoRef>();
+    for (const r of [...config.selectedRepos, ...config.upstreamRepos, ...config.monitoredRepos]) {
+      seen.set(r.fullName.toLowerCase(), r);
+    }
+    return [...seen.values()];
+  });
+  const dependencyExclusionOrgs = createMemo(() =>
+    [...new Set(dependencyExclusionPool().map((r) => r.owner))]
   );
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -352,6 +364,7 @@ export default function SettingsPage() {
   const [jiraApiMode, setJiraApiMode] = createSignal(false);
   const [showFieldPicker, setShowFieldPicker] = createSignal(false);
   const [showScopePicker, setShowScopePicker] = createSignal(false);
+  const [showDependencyExclusionModal, setShowDependencyExclusionModal] = createSignal(false);
 
   const jiraClient = createMemo(() => createJiraClient(config.jira?.authMethod));
 
@@ -1356,6 +1369,25 @@ export default function SettingsPage() {
               onInput={(e) => saveWithFeedback({ dependencies: { ...config.dependencies, rebaseLabel: e.currentTarget.value || "rebase" } })}
             />
           </SettingRow>
+          <SettingRow
+            label="Excluded repos/orgs"
+            description="Hide specific repos or entire orgs from the Dependencies tab only — they still appear in Issues, Pull Requests, and Actions"
+          >
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-base-content/60">
+                {(config.dependencies?.excludedOrgs ?? []).length === 0 && (config.dependencies?.excludedRepos ?? []).length === 0
+                  ? "None excluded"
+                  : formatScopeSummary((config.dependencies?.excludedOrgs ?? []).length, (config.dependencies?.excludedRepos ?? []).length, true)}
+              </span>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline"
+                onClick={() => setShowDependencyExclusionModal(true)}
+              >
+                Manage
+              </button>
+            </div>
+          </SettingRow>
         </Section>
 
         {/* ── Account ─────────────────────────────────────────────────── */}
@@ -1538,6 +1570,18 @@ export default function SettingsPage() {
         </Section>
           </div>
         </div>
+
+        <DependencyExclusionModal
+          open={showDependencyExclusionModal()}
+          onClose={() => setShowDependencyExclusionModal(false)}
+          availableOrgs={dependencyExclusionOrgs()}
+          availableRepos={dependencyExclusionPool()}
+          excludedOrgs={config.dependencies?.excludedOrgs ?? []}
+          excludedRepos={config.dependencies?.excludedRepos ?? []}
+          onSave={(orgs, repos) =>
+            saveWithFeedback({ dependencies: { ...config.dependencies, excludedOrgs: orgs, excludedRepos: repos } })
+          }
+        />
 
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">
