@@ -55,6 +55,21 @@ describe("ConfigSchema", () => {
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
     expect(result.enableActions).toBe(true);
+    expect(result.dependencies.excludedOrgs).toEqual([]);
+    expect(result.dependencies.excludedRepos).toEqual([]);
+  });
+
+  it("round-trips excludedOrgs/excludedRepos when provided", () => {
+    const result = ConfigSchema.parse({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: ["some-org"],
+        excludedRepos: [{ owner: "some-org", name: "repo", fullName: "some-org/repo" }],
+      },
+    });
+    expect(result.dependencies.excludedOrgs).toEqual(["some-org"]);
+    expect(result.dependencies.excludedRepos).toEqual([{ owner: "some-org", name: "repo", fullName: "some-org/repo" }]);
   });
 
   it("enableActions defaults to true (Actions tab enabled by default)", () => {
@@ -660,6 +675,39 @@ describe("updateConfig — customTabs scope pruning on selectedRepos change", ()
 //     curated via explicit add/remove UI, never auto-merged from a live fetch.
 //   - selectedOrgs: reconciled against a live fetchOrgs() result rather than
 //     a sibling config field — covered separately in OrgSelector.test.tsx.
+//   - dependencies.excludedOrgs / dependencies.excludedRepos: their available
+//     pool is the union of selectedRepos + upstreamRepos + monitoredRepos, not
+//     selectedRepos alone, so pruning against selectedRepos shrinkage alone
+//     would incorrectly drop valid exclusions for a repo still present via
+//     upstreamRepos or monitoredRepos.
+//
+//     Contrast with customTabs.orgScope/repoScope above, which IS pruned
+//     under this same `if ("selectedRepos" in partial)` guard — structurally
+//     it looks identical (an org-string array plus a repo-array, both living
+//     in a settings scope picker), which could tempt a future implementer or
+//     reviewer into "fixing" the asymmetry by copying that pruning onto
+//     excludedOrgs/excludedRepos. Don't: customTabs is safely prunable
+//     against selectedRepos alone specifically because its own
+//     available-options pool (availableOrgs/availableRepos, passed into
+//     CustomTabModal from config.selectedRepos only) IS selectedRepos alone,
+//     with no upstreamRepos/monitoredRepos contribution. excludedOrgs/
+//     excludedRepos have no such narrow pool; applying customTabs' pruning
+//     technique to them would silently drop valid exclusions for repos
+//     tracked only via upstreamRepos or monitoredRepos.
+//
+//     The two exclusion fields are NOT equally inert when stale. A stale
+//     excludedRepos entry (referencing a repo no longer in any of the three
+//     pools) has no effect unless that exact repo is re-added later, and is
+//     incidentally pruned the next time the exclusion modal is saved
+//     (buildExcludedRepos filters against availableRepos at save time — the
+//     same asymmetry CustomTabModal already has between its own repoScope,
+//     filtered via buildRepoScope() on save, and orgScope, saved verbatim).
+//     A stale excludedOrgs entry is more persistent: because org-level
+//     matching is intentionally dynamic and re-evaluated against
+//     pr.repoFullName on every render, a leftover org name silently
+//     re-excludes any repo added under that org later — including repos
+//     unrelated to the original exclusion — and, like CustomTabModal's
+//     orgScope, is never filtered against availableOrgs on save either.
 describe("updateConfig — structural invariant: repo-referencing fields reconcile with selectedRepos", () => {
   beforeEach(() => {
     resetConfig();

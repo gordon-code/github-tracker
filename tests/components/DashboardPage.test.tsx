@@ -2043,7 +2043,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
       errors: [],
     });
 
-    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
 
     render(() => <DashboardPage />);
     await waitFor(() => {
@@ -2068,7 +2068,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
   });
 
   it("dep PRs appear on Pull Requests tab when dependencies feature is disabled", async () => {
-    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
       pullRequests: [
