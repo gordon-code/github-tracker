@@ -5,6 +5,7 @@ import type { CustomTab } from "../../stores/config";
 import { resetCustomTabFilters } from "../../stores/view";
 import type { RepoRef } from "../../services/api";
 import { formatScopeSummary } from "../../lib/format";
+import OrgRepoCheckboxTree from "./OrgRepoCheckboxTree";
 import {
   scopeFilterGroup,
   issueFilterGroups,
@@ -275,53 +276,17 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                   <p class="text-xs text-base-content/50">
                     Leave empty to match no repos — the tab will show a warning icon until scoped. Org selection includes all repos in that org.
                   </p>
-                  <Show
-                    when={props.availableOrgs.length > 0}
-                    fallback={<p class="text-xs text-base-content/40">No orgs available.</p>}
-                  >
-                    <div class="overflow-y-auto max-h-[300px] space-y-3">
-                      <For each={props.availableOrgs}>
-                        {(org) => {
-                          const orgRepos = createMemo(() =>
-                            props.availableRepos.filter((r) => r.owner === org)
-                          );
-                          return (
-                            <div>
-                              {/* Org header checkbox */}
-                              <label class="flex items-center gap-2 cursor-pointer py-1">
-                                <input
-                                  type="checkbox"
-                                  class="checkbox checkbox-sm checkbox-primary"
-                                  checked={selectedOrgs().has(org)}
-                                  onChange={() => toggleOrg(org)}
-                                />
-                                <span class="text-sm font-semibold">{org}</span>
-                              </label>
-                              {/* Repo checkboxes under org */}
-                              <Show when={orgRepos().length > 0}>
-                                <div class="ml-6 space-y-0.5">
-                                  <For each={orgRepos()}>
-                                    {(repo) => (
-                                      <label class="flex items-center gap-2 cursor-pointer py-0.5">
-                                        <input
-                                          type="checkbox"
-                                          class="checkbox checkbox-xs checkbox-primary"
-                                          checked={selectedRepos().has(repo.fullName) || selectedOrgs().has(org)}
-                                          disabled={selectedOrgs().has(org)}
-                                          onChange={() => toggleRepo(repo.fullName)}
-                                        />
-                                        <span class="text-xs text-base-content/70">{repo.name}</span>
-                                      </label>
-                                    )}
-                                  </For>
-                                </div>
-                              </Show>
-                            </div>
-                          );
-                        }}
-                      </For>
-                    </div>
-                  </Show>
+                  <div class="overflow-y-auto max-h-[300px] space-y-3">
+                    <OrgRepoCheckboxTree
+                      availableOrgs={props.availableOrgs}
+                      availableRepos={props.availableRepos}
+                      checkedOrgs={selectedOrgs()}
+                      checkedRepos={selectedRepos()}
+                      onToggleOrg={toggleOrg}
+                      onToggleRepo={toggleRepo}
+                      emptyMessage="No orgs available."
+                    />
+                  </div>
                 </div>
               </Show>
             </div>

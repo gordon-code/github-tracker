@@ -1,0 +1,134 @@
+import { createSignal, createEffect } from "solid-js";
+import { Dialog } from "@kobalte/core/dialog";
+import type { RepoRef } from "../../services/api";
+import OrgRepoCheckboxTree from "../shared/OrgRepoCheckboxTree";
+
+interface DependencyExclusionModalProps {
+  open: boolean;
+  onClose: () => void;
+  availableOrgs: string[];
+  availableRepos: RepoRef[];
+  excludedOrgs: string[];
+  excludedRepos: RepoRef[];
+  onSave: (excludedOrgs: string[], excludedRepos: RepoRef[]) => void;
+}
+
+export default function DependencyExclusionModal(props: DependencyExclusionModalProps) {
+  const [excludedOrgs, setExcludedOrgs] = createSignal<Set<string>>(new Set(props.excludedOrgs));
+  const [excludedRepos, setExcludedRepos] = createSignal<Set<string>>(
+    new Set(props.excludedRepos.map((r) => r.fullName))
+  );
+
+  // Reinitialize when the modal reopens — mirrors CustomTabModal's reinit effect
+  // (props.open false→true), so stale in-progress edits don't leak between opens.
+  createEffect(() => {
+    if (!props.open) return;
+    setExcludedOrgs(new Set(props.excludedOrgs));
+    setExcludedRepos(new Set(props.excludedRepos.map((r) => r.fullName)));
+  });
+
+  function toggleOrg(org: string) {
+    setExcludedOrgs((prev) => {
+      const next = new Set(prev);
+      if (next.has(org)) {
+        next.delete(org);
+        // Also remove repos in this org from the repo-exclusion set — mirrors
+        // CustomTabModal's toggleOrg cleanup on DESELECT exactly: deselecting
+        // an org clears its repos; selecting an org never touches the repo set
+        // (OrgRepoCheckboxTree's checked-attribute OR handles display without
+        // needing individual repo entries).
+        setExcludedRepos((prevRepos) => {
+          const next2 = new Set(prevRepos);
+          for (const r of props.availableRepos) {
+            if (r.owner === org) next2.delete(r.fullName);
+          }
+          return next2;
+        });
+      } else {
+        next.add(org);
+      }
+      return next;
+    });
+  }
+
+  function toggleRepo(repoFullName: string) {
+    setExcludedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(repoFullName)) {
+        next.delete(repoFullName);
+      } else {
+        next.add(repoFullName);
+      }
+      return next;
+    });
+  }
+
+  function buildExcludedRepos(): RepoRef[] {
+    return props.availableRepos.filter((r) => excludedRepos().has(r.fullName));
+  }
+
+  function handleSave() {
+    props.onSave([...excludedOrgs()], buildExcludedRepos());
+    props.onClose();
+  }
+
+  return (
+    <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()} modal>
+      <Dialog.Portal>
+        <Dialog.Overlay class="fixed inset-0 bg-black/50 z-[70]" />
+        <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-base-100 rounded-xl shadow-xl z-[71] flex flex-col max-h-[90vh]">
+          <Dialog.Description class="sr-only">
+            Manage repos and orgs excluded from the Dependencies tab
+          </Dialog.Description>
+
+          {/* Header */}
+          <div class="flex items-center gap-2 px-5 py-4 border-b border-base-300 shrink-0">
+            <Dialog.Title class="text-lg font-semibold flex-1">
+              Exclude from Dependencies
+            </Dialog.Title>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm btn-circle"
+              aria-label="Close"
+              onClick={props.onClose}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Scrollable body */}
+          <div class="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+            <p class="text-xs text-base-content/50">
+              Repos and orgs checked below are hidden from the Dependencies tab only — they'll still appear in Issues, Pull Requests, and Actions.
+            </p>
+            <div class="overflow-y-auto max-h-[400px] space-y-3">
+              <OrgRepoCheckboxTree
+                availableOrgs={props.availableOrgs}
+                availableRepos={props.availableRepos}
+                checkedOrgs={excludedOrgs()}
+                checkedRepos={excludedRepos()}
+                onToggleOrg={toggleOrg}
+                onToggleRepo={toggleRepo}
+                emptyMessage="No repos tracked yet."
+              />
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div class="flex items-center justify-end gap-2 px-5 py-4 border-t border-base-300 shrink-0">
+            <button type="button" class="btn btn-ghost btn-sm" onClick={props.onClose}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              onClick={handleSave}
+            >
+              Save
+            </button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog>
+  );
+}
