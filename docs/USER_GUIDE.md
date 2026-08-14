@@ -317,7 +317,7 @@ Go to **Settings > Dependencies** to configure:
 |---------|---------|-------------|
 | Enable Dependencies tab | On | Show or hide the tab. When disabled, dependency PRs appear in the standard Pull Requests tab. |
 | Rebase label | `rebase` | PRs with this label are shown with a "Rebasing" indicator in the Dependencies tab. Change to match the label name your dependency bot uses to signal rebase-needed status. |
-| Excluded repos/orgs | (none) | Hide specific repos or entire orgs from the Dependencies tab — including their Renovate Dashboard "Abandoned" package badges. Picked from your selected, upstream, and monitored repos. Excluding an org covers all repos under it, including ones added later. Excluded items still appear normally in Issues, Pull Requests, and Actions. |
+| Excluded repos/orgs | (none) | Hide specific repos or entire orgs from the Dependencies tab — including their Renovate Dashboard "Abandoned" package badges. Picked from your selected, upstream, and monitored repos. Excluding an org covers all repos under it, including ones added later. Regular issues, pull requests, and workflow runs for excluded repos are unaffected — only their dependency-bot PRs are hidden, and those don't reappear in Pull Requests either. |
 
 ### Dependencies Filters
 

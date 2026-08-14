@@ -1371,7 +1371,7 @@ export default function SettingsPage() {
           </SettingRow>
           <SettingRow
             label="Excluded repos/orgs"
-            description="Hide specific repos or entire orgs from the Dependencies tab only — they still appear in Issues, Pull Requests, and Actions"
+            description="Hide specific repos or entire orgs from the Dependencies tab only — their dependency-bot PRs won't reappear in Pull Requests, but regular issues, pull requests, and workflow runs for those repos are unaffected"
           >
             <div class="flex items-center gap-3">
               <span class="text-xs text-base-content/60">

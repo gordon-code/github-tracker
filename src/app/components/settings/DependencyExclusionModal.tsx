@@ -99,7 +99,7 @@ export default function DependencyExclusionModal(props: DependencyExclusionModal
           {/* Scrollable body */}
           <div class="overflow-y-auto flex-1 px-5 py-4 space-y-3">
             <p class="text-xs text-base-content/50">
-              Repos and orgs checked below are hidden from the Dependencies tab only — they'll still appear in Issues, Pull Requests, and Actions.
+              Repos and orgs checked below are hidden from the Dependencies tab only — their dependency-bot PRs won't reappear in Pull Requests, but regular issues, pull requests, and workflow runs are unaffected.
             </p>
             <div class="overflow-y-auto max-h-[400px] space-y-3">
               <OrgRepoCheckboxTree
