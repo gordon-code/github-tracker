@@ -9,6 +9,7 @@ import {
   ViewStateSchema,
   VIEW_STORAGE_KEY,
   JIRA_CUSTOM_ORDER_CAP,
+  JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH,
 } from "../../src/app/stores/view";
 
 describe("jira custom order store actions", () => {
@@ -51,6 +52,13 @@ describe("jira custom order store actions", () => {
     it("deduplicates keys, keeping first occurrence and relative order", () => {
       setJiraCustomOrder(["A", "B", "A", "C"]);
       expect(viewState.jiraCustomOrder).toEqual(["A", "B", "C"]);
+    });
+
+    it("drops entries exceeding per-item max length", () => {
+      const tooLong = "K".repeat(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH + 1);
+      const atLimit = "K".repeat(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH);
+      setJiraCustomOrder(["PROJ-1", tooLong, atLimit, "PROJ-2"]);
+      expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", atLimit, "PROJ-2"]);
     });
   });
 
@@ -110,6 +118,43 @@ describe("jira custom order store actions", () => {
         },
       });
       expect(result.tabFilters.jiraAssigned.sortField).toBe("priority");
+    });
+
+    it("deduplicates jiraCustomOrder at schema level during parse", () => {
+      const result = ViewStateSchema.parse({
+        jiraCustomOrder: ["A", "B", "A", "C", "B"],
+      });
+      expect(result.jiraCustomOrder).toEqual(["A", "B", "C"]);
+    });
+
+    it("deduplicates jiraCustomOrder at schema level during safeParse", () => {
+      const result = ViewStateSchema.safeParse({
+        jiraCustomOrder: ["X", "Y", "X"],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.jiraCustomOrder).toEqual(["X", "Y"]);
+      }
+    });
+
+    it("schema dedup shrinks array — cannot violate max cap", () => {
+      // An array at exactly the cap with all duplicates should parse fine and dedup
+      const atCap = Array.from({ length: JIRA_CUSTOM_ORDER_CAP }, () => "SAME-KEY");
+      const result = ViewStateSchema.safeParse({ jiraCustomOrder: atCap });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.jiraCustomOrder).toEqual(["SAME-KEY"]);
+      }
+    });
+
+    it("schema pick + safeParse deduplicates for cross-tab sync path", () => {
+      const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse({
+        jiraCustomOrder: ["P-1", "P-2", "P-1", "P-3"],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.jiraCustomOrder).toEqual(["P-1", "P-2", "P-3"]);
+      }
     });
   });
 });
@@ -204,5 +249,22 @@ describe("cross-tab sync for jiraCustomOrder", () => {
     dispose = undefined;
     dispatchStorageEvent(JSON.stringify({ jiraCustomOrder: ["PROJ-NEW"] }));
     expect(viewState.jiraCustomOrder).toEqual([]);
+  });
+
+  it("does not wipe jiraCustomOrder when incoming blob is missing the key entirely", () => {
+    setupPersistence();
+    setJiraCustomOrder(["PROJ-1", "PROJ-2", "PROJ-3"]);
+    // Simulate a stale blob from a pre-feature tab that doesn't have jiraCustomOrder
+    const staleBlob = JSON.stringify({ lastActiveTab: "issues" });
+    dispatchStorageEvent(staleBlob);
+    // Current order must be preserved — NOT wiped to []
+    expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2", "PROJ-3"]);
+  });
+
+  it("deduplicates incoming jiraCustomOrder from cross-tab sync", () => {
+    setupPersistence();
+    const blob = JSON.stringify({ jiraCustomOrder: ["A", "B", "A", "C"] });
+    dispatchStorageEvent(blob);
+    expect(viewState.jiraCustomOrder).toEqual(["A", "B", "C"]);
   });
 });

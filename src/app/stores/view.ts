@@ -130,7 +130,8 @@ export const ViewStateSchema = z.object({
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
   dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
-  jiraCustomOrder: z.array(z.string().max(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)).max(JIRA_CUSTOM_ORDER_CAP).default([]),
+  jiraCustomOrder: z.array(z.string().max(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)).max(JIRA_CUSTOM_ORDER_CAP).default([])
+    .transform((arr) => [...new Set(arr)]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -345,6 +346,10 @@ export function resetAllTabFilters(
       } else if (tab === "pullRequests") {
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else if (tab === "jiraAssigned") {
+        // WARNING: This resets sortField and scope as a side effect (back to defaults
+        // "custom" and "assigned"). JiraAssignedTab.tsx's Clear button uses two targeted
+        // setTabFilter calls instead of this function specifically to avoid that.
+        // Do not casually wire this back in for Jira without accounting for those resets.
         draft.tabFilters.jiraAssigned = JiraFiltersSchema.parse({});
       } else if (tab === "actions") {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
@@ -578,7 +583,10 @@ export function moveTrackedItem(
 }
 
 export function setJiraCustomOrder(order: string[]): void {
-  const deduped = [...new Set(order)];
+  // Drop entries exceeding per-item length cap (consistent with loadViewState's guard),
+  // then dedup (schema transform only fires on parse, not on direct produce() mutations)
+  const sanitized = order.filter((k) => k.length <= JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH);
+  const deduped = [...new Set(sanitized)];
   setViewState(
     produce((draft) => {
       draft.jiraCustomOrder = deduped.length > JIRA_CUSTOM_ORDER_CAP
@@ -621,6 +629,10 @@ export function initViewPersistence(): void {
         return;
       }
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+      // Guard: if the incoming blob doesn't contain jiraCustomOrder at all, skip sync.
+      // Without this, Zod's .default([]) would backfill the missing key with an empty
+      // array and silently wipe the current tab's real order.
+      if (!("jiraCustomOrder" in (parsed as Record<string, unknown>))) return;
       const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse(parsed);
       if (!result.success) return;
       const incoming = result.data.jiraCustomOrder;

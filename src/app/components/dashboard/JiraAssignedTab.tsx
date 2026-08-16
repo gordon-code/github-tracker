@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, on } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, on, onCleanup } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
 import { viewState, setTabFilter, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded, setJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE } from "../../stores/view";
 import { config } from "../../stores/config";
@@ -363,7 +363,12 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
 
   const [reordering, setReordering] = createSignal(false);
 
+  // Clear the module-level itemRefs map when the component unmounts (e.g. tab
+  // switch) so detached DOM references are not leaked across mount cycles.
+  onCleanup(() => itemRefs.clear());
+
   function handleCustomMove(jiraKey: string, direction: "up" | "down") {
+    if (!canReorder()) return;
     if (reordering()) return;
     const order = filteredSorted().map((i) => i.key);
     const idx = order.indexOf(jiraKey);
@@ -411,7 +416,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
       <div
         role="listitem"
         class="flex items-stretch"
-        ref={(el) => { itemRefs.set(issue.key, el); }}
+        ref={(el) => { if (isCustomMode()) itemRefs.set(issue.key, el); }}
       >
         <Show when={isCustomMode()}>
           <div class="flex flex-col shrink-0 justify-center gap-0.5 pl-2 compact:pl-1">

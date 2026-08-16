@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -797,6 +798,7 @@ describe("JiraAssignedTab", () => {
   describe("custom order — FLIP animation / reduced motion", () => {
     afterEach(() => {
       delete (Element.prototype as unknown as { animate?: unknown }).animate;
+      vi.restoreAllMocks();
     });
 
     it("invokes Element.prototype.animate for a same-page move", () => {
@@ -890,6 +892,44 @@ describe("JiraAssignedTab", () => {
       expect(window.scrollTo).toHaveBeenCalled();
       expect(animateSpy).not.toHaveBeenCalled();
       expect(screen.getByText(/page 2 of 2/i)).toBeTruthy();
+    });
+
+    it("preserves DOM element identity (same node, not recreated) after a same-page reorder", () => {
+      // The mock store's setJiraCustomOrder is a no-op, so clicking an arrow
+      // button does not reorder the DOM.  To test actual DOM identity we drive
+      // the reorder through the reactive prop layer: pass a signal-backed
+      // issues array, change mockJiraCustomOrder, and trigger a re-render by
+      // updating the signal (same JiraIssue objects, new array reference).
+      // The itemsWithGroupKeyCache inside the component should keep the same
+      // wrapped JiraItem objects for unchanged source issues, so <For>'s keyed
+      // reconciliation moves the DOM nodes instead of tearing down / rebuilding.
+      mockJiraFilters = customFilters();
+      mockJiraCustomOrder = ["PROJ-1", "PROJ-2", "PROJ-3"];
+
+      const issueA = makeIssue("PROJ-1");
+      const issueB = makeIssue("PROJ-2");
+      const issueC = makeIssue("PROJ-3");
+
+      const [issues, setIssues] = createSignal<JiraIssue[]>([issueA, issueB, issueC]);
+      render(() => <JiraAssignedTab issues={issues()} loading={false} siteUrl={SITE_URL} />);
+
+      // Capture the actual DOM node for PROJ-2's row before the reorder
+      const rowsBefore = screen.getAllByRole("listitem");
+      expect(rowsBefore[1].querySelector(".font-mono")?.textContent).toBe("PROJ-2");
+      const proj2NodeBefore = rowsBefore[1];
+
+      // Swap PROJ-1 and PROJ-2 in the custom order, then poke the signal to
+      // trigger a reactive re-evaluation of filtered → filteredSorted →
+      // itemsWithGroupKey → customPageItems → <For>.
+      mockJiraCustomOrder = ["PROJ-2", "PROJ-1", "PROJ-3"];
+      setIssues([issueA, issueB, issueC]);
+
+      // After the reactive update, PROJ-2 should be at index 0.  The critical
+      // assertion: the DOM node is the SAME object reference — moved by <For>,
+      // not torn down and rebuilt.
+      const rowsAfter = screen.getAllByRole("listitem");
+      expect(rowsAfter[0].querySelector(".font-mono")?.textContent).toBe("PROJ-2");
+      expect(rowsAfter[0]).toBe(proj2NodeBefore);
     });
   });
 
