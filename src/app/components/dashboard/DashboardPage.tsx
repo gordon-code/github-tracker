@@ -479,7 +479,13 @@ export default function DashboardPage() {
       if (!isJiraAuthenticated()) return;
       setJiraIssues(result.issues);
 
-      if (scope === JIRA_CUSTOM_ORDER_SCOPE) {
+      // Only prune when the result set is complete. `result.total` reflects the true
+      // match count while `result.issues` is capped at maxResults — if more issues
+      // exist than were returned (pagination truncation), skip pruning: treating
+      // "not in this page" as "no longer exists" would permanently destroy
+      // user-curated custom-order positions for issues that are simply on a later
+      // page, not actually gone (closed, reassigned, or resolved).
+      if (scope === JIRA_CUSTOM_ORDER_SCOPE && result.total <= result.issues.length) {
         pruneJiraCustomOrder(new Set(result.issues.map((i) => i.key)));
       }
 

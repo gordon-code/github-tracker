@@ -2762,6 +2762,122 @@ describe("DashboardPage — pruneJiraCustomOrder on refresh", () => {
 
     expect(freshView.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2", "PROJ-3"]);
   });
+
+  it("does NOT prune jiraCustomOrder when the assigned-scope result is truncated by pagination", async () => {
+    // Regression test for the truncation guard at DashboardPage.tsx
+    // (`result.total <= result.issues.length`). searchJql returns only 2
+    // issues but reports total: 5 — simulating a user with more than
+    // maxResults assigned non-done issues, where the API silently paginates.
+    // pruneJiraCustomOrder must NOT run here: treating "not in this page" as
+    // "no longer exists" would permanently delete the custom-order position
+    // for issues that are simply on a later page, not actually gone.
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [
+        {
+          id: "1001", key: "PROJ-1", self: "https://test.atlassian.net/rest/api/3/issue/1001",
+          fields: {
+            summary: "First issue", status: { id: "1", name: "To Do", statusCategory: { id: 2, key: "new" as const, name: "To Do" } },
+            priority: { id: "3", name: "Medium" }, assignee: null,
+            project: { id: "10000", key: "PROJ", name: "Project" },
+          },
+        },
+        {
+          id: "1002", key: "PROJ-2", self: "https://test.atlassian.net/rest/api/3/issue/1002",
+          fields: {
+            summary: "Second issue", status: { id: "1", name: "To Do", statusCategory: { id: 2, key: "new" as const, name: "To Do" } },
+            priority: { id: "3", name: "Medium" }, assignee: null,
+            project: { id: "10000", key: "PROJ", name: "Project" },
+          },
+        },
+      ],
+      // total (5) exceeds issues.length (2): the API result is truncated.
+      total: 5, maxResults: 100, startAt: 0,
+    });
+
+    vi.doMock("../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: vi.fn(),
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+    }));
+
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+    vi.doMock("../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: vi.fn(),
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [], pullRequests: [], workflowRuns: [], errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          void fetchAll().catch(() => {});
+          return { isRefreshing: () => false, lastRefreshAt: () => null, manualRefresh: vi.fn(), destroy: vi.fn() };
+        }
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    // Fresh imports after mock registration
+    const freshView = await import("../../src/app/stores/view");
+    const freshConfig = await import("../../src/app/stores/config");
+    const freshDash = await import("../../src/app/components/dashboard/DashboardPage");
+
+    freshView.resetViewState();
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({ enabled: true, siteUrl: "https://test.atlassian.net", siteName: "Test Site", authMethod: "oauth" });
+    // PROJ-3 is not present in the (truncated) search results but must
+    // survive because the result set is incomplete.
+    freshView.setJiraCustomOrder(["PROJ-1", "PROJ-2", "PROJ-3"]);
+
+    render(() => <freshDash.default />);
+
+    // Wait for the real fetchJiraAssigned() to actually invoke searchJql...
+    await waitFor(() => {
+      expect(mockSearchJql).toHaveBeenCalled();
+    }, { timeout: 3000 });
+    // ...then flush the microtask/timer queue so the code after the awaited
+    // searchJql call (setJiraIssues + the truncation-gated prune call) has
+    // actually finished running before we assert on the result.
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(freshView.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2", "PROJ-3"]);
+  });
 });
 
 describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clear", () => {
