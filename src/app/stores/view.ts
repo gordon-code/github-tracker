@@ -578,11 +578,12 @@ export function moveTrackedItem(
 }
 
 export function setJiraCustomOrder(order: string[]): void {
+  const deduped = [...new Set(order)];
   setViewState(
     produce((draft) => {
-      draft.jiraCustomOrder = order.length > JIRA_CUSTOM_ORDER_CAP
-        ? order.slice(0, JIRA_CUSTOM_ORDER_CAP)
-        : order;
+      draft.jiraCustomOrder = deduped.length > JIRA_CUSTOM_ORDER_CAP
+        ? deduped.slice(0, JIRA_CUSTOM_ORDER_CAP)
+        : deduped;
     })
   );
 }

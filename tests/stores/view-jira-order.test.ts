@@ -47,6 +47,11 @@ describe("jira custom order store actions", () => {
       setJiraCustomOrder(exact);
       expect(viewState.jiraCustomOrder.length).toBe(JIRA_CUSTOM_ORDER_CAP);
     });
+
+    it("deduplicates keys, keeping first occurrence and relative order", () => {
+      setJiraCustomOrder(["A", "B", "A", "C"]);
+      expect(viewState.jiraCustomOrder).toEqual(["A", "B", "C"]);
+    });
   });
 
   describe("pruneJiraCustomOrder", () => {

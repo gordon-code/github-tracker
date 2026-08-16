@@ -1051,4 +1051,85 @@ describe("loadViewState — cap-guard integration", () => {
 
     expect(mod.viewState.lockedRepos["issues"]).toEqual(["org/repo", "org/other"]);
   });
+
+  it("truncates oversized jiraCustomOrder arrays to JIRA_CUSTOM_ORDER_CAP", async () => {
+    const bigArray = Array.from({ length: 600 }, (_, i) => `KEY-${i}`);
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      jiraCustomOrder: bigArray,
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.jiraCustomOrder.length).toBe(mod.JIRA_CUSTOM_ORDER_CAP);
+    expect(mod.viewState.jiraCustomOrder[0]).toBe("KEY-0");
+    expect(mod.viewState.jiraCustomOrder[mod.JIRA_CUSTOM_ORDER_CAP - 1]).toBe(
+      `KEY-${mod.JIRA_CUSTOM_ORDER_CAP - 1}`
+    );
+  });
+
+  it("filters non-string elements from jiraCustomOrder arrays", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      jiraCustomOrder: [42, "PROJ-1", null, true, "PROJ-2"],
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2"]);
+  });
+
+  it("drops (not truncates) jiraCustomOrder entries longer than JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH", async () => {
+    const maxLen = 50;
+    const tooLong = "X".repeat(maxLen + 1); // 51 chars — over the limit
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      jiraCustomOrder: ["PROJ-1", tooLong],
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    // Sanity: confirm the constant matches what this test assumes before trusting the assertions below.
+    expect(mod.JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH).toBe(maxLen);
+    // The oversized entry is dropped entirely, NOT truncated to a 50-char prefix.
+    // If the guard truncated instead of dropping, the array would be
+    // ["PROJ-1", "X".repeat(50)] with length 2 — assert both the exact
+    // array and the absence of a truncated variant to distinguish the two behaviors.
+    expect(mod.viewState.jiraCustomOrder).toEqual(["PROJ-1"]);
+    expect(mod.viewState.jiraCustomOrder).not.toContain("X".repeat(maxLen));
+  });
+
+  it("deletes a non-array (string) jiraCustomOrder value so ViewStateSchema's default applies", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      jiraCustomOrder: "not-an-array",
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.jiraCustomOrder).toEqual([]);
+  });
+
+  it("deletes a non-array (number) jiraCustomOrder value so ViewStateSchema's default applies", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      jiraCustomOrder: 42,
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.jiraCustomOrder).toEqual([]);
+  });
+
+  it("defaults jiraCustomOrder to [] when the key is missing from the raw blob", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+      lastActiveTab: "jiraAssigned",
+    }));
+
+    vi.resetModules();
+    const mod = await import("../../src/app/stores/view");
+
+    expect(mod.viewState.jiraCustomOrder).toEqual([]);
+    expect(mod.viewState.lastActiveTab).toBe("jiraAssigned");
+  });
 });

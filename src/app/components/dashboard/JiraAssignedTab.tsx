@@ -137,18 +137,21 @@ const itemRefs = new Map<string, HTMLDivElement>();
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function recordPositions(): Map<string, DOMRect> {
+function recordPositions(keys: string[]): Map<string, DOMRect> {
   const snapshot = new Map<string, DOMRect>();
-  for (const [key, el] of itemRefs) {
-    snapshot.set(key, el.getBoundingClientRect());
+  for (const key of keys) {
+    const el = itemRefs.get(key);
+    if (el) snapshot.set(key, el.getBoundingClientRect());
   }
   return snapshot;
 }
 
-function animateMove(before: Map<string, DOMRect>) {
+function animateMove(before: Map<string, DOMRect>, keys: string[]) {
   if (prefersReducedMotion()) return;
   requestAnimationFrame(() => {
-    for (const [key, el] of itemRefs) {
+    for (const key of keys) {
+      const el = itemRefs.get(key);
+      if (!el) continue;
       const old = before.get(key);
       if (!old) continue;
       const now = el.getBoundingClientRect();
@@ -270,12 +273,32 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   });
 
   type JiraItem = JiraIssue & { repoFullName: string };
-  const itemsWithGroupKey = createMemo(() =>
-    filteredSorted().map((issue): JiraItem => ({
-      ...issue,
-      repoFullName: issue.fields.project?.key ?? "OTHER",
-    }))
-  );
+
+  // Cache wrapper objects by issue key so that a reorder (same JiraIssue references,
+  // new array order) reuses the SAME JiraItem object per issue.  This preserves
+  // reference equality for <For>'s keyed reconciliation, letting it move DOM nodes
+  // instead of tearing down / rebuilding every row on each arrow-click (Finding 4).
+  const itemsWithGroupKeyCache = new Map<string, { source: JiraIssue; wrapped: JiraItem }>();
+  const itemsWithGroupKey = createMemo(() => {
+    const result = filteredSorted().map((issue): JiraItem => {
+      const cached = itemsWithGroupKeyCache.get(issue.key);
+      if (cached && cached.source === issue) return cached.wrapped;
+      const wrapped: JiraItem = { ...issue, repoFullName: issue.fields.project?.key ?? "OTHER" };
+      itemsWithGroupKeyCache.set(issue.key, { source: issue, wrapped });
+      return wrapped;
+    });
+    // Prune stale cache entries for issues that left the list (e.g. after a data
+    // refresh or filter change).  The cache naturally self-limits to the active issue
+    // count (capped at ~500 elsewhere in the ecosystem), so this is a hygiene measure
+    // rather than a hard cap.
+    if (itemsWithGroupKeyCache.size > result.length) {
+      const activeKeys = new Set(result.map(item => item.key));
+      for (const key of itemsWithGroupKeyCache.keys()) {
+        if (!activeKeys.has(key)) itemsWithGroupKeyCache.delete(key);
+      }
+    }
+    return result;
+  });
 
   const repoGroups = createMemo(() => {
     const groups = groupByRepo(itemsWithGroupKey());
@@ -294,8 +317,21 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   // repoFullName, never filters/reorders), so paginating it directly yields the same
   // slices filteredSorted() would, while giving renderIssueRow's shared JiraItem rows
   // the project key it needs for the Step 4 badge without re-deriving it.
-  const customPageCount = () => Math.max(1, Math.ceil(itemsWithGroupKey().length / ITEMS_PER_PAGE));
-  const customPageItems = () => itemsWithGroupKey().slice(page() * ITEMS_PER_PAGE, (page() + 1) * ITEMS_PER_PAGE);
+  //
+  // Both are createMemo (not plain arrow functions) because customPageItems is called
+  // 3+ times per render and does a real .slice() each time (Finding 1).
+  const customPageCount = createMemo(() => Math.max(1, Math.ceil(itemsWithGroupKey().length / ITEMS_PER_PAGE)));
+  const customPageItems = createMemo(() => itemsWithGroupKey().slice(page() * ITEMS_PER_PAGE, (page() + 1) * ITEMS_PER_PAGE));
+
+  // Prune itemRefs to current-page items in custom mode so the map does not grow
+  // unbounded across pages, filter changes, and data refreshes (Finding 2 & 3).
+  createEffect(() => {
+    if (!isCustomMode()) return;
+    const pageItemKeys = new Set(customPageItems().map(item => item.key));
+    for (const key of itemRefs.keys()) {
+      if (!pageItemKeys.has(key)) itemRefs.delete(key);
+    }
+  });
 
   const pageLayout = createMemo(() => computePageLayout(repoGroups(), ITEMS_PER_PAGE));
   const pageCount = createMemo(() => (isCustomMode() ? customPageCount() : pageLayout().pageCount));
@@ -347,20 +383,22 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
       // Reduced motion: no animation ever, but still guard against a viewport jump
       // from the mutation itself (matches withFlipAnimation's fallback, scroll.ts:27-29).
       withScrollLock(applyMove);
-      setReordering(false);
     } else if (crossesPage) {
       // Cross-page moves must skip the FLIP animation entirely (spike pl-feas-2): the
       // old page's rows become detached before animateMove's rAF callback runs, producing
       // a broken/misleading animation. Jump straight to the new page instead.
       applyMove();
-      setReordering(false);
     } else {
-      const before = recordPositions();
+      const pageKeys = customPageItems().map(i => i.key);
+      const before = recordPositions(pageKeys);
       applyMove();
-      animateMove(before);
-      // Matches animateMove's `duration: 200` — keep these two values in sync.
-      setTimeout(() => setReordering(false), 200);
+      animateMove(before, pageKeys);
     }
+    // Uniform 200ms lockout across all branches — prevents rapid clicks / key-repeat
+    // from queuing moves in the reduced-motion and cross-page paths where the lockout
+    // was previously reset synchronously (Finding 5).  Value matches animateMove's
+    // `duration: 200` — keep them in sync.
+    setTimeout(() => setReordering(false), 200);
   }
 
   function renderIssueRow(issue: JiraItem, boundary?: { isFirst: boolean; isLast: boolean }) {
