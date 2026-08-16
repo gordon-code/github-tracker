@@ -5,6 +5,7 @@ import { render, screen } from "@solidjs/testing-library";
 
 let mockTrackedItems: Array<{ source: string; jiraKey?: string }> = [];
 let mockJiraFilters: { scope: string; statusCategory: string; priority: string; sortField: string; sortDirection: string } = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+let mockJiraCustomOrder: string[] = [];
 
 vi.mock("../../../src/app/stores/view", () => ({
   viewState: new Proxy({} as Record<string, unknown>, {
@@ -13,6 +14,7 @@ vi.mock("../../../src/app/stores/view", () => ({
       if (key === "tabFilters") return { jiraAssigned: mockJiraFilters };
       if (key === "lockedRepos") return {};
       if (key === "expandedRepos") return { jiraAssigned: new Proxy({}, { get: () => true }) };
+      if (key === "jiraCustomOrder") return mockJiraCustomOrder;
       return undefined;
     },
   }),
@@ -22,6 +24,8 @@ vi.mock("../../../src/app/stores/view", () => ({
   trackItem: vi.fn(),
   untrackJiraItem: vi.fn(),
   setAllExpanded: vi.fn(),
+  setJiraCustomOrder: vi.fn(),
+  JIRA_CUSTOM_ORDER_SCOPE: "assigned",
 }));
 
 vi.mock("../../../src/app/stores/config", () => ({
@@ -31,7 +35,7 @@ vi.mock("../../../src/app/stores/config", () => ({
 import JiraAssignedTab, { _resetJiraTabState } from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
-import { trackItem, untrackJiraItem, setAllExpanded, setTabFilter } from "../../../src/app/stores/view";
+import { trackItem, untrackJiraItem, setAllExpanded, setTabFilter, setJiraCustomOrder } from "../../../src/app/stores/view";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -66,12 +70,19 @@ function makeIssue(
 
 const SITE_URL = "https://mysite.atlassian.net";
 
+// Builds a jiraAssigned filter object defaulting to the canonical, unfiltered
+// "assigned" + "custom" state that gates reordering (canReorder() in the component).
+function customFilters(overrides: Partial<typeof mockJiraFilters> = {}): typeof mockJiraFilters {
+  return { scope: "assigned", statusCategory: "all", priority: "all", sortField: "custom", sortDirection: "asc", ...overrides };
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("JiraAssignedTab", () => {
   beforeEach(() => {
     mockTrackedItems = [];
     mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
+    mockJiraCustomOrder = [];
     _resetJiraTabState();
     vi.clearAllMocks();
   });
@@ -550,6 +561,384 @@ describe("JiraAssignedTab", () => {
       // The createEffect on mount detects the invalid scope and calls setTabFilter
       expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "scope", "assigned");
       (config as Record<string, unknown>).jira = { customScopes: [] };
+    });
+  });
+
+  // ── Custom order (Task 3) ──────────────────────────────────────────────────
+
+  describe("custom order — flat rendering", () => {
+    it("renders a flat list with no group headers in custom mode (fresh/default state)", () => {
+      mockJiraFilters = customFilters();
+      const issues = [
+        makeIssue("ALPHA-1", "ALPHA"),
+        makeIssue("BETA-1", "BETA"),
+      ];
+      const { container } = render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      // Group headers are wrapped in a "group/repo-header" div — none should render.
+      // (Per-row expand/collapse chevrons also carry aria-expanded, so that alone
+      // isn't a reliable signal that a *group* header is absent. classList.contains
+      // is used instead of a CSS class selector because happy-dom's querySelector
+      // rejects the unescaped "/" in "group/repo-header" as an invalid selector.)
+      const hasGroupHeader = Array.from(container.querySelectorAll("div")).some((el) =>
+        el.classList.contains("group/repo-header")
+      );
+      expect(hasGroupHeader).toBe(false);
+      // Rows still render directly
+      const rows = screen.getAllByRole("listitem");
+      expect(rows).toHaveLength(2);
+      expect(screen.getByText("ALPHA-1")).toBeTruthy();
+      expect(screen.getByText("BETA-1")).toBeTruthy();
+    });
+
+    it("shows a per-row project badge for each issue in custom mode", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("ALPHA-1", "ALPHA")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const row = screen.getAllByRole("listitem")[0];
+      const badge = row.querySelector(".badge-ghost");
+      expect(badge?.textContent).toBe("ALPHA");
+    });
+
+    it("hides ExpandCollapseButtons in custom mode", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("ALPHA-1", "ALPHA")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      expect(screen.queryByRole("button", { name: /expand all/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /collapse all/i })).toBeNull();
+    });
+
+    it("shows 'Custom order' placeholder text in the SortDropdown trigger while in custom mode", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      expect(screen.getByText("Custom order")).toBeTruthy();
+    });
+
+    it("restores grouped display with RepoLockControls and hides per-row project badges when sorted by Priority", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" };
+      const issues = [makeIssue("ALPHA-1", "ALPHA")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      // Group header present
+      expect(screen.getByRole("button", { expanded: true })).toBeTruthy();
+      // RepoLockControls present (pin button)
+      expect(screen.getByRole("button", { name: /pin alpha to top of list/i })).toBeTruthy();
+      // No per-row project badge
+      const row = screen.getAllByRole("listitem")[0];
+      expect(row.querySelector(".badge-ghost")).toBeNull();
+      // No arrow buttons
+      expect(screen.queryByRole("button", { name: /move up:/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /move down:/i })).toBeNull();
+    });
+
+    it("does not show RepoLockControls or group headers in custom mode", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("ALPHA-1", "ALPHA")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      expect(screen.queryByRole("button", { name: /pin alpha to top of list/i })).toBeNull();
+    });
+
+    it("auto-expands all project groups on first entry to a grouped sort", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" };
+      const issues = [
+        makeIssue("ALPHA-1", "ALPHA"),
+        makeIssue("BETA-1", "BETA"),
+      ];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      expect(vi.mocked(setAllExpanded)).toHaveBeenCalledWith("jiraAssigned", ["ALPHA", "BETA"], true);
+    });
+  });
+
+  describe("custom order — arrow button interactions", () => {
+    it("clicking move-down swaps a row with the next and persists the full order via setJiraCustomOrder", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" });
+      downBtn.click();
+
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-1"]);
+    });
+
+    it("clicking move-up swaps a row with the previous and persists the full order via setJiraCustomOrder", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const upBtn = screen.getByRole("button", { name: "Move up: PROJ-2" });
+      upBtn.click();
+
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-1"]);
+    });
+
+    it("disables the up arrow on the true first item and does not disable the down arrow merely for being the current page's last item", () => {
+      mockJiraFilters = customFilters();
+      const issues = Array.from({ length: 27 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const upFirst = screen.getByRole("button", { name: "Move up: PROJ-1" }) as HTMLButtonElement;
+      const downPageEdge = screen.getByRole("button", { name: "Move down: PROJ-25" }) as HTMLButtonElement;
+      expect(upFirst.disabled).toBe(true);
+      expect(downPageEdge.disabled).toBe(false);
+    });
+
+    it("disables the down arrow only on the true last item across pages, and enables the up arrow on the first item of a non-first page", () => {
+      mockJiraFilters = customFilters();
+      const issues = Array.from({ length: 27 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /next page/i }).click();
+
+      const upPageStart = screen.getByRole("button", { name: "Move up: PROJ-26" }) as HTMLButtonElement;
+      const downLast = screen.getByRole("button", { name: "Move down: PROJ-27" }) as HTMLButtonElement;
+      expect(upPageStart.disabled).toBe(false);
+      expect(downLast.disabled).toBe(true);
+    });
+
+    it("disables arrow buttons when a status filter is active", () => {
+      mockJiraFilters = customFilters({ statusCategory: "new" });
+      const issues = [makeIssue("PROJ-1", "PROJ", "new"), makeIssue("PROJ-2", "PROJ", "new")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement;
+      expect(downBtn.disabled).toBe(true);
+      expect(downBtn.getAttribute("title")).toBe("Switch to Assigned to me with no filters to reorder");
+    });
+
+    it("disables arrow buttons when a priority filter is active", () => {
+      mockJiraFilters = customFilters({ priority: "High" });
+      const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate", "High"), makeIssue("PROJ-2", "PROJ", "indeterminate", "High")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement;
+      expect(downBtn.disabled).toBe(true);
+    });
+
+    it("disables arrow buttons when scope is not 'assigned'", () => {
+      mockJiraFilters = customFilters({ scope: "reported" });
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement;
+      expect(downBtn.disabled).toBe(true);
+    });
+
+    it("does not call setJiraCustomOrder when clicking a disabled arrow button while a filter is active (no data loss)", () => {
+      mockJiraCustomOrder = ["PROJ-1", "PROJ-2"];
+      mockJiraFilters = customFilters({ priority: "High" });
+      const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate", "High"), makeIssue("PROJ-2", "PROJ", "indeterminate", "Medium")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement;
+      expect(downBtn.disabled).toBe(true);
+      downBtn.click();
+
+      // The disabled attribute blocks the click entirely — setJiraCustomOrder is never
+      // called, so the full recorded order (including PROJ-2, which the active priority
+      // filter excludes from filteredSorted()) can never be silently truncated.
+      expect(vi.mocked(setJiraCustomOrder)).not.toHaveBeenCalled();
+    });
+
+    it("disables both arrow buttons immediately after a click, before the animation/timeout settles", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2"), makeIssue("PROJ-3")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-2" }) as HTMLButtonElement;
+      const upBtn = screen.getByRole("button", { name: "Move up: PROJ-2" }) as HTMLButtonElement;
+      expect(downBtn.disabled).toBe(false);
+
+      downBtn.click();
+
+      expect(downBtn.disabled).toBe(true);
+      expect(upBtn.disabled).toBe(true);
+    });
+
+    it("clicking an arrow twice in immediate succession only applies the first move", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2"), makeIssue("PROJ-3")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const downBtn = screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement;
+      downBtn.click();
+      downBtn.click();
+
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-1", "PROJ-3"]);
+    });
+
+    it("renders a newly-appearing issue (not yet in jiraCustomOrder) at the bottom of the list with functional arrow buttons", () => {
+      mockJiraCustomOrder = ["PROJ-2", "PROJ-1"];
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2"), makeIssue("PROJ-3")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      const rows = screen.getAllByRole("listitem");
+      const keys = rows.map((el) => el.querySelector(".font-mono")?.textContent);
+      expect(keys).toEqual(["PROJ-2", "PROJ-1", "PROJ-3"]);
+
+      const upBtn = screen.getByRole("button", { name: "Move up: PROJ-3" }) as HTMLButtonElement;
+      expect(upBtn.disabled).toBe(false);
+      upBtn.click();
+
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-3", "PROJ-1"]);
+    });
+  });
+
+  describe("custom order — FLIP animation / reduced motion", () => {
+    afterEach(() => {
+      delete (Element.prototype as unknown as { animate?: unknown }).animate;
+    });
+
+    it("invokes Element.prototype.animate for a same-page move", () => {
+      vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+      let rectCallCount = 0;
+      vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(() => {
+        rectCallCount += 1;
+        return { top: rectCallCount * 10, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      });
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { cb(0); return 0; });
+      const animateSpy = vi.fn();
+      Element.prototype.animate = animateSpy;
+
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2"), makeIssue("PROJ-3")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: "Move down: PROJ-1" }).click();
+
+      expect(animateSpy).toHaveBeenCalled();
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-1", "PROJ-3"]);
+    });
+
+    it("does not invoke Element.prototype.animate and advances the page for a move crossing forward into the next page", () => {
+      vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+      const animateSpy = vi.fn();
+      Element.prototype.animate = animateSpy;
+
+      mockJiraFilters = customFilters();
+      const issues = Array.from({ length: 27 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: "Move down: PROJ-25" }).click();
+
+      expect(animateSpy).not.toHaveBeenCalled();
+      expect(screen.getByText(/page 2 of 2/i)).toBeTruthy();
+      const expected = issues.map((i) => i.key);
+      [expected[24], expected[25]] = [expected[25], expected[24]];
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(expected);
+    });
+
+    it("does not invoke Element.prototype.animate and returns to the previous page for a move crossing backward", () => {
+      vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
+      mockJiraFilters = customFilters();
+      const issues = Array.from({ length: 27 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /next page/i }).click();
+      expect(screen.getByText(/page 2 of 2/i)).toBeTruthy();
+
+      const animateSpy = vi.fn();
+      Element.prototype.animate = animateSpy;
+      screen.getByRole("button", { name: "Move up: PROJ-26" }).click();
+
+      expect(animateSpy).not.toHaveBeenCalled();
+      expect(screen.getByText(/page 1 of 2/i)).toBeTruthy();
+      const expected = issues.map((i) => i.key);
+      [expected[24], expected[25]] = [expected[25], expected[24]];
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(expected);
+    });
+
+    it("with prefers-reduced-motion, calls window.scrollTo instead of animating for a same-page move", () => {
+      vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+      vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+      const animateSpy = vi.fn();
+      Element.prototype.animate = animateSpy;
+
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: "Move down: PROJ-1" }).click();
+
+      expect(window.scrollTo).toHaveBeenCalled();
+      expect(animateSpy).not.toHaveBeenCalled();
+      expect(vi.mocked(setJiraCustomOrder)).toHaveBeenCalledWith(["PROJ-2", "PROJ-1"]);
+    });
+
+    it("with prefers-reduced-motion, calls window.scrollTo instead of animating for a cross-page move", () => {
+      vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+      vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+      const animateSpy = vi.fn();
+      Element.prototype.animate = animateSpy;
+
+      mockJiraFilters = customFilters();
+      const issues = Array.from({ length: 27 }, (_, i) => makeIssue(`PROJ-${i + 1}`));
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: "Move down: PROJ-25" }).click();
+
+      expect(window.scrollTo).toHaveBeenCalled();
+      expect(animateSpy).not.toHaveBeenCalled();
+      expect(screen.getByText(/page 2 of 2/i)).toBeTruthy();
+    });
+  });
+
+  describe("custom order — Clear button / reset button interplay", () => {
+    it("clicking Clear while sorted by Priority with a filter active only clears status/priority filters, not sortField or scope", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "High", sortField: "priority", sortDirection: "asc" };
+      const issues = [makeIssue("PROJ-1", "PROJ", "indeterminate", "High")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /clear/i }).click();
+
+      expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "statusCategory", "all");
+      expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "priority", "all");
+      const fieldsChanged = vi.mocked(setTabFilter).mock.calls.map((call) => call[1]);
+      expect(fieldsChanged).not.toContain("sortField");
+      expect(fieldsChanged).not.toContain("scope");
+    });
+
+    it("shows the '↺ Custom order' reset button when sortField is not custom, and hides it in custom mode", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" };
+      const issues = [makeIssue("PROJ-1")];
+      const { unmount } = render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      // Matched by its exact "↺ Custom order" text, which disambiguates it from
+      // the SortDropdown trigger — in custom mode the trigger's own accessible
+      // name also contains "Custom order" (via its placeholder prop), so a bare
+      // /custom order/i regex would match both buttons.
+      expect(screen.getByRole("button", { name: /↺\s*custom order/i })).toBeTruthy();
+      unmount();
+
+      mockJiraFilters = customFilters();
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+      expect(screen.queryByRole("button", { name: /↺\s*custom order/i })).toBeNull();
+    });
+
+    it("clicking the reset button switches sortField to custom and resets the page to 0", () => {
+      mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" };
+      const issues = [
+        ...Array.from({ length: 15 }, (_, i) => makeIssue(`ALPHA-${i + 1}`, "ALPHA")),
+        ...Array.from({ length: 15 }, (_, i) => makeIssue(`BETA-${i + 1}`, "BETA")),
+      ];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: /next page/i }).click();
+      expect(screen.getByText(/page 2 of 2/i)).toBeTruthy();
+
+      screen.getByRole("button", { name: /custom order/i }).click();
+
+      expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "sortField", "custom");
+      expect(screen.getByText(/page 1 of 2/i)).toBeTruthy();
     });
   });
 });
