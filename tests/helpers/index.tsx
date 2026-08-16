@@ -1,4 +1,4 @@
-import { render } from "@solidjs/testing-library";
+import { render, screen } from "@solidjs/testing-library";
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { resetViewState } from "../../src/app/stores/view";
 import type { JSX } from "solid-js";
@@ -18,4 +18,12 @@ export function renderWithRouter(
 
 export function resetViewStore(): void {
   resetViewState();
+}
+
+export function findCheckboxByLabelText(text: string): HTMLInputElement {
+  const checkbox = screen
+    .getAllByRole("checkbox")
+    .find((cb) => cb.closest("label")?.textContent?.includes(text));
+  if (!checkbox) throw new Error(`No checkbox found for label text "${text}"`);
+  return checkbox as HTMLInputElement;
 }

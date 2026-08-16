@@ -5,6 +5,7 @@ import type { CustomTab } from "../../stores/config";
 import { resetCustomTabFilters } from "../../stores/view";
 import type { RepoRef } from "../../services/api";
 import { formatScopeSummary } from "../../lib/format";
+import { createOrgRepoSelection } from "../../lib/orgRepoSelection";
 import OrgRepoCheckboxTree from "./OrgRepoCheckboxTree";
 import {
   scopeFilterGroup,
@@ -37,12 +38,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   const [baseType, setBaseType] = createSignal<"issues" | "pullRequests" | "actions">(
     props.editingTab?.baseType ?? "issues"
   );
-  const [selectedOrgs, setSelectedOrgs] = createSignal<Set<string>>(
-    new Set(props.editingTab?.orgScope ?? [])
-  );
-  const [selectedRepos, setSelectedRepos] = createSignal<Set<string>>(
-    new Set((props.editingTab?.repoScope ?? []).map((r) => r.fullName))
-  );
+  const { selectedOrgs, selectedRepos, toggleOrg, toggleRepo, buildRepoList: buildRepoScope } = createOrgRepoSelection({
+    getOpen: () => props.open,
+    getAvailableRepos: () => props.availableRepos,
+    getInitialOrgs: () => props.editingTab?.orgScope ?? [],
+    getInitialRepos: () => (props.editingTab?.repoScope ?? []).map((r) => r.fullName),
+  });
   // filterPreset: field → value. Only set keys are stored.
   const [filterPreset, setFilterPreset] = createSignal<Record<string, string>>(
     { ...(props.editingTab?.filterPreset ?? {}) }
@@ -54,13 +55,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   // Reinitialize form state when the modal opens with a different editingTab.
   // Signals are initialized at mount; without this, switching from "edit tab A" to
   // "edit tab B" (open=false then open=true) would show stale values from tab A.
+  // Org/repo scope reset is handled by createOrgRepoSelection's own reinit effect.
   createEffect(() => {
     if (!props.open) return;
     const tab = props.editingTab;
     setName(tab?.name ?? "");
     setBaseType(tab?.baseType ?? "issues");
-    setSelectedOrgs(new Set(tab?.orgScope ?? []));
-    setSelectedRepos(new Set((tab?.repoScope ?? []).map((r) => r.fullName)));
     setFilterPreset({ ...(tab?.filterPreset ?? {}) });
     setExclusive(tab?.exclusive ?? false);
     setScopeOpen(false);
@@ -90,38 +90,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     return base;
   });
 
-  function toggleOrg(org: string) {
-    setSelectedOrgs((prev) => {
-      const next = new Set(prev);
-      if (next.has(org)) {
-        next.delete(org);
-        // Also remove repos in this org from repo selection
-        setSelectedRepos((prevRepos) => {
-          const nextRepos = new Set(prevRepos);
-          for (const r of props.availableRepos) {
-            if (r.owner === org) nextRepos.delete(r.fullName);
-          }
-          return nextRepos;
-        });
-      } else {
-        next.add(org);
-      }
-      return next;
-    });
-  }
-
-  function toggleRepo(repoFullName: string) {
-    setSelectedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
-  }
-
   function handleBaseTypeChange(bt: "issues" | "pullRequests" | "actions") {
     setBaseType(bt);
     // Clear filter preset when base type changes — keys are type-specific
@@ -141,10 +109,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
       }
       return next;
     });
-  }
-
-  function buildRepoScope(): RepoRef[] {
-    return props.availableRepos.filter((r) => selectedRepos().has(r.fullName));
   }
 
   function handleSave() {

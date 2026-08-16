@@ -1,6 +1,6 @@
-import { createSignal, createEffect } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
 import type { RepoRef } from "../../services/api";
+import { createOrgRepoSelection } from "../../lib/orgRepoSelection";
 import OrgRepoCheckboxTree from "../shared/OrgRepoCheckboxTree";
 
 interface DependencyExclusionModalProps {
@@ -14,58 +14,18 @@ interface DependencyExclusionModalProps {
 }
 
 export default function DependencyExclusionModal(props: DependencyExclusionModalProps) {
-  const [excludedOrgs, setExcludedOrgs] = createSignal<Set<string>>(new Set(props.excludedOrgs));
-  const [excludedRepos, setExcludedRepos] = createSignal<Set<string>>(
-    new Set(props.excludedRepos.map((r) => r.fullName))
-  );
-
-  // Reinitialize when the modal reopens — mirrors CustomTabModal's reinit effect
-  // (props.open false→true), so stale in-progress edits don't leak between opens.
-  createEffect(() => {
-    if (!props.open) return;
-    setExcludedOrgs(new Set(props.excludedOrgs));
-    setExcludedRepos(new Set(props.excludedRepos.map((r) => r.fullName)));
+  const {
+    selectedOrgs: excludedOrgs,
+    selectedRepos: excludedRepos,
+    toggleOrg,
+    toggleRepo,
+    buildRepoList: buildExcludedRepos,
+  } = createOrgRepoSelection({
+    getOpen: () => props.open,
+    getAvailableRepos: () => props.availableRepos,
+    getInitialOrgs: () => props.excludedOrgs,
+    getInitialRepos: () => props.excludedRepos.map((r) => r.fullName),
   });
-
-  function toggleOrg(org: string) {
-    setExcludedOrgs((prev) => {
-      const next = new Set(prev);
-      if (next.has(org)) {
-        next.delete(org);
-        // Also remove repos in this org from the repo-exclusion set — mirrors
-        // CustomTabModal's toggleOrg cleanup on DESELECT exactly: deselecting
-        // an org clears its repos; selecting an org never touches the repo set
-        // (OrgRepoCheckboxTree's checked-attribute OR handles display without
-        // needing individual repo entries).
-        setExcludedRepos((prevRepos) => {
-          const next2 = new Set(prevRepos);
-          for (const r of props.availableRepos) {
-            if (r.owner === org) next2.delete(r.fullName);
-          }
-          return next2;
-        });
-      } else {
-        next.add(org);
-      }
-      return next;
-    });
-  }
-
-  function toggleRepo(repoFullName: string) {
-    setExcludedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
-  }
-
-  function buildExcludedRepos(): RepoRef[] {
-    return props.availableRepos.filter((r) => excludedRepos().has(r.fullName));
-  }
 
   function handleSave() {
     props.onSave([...excludedOrgs()], buildExcludedRepos());
@@ -101,7 +61,7 @@ export default function DependencyExclusionModal(props: DependencyExclusionModal
             <p class="text-xs text-base-content/50">
               Repos and orgs checked below are hidden from the Dependencies tab only — their dependency-bot PRs won't reappear in Pull Requests, but regular issues, pull requests, and workflow runs are unaffected.
             </p>
-            <div class="overflow-y-auto max-h-[400px] space-y-3">
+            <div class="space-y-3">
               <OrgRepoCheckboxTree
                 availableOrgs={props.availableOrgs}
                 availableRepos={props.availableRepos}

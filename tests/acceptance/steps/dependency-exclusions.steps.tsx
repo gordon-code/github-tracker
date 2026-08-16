@@ -134,7 +134,7 @@ import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { render, screen, waitFor, fireEvent, cleanup } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
-import { makeIssue, makePullRequest, makeWorkflowRun } from "../../helpers/index";
+import { makeIssue, makePullRequest, makeWorkflowRun, findCheckboxByLabelText } from "../../helpers/index";
 
 import DashboardPage from "../../../src/app/components/dashboard/DashboardPage";
 import SettingsPage from "../../../src/app/components/settings/SettingsPage";
@@ -161,14 +161,6 @@ function renderSettings() {
 
 function openManageModal() {
   fireEvent.click(screen.getByRole("button", { name: "Manage" }));
-}
-
-function findCheckboxByLabelText(text: string): HTMLInputElement {
-  const checkbox = screen
-    .getAllByRole("checkbox")
-    .find((cb) => cb.closest("label")?.textContent?.includes(text));
-  if (!checkbox) throw new Error(`No checkbox found for label text "${text}"`);
-  return checkbox as HTMLInputElement;
 }
 
 function depBotPR(overrides: Parameters<typeof makePullRequest>[0] = {}) {

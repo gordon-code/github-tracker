@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import OrgRepoCheckboxTree from "../../../src/app/components/shared/OrgRepoCheckboxTree";
+import { findCheckboxByLabelText } from "../../helpers/index";
 
 const availableOrgs = ["orgA", "orgB"];
 const availableRepos = [
@@ -8,14 +9,6 @@ const availableRepos = [
   { owner: "orgA", name: "repoA2", fullName: "orgA/repoA2" },
   { owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" },
 ];
-
-function findCheckboxByLabelText(text: string): HTMLInputElement {
-  const checkbox = screen
-    .getAllByRole("checkbox")
-    .find((cb) => cb.closest("label")?.textContent?.includes(text));
-  if (!checkbox) throw new Error(`No checkbox found for label text "${text}"`);
-  return checkbox as HTMLInputElement;
-}
 
 describe("OrgRepoCheckboxTree — rendering", () => {
   it("renders one checkbox per org and one nested checkbox per repo", () => {

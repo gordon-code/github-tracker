@@ -1308,4 +1308,27 @@ describe("Dependencies settings section", () => {
     expect(config.dependencies.excludedOrgs).toEqual([]);
     screen.getByText("1 repo");
   });
+
+  it("de-dupes a repo present in both selectedRepos and monitoredRepos to a single checkbox and exclusion entry", () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      monitoredRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] },
+    });
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    const repoCheckboxes = screen
+      .getAllByRole("checkbox")
+      .filter((cb) => cb.closest("label")?.textContent?.includes("repo1"));
+    expect(repoCheckboxes).toHaveLength(1);
+
+    fireEvent.click(repoCheckboxes[0]);
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(config.dependencies.excludedRepos).toEqual([
+      { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+    ]);
+  });
 });

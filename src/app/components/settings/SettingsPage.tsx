@@ -153,6 +153,10 @@ export default function SettingsPage() {
   const dependencyExclusionOrgs = createMemo(() =>
     [...new Set(dependencyExclusionPool().map((r) => r.owner))]
   );
+  const excludedCounts = createMemo(() => ({
+    orgs: (config.dependencies?.excludedOrgs ?? []).length,
+    repos: (config.dependencies?.excludedRepos ?? []).length,
+  }));
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -1375,9 +1379,9 @@ export default function SettingsPage() {
           >
             <div class="flex items-center gap-3">
               <span class="text-xs text-base-content/60">
-                {(config.dependencies?.excludedOrgs ?? []).length === 0 && (config.dependencies?.excludedRepos ?? []).length === 0
+                {excludedCounts().orgs === 0 && excludedCounts().repos === 0
                   ? "None excluded"
-                  : formatScopeSummary((config.dependencies?.excludedOrgs ?? []).length, (config.dependencies?.excludedRepos ?? []).length, true)}
+                  : formatScopeSummary(excludedCounts().orgs, excludedCounts().repos, true)}
               </span>
               <button
                 type="button"

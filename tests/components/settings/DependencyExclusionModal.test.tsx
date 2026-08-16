@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import DependencyExclusionModal from "../../../src/app/components/settings/DependencyExclusionModal";
 import type { RepoRef } from "../../../src/app/services/api";
+import { findCheckboxByLabelText } from "../../helpers/index";
 
 const availableOrgs = ["orgA", "orgB"];
 const availableRepos: RepoRef[] = [
@@ -10,14 +11,6 @@ const availableRepos: RepoRef[] = [
   { owner: "orgA", name: "repoA2", fullName: "orgA/repoA2" },
   { owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" },
 ];
-
-function findCheckboxByLabelText(text: string): HTMLInputElement {
-  const checkbox = screen
-    .getAllByRole("checkbox")
-    .find((cb) => cb.closest("label")?.textContent?.includes(text));
-  if (!checkbox) throw new Error(`No checkbox found for label text "${text}"`);
-  return checkbox as HTMLInputElement;
-}
 
 function renderModal(overrides: Partial<Parameters<typeof DependencyExclusionModal>[0]> = {}) {
   const onClose = vi.fn();
@@ -141,6 +134,17 @@ describe("DependencyExclusionModal — save", () => {
       { owner: "orgA", name: "repoA1", fullName: "orgA/repoA1" },
       { owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" },
     ]);
+  });
+
+  it("silently drops a stale excludedRepos entry not present in availableRepos on save, even when untouched", () => {
+    // Accepted tradeoff — see tests/stores/config.test.ts structural-invariant block.
+    const STALE_REPO: RepoRef = { owner: "stale", name: "repo", fullName: "stale/repo" };
+    const { onSave } = renderModal({ excludedRepos: [STALE_REPO] });
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    const [, repos] = onSave.mock.calls[0] as [string[], RepoRef[]];
+    expect(repos).toEqual([]);
   });
 });
 
