@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, isTabUnscoped, updateJiraConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema, pruneJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
@@ -478,6 +478,10 @@ export default function DashboardPage() {
       }
       if (!isJiraAuthenticated()) return;
       setJiraIssues(result.issues);
+
+      if (scope === JIRA_CUSTOM_ORDER_SCOPE) {
+        pruneJiraCustomOrder(new Set(result.issues.map((i) => i.key)));
+      }
 
       // Auto-prune tracked Jira items that are done or deleted (scope-independent).
       // Resolves status from current search results first, then bulkFetches only

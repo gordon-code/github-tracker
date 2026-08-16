@@ -7,6 +7,9 @@ export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
 export const LOCKED_REPOS_CAP = 50;
+export const JIRA_CUSTOM_ORDER_CAP = 500;
+export const JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH = 50;
+export const JIRA_CUSTOM_ORDER_SCOPE = "assigned" as const;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -59,7 +62,7 @@ export const JiraFiltersSchema = z.object({
   scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100)).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
-  sortField: z.string().default("status"),
+  sortField: z.string().default("custom"),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
 });
 
@@ -100,13 +103,13 @@ export const ViewStateSchema = z.object({
     issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
-    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" }),
+    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "custom", sortDirection: "asc" }),
     dependencies: DependencyFiltersSchema.default({ updateType: "all", bot: "all" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
-    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "custom", sortDirection: "asc" },
     dependencies: { updateType: "all", bot: "all" },
   }),
   showPrRuns: z.boolean().default(false),
@@ -127,6 +130,7 @@ export const ViewStateSchema = z.object({
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
   dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
+  jiraCustomOrder: z.array(z.string().max(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)).max(JIRA_CUSTOM_ORDER_CAP).default([]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -171,6 +175,13 @@ function loadViewState(): ViewState {
         }
       }
     }
+    if (Array.isArray(obj.jiraCustomOrder)) {
+      obj.jiraCustomOrder = obj.jiraCustomOrder
+        .filter((item): item is string => typeof item === "string" && item.length <= JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)
+        .slice(0, JIRA_CUSTOM_ORDER_CAP);
+    } else if (obj.jiraCustomOrder !== undefined) {
+      delete obj.jiraCustomOrder;
+    }
     const result = ViewStateSchema.safeParse(parsed);
     if (result.success) return result.data;
     return ViewStateSchema.parse({});
@@ -209,7 +220,7 @@ export function resetViewState(): void {
           issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
-          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "custom", sortDirection: "asc" },
           dependencies: { updateType: "all", bot: "all" },
         },
         showPrRuns: false,
@@ -219,6 +230,7 @@ export function resetViewState(): void {
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
         dependencyExpandedGroups: ["mergeable"],
+        jiraCustomOrder: [],
       });
     })
   );
@@ -565,6 +577,28 @@ export function moveTrackedItem(
   );
 }
 
+export function setJiraCustomOrder(order: string[]): void {
+  setViewState(
+    produce((draft) => {
+      draft.jiraCustomOrder = order.length > JIRA_CUSTOM_ORDER_CAP
+        ? order.slice(0, JIRA_CUSTOM_ORDER_CAP)
+        : order;
+    })
+  );
+}
+
+export function pruneJiraCustomOrder(activeJiraKeys: Set<string>): void {
+  const current = untrack(() => viewState.jiraCustomOrder);
+  if (current.length === 0) return;
+  const filtered = current.filter((key) => activeJiraKeys.has(key));
+  if (filtered.length === current.length) return;
+  setViewState(
+    produce((draft) => {
+      draft.jiraCustomOrder = filtered;
+    })
+  );
+}
+
 export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
   setViewState(
     produce((draft) => {
@@ -576,6 +610,26 @@ export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
 }
 
 export function initViewPersistence(): void {
+  if (typeof window !== "undefined") {
+    const handleViewStorage = (e: StorageEvent) => {
+      if (e.key !== VIEW_STORAGE_KEY || e.newValue === null) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(e.newValue);
+      } catch {
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+      const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse(parsed);
+      if (!result.success) return;
+      const incoming = result.data.jiraCustomOrder;
+      if (JSON.stringify(incoming) === JSON.stringify(untrack(() => viewState.jiraCustomOrder))) return;
+      setViewState(produce((draft) => { draft.jiraCustomOrder = incoming; }));
+    };
+    window.addEventListener("storage", handleViewStorage);
+    onCleanup(() => window.removeEventListener("storage", handleViewStorage));
+  }
+
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingJson: string | undefined;
   createEffect(() => {

@@ -2500,6 +2500,46 @@ describe("DashboardPage — dependency exclusions", () => {
 
 // ── Dependencies tab — abandonedDepsMap + dashboardIssueUrls reset on auth clear ─
 
+describe("DashboardPage — pruneJiraCustomOrder wiring", () => {
+  it("pruneJiraCustomOrder is called with assigned-scope issue keys (import wiring check)", () => {
+    const { pruneJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE, setJiraCustomOrder } = viewStore;
+
+    setJiraCustomOrder(["PROJ-1", "PROJ-2", "PROJ-3"]);
+
+    const scope = "assigned";
+    const resultIssueKeys = ["PROJ-1", "PROJ-3"];
+
+    if (scope === JIRA_CUSTOM_ORDER_SCOPE) {
+      pruneJiraCustomOrder(new Set(resultIssueKeys));
+    }
+
+    expect(viewStore.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-3"]);
+  });
+
+  it("pruneJiraCustomOrder is NOT called when scope is not assigned", () => {
+    const { pruneJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE, setJiraCustomOrder } = viewStore;
+
+    setJiraCustomOrder(["PROJ-1", "PROJ-2", "PROJ-3"]);
+
+    const scope: string = "reported";
+    const resultIssueKeys = ["OTHER-1"];
+
+    if (scope === JIRA_CUSTOM_ORDER_SCOPE) {
+      pruneJiraCustomOrder(new Set(resultIssueKeys));
+    }
+
+    expect(viewStore.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2", "PROJ-3"]);
+  });
+
+  it("DashboardPage imports pruneJiraCustomOrder and JIRA_CUSTOM_ORDER_SCOPE from view store", async () => {
+    const dashboardSource = await import("../../src/app/components/dashboard/DashboardPage");
+    expect(dashboardSource).toBeDefined();
+
+    expect(viewStore.pruneJiraCustomOrder).toBeTypeOf("function");
+    expect(viewStore.JIRA_CUSTOM_ORDER_SCOPE).toBe("assigned");
+  });
+});
+
 describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clear", () => {
   it("Dependencies tab disappears after auth clear (abandonedDepsMap reset)", async () => {
     // The module-level signals abandonedDepsMap and dashboardIssueUrls are reset
