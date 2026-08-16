@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, ensureLockedRepoGroups, type RepoGroup } from "../../src/app/lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, ensureLockedRepoGroups, applyCustomOrder, type RepoGroup } from "../../src/app/lib/grouping";
 
 interface Item {
   repoFullName: string;
@@ -285,5 +285,57 @@ describe("ensureLockedRepoGroups", () => {
     const result = ensureLockedRepoGroups(groups, ["org/a", "org/b"], wfFactory);
     expect(result).toHaveLength(2);
     expect(result[1].workflows).toEqual([]);
+  });
+});
+
+describe("applyCustomOrder", () => {
+  const keyFn = (item: Item) => String(item.id);
+
+  it("returns items in the exact order when order fully matches", () => {
+    const items = [makeItem("org/a", 1), makeItem("org/a", 2), makeItem("org/a", 3)];
+    const result = applyCustomOrder(items, ["3", "1", "2"], keyFn);
+    expect(result.map((i) => i.id)).toEqual([3, 1, 2]);
+  });
+
+  it("appends unlisted items at the end in original relative order", () => {
+    const items = [makeItem("org/a", 1), makeItem("org/a", 2), makeItem("org/a", 3), makeItem("org/a", 4)];
+    const result = applyCustomOrder(items, ["3", "1"], keyFn);
+    expect(result.map((i) => i.id)).toEqual([3, 1, 2, 4]);
+  });
+
+  it("returns items unchanged by reference when order is empty", () => {
+    const items = [makeItem("org/a", 1), makeItem("org/a", 2)];
+    const result = applyCustomOrder(items, [], keyFn);
+    expect(result).toBe(items); // same reference — no copy
+  });
+
+  it("silently ignores order keys not present in items", () => {
+    const items = [makeItem("org/a", 1), makeItem("org/a", 2)];
+    const result = applyCustomOrder(items, ["1", "99"], keyFn);
+    expect(result.map((i) => i.id)).toEqual([1, 2]);
+    expect(result).toHaveLength(2); // no phantom entry for the unmatched "99" key
+  });
+
+  it("keeps only the later item when two items share the same key", () => {
+    const first = makeItem("org/a", 1);
+    const second = makeItem("org/b", 1); // same keyFn() result ("1") as `first`
+    // Route both through the "unreferenced" append path so the assertion
+    // exercises dedup at map-build time, independent of the `order` walk.
+    const result = applyCustomOrder([first, second], ["nonexistent"], keyFn);
+    expect(result).toHaveLength(1);
+    expect(result[0].repoFullName).toBe("org/b");
+  });
+
+  it("documents duplicate-entry behavior when a key appears twice in order", () => {
+    // applyCustomOrder does not deduplicate `order` itself — a repeated key
+    // pulls the same item into the result once per occurrence, per the
+    // function's own doc comment ("order is walked as-is and is not itself
+    // deduplicated"). This test pins that behavior rather than leaving it
+    // unspecified.
+    const item = makeItem("org/a", 1);
+    const result = applyCustomOrder([item], ["1", "1"], keyFn);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(item);
+    expect(result[1]).toBe(item);
   });
 });
