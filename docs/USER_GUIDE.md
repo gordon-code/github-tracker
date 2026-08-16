@@ -572,7 +572,9 @@ When Jira is connected, a **Jira** tab appears in the tab bar. It shows all open
 
 **Filters:** Status category (New, In Progress) and priority (Highest through Lowest) filters are available in the filter popover.
 
-**Grouping:** Issues are grouped by Jira project key, similar to how GitHub items are grouped by repo.
+**Grouping:** Issues are grouped by Jira project key, similar to how GitHub items are grouped by repo — except when Custom order is active (see below), which shows one flat list.
+
+**Custom order:** By default, issues show in one flat list across all projects, ranked in whatever order you've arranged them (each row shows its project as a small badge). Use the up/down arrows on each row to move it — moves work across page boundaries and the page view follows the row. Arrows are only enabled while viewing "Assigned to me" with no status/priority filter applied (your arrangement is still visible otherwise, just not editable from that view). Pick any other option from the sort dropdown to switch to grouped/sorted display instead; a small "Custom order" button next to the dropdown switches back. Project group locking (pinning a project to the top) is only available in grouped views.
 
 **Pagination:** Client-side over up to 100 fetched issues.
 
