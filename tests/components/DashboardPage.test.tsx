@@ -2540,6 +2540,109 @@ describe("DashboardPage — pruneJiraCustomOrder wiring", () => {
   });
 });
 
+describe("DashboardPage — pruneJiraCustomOrder on refresh", () => {
+  it("prunes jiraCustomOrder entries absent from assigned-scope results", async () => {
+    // Fully isolated module reload: we need jiraAuth, isJiraAuthenticated, and JiraClient
+    // to behave differently from the default mocks.
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [
+        {
+          id: "1001", key: "PROJ-1", self: "https://test.atlassian.net/rest/api/3/issue/1001",
+          fields: {
+            summary: "First issue", status: { id: "1", name: "To Do", statusCategory: { id: 2, key: "new" as const, name: "To Do" } },
+            priority: { id: "3", name: "Medium" }, assignee: null,
+            project: { id: "10000", key: "PROJ", name: "Project" },
+          },
+        },
+        {
+          id: "1003", key: "PROJ-3", self: "https://test.atlassian.net/rest/api/3/issue/1003",
+          fields: {
+            summary: "Third issue", status: { id: "1", name: "To Do", statusCategory: { id: 2, key: "new" as const, name: "To Do" } },
+            priority: { id: "3", name: "Medium" }, assignee: null,
+            project: { id: "10000", key: "PROJ", name: "Project" },
+          },
+        },
+      ],
+      total: 2, maxResults: 100, startAt: 0,
+    });
+
+    vi.doMock("../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: vi.fn(),
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+    }));
+
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+    vi.doMock("../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: vi.fn(),
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [], pullRequests: [], workflowRuns: [], errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          void fetchAll().catch(() => {});
+          return { isRefreshing: () => false, lastRefreshAt: () => null, manualRefresh: vi.fn(), destroy: vi.fn() };
+        }
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    // Fresh imports after mock registration
+    const freshView = await import("../../src/app/stores/view");
+    const freshConfig = await import("../../src/app/stores/config");
+    const freshDash = await import("../../src/app/components/dashboard/DashboardPage");
+
+    freshView.resetViewState();
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({ enabled: true, siteUrl: "https://test.atlassian.net", siteName: "Test Site", authMethod: "oauth" });
+    freshView.setJiraCustomOrder(["PROJ-1", "PROJ-2", "PROJ-3"]);
+
+    render(() => <freshDash.default />);
+
+    await waitFor(() => {
+      expect(freshView.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-3"]);
+    }, { timeout: 3000 });
+  });
+});
+
 describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clear", () => {
   it("Dependencies tab disappears after auth clear (abandonedDepsMap reset)", async () => {
     // The module-level signals abandonedDepsMap and dashboardIssueUrls are reset
