@@ -12,6 +12,7 @@ import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, isTab
 import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
+import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies, fetchDepPRBodies } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
@@ -857,10 +858,22 @@ export default function DashboardPage() {
   const trackedBotLogins = createMemo(() =>
     expandBotLogins(config.trackedUsers.filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()))
   );
+  // Unfiltered classification — for rendering/counting use visibleDependencyPullRequests below.
   const dependencyPullRequests = createMemo(() => {
     if (!config.dependencies.enabled) return [];
     return dashboardData.pullRequests.filter((pr) => pr.state === "OPEN" && isDependencyPr(pr, trackedBotLogins()));
   });
+
+  // Dependencies-tab display filter — applied on top of the unfiltered
+  // dependencyPullRequests classification above. dependencyPrIds (below) and
+  // exclusiveOwnership deliberately keep using the UNFILTERED memo, so an
+  // excluded repo's bot PRs still don't leak into the main Pull Requests tab —
+  // they vanish entirely instead of reappearing elsewhere.
+  const visibleDependencyPullRequests = createMemo(() =>
+    dependencyPullRequests().filter(
+      (pr) => !isRepoExcludedFromDependencies(pr.repoFullName, config.dependencies.excludedOrgs, config.dependencies.excludedRepos)
+    )
+  );
   const dependencyPrIds = createMemo(() =>
     new Set(dependencyPullRequests().map((pr) => pr.id))
   );
@@ -917,7 +930,7 @@ export default function DashboardPage() {
   }
 
   const enableDependencies = createMemo(() =>
-    config.dependencies.enabled && dependencyPullRequests().length > 0
+    config.dependencies.enabled && visibleDependencyPullRequests().length > 0
   );
 
   // Visible data for built-in tabs — filters out exclusively-owned items
@@ -1070,7 +1083,7 @@ export default function DashboardPage() {
           return true;
         }).length };
       })() : {}),
-      ...(enableDependencies() ? { dependencies: dependencyPullRequests().filter((p) => !ignoredPRs.has(p.id)).length } : {}),
+      ...(enableDependencies() ? { dependencies: visibleDependencyPullRequests().filter((p) => !ignoredPRs.has(p.id)).length } : {}),
       ...customCounts,
     };
   });
@@ -1163,7 +1176,7 @@ export default function DashboardPage() {
       void (async () => {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
-          const depRepos = new Set(dependencyPullRequests().map((pr) => pr.repoFullName));
+          const depRepos = new Set(visibleDependencyPullRequests().map((pr) => pr.repoFullName));
           const relevant = dashboardIssues.filter((di) => depRepos.has(di.repoFullName));
           if (relevant.length === 0) return;
 
@@ -1202,7 +1215,8 @@ export default function DashboardPage() {
 
     const meta = depMeta();
     const depPrs = dependencyPullRequests();
-    const toFetch = depPrs.filter((pr) => !meta.has(pr.id) && needsBodyFallback(pr));
+    const visibleDepPrs = visibleDependencyPullRequests();
+    const toFetch = visibleDepPrs.filter((pr) => !meta.has(pr.id) && needsBodyFallback(pr));
     if (toFetch.length === 0) return;
 
     _fetchingDepBodies = true;
@@ -1323,7 +1337,7 @@ export default function DashboardPage() {
               </Match>
               <Match when={activeTab() === "dependencies"}>
                 <DependenciesTab
-                  pullRequests={dependencyPullRequests()}
+                  pullRequests={visibleDependencyPullRequests()}
                   depMeta={depMeta()}
                   loading={dashboardData.loading}
                   abandonedDepsMap={abandonedDepsMap()}
@@ -1338,7 +1352,7 @@ export default function DashboardPage() {
               </Match>
               <Match when={activeTab() === "dependencies"}>
                 <DependenciesTab
-                  pullRequests={dependencyPullRequests()}
+                  pullRequests={visibleDependencyPullRequests()}
                   loading={dashboardData.loading}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}

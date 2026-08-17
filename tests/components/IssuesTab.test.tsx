@@ -577,7 +577,7 @@ describe("IssuesTab", () => {
 describe("IssuesTab — hideDepDashboard + dependencies.enabled interaction", () => {
   it("shows Dependency Dashboard in custom tab even when hideDepDashboard=true and deps disabled", () => {
     viewStore.updateViewState({ hideDepDashboard: true });
-    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo", userLogin: "me" }),
     ];
@@ -590,7 +590,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled interaction", ()
 describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
   it("hides Dependency Dashboard issue when hideDepDashboard=true and dependencies.enabled=false", () => {
     viewStore.updateViewState({ hideDepDashboard: true });
-    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
       makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
@@ -603,7 +603,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
 
   it("shows Dependency Dashboard issue when hideDepDashboard=true but dependencies.enabled=true", () => {
     viewStore.updateViewState({ hideDepDashboard: true });
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
       makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
@@ -616,7 +616,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
 
   it("shows Dependency Dashboard issue when hideDepDashboard=false regardless of dependencies.enabled", () => {
     viewStore.updateViewState({ hideDepDashboard: false });
-    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
     ];

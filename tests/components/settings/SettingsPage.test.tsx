@@ -1167,21 +1167,21 @@ describe("Dependencies settings section", () => {
   });
 
   it("renders Dependencies tab toggle checked when enabled", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const toggle = screen.getByRole<HTMLInputElement>("checkbox", { name: /Enable dependencies tab/i });
     expect(toggle.checked).toBe(true);
   });
 
   it("renders Dependencies tab toggle unchecked when disabled", () => {
-    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const toggle = screen.getByRole<HTMLInputElement>("checkbox", { name: /Enable dependencies tab/i });
     expect(toggle.checked).toBe(false);
   });
 
   it("toggles dependencies.enabled when checkbox is clicked", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
     fireEvent.click(toggle);
@@ -1189,7 +1189,7 @@ describe("Dependencies settings section", () => {
   });
 
   it("disabling dependencies resets defaultTab to 'issues' when it was 'dependencies'", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" }, defaultTab: "dependencies" });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] }, defaultTab: "dependencies" });
     renderSettings();
     const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
     fireEvent.click(toggle);
@@ -1198,7 +1198,7 @@ describe("Dependencies settings section", () => {
   });
 
   it("disabling dependencies preserves defaultTab when it was not 'dependencies'", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" }, defaultTab: "pullRequests" });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] }, defaultTab: "pullRequests" });
     renderSettings();
     const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
     fireEvent.click(toggle);
@@ -1207,7 +1207,7 @@ describe("Dependencies settings section", () => {
   });
 
   it("disabling dependencies resets lastActiveTab to 'issues' when it was 'dependencies'", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     updateViewState({ lastActiveTab: "dependencies" });
     renderSettings();
     const toggle = screen.getByRole("checkbox", { name: /Enable dependencies tab/i });
@@ -1217,14 +1217,14 @@ describe("Dependencies settings section", () => {
   });
 
   it("renders rebase label input with current value", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase-please" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase-please", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const input = screen.getByRole<HTMLInputElement>("textbox", { name: /Rebase label/i });
     expect(input.value).toBe("rebase-please");
   });
 
   it("updates dependencies.rebaseLabel on input change", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const input = screen.getByRole("textbox", { name: /Rebase label/i });
     fireEvent.input(input, { target: { value: "rebase-please" } });
@@ -1232,10 +1232,103 @@ describe("Dependencies settings section", () => {
   });
 
   it("rebase label input falls back to 'rebase' when cleared", () => {
-    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase" } });
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     renderSettings();
     const input = screen.getByRole("textbox", { name: /Rebase label/i });
     fireEvent.input(input, { target: { value: "" } });
     expect(config.dependencies.rebaseLabel).toBe("rebase");
+  });
+
+  it("renders 'None excluded' when excludedOrgs/excludedRepos are both empty", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
+    renderSettings();
+    screen.getByText("None excluded");
+  });
+
+  it("renders the count summary when both excluded lists are non-empty", () => {
+    updateConfig({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: ["excluded-org"],
+        excludedRepos: [
+          { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+          { owner: "org1", name: "repo2", fullName: "org1/repo2" },
+        ],
+      },
+    });
+    renderSettings();
+    screen.getByText("1 org, 2 repos");
+  });
+
+  it("renders '2 repos' (elideZero) when only excludedRepos is non-empty", () => {
+    updateConfig({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: [],
+        excludedRepos: [
+          { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+          { owner: "org1", name: "repo2", fullName: "org1/repo2" },
+        ],
+      },
+    });
+    renderSettings();
+    screen.getByText("2 repos");
+    expect(screen.queryByText("0 orgs, 2 repos")).toBeNull();
+  });
+
+  it("clicking Manage opens the exclusion modal", () => {
+    updateConfig({ dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
+    renderSettings();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    screen.getByText("Exclude from Dependencies");
+  });
+
+  it("saving an exclusion updates config and the Section 12 summary re-renders", () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] },
+    });
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    const repoCheckbox = screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("repo1")) as HTMLInputElement;
+    fireEvent.click(repoCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(config.dependencies.excludedRepos).toEqual([
+      { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+    ]);
+    expect(config.dependencies.excludedOrgs).toEqual([]);
+    screen.getByText("1 repo");
+  });
+
+  it("de-dupes a repo present in both selectedRepos and monitoredRepos to a single checkbox and exclusion entry", () => {
+    updateConfig({
+      selectedRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      monitoredRepos: [{ owner: "org1", name: "repo1", fullName: "org1/repo1" }],
+      dependencies: { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] },
+    });
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    const repoCheckboxes = screen
+      .getAllByRole("checkbox")
+      .filter((cb) => cb.closest("label")?.textContent?.includes("repo1"));
+    expect(repoCheckboxes).toHaveLength(1);
+
+    fireEvent.click(repoCheckboxes[0]);
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    expect(config.dependencies.excludedRepos).toEqual([
+      { owner: "org1", name: "repo1", fullName: "org1/repo1" },
+    ]);
   });
 });

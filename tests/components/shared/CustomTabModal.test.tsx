@@ -45,6 +45,7 @@ vi.mock("../../../src/app/stores/view", () => ({
 import CustomTabModal from "../../../src/app/components/shared/CustomTabModal";
 import { config } from "../../../src/app/stores/config";
 import type { CustomTab } from "../../../src/app/stores/config";
+import { findCheckboxByLabelText } from "../../helpers/index";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,10 @@ function makeTab(overrides: Partial<CustomTab> = {}): CustomTab {
 }
 
 /**
- * Renders the modal wrapped in a signal so open/editingTab can be changed reactively.
+ * Renders the modal with `open` wrapped in a signal so it can be toggled reactively.
+ * `editingTab` is captured at render time — it is not reactive. For a test that needs
+ * editingTab to change after the initial render, build the props signal directly (see
+ * "CustomTabModal — reopening with a different editingTab" below).
  */
 function renderModal(
   initialOpen = true,
@@ -466,6 +470,41 @@ describe("CustomTabModal — scope accordion", () => {
     const arg = mockAddCustomTab.mock.calls[0][0] as CustomTab;
     expect(arg.orgScope).toEqual([]);
     expect(arg.repoScope).toEqual([{ owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" }]);
+  });
+});
+
+// ── Reopening with a different editingTab ────────────────────────────────────
+
+describe("CustomTabModal — reopening with a different editingTab", () => {
+  it("resets org/repo scope to match the new editingTab, not stale state from the previous one", () => {
+    type Props = Parameters<typeof CustomTabModal>[0];
+    const tabA = makeTab({ id: "tabA", name: "Tab A", orgScope: ["orgA"] });
+    const tabB = makeTab({ id: "tabB", name: "Tab B", orgScope: ["orgB"] });
+    const [modalProps, setModalProps] = createSignal<Props>({
+      open: true,
+      onClose: vi.fn(),
+      editingTab: tabA,
+      availableOrgs: ["orgA", "orgB"],
+      availableRepos: [
+        { owner: "orgA", name: "repoA1", fullName: "orgA/repoA1" },
+        { owner: "orgB", name: "repoB1", fullName: "orgB/repoB1" },
+      ],
+    });
+
+    render(() => <CustomTabModal {...modalProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /scope/i }));
+    expect(findCheckboxByLabelText("orgA").checked).toBe(true);
+    expect(findCheckboxByLabelText("orgB").checked).toBe(false);
+
+    // Close, then reopen with a different editingTab
+    setModalProps((prev) => ({ ...prev, open: false }));
+    setModalProps((prev) => ({ ...prev, open: true, editingTab: tabB }));
+
+    // Reinitializing collapses the scope accordion — reopen it
+    fireEvent.click(screen.getByRole("button", { name: /scope/i }));
+    expect(findCheckboxByLabelText("orgA").checked).toBe(false);
+    expect(findCheckboxByLabelText("orgB").checked).toBe(true);
   });
 });
 

@@ -86,6 +86,8 @@ export type JiraConfig = z.infer<typeof JiraConfigSchema>;
 export const DependencyConfigSchema = z.object({
   enabled: z.boolean().default(true),
   rebaseLabel: z.string().min(1).max(50).default("rebase"),
+  excludedOrgs: z.array(z.string().regex(REPO_SEGMENT)).max(100).default([]),
+  excludedRepos: z.array(RepoRefSchema).max(100).default([]),
 });
 export type DependencyConfig = z.infer<typeof DependencyConfigSchema>;
 
@@ -121,7 +123,7 @@ export const ConfigSchema = z.object({
   mcpRelayPort: z.number().int().min(1024).max(65535).default(9876),
   // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
   jira: JiraConfigSchema.default({ enabled: false, authMethod: "oauth", issueKeyDetection: true, expandIssueDetails: false, customFields: [], customScopes: [] }),
-  dependencies: DependencyConfigSchema.default({ enabled: true, rebaseLabel: "rebase" }),
+  dependencies: DependencyConfigSchema.default({ enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

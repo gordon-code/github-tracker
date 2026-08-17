@@ -55,6 +55,32 @@ describe("ConfigSchema", () => {
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
     expect(result.enableActions).toBe(true);
+    expect(result.dependencies.excludedOrgs).toEqual([]);
+    expect(result.dependencies.excludedRepos).toEqual([]);
+  });
+
+  it("round-trips excludedOrgs/excludedRepos when provided", () => {
+    const result = ConfigSchema.parse({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+        excludedOrgs: ["some-org"],
+        excludedRepos: [{ owner: "some-org", name: "repo", fullName: "some-org/repo" }],
+      },
+    });
+    expect(result.dependencies.excludedOrgs).toEqual(["some-org"]);
+    expect(result.dependencies.excludedRepos).toEqual([{ owner: "some-org", name: "repo", fullName: "some-org/repo" }]);
+  });
+
+  it("defaults excludedOrgs/excludedRepos to [] for a pre-migration persisted config missing the new fields", () => {
+    const result = ConfigSchema.parse({
+      dependencies: {
+        enabled: true,
+        rebaseLabel: "rebase",
+      },
+    });
+    expect(result.dependencies.excludedOrgs).toEqual([]);
+    expect(result.dependencies.excludedRepos).toEqual([]);
   });
 
   it("enableActions defaults to true (Actions tab enabled by default)", () => {
@@ -660,6 +686,12 @@ describe("updateConfig — customTabs scope pruning on selectedRepos change", ()
 //     curated via explicit add/remove UI, never auto-merged from a live fetch.
 //   - selectedOrgs: reconciled against a live fetchOrgs() result rather than
 //     a sibling config field — covered separately in OrgSelector.test.tsx.
+//   - dependencies.excludedOrgs / dependencies.excludedRepos: available pool
+//     is the union of selectedRepos + upstreamRepos + monitoredRepos, not
+//     selectedRepos alone — pruning against selectedRepos shrinkage alone
+//     would incorrectly drop valid exclusions for a repo still reachable via
+//     the other two. Unlike customTabs.orgScope/repoScope above, this pair is
+//     not pruned under the `if ("selectedRepos" in partial)` guard.
 describe("updateConfig — structural invariant: repo-referencing fields reconcile with selectedRepos", () => {
   beforeEach(() => {
     resetConfig();
@@ -719,6 +751,30 @@ describe("updateConfig — structural invariant: repo-referencing fields reconci
       });
     }
   );
+
+  it("dependencies.excludedOrgs/excludedRepos survive a selectedRepos update that drops a repo still present via upstreamRepos", () => {
+    createRoot((dispose) => {
+      updateConfig({
+        selectedRepos: [STALE_REPO, SURVIVING_REPO],
+        upstreamRepos: [STALE_REPO],
+        dependencies: {
+          ...config.dependencies,
+          excludedOrgs: ["unrelated-org"],
+          excludedRepos: [STALE_REPO],
+        },
+      });
+
+      // STALE_REPO drops out of selectedRepos but remains available via
+      // upstreamRepos — its exclusion entries must NOT be pruned, unlike
+      // monitoredRepos/customTabs above (see the block comment before this
+      // describe for why excludedOrgs/excludedRepos are intentionally exempt).
+      updateConfig({ selectedRepos: [SURVIVING_REPO] });
+
+      expect(config.dependencies.excludedRepos).toEqual([STALE_REPO]);
+      expect(config.dependencies.excludedOrgs).toEqual(["unrelated-org"]);
+      dispose();
+    });
+  });
 });
 
 describe("setMonitoredRepo (C3)", () => {

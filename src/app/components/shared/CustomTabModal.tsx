@@ -5,6 +5,8 @@ import type { CustomTab } from "../../stores/config";
 import { resetCustomTabFilters } from "../../stores/view";
 import type { RepoRef } from "../../services/api";
 import { formatScopeSummary } from "../../lib/format";
+import { createOrgRepoSelection } from "../../lib/orgRepoSelection";
+import OrgRepoCheckboxTree from "./OrgRepoCheckboxTree";
 import {
   scopeFilterGroup,
   issueFilterGroups,
@@ -36,12 +38,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   const [baseType, setBaseType] = createSignal<"issues" | "pullRequests" | "actions">(
     props.editingTab?.baseType ?? "issues"
   );
-  const [selectedOrgs, setSelectedOrgs] = createSignal<Set<string>>(
-    new Set(props.editingTab?.orgScope ?? [])
-  );
-  const [selectedRepos, setSelectedRepos] = createSignal<Set<string>>(
-    new Set((props.editingTab?.repoScope ?? []).map((r) => r.fullName))
-  );
+  const { selectedOrgs, selectedRepos, toggleOrg, toggleRepo, buildRepoList: buildRepoScope } = createOrgRepoSelection({
+    getOpen: () => props.open,
+    getAvailableRepos: () => props.availableRepos,
+    getInitialOrgs: () => props.editingTab?.orgScope ?? [],
+    getInitialRepos: () => (props.editingTab?.repoScope ?? []).map((r) => r.fullName),
+  });
   // filterPreset: field → value. Only set keys are stored.
   const [filterPreset, setFilterPreset] = createSignal<Record<string, string>>(
     { ...(props.editingTab?.filterPreset ?? {}) }
@@ -53,13 +55,12 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   // Reinitialize form state when the modal opens with a different editingTab.
   // Signals are initialized at mount; without this, switching from "edit tab A" to
   // "edit tab B" (open=false then open=true) would show stale values from tab A.
+  // Org/repo scope reset is handled by createOrgRepoSelection's own reinit effect.
   createEffect(() => {
     if (!props.open) return;
     const tab = props.editingTab;
     setName(tab?.name ?? "");
     setBaseType(tab?.baseType ?? "issues");
-    setSelectedOrgs(new Set(tab?.orgScope ?? []));
-    setSelectedRepos(new Set((tab?.repoScope ?? []).map((r) => r.fullName)));
     setFilterPreset({ ...(tab?.filterPreset ?? {}) });
     setExclusive(tab?.exclusive ?? false);
     setScopeOpen(false);
@@ -89,38 +90,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     return base;
   });
 
-  function toggleOrg(org: string) {
-    setSelectedOrgs((prev) => {
-      const next = new Set(prev);
-      if (next.has(org)) {
-        next.delete(org);
-        // Also remove repos in this org from repo selection
-        setSelectedRepos((prevRepos) => {
-          const nextRepos = new Set(prevRepos);
-          for (const r of props.availableRepos) {
-            if (r.owner === org) nextRepos.delete(r.fullName);
-          }
-          return nextRepos;
-        });
-      } else {
-        next.add(org);
-      }
-      return next;
-    });
-  }
-
-  function toggleRepo(repoFullName: string) {
-    setSelectedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(repoFullName)) {
-        next.delete(repoFullName);
-      } else {
-        next.add(repoFullName);
-      }
-      return next;
-    });
-  }
-
   function handleBaseTypeChange(bt: "issues" | "pullRequests" | "actions") {
     setBaseType(bt);
     // Clear filter preset when base type changes — keys are type-specific
@@ -140,10 +109,6 @@ export default function CustomTabModal(props: CustomTabModalProps) {
       }
       return next;
     });
-  }
-
-  function buildRepoScope(): RepoRef[] {
-    return props.availableRepos.filter((r) => selectedRepos().has(r.fullName));
   }
 
   function handleSave() {
@@ -275,53 +240,17 @@ export default function CustomTabModal(props: CustomTabModalProps) {
                   <p class="text-xs text-base-content/50">
                     Leave empty to match no repos — the tab will show a warning icon until scoped. Org selection includes all repos in that org.
                   </p>
-                  <Show
-                    when={props.availableOrgs.length > 0}
-                    fallback={<p class="text-xs text-base-content/40">No orgs available.</p>}
-                  >
-                    <div class="overflow-y-auto max-h-[300px] space-y-3">
-                      <For each={props.availableOrgs}>
-                        {(org) => {
-                          const orgRepos = createMemo(() =>
-                            props.availableRepos.filter((r) => r.owner === org)
-                          );
-                          return (
-                            <div>
-                              {/* Org header checkbox */}
-                              <label class="flex items-center gap-2 cursor-pointer py-1">
-                                <input
-                                  type="checkbox"
-                                  class="checkbox checkbox-sm checkbox-primary"
-                                  checked={selectedOrgs().has(org)}
-                                  onChange={() => toggleOrg(org)}
-                                />
-                                <span class="text-sm font-semibold">{org}</span>
-                              </label>
-                              {/* Repo checkboxes under org */}
-                              <Show when={orgRepos().length > 0}>
-                                <div class="ml-6 space-y-0.5">
-                                  <For each={orgRepos()}>
-                                    {(repo) => (
-                                      <label class="flex items-center gap-2 cursor-pointer py-0.5">
-                                        <input
-                                          type="checkbox"
-                                          class="checkbox checkbox-xs checkbox-primary"
-                                          checked={selectedRepos().has(repo.fullName) || selectedOrgs().has(org)}
-                                          disabled={selectedOrgs().has(org)}
-                                          onChange={() => toggleRepo(repo.fullName)}
-                                        />
-                                        <span class="text-xs text-base-content/70">{repo.name}</span>
-                                      </label>
-                                    )}
-                                  </For>
-                                </div>
-                              </Show>
-                            </div>
-                          );
-                        }}
-                      </For>
-                    </div>
-                  </Show>
+                  <div class="overflow-y-auto max-h-[300px] space-y-3">
+                    <OrgRepoCheckboxTree
+                      availableOrgs={props.availableOrgs}
+                      availableRepos={props.availableRepos}
+                      checkedOrgs={selectedOrgs()}
+                      checkedRepos={selectedRepos()}
+                      onToggleOrg={toggleOrg}
+                      onToggleRepo={toggleRepo}
+                      emptyMessage="No orgs available."
+                    />
+                  </div>
                 </div>
               </Show>
             </div>

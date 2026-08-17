@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createSignal } from "solid-js";
 import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
@@ -53,7 +54,7 @@ vi.mock("../../src/app/services/jira-keys", () => ({
 vi.mock("../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
   getGraphqlRateLimit: () => null,
-  getClient: () => null,
+  getClient: vi.fn(() => null),
 }));
 
 // Mock notifications lib
@@ -2043,7 +2044,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
       errors: [],
     });
 
-    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
 
     render(() => <DashboardPage />);
     await waitFor(() => {
@@ -2068,7 +2069,7 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
   });
 
   it("dep PRs appear on Pull Requests tab when dependencies feature is disabled", async () => {
-    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase" } });
+    configStore.updateConfig({ dependencies: { enabled: false, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] } });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
       pullRequests: [
@@ -2188,6 +2189,311 @@ describe("DashboardPage — dependency pre-exclusivity", () => {
     await waitFor(() => {
       const readyToMerge = screen.getByText(/ready to merge/);
       expect(readyToMerge.textContent).toMatch(/^1\s/);
+    });
+  });
+});
+
+// ── Dependencies tab — repo/org exclusion filtering ──────────────────────────
+
+describe("DashboardPage — dependency exclusions", () => {
+  it("excludedRepos hides that repo's dependency PR from the Dependencies tab", async () => {
+    configStore.updateConfig({
+      dependencies: {
+        ...configStore.config.dependencies,
+        excludedRepos: [{ owner: "owner", name: "excluded-repo", fullName: "owner/excluded-repo" }],
+      },
+    });
+
+    const user = userEvent.setup();
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          repoFullName: "owner/excluded-repo",
+          title: "Bump lodash from 4.1 to 4.2",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.2",
+        }),
+        makePullRequest({
+          repoFullName: "owner/other-repo",
+          title: "Bump axios from 0.27 to 1.0",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => {
+      expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
+      expect(screen.queryByText("lodash: 4.1 → 4.2")).toBeNull();
+    });
+  });
+
+  it("excluded repo's dependency PR does not leak into the Pull Requests tab (exclusivity preserved)", async () => {
+    configStore.updateConfig({
+      dependencies: {
+        ...configStore.config.dependencies,
+        excludedRepos: [{ owner: "owner", name: "excluded-repo", fullName: "owner/excluded-repo" }],
+      },
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          repoFullName: "owner/excluded-repo",
+          title: "Bump lodash from 4.1 to 4.2",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.2",
+        }),
+        makePullRequest({
+          repoFullName: "owner/other-repo",
+          title: "Bump axios from 0.27 to 1.0",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const prTab = screen.getByRole("tab", { name: /^Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("0");
+    });
+  });
+
+  it("excludedOrgs hides that org's repo's dependency PR from the Dependencies tab", async () => {
+    configStore.updateConfig({
+      dependencies: {
+        ...configStore.config.dependencies,
+        excludedOrgs: ["excluded-org"],
+      },
+    });
+
+    const user = userEvent.setup();
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          repoFullName: "excluded-org/repo-a",
+          title: "Bump lodash from 4.1 to 4.2",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.2",
+        }),
+        makePullRequest({
+          repoFullName: "other-org/repo-b",
+          title: "Bump axios from 0.27 to 1.0",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const depsTab = screen.getByRole("tab", { name: /Dependencies/ });
+      expect(depsTab.textContent?.replace(/\D+/g, "")).toBe("1");
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => {
+      expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
+      expect(screen.queryByText("lodash: 4.1 → 4.2")).toBeNull();
+    });
+  });
+
+  it("excludedOrgs repo's dependency PR does not leak into the Pull Requests tab (exclusivity preserved)", async () => {
+    configStore.updateConfig({
+      dependencies: {
+        ...configStore.config.dependencies,
+        excludedOrgs: ["excluded-org"],
+      },
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          repoFullName: "excluded-org/repo-a",
+          title: "Bump lodash from 4.1 to 4.2",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.2",
+        }),
+        makePullRequest({
+          repoFullName: "other-org/repo-b",
+          title: "Bump axios from 0.27 to 1.0",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const prTab = screen.getByRole("tab", { name: /^Pull Requests/ });
+      expect(prTab.textContent?.replace(/\D+/g, "")).toBe("0");
+    });
+  });
+
+  it("excluded repo's Dependency Dashboard issue is skipped for abandoned-package detection", async () => {
+    configStore.updateConfig({
+      dependencies: {
+        ...configStore.config.dependencies,
+        excludedRepos: [{ owner: "owner", name: "excluded-repo", fullName: "owner/excluded-repo" }],
+      },
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_excluded",
+          repoFullName: "owner/excluded-repo",
+          state: "OPEN",
+        }),
+        makeIssue({
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_other",
+          repoFullName: "owner/other-repo",
+          state: "OPEN",
+        }),
+      ],
+      pullRequests: [
+        makePullRequest({
+          repoFullName: "owner/excluded-repo",
+          title: "Bump lodash from 4.1 to 4.2",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.2",
+        }),
+        makePullRequest({
+          repoFullName: "owner/other-repo",
+          title: "Bump axios from 0.27 to 1.0",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/axios-1.0.0",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const githubService = await import("../../src/app/services/github");
+    const graphqlSpy = vi.fn().mockResolvedValue({ nodes: [], rateLimit: null });
+    vi.mocked(githubService.getClient).mockReturnValue({ graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>);
+
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+      void fetchAll().then(() => setLastRefreshAt(new Date())).catch(() => {});
+      return { isRefreshing: () => false, lastRefreshAt, manualRefresh: vi.fn(), destroy: vi.fn() };
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalled());
+
+    const [, variables] = graphqlSpy.mock.calls[0] as [string, { ids: string[] }];
+    expect(variables.ids).toContain("DASH_other");
+    expect(variables.ids).not.toContain("DASH_excluded");
+  });
+
+  it("depMeta cache entry for an excluded-but-still-tracked PR survives pruning", async () => {
+    const EXCLUDED_REPO = { owner: "owner", name: "excluded-repo", fullName: "owner/excluded-repo" };
+    const RENOVATE_BODY = [
+      "| Package | Update | Change |",
+      "|---|---|---|",
+      "| some-pkg | minor | `1.0.0` → `1.1.0` |",
+    ].join("\n");
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 100,
+          nodeId: "PR_A",
+          repoFullName: EXCLUDED_REPO.fullName,
+          title: "Update dependency some-pkg",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/some-pkg",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const githubService = await import("../../src/app/services/github");
+    const graphqlSpy = vi.fn().mockResolvedValue({
+      nodes: [{ databaseId: 100, body: RENOVATE_BODY }],
+      rateLimit: null,
+    });
+    vi.mocked(githubService.getClient).mockReturnValue({ graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>);
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const raw = localStorage.getItem("github-tracker:dep-meta");
+      expect(raw && JSON.parse(raw)).toHaveProperty("100");
+    });
+
+    // Exclude the repo, then poll again with a second PR needing its own body
+    // fetch — this re-runs the effect (and its prune step) without which the
+    // prune logic never executes again.
+    configStore.updateConfig({
+      dependencies: { ...configStore.config.dependencies, excludedRepos: [EXCLUDED_REPO] },
+    });
+    graphqlSpy.mockResolvedValue({
+      nodes: [{ databaseId: 200, body: RENOVATE_BODY }],
+      rateLimit: null,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 100,
+          nodeId: "PR_A",
+          repoFullName: EXCLUDED_REPO.fullName,
+          title: "Update dependency some-pkg",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/some-pkg",
+        }),
+        makePullRequest({
+          id: 200,
+          nodeId: "PR_B",
+          repoFullName: "owner/other-repo",
+          title: "Update dependency other-pkg",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/other-pkg",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+    if (capturedFetchAll) await capturedFetchAll();
+
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const raw = localStorage.getItem("github-tracker:dep-meta");
+      const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      // PR-A (id 100) is excluded from the visible set but must survive
+      // pruning — the prune step keys off the unfiltered dependency set.
+      expect(parsed).toHaveProperty("100");
+      expect(parsed).toHaveProperty("200");
     });
   });
 });
