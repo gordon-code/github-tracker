@@ -47,9 +47,42 @@ interface ToastItem {
   dismissing: boolean;
 }
 
+// Persisted (sessionStorage) record of the last message actually toasted per
+// source. This component only renders inside Header, which the router mounts
+// for /dashboard but not /settings — navigating away and back fully unmounts
+// and remounts it, wiping any in-memory-only dedup state. A hard page refresh
+// wipes the entire notification store too. Either way, a still-active,
+// unchanged notification (most visibly a GitHub-status outage, which can sit
+// unchanged in the store for hours) would otherwise look brand new again and
+// re-toast. sessionStorage survives both a remount and a refresh, so this is
+// the one place dedup needs to persist beyond the component's own lifetime.
+const TOASTED_MESSAGES_KEY = "github-tracker:toasted-messages";
+
+function loadToastedMessages(): Map<string, string> {
+  const raw = sessionStorage.getItem(TOASTED_MESSAGES_KEY);
+  const parsed: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(parsed)) return new Map();
+  return new Map(
+    parsed.filter(
+      (e): e is [string, string] =>
+        Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "string"
+    )
+  );
+}
+
+function persistToastedMessages(map: Map<string, string>): void {
+  sessionStorage.setItem(TOASTED_MESSAGES_KEY, JSON.stringify([...map.entries()]));
+}
+
+// Test-only reset — mirrors resetGitHubStatusState()/resetPollState() etc.
+export function resetToastState(): void {
+  sessionStorage.removeItem(TOASTED_MESSAGES_KEY);
+}
+
 export default function ToastContainer() {
   const seenTimestamps = new Map<string, number>();
   const lastToastedAt = new Map<string, number>();
+  const toastedMessages = loadToastedMessages();
   const [visibleToasts, setVisibleToasts] = createSignal<Map<string, ToastItem>>(new Map());
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
   const dismissingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -115,10 +148,13 @@ export default function ToastContainer() {
       const lastToasted = lastToastedAt.get(notif.source);
       const inCooldown = lastToasted !== undefined && Date.now() - lastToasted < COOLDOWN_MS;
       const muted = isMuted(notif.source);
+      const alreadyToasted = toastedMessages.get(notif.source) === notif.message;
 
-      if (inCooldown || muted) continue;
+      if (inCooldown || muted || alreadyToasted) continue;
 
       lastToastedAt.set(notif.source, Date.now());
+      toastedMessages.set(notif.source, notif.message);
+      persistToastedMessages(toastedMessages);
       setVisibleToasts((prev) => {
         const next = new Map(prev);
         next.set(notif.id, { notification: notif, dismissing: false });
@@ -135,6 +171,14 @@ export default function ToastContainer() {
     for (const source of lastToastedAt.keys()) {
       if (!currentSources.has(source)) lastToastedAt.delete(source);
     }
+    let toastedMessagesChanged = false;
+    for (const source of toastedMessages.keys()) {
+      if (!currentSources.has(source)) {
+        toastedMessages.delete(source);
+        toastedMessagesChanged = true;
+      }
+    }
+    if (toastedMessagesChanged) persistToastedMessages(toastedMessages);
     for (const id of visibleToasts().keys()) {
       if (!currentIds.has(id)) {
         const t = timeouts.get(id);

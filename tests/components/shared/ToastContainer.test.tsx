@@ -8,11 +8,12 @@ import {
   dismissError,
   getNotifications,
 } from "../../../src/app/lib/errors";
-import ToastContainer from "../../../src/app/components/shared/ToastContainer";
+import ToastContainer, { resetToastState } from "../../../src/app/components/shared/ToastContainer";
 
 beforeEach(() => {
   clearNotifications();
   clearMutedSources();
+  resetToastState();
   vi.useFakeTimers();
   // Ensure matchMedia returns non-reduced-motion
   vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
@@ -152,5 +153,77 @@ describe("ToastContainer", () => {
 
     // Toast should be removed (store pruning path)
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("does not re-toast a still-active notification across a remount (e.g. dashboard -> settings -> dashboard nav)", () => {
+    const first = render(() => <ToastContainer />);
+    pushNotification("github-status", "Actions Outage", "error");
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    // Simulate navigating away: ToastContainer/Header only render inside
+    // DashboardPage, so leaving /dashboard unmounts this component while the
+    // notification (an ongoing outage) stays in the store, unchanged.
+    first.unmount();
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Simulate navigating back: a fresh mount, same unchanged notification
+    // still present in the store — must not replay the toast.
+    render(() => <ToastContainer />);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("still toasts a genuinely new notification for the same source after a remount", () => {
+    const first = render(() => <ToastContainer />);
+    pushNotification("github-status", "Actions Outage", "error");
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    first.unmount();
+
+    // A distinct incident (new message) resolves the prior one and starts —
+    // must still surface as a toast even though this source was already
+    // toasted once before the remount.
+    pushNotification("github-status", "Issues Outage", "error");
+    render(() => <ToastContainer />);
+    const alerts = screen.queryAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].textContent).toContain("Issues Outage");
+  });
+
+  it("does not re-toast after a simulated hard refresh (sessionStorage survives, in-memory state does not)", () => {
+    const first = render(() => <ToastContainer />);
+    pushNotification("github-status", "Actions Outage", "error");
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+    first.unmount();
+
+    // A hard refresh wipes the notification store itself (module-level state
+    // resets), but NOT sessionStorage. Simulate that: clear the store the way
+    // a fresh page load would leave it, then re-announce the same unchanged
+    // outage on the next poll cycle after reload — exactly what
+    // notifyTransitions() does today (it unconditionally re-pushes for any
+    // still-active incident).
+    clearNotifications();
+    pushNotification("github-status", "Actions Outage", "error");
+
+    render(() => <ToastContainer />);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("re-toasts once a source's notification clears and later recurs with the same text", () => {
+    const first = render(() => <ToastContainer />);
+    pushNotification("github-status", "Actions Outage", "error");
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    // Incident fully resolves — source drops out of the store entirely.
+    const notifId = getNotifications()[0].id;
+    dismissError(notifId);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    first.unmount();
+
+    // A later, unrelated incident happens to have identical text — should
+    // not be suppressed forever just because the same string was toasted once.
+    pushNotification("github-status", "Actions Outage", "error");
+    render(() => <ToastContainer />);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
   });
 });
