@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@octokit/core": "7.0.6",
-    "@octokit/plugin-paginate-rest": "14.0.0",
+    "@octokit/plugin-paginate-rest": "15.0.0",
     "@octokit/plugin-retry": "8.1.0",
     "@octokit/plugin-throttling": "11.0.3",
     "@types/ws": "8.18.1",
