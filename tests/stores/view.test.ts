@@ -27,6 +27,7 @@ import {
   lockRepo,
   untrackJiraItem,
   moveJiraItem,
+  setJiraCustomOrder,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem, ViewState } from "../../src/app/stores/view";
 import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
@@ -271,26 +272,399 @@ describe("pruneStaleIgnoredItems", () => {
 });
 
 describe("initViewPersistence", () => {
-  it("persists state changes to localStorage via createEffect", async () => {
+  // Shared harness: every test in this block needs fake timers, a createRoot
+  // to host initViewPersistence()'s effect, and real-timer restoration
+  // afterward. `fn` receives `dispose` so tests can end the root whenever
+  // their scenario requires (immediately, to test flush-on-disposal; or at
+  // the end, after asserting the debounced write). `dispose()` is called
+  // unconditionally in `finally` (idempotent in Solid — a no-op if the test
+  // already called it) so a thrown assertion mid-test can't leave this
+  // root's createEffect/storage-listener live against the shared, module-level
+  // `viewState`, where it would keep firing (with real timers already
+  // restored) against later, unrelated tests.
+  async function withViewPersistence(fn: (dispose: () => void) => Promise<void> | void): Promise<void> {
     vi.useFakeTimers();
     let dispose!: () => void;
     createRoot((d) => {
       dispose = d;
       initViewPersistence();
-      setGlobalFilter("testorg", "testrepo");
     });
+    try {
+      await fn(dispose);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  }
 
-    // SolidJS effects are scheduled as microtasks — flush with a tick
+  // Reads whatever's currently on disk, or falls back to the live in-memory
+  // viewState on the very first write of a test.
+  function currentOnDisk(): Record<string, unknown> {
+    return JSON.parse(localStorageMock.getItem(VIEW_KEY) ?? JSON.stringify(viewState));
+  }
+
+  // Simulates another tab writing directly to localStorage — merges `overrides`
+  // onto whatever's already on disk.
+  function seedOtherTabWrite(overrides: Record<string, unknown>): void {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({ ...currentOnDisk(), ...overrides }));
+  }
+
+  it("persists state changes to localStorage via createEffect", async () => {
+    await withViewPersistence(async (dispose) => {
+      setGlobalFilter("testorg", "testrepo");
+      // SolidJS effects are scheduled as microtasks — flush with a tick
+      await Promise.resolve();
+      // Persistence is debounced by 200ms
+      vi.advanceTimersByTime(200);
+
+      const raw = localStorageMock.getItem(VIEW_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.globalFilter.org).toBe("testorg");
+      expect(parsed.globalFilter.repo).toBe("testrepo");
+      dispose();
+    });
+  });
+
+  it("coalesces two separate changes within the debounce window into a single write of the latest state", async () => {
+    // Regression test: the debounce effect's flush-on-cleanup must be
+    // registered on the OUTER owner, not nested inside createEffect. Solid
+    // invokes onCleanup on both disposal AND recomputation — if nested
+    // inside the effect, a second change arriving before the first change's
+    // 200ms timer fires would flush the FIRST (stale) snapshot immediately
+    // instead of coalescing into one trailing write of the latest state.
+    await withViewPersistence(async (dispose) => {
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(50); // well within the 200ms window
+
+      setGlobalFilter("org2", "repo2");
+      await Promise.resolve();
+      // No write should have happened yet from either change.
+      expect(setItemSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(200);
+
+      // Exactly one write, reflecting the latest (second) state.
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org2");
+      expect(parsed.globalFilter.repo).toBe("repo2");
+
+      setItemSpy.mockRestore();
+      dispose();
+    });
+  });
+
+  it("preserves another tab's concurrent write to a field this tab didn't touch (merge-on-write)", async () => {
+    await withViewPersistence(async (dispose) => {
+      // Simulate another tab writing directly to localStorage — a full
+      // ViewState-shaped blob differing only in jiraCustomOrder, a field this
+      // tab has never touched (still at its boot-time baseline of []).
+      seedOtherTabWrite({ jiraCustomOrder: ["OTHER-1"] });
+
+      // This tab changes an unrelated field, triggering its own debounced write.
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      // The other tab's jiraCustomOrder write must survive — this tab never
+      // touched that field, so its own stale in-memory copy (still []) must
+      // NOT clobber what's already on disk.
+      expect(parsed.jiraCustomOrder).toEqual(["OTHER-1"]);
+
+      dispose();
+    });
+  });
+
+  it("this tab's own concurrent change to a field wins over a divergent on-disk value for that same field", async () => {
+    await withViewPersistence(async (dispose) => {
+      seedOtherTabWrite({ jiraCustomOrder: ["OTHER-1"] });
+
+      // This tab ALSO changes jiraCustomOrder itself — its own value should win
+      // over whatever the other tab wrote, since this tab's change is more recent.
+      setJiraCustomOrder(["MINE-1", "MINE-2"]);
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.jiraCustomOrder).toEqual(["MINE-1", "MINE-2"]);
+
+      dispose();
+    });
+  });
+
+  it("drops unknown/unrecognized keys from the on-disk blob before merging (schema allowlist)", async () => {
+    // Regression test: localStorage is writable by any same-origin script
+    // (extensions, a stale/incompatible schema version, manual tampering).
+    // readOnDiskState() must filter the parsed blob down to known
+    // ViewStateSchema top-level keys before commitSnapshot() folds it into
+    // the merged write — otherwise unrecognized content would be perpetually
+    // re-persisted instead of self-healing on the next write.
+    await withViewPersistence(async (dispose) => {
+      const onDiskBeforeTamper = JSON.parse(localStorageMock.getItem(VIEW_KEY) ?? JSON.stringify(viewState));
+      const taintedJson = JSON.stringify({ ...onDiskBeforeTamper, maliciousInjectedField: "should not survive" });
+      // Splice in a literal "__proto__" key at the JSON-text level — `{...x, __proto__: y}`
+      // as an object-literal would set the object's actual prototype (a language special
+      // case) rather than produce JSON text containing a "__proto__" key. JSON.parse, by
+      // contrast, does NOT apply that special-case magic: parsing `{"__proto__":{...}}`
+      // creates a plain OWN property literally named "__proto__" — which is the actual
+      // shape a tampered localStorage blob would take, and what readOnDiskState() must
+      // filter out via the schema allowlist rather than relying on spread's inertness alone.
+      const tainted = taintedJson.slice(0, -1) + ',"__proto__":{"polluted":true}}';
+      localStorageMock.setItem(VIEW_KEY, tainted);
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      expect(parsed.maliciousInjectedField).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(false);
+      expect(Object.getPrototypeOf({})).not.toHaveProperty("polluted");
+
+      dispose();
+    });
+  });
+
+  it("drops a known key's value from the on-disk blob when it fails that field's own schema validation", async () => {
+    // Regression test: the allowlist in readOnDiskState() must validate each
+    // known key's VALUE against ViewStateSchema (not just its NAME) before
+    // folding it into the merge — a structurally-valid-key-but-malformed-value
+    // (e.g. jiraCustomOrder holding an object instead of a string array)
+    // would otherwise survive the {...onDisk} spread untouched and be
+    // re-persisted forever, never passing through Zod validation on write.
+    await withViewPersistence(async (dispose) => {
+      const onDiskBeforeTamper = JSON.parse(localStorageMock.getItem(VIEW_KEY) ?? JSON.stringify(viewState));
+      localStorageMock.setItem(VIEW_KEY, JSON.stringify({
+        ...onDiskBeforeTamper,
+        jiraCustomOrder: { foo: "bar" }, // wrong shape: object instead of string[]
+      }));
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      // The malformed jiraCustomOrder must be dropped, not echoed back — this
+      // tab's own (valid, empty) value fills the gap instead.
+      expect(parsed.jiraCustomOrder).toEqual([]);
+
+      dispose();
+    });
+  });
+
+  it("preserves this tab's known value for a key missing entirely from a corrupted/stale on-disk blob", async () => {
+    await withViewPersistence(async (dispose) => {
+      setJiraCustomOrder(["MINE-1"]);
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)!).jiraCustomOrder).toEqual(["MINE-1"]);
+
+      // Simulate a stale/corrupted on-disk blob missing jiraCustomOrder entirely
+      // (version skew, manual tampering) — this tab's own last-known value for
+      // that key must survive even though it hasn't changed since baseline.
+      const onDisk = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      delete onDisk.jiraCustomOrder;
+      localStorageMock.setItem(VIEW_KEY, JSON.stringify(onDisk));
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      expect(parsed.jiraCustomOrder).toEqual(["MINE-1"]);
+
+      dispose();
+    });
+  });
+
+  it("falls back to this tab's own full snapshot when the on-disk blob is malformed JSON", async () => {
+    await withViewPersistence(async (dispose) => {
+      localStorageMock.setItem(VIEW_KEY, "{not valid json");
+
+      expect(() => {
+        setGlobalFilter("org1", "repo1");
+      }).not.toThrow();
+      await Promise.resolve();
+      expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      // Must be the FULL snapshot, not just the one field this test changed —
+      // an untouched default field must also be present, ruling out a
+      // regression that wrote only a partial object on this fallback path.
+      expect(parsed.lastActiveTab).toBe("issues");
+      expect(parsed.jiraCustomOrder).toEqual([]);
+
+      dispose();
+    });
+  });
+
+  it("falls back to this tab's own full snapshot when the on-disk blob is a JSON array or primitive", async () => {
+    await withViewPersistence(async (dispose) => {
+      localStorageMock.setItem(VIEW_KEY, "[1,2,3]");
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      expect(parsed.globalFilter.org).toBe("org1");
+      expect(parsed.lastActiveTab).toBe("issues");
+
+      dispose();
+    });
+  });
+
+  it("pushes a warning notification and does not throw when localStorage.setItem fails (e.g. quota exceeded)", async () => {
+    await withViewPersistence(async (dispose) => {
+      clearNotifications();
+      vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+
+      const notifications = getNotifications();
+      expect(notifications.some((n) => n.source === "localStorage:view")).toBe(true);
+
+      vi.mocked(localStorageMock.setItem).mockRestore();
+      dispose();
+    });
+  });
+
+  it("flushes a pending debounced write synchronously on disposal (unmount/HMR)", async () => {
+    await withViewPersistence(async (dispose) => {
+      setGlobalFilter("unmount-org", "unmount-repo");
+      await Promise.resolve();
+      // Dispose before the 200ms debounce timer ever fires.
+      dispose();
+
+      const raw = localStorageMock.getItem(VIEW_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.globalFilter.org).toBe("unmount-org");
+      expect(parsed.globalFilter.repo).toBe("unmount-repo");
+    });
+  });
+});
+
+describe("initViewPersistence — genuine two-tab concurrency", () => {
+  // Unlike the "preserves another tab's concurrent write" tests above (which
+  // simulate "tab B" via a single synchronous localStorage.setItem call
+  // representing an already-completed write), this describe block spins up
+  // TWO fully independent module instances of stores/view.ts via
+  // vi.resetModules() + fresh dynamic imports — each with its own in-memory
+  // viewState, its own commitSnapshot()/lastSyncedSnapshot closure, and its
+  // own live createEffect/debounce timer — sharing only the same
+  // localStorageMock (the one durable channel two real browser tabs would
+  // actually share). This exercises the hardest case for the merge-on-write
+  // algorithm: two tabs changing the SAME field around the same time.
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  async function importFreshViewModule() {
+    vi.resetModules();
+    return import("../../src/app/stores/view");
+  }
+
+  it("whichever tab's commitSnapshot() actually runs last wins when both change the same field at the same tick", async () => {
+    vi.useFakeTimers();
+    const tabA = await importFreshViewModule();
+    const tabB = await importFreshViewModule();
+
+    let disposeA!: () => void;
+    let disposeB!: () => void;
+    createRoot((d) => { disposeA = d; tabA.initViewPersistence(); });
+    createRoot((d) => { disposeB = d; tabB.initViewPersistence(); });
+
+    // A changes first, B changes second, both at essentially the same fake-timer
+    // tick — both 200ms timers are scheduled for the identical target time, so
+    // JS timer FIFO ordering (registration order) fires A's callback before B's.
+    tabA.setJiraCustomOrder(["FROM-A"]);
     await Promise.resolve();
-    // Persistence is debounced by 200ms
+    tabB.setJiraCustomOrder(["FROM-B"]);
+    await Promise.resolve();
+
     vi.advanceTimersByTime(200);
 
-    const raw = localStorageMock.getItem(VIEW_KEY);
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!);
-    expect(parsed.globalFilter.org).toBe("testorg");
-    expect(parsed.globalFilter.repo).toBe("testrepo");
-    dispose();
+    // B's commit runs strictly after A's (registered later, same target time),
+    // so B's write is the one that lands last on disk.
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    expect(parsed.jiraCustomOrder).toEqual(["FROM-B"]);
+
+    disposeA();
+    disposeB();
+    vi.useRealTimers();
+  });
+
+  it("reversing which tab changes the field last reverses which value wins", async () => {
+    vi.useFakeTimers();
+    const tabA = await importFreshViewModule();
+    const tabB = await importFreshViewModule();
+
+    let disposeA!: () => void;
+    let disposeB!: () => void;
+    createRoot((d) => { disposeA = d; tabA.initViewPersistence(); });
+    createRoot((d) => { disposeB = d; tabB.initViewPersistence(); });
+
+    // B changes first this time, A changes second — A's commit should now
+    // run last and win.
+    tabB.setJiraCustomOrder(["FROM-B"]);
+    await Promise.resolve();
+    tabA.setJiraCustomOrder(["FROM-A"]);
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(200);
+
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    expect(parsed.jiraCustomOrder).toEqual(["FROM-A"]);
+
+    disposeA();
+    disposeB();
+    vi.useRealTimers();
+  });
+
+  it("a tab's unrelated field change does not clobber the other tab's more recent same-field write", async () => {
+    vi.useFakeTimers();
+    const tabA = await importFreshViewModule();
+    const tabB = await importFreshViewModule();
+
+    let disposeA!: () => void;
+    let disposeB!: () => void;
+    createRoot((d) => { disposeA = d; tabA.initViewPersistence(); });
+    createRoot((d) => { disposeB = d; tabB.initViewPersistence(); });
+
+    // B writes jiraCustomOrder and its debounced commit fully completes first.
+    tabB.setJiraCustomOrder(["FROM-B"]);
+    await Promise.resolve();
+    vi.advanceTimersByTime(200);
+    expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)!).jiraCustomOrder).toEqual(["FROM-B"]);
+
+    // A, which never touched jiraCustomOrder, now changes an unrelated field.
+    // A's own stale in-memory jiraCustomOrder ([]) must NOT overwrite B's
+    // already-committed value merely because A is writing at all.
+    tabA.setGlobalFilter("org1", "repo1");
+    await Promise.resolve();
+    vi.advanceTimersByTime(200);
+
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    expect(parsed.globalFilter.org).toBe("org1");
+    expect(parsed.jiraCustomOrder).toEqual(["FROM-B"]);
+
+    disposeA();
+    disposeB();
     vi.useRealTimers();
   });
 });

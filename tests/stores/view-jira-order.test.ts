@@ -60,6 +60,15 @@ describe("jira custom order store actions", () => {
       setJiraCustomOrder(["PROJ-1", tooLong, atLimit, "PROJ-2"]);
       expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", atLimit, "PROJ-2"]);
     });
+
+    it("drops non-string entries instead of throwing when given malformed input", () => {
+      // order is typed string[], but the only production caller builds it from
+      // live, unvalidated Jira API data — guard against a non-string slipping
+      // through at runtime despite the type signature.
+      const malformed = ["PROJ-1", 42, null, undefined, "PROJ-2"] as unknown as string[];
+      expect(() => setJiraCustomOrder(malformed)).not.toThrow();
+      expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2"]);
+    });
   });
 
   describe("pruneJiraCustomOrder", () => {

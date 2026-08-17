@@ -8,11 +8,33 @@ let mockTrackedItems: Array<{ source: string; jiraKey?: string }> = [];
 let mockJiraFilters: { scope: string; statusCategory: string; priority: string; sortField: string; sortDirection: string } = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" };
 let mockJiraCustomOrder: string[] = [];
 
+// Lazily-created trigger signal (NOT created at vi.mock hoist time — solid-js's
+// createSignal isn't safely callable there, since vi.mock factories may run
+// before this file's `import { createSignal } from "solid-js"` has resolved).
+// Reading it inside the tabFilters Proxy trap below registers a genuine Solid
+// dependency, so bumpMockJiraFilters() can force filters() (a createMemo in
+// JiraAssignedTab.tsx) to re-evaluate AFTER mount. Plain `mockJiraFilters = {...}`
+// reassignment (used by ~90 pre-existing tests that only need to set state
+// BEFORE render()) is untouched and still works exactly as before — this signal
+// is purely an opt-in for tests that need a LIVE, post-mount filter change.
+let _jiraFiltersVersion: [() => number, (v: number | ((p: number) => number)) => void] | undefined;
+function jiraFiltersVersionSignal() {
+  if (!_jiraFiltersVersion) _jiraFiltersVersion = createSignal(0);
+  return _jiraFiltersVersion;
+}
+function bumpMockJiraFilters(next: typeof mockJiraFilters): void {
+  mockJiraFilters = next;
+  jiraFiltersVersionSignal()[1]((v) => v + 1);
+}
+
 vi.mock("../../../src/app/stores/view", () => ({
   viewState: new Proxy({} as Record<string, unknown>, {
     get(_t, key: string) {
       if (key === "trackedItems") return mockTrackedItems;
-      if (key === "tabFilters") return { jiraAssigned: mockJiraFilters };
+      if (key === "tabFilters") {
+        jiraFiltersVersionSignal()[0](); // register reactive dependency
+        return { jiraAssigned: mockJiraFilters };
+      }
       if (key === "lockedRepos") return {};
       if (key === "expandedRepos") return { jiraAssigned: new Proxy({}, { get: () => true }) };
       if (key === "jiraCustomOrder") return mockJiraCustomOrder;
@@ -27,13 +49,14 @@ vi.mock("../../../src/app/stores/view", () => ({
   setAllExpanded: vi.fn(),
   setJiraCustomOrder: vi.fn(),
   JIRA_CUSTOM_ORDER_SCOPE: "assigned",
+  JIRA_CUSTOM_SORT_FIELD: "custom",
 }));
 
 vi.mock("../../../src/app/stores/config", () => ({
   config: { enableTracking: false },
 }));
 
-import JiraAssignedTab, { _resetJiraTabState } from "../../../src/app/components/dashboard/JiraAssignedTab";
+import JiraAssignedTab, { _resetJiraTabState, _getItemRefsCount } from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
 import { trackItem, untrackJiraItem, setAllExpanded, setTabFilter, setJiraCustomOrder } from "../../../src/app/stores/view";
@@ -654,6 +677,23 @@ describe("JiraAssignedTab", () => {
 
       expect(vi.mocked(setAllExpanded)).toHaveBeenCalledWith("jiraAssigned", ["ALPHA", "BETA"], true);
     });
+
+    it("clears itemRefs when the sortField changes away from custom while still mounted (live mode switch)", () => {
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      // Rows are mounted in custom mode, so their ref callbacks have populated
+      // the module-level itemRefs map.
+      expect(_getItemRefsCount()).toBeGreaterThan(0);
+
+      // Switch to a grouped sort WITHOUT unmounting — exercises the itemRefs
+      // pruning effect's early-return branch (itemRefs.clear() instead of a
+      // bare `return`), not the separate onCleanup-on-unmount path.
+      bumpMockJiraFilters({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" });
+
+      expect(_getItemRefsCount()).toBe(0);
+    });
   });
 
   describe("custom order — arrow button interactions", () => {
@@ -979,6 +1019,30 @@ describe("JiraAssignedTab", () => {
 
       expect(vi.mocked(setTabFilter)).toHaveBeenCalledWith("jiraAssigned", "sortField", "custom");
       expect(screen.getByText(/page 1 of 2/i)).toBeTruthy();
+    });
+  });
+
+  describe("custom order — cleanup on unmount", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("clears the pending reorder-lockout timeout on unmount so it cannot fire after disposal", () => {
+      vi.useFakeTimers();
+      const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+      mockJiraFilters = customFilters();
+      const issues = [makeIssue("PROJ-1"), makeIssue("PROJ-2")];
+      const { unmount } = render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
+
+      screen.getByRole("button", { name: "Move down: PROJ-1" }).click();
+      // A 200ms reorder-lockout timeout is now pending.
+      clearTimeoutSpy.mockClear();
+      unmount();
+
+      // onCleanup must clear the pending timeout so it cannot fire setReordering
+      // on a disposed component after a tab switch mid-lockout.
+      expect(clearTimeoutSpy).toHaveBeenCalled();
     });
   });
 });

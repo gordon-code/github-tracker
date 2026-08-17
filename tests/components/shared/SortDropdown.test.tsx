@@ -139,4 +139,44 @@ describe("SortDropdown", () => {
     expect(opts.some((t) => t.includes("(most)"))).toBe(true);
     expect(opts.some((t) => t.includes("(fewest)"))).toBe(true);
   });
+
+  it("renders default 'Sort by' placeholder text when no placeholder prop is given and value doesn't match any option", () => {
+    render(() => (
+      <SortDropdown
+        options={options}
+        value="nonexistent-field"
+        direction="desc"
+        onChange={vi.fn()}
+      />
+    ));
+    expect(screen.getByText("Sort by")).toBeTruthy();
+  });
+
+  it("renders custom placeholder text when placeholder prop is given and value doesn't match any option", () => {
+    render(() => (
+      <SortDropdown
+        options={options}
+        value="nonexistent-field"
+        direction="desc"
+        onChange={vi.fn()}
+        placeholder="Custom order"
+      />
+    ));
+    expect(screen.getByText("Custom order")).toBeTruthy();
+    expect(screen.queryByText("Sort by")).toBeNull();
+  });
+
+  it("renders the selected option's label instead of the placeholder when value matches a real option", () => {
+    render(() => (
+      <SortDropdown
+        options={options}
+        value="title"
+        direction="asc"
+        onChange={vi.fn()}
+        placeholder="Custom order"
+      />
+    ));
+    expect(screen.getByText("Title (A-Z)")).toBeTruthy();
+    expect(screen.queryByText("Custom order")).toBeNull();
+  });
 });

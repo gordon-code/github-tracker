@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show, on, onCleanup } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
-import { viewState, setTabFilter, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded, setJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE } from "../../stores/view";
+import { viewState, setTabFilter, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded, setJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE, JIRA_CUSTOM_SORT_FIELD } from "../../stores/view";
 import { config } from "../../stores/config";
 import JiraFieldValue from "./JiraFieldValue";
 import { jiraStatusCategoryClass, stripParenthetical } from "../../lib/format";
@@ -90,6 +90,14 @@ let _jiraExpandInitialized = false;
 
 export function _resetJiraTabState() {
   _jiraExpandInitialized = false;
+  itemRefs.clear();
+}
+
+// Test-only accessor for the module-level itemRefs Map (see below) — lets
+// tests verify the mode-exit cleanup effect actually clears stale DOM refs
+// without exposing itemRefs itself.
+export function _getItemRefsCount(): number {
+  return itemRefs.size;
 }
 
 const ISSUE_TYPE_ICONS: Record<string, { path: string; color: string }> = Object.assign(
@@ -124,7 +132,7 @@ function IssueTypeFallbackIcon(props: { name: string }) {
 
 // FLIP animation: record positions before a custom-order move, animate slide after
 // DOM updates. Modeled on TrackedTab.tsx's recordPositions/animateMove/prefersReducedMotion
-// trio (TrackedTab.tsx:31-59) — deliberately duplicated here rather than extracted into a
+// trio — deliberately duplicated here rather than extracted into a
 // shared utility (see plan Task 3, Step 5).
 //
 // Deviation from TrackedTab.tsx: TrackedTab's animateMove only guards with
@@ -216,7 +224,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   });
 
   const filteredSorted = createMemo(() => {
-    if (filters().sortField === "custom") {
+    if (filters().sortField === JIRA_CUSTOM_SORT_FIELD) {
       return applyCustomOrder(filtered(), viewState.jiraCustomOrder, (issue) => issue.key);
     }
     const items = [...filtered()];
@@ -311,7 +319,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     return orderRepoGroups(withLocked, lockedForTab);
   });
 
-  const isCustomMode = () => filters().sortField === "custom";
+  const isCustomMode = () => filters().sortField === JIRA_CUSTOM_SORT_FIELD;
 
   // itemsWithGroupKey() is a 1:1, order-preserving map over filteredSorted() (adds
   // repoFullName, never filters/reorders), so paginating it directly yields the same
@@ -326,7 +334,10 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
   // Prune itemRefs to current-page items in custom mode so the map does not grow
   // unbounded across pages, filter changes, and data refreshes (Finding 2 & 3).
   createEffect(() => {
-    if (!isCustomMode()) return;
+    if (!isCustomMode()) {
+      itemRefs.clear();
+      return;
+    }
     const pageItemKeys = new Set(customPageItems().map(item => item.key));
     for (const key of itemRefs.keys()) {
       if (!pageItemKeys.has(key)) itemRefs.delete(key);
@@ -362,10 +373,16 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     filters().scope === JIRA_CUSTOM_ORDER_SCOPE && filters().statusCategory === "all" && filters().priority === "all";
 
   const [reordering, setReordering] = createSignal(false);
+  let reorderTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   // Clear the module-level itemRefs map when the component unmounts (e.g. tab
   // switch) so detached DOM references are not leaked across mount cycles.
-  onCleanup(() => itemRefs.clear());
+  // Also clear any pending reordering-lockout timeout so it doesn't fire
+  // setReordering on a disposed component after a tab switch mid-lockout.
+  onCleanup(() => {
+    itemRefs.clear();
+    clearTimeout(reorderTimeoutId);
+  });
 
   function handleCustomMove(jiraKey: string, direction: "up" | "down") {
     if (!canReorder()) return;
@@ -386,7 +403,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     setReordering(true);
     if (prefersReducedMotion()) {
       // Reduced motion: no animation ever, but still guard against a viewport jump
-      // from the mutation itself (matches withFlipAnimation's fallback, scroll.ts:27-29).
+      // from the mutation itself (matches withFlipAnimation's reduced-motion fallback in scroll.ts).
       withScrollLock(applyMove);
     } else if (crossesPage) {
       // Cross-page moves must skip the FLIP animation entirely (spike pl-feas-2): the
@@ -403,7 +420,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     // from queuing moves in the reduced-motion and cross-page paths where the lockout
     // was previously reset synchronously (Finding 5).  Value matches animateMove's
     // `duration: 200` — keep them in sync.
-    setTimeout(() => setReordering(false), 200);
+    reorderTimeoutId = setTimeout(() => setReordering(false), 200);
   }
 
   function renderIssueRow(issue: JiraItem, boundary?: { isFirst: boolean; isLast: boolean }) {
@@ -652,12 +669,12 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           <span class="text-xs text-base-content/50">
             {filtered().length} issue{filtered().length !== 1 ? "s" : ""}
           </span>
-          <Show when={filters().sortField !== "custom"}>
+          <Show when={!isCustomMode()}>
             <button
               type="button"
               class="btn btn-ghost btn-xs"
               onClick={() => {
-                setTabFilter("jiraAssigned", "sortField", "custom");
+                setTabFilter("jiraAssigned", "sortField", JIRA_CUSTOM_SORT_FIELD);
                 setPage(0);
               }}
             >
@@ -668,7 +685,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
             options={JIRA_SORT_OPTIONS}
             value={filters().sortField}
             direction={filters().sortDirection}
-            placeholder={filters().sortField === "custom" ? "Custom order" : "Sort by"}
+            placeholder={isCustomMode() ? "Custom order" : "Sort by"}
             onChange={(field, dir) => {
               setTabFilter("jiraAssigned", "sortField", field);
               setTabFilter("jiraAssigned", "sortDirection", dir);

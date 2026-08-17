@@ -479,13 +479,16 @@ export default function DashboardPage() {
       if (!isJiraAuthenticated()) return;
       setJiraIssues(result.issues);
 
-      // Only prune when the result set is complete. `result.total` reflects the true
-      // match count while `result.issues` is capped at maxResults — if more issues
-      // exist than were returned (pagination truncation), skip pruning: treating
-      // "not in this page" as "no longer exists" would permanently destroy
-      // user-curated custom-order positions for issues that are simply on a later
-      // page, not actually gone (closed, reassigned, or resolved).
-      if (scope === JIRA_CUSTOM_ORDER_SCOPE && result.total <= result.issues.length) {
+      // Only prune when the result set is complete. The Enhanced JQL Search
+      // endpoint (search/jql) does not return a `total` match count — it uses
+      // cursor-based pagination via `nextPageToken` instead. A defined
+      // nextPageToken means more results exist beyond this page (pagination
+      // truncation); its absence means this page is the complete result set.
+      // Treating "not in this page" as "no longer exists" on a truncated page
+      // would permanently destroy user-curated custom-order positions for
+      // issues that are simply on a later page, not actually gone (closed,
+      // reassigned, or resolved).
+      if (scope === JIRA_CUSTOM_ORDER_SCOPE && result.nextPageToken === undefined) {
         pruneJiraCustomOrder(new Set(result.issues.map((i) => i.key)));
       }
 
