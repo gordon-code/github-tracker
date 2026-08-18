@@ -1224,3 +1224,76 @@ describe("setAuthFromPat", () => {
     expect(configMod.config.authMethod).toBe("oauth");
   });
 });
+
+describe("setAuthFromPat — identity switch", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+
+  const userA = { login: "usera", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "User A" };
+  const userB = { login: "userb", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "User B" };
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does not run onAuthCleared callbacks on the first setAuthFromPat call (no previous identity)", () => {
+    const cb = vi.fn();
+    mod.onAuthCleared(cb);
+    mod.setAuthFromPat("ghp_token1", userA);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("does not run onAuthCleared callbacks when replacing a token for the same identity (case-insensitive)", () => {
+    mod.setAuthFromPat("ghp_token1", userA);
+    const cb = vi.fn();
+    mod.onAuthCleared(cb);
+    mod.setAuthFromPat("ghp_token2", { ...userA, login: userA.login.toUpperCase() });
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("runs onAuthCleared callbacks when setAuthFromPat switches to a different GitHub identity", () => {
+    mod.setAuthFromPat("ghp_token1", userA);
+    const cb = vi.fn();
+    mod.onAuthCleared(cb);
+    mod.setAuthFromPat("ghp_token2", userB);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(mod.user()).toEqual(userB);
+  });
+
+  it("still adopts the new identity even if a registered callback throws during an identity switch", () => {
+    mod.setAuthFromPat("ghp_token1", userA);
+    mod.onAuthCleared(() => {
+      throw new Error("boom");
+    });
+    expect(() => mod.setAuthFromPat("ghp_token2", userB)).not.toThrow();
+    expect(mod.user()).toEqual(userB);
+    expect(mod.token()).toBe("ghp_token2");
+  });
+
+  it("clears config and view localStorage keys on a genuine identity switch", () => {
+    mod.setAuthFromPat("ghp_token1", userA);
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+
+    mod.setAuthFromPat("ghp_token2", userB);
+
+    expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+  });
+
+  it("preserves config and view localStorage keys when replacing a token for the same identity", () => {
+    mod.setAuthFromPat("ghp_token1", userA);
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+
+    mod.setAuthFromPat("ghp_token2", userA);
+
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+});
