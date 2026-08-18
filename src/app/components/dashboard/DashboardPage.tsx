@@ -9,7 +9,7 @@ import PullRequestsTab from "./PullRequestsTab";
 import TrackedTab from "./TrackedTab";
 import PersonalSummaryStrip from "./PersonalSummaryStrip";
 import { config, setConfig, getCustomTab, isBuiltinTab, isActionsBasedTab, isTabUnscoped, updateJiraConfig, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, setSortPreference, pruneClosedTrackedItems, removeCustomTabState, untrackJiraItem, setTabFilter, IssueFiltersSchema, PullRequestFiltersSchema, ActionsFiltersSchema, pruneJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE } from "../../stores/view";
 import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
@@ -478,6 +478,19 @@ export default function DashboardPage() {
       }
       if (!isJiraAuthenticated()) return;
       setJiraIssues(result.issues);
+
+      // Only prune when the result set is complete. The Enhanced JQL Search
+      // endpoint (search/jql) does not return a `total` match count — it uses
+      // cursor-based pagination via `nextPageToken` instead. A defined
+      // nextPageToken means more results exist beyond this page (pagination
+      // truncation); its absence means this page is the complete result set.
+      // Treating "not in this page" as "no longer exists" on a truncated page
+      // would permanently destroy user-curated custom-order positions for
+      // issues that are simply on a later page, not actually gone (closed,
+      // reassigned, or resolved).
+      if (scope === JIRA_CUSTOM_ORDER_SCOPE && result.nextPageToken === undefined) {
+        pruneJiraCustomOrder(new Set(result.issues.map((i) => i.key)));
+      }
 
       // Auto-prune tracked Jira items that are done or deleted (scope-independent).
       // Resolves status from current search results first, then bulkFetches only

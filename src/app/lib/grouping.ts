@@ -91,6 +91,41 @@ export function orderRepoGroups<G extends { repoFullName: string }>(
 }
 
 /**
+ * Orders `items` by `order` (a list of keys produced by `keyFn`), appending any
+ * items not referenced in `order` at the end, in their original relative order.
+ * If two items share the same key, the later one in `items` wins. `order` is
+ * walked as-is and is not itself deduplicated — a key appearing twice in `order`
+ * will pull the matching item twice into the result.
+ * Returns `items` unchanged (same reference) when `order` is empty.
+ */
+export function applyCustomOrder<T>(items: T[], order: string[], keyFn: (item: T) => string): T[] {
+  if (order.length === 0) return items;
+
+  const map = new Map<string, T>();
+  for (const item of items) {
+    map.set(keyFn(item), item);
+  }
+
+  const referenced = new Set<string>();
+  const result: T[] = [];
+  for (const key of order) {
+    const item = map.get(key);
+    if (item !== undefined) {
+      result.push(item);
+      referenced.add(key);
+    }
+  }
+
+  for (const [key, item] of map) {
+    if (!referenced.has(key)) {
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Three-tier involvement check for scope filtering.
  * Shared by IssuesTab and PullRequestsTab — keep both call sites in sync.
  *

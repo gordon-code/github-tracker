@@ -7,6 +7,10 @@ export const VIEW_STORAGE_KEY = "github-tracker:view";
 const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
 export const LOCKED_REPOS_CAP = 50;
+export const JIRA_CUSTOM_ORDER_CAP = 500;
+export const JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH = 50;
+export const JIRA_CUSTOM_ORDER_SCOPE = "assigned" as const;
+export const JIRA_CUSTOM_SORT_FIELD = "custom" as const;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
@@ -59,7 +63,7 @@ export const JiraFiltersSchema = z.object({
   scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100)).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
-  sortField: z.string().default("status"),
+  sortField: z.string().default(JIRA_CUSTOM_SORT_FIELD),
   sortDirection: z.enum(["asc", "desc"]).default("asc"),
 });
 
@@ -100,13 +104,13 @@ export const ViewStateSchema = z.object({
     issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
     pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
     actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
-    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" }),
+    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" }),
     dependencies: DependencyFiltersSchema.default({ updateType: "all", bot: "all" }),
   }).default({
     issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
     pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
     actions: { conclusion: "all", event: "all" },
-    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" },
     dependencies: { updateType: "all", bot: "all" },
   }),
   showPrRuns: z.boolean().default(false),
@@ -127,12 +131,15 @@ export const ViewStateSchema = z.object({
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
   dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
+  jiraCustomOrder: z.array(z.string().max(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)).max(JIRA_CUSTOM_ORDER_CAP).default([])
+    .transform((arr) => [...new Set(arr)]),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
 export type IgnoredItem = ViewState["ignoredItems"][number];
 
 const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"] as const;
+const VIEW_STATE_KEYS = new Set(Object.keys(ViewStateSchema.shape));
 
 export function migrateLockedRepos(raw: unknown): unknown {
   if (raw == null) return { issues: [], pullRequests: [], actions: [], jiraAssigned: [] };
@@ -170,6 +177,13 @@ function loadViewState(): ViewState {
           record[key] = filtered.length > LOCKED_REPOS_CAP ? filtered.slice(0, LOCKED_REPOS_CAP) : filtered;
         }
       }
+    }
+    if (Array.isArray(obj.jiraCustomOrder)) {
+      obj.jiraCustomOrder = obj.jiraCustomOrder
+        .filter((item): item is string => typeof item === "string" && item.length <= JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)
+        .slice(0, JIRA_CUSTOM_ORDER_CAP);
+    } else if (obj.jiraCustomOrder !== undefined) {
+      delete obj.jiraCustomOrder;
     }
     const result = ViewStateSchema.safeParse(parsed);
     if (result.success) return result.data;
@@ -209,7 +223,7 @@ export function resetViewState(): void {
           issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
           pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
           actions: { conclusion: "all", event: "all" },
-          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "status", sortDirection: "asc" },
+          jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" },
           dependencies: { updateType: "all", bot: "all" },
         },
         showPrRuns: false,
@@ -219,6 +233,7 @@ export function resetViewState(): void {
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
         dependencyExpandedGroups: ["mergeable"],
+        jiraCustomOrder: [],
       });
     })
   );
@@ -333,6 +348,10 @@ export function resetAllTabFilters(
       } else if (tab === "pullRequests") {
         draft.tabFilters.pullRequests = PullRequestFiltersSchema.parse({});
       } else if (tab === "jiraAssigned") {
+        // WARNING: This resets sortField and scope as a side effect (back to defaults
+        // "custom" and "assigned"). JiraAssignedTab.tsx's Clear button uses two targeted
+        // setTabFilter calls instead of this function specifically to avoid that.
+        // Do not casually wire this back in for Jira without accounting for those resets.
         draft.tabFilters.jiraAssigned = JiraFiltersSchema.parse({});
       } else if (tab === "actions") {
         draft.tabFilters.actions = ActionsFiltersSchema.parse({});
@@ -565,6 +584,34 @@ export function moveTrackedItem(
   );
 }
 
+export function setJiraCustomOrder(order: string[]): void {
+  // Drop entries exceeding per-item length cap (consistent with loadViewState's guard),
+  // then dedup (schema transform only fires on parse, not on direct produce() mutations)
+  const sanitized = order.filter(
+    (k): k is string => typeof k === "string" && k.length <= JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH
+  );
+  const deduped = [...new Set(sanitized)];
+  setViewState(
+    produce((draft) => {
+      draft.jiraCustomOrder = deduped.length > JIRA_CUSTOM_ORDER_CAP
+        ? deduped.slice(0, JIRA_CUSTOM_ORDER_CAP)
+        : deduped;
+    })
+  );
+}
+
+export function pruneJiraCustomOrder(activeJiraKeys: Set<string>): void {
+  const current = untrack(() => viewState.jiraCustomOrder);
+  if (current.length === 0) return;
+  const filtered = current.filter((key) => activeJiraKeys.has(key));
+  if (filtered.length === current.length) return;
+  setViewState(
+    produce((draft) => {
+      draft.jiraCustomOrder = filtered;
+    })
+  );
+}
+
 export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
   setViewState(
     produce((draft) => {
@@ -576,27 +623,120 @@ export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
 }
 
 export function initViewPersistence(): void {
+  if (typeof window !== "undefined") {
+    const handleViewStorage = (e: StorageEvent) => {
+      if (e.key !== VIEW_STORAGE_KEY || e.newValue === null) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(e.newValue);
+      } catch {
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+      // Guard: if the incoming blob doesn't contain jiraCustomOrder at all, skip sync.
+      // Without this, Zod's .default([]) would backfill the missing key with an empty
+      // array and silently wipe the current tab's real order.
+      if (!("jiraCustomOrder" in (parsed as Record<string, unknown>))) return;
+      const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse(parsed);
+      if (!result.success) return;
+      const incoming = result.data.jiraCustomOrder;
+      if (JSON.stringify(incoming) === JSON.stringify(untrack(() => viewState.jiraCustomOrder))) return;
+      setViewState(produce((draft) => { draft.jiraCustomOrder = incoming; }));
+    };
+    window.addEventListener("storage", handleViewStorage);
+    onCleanup(() => window.removeEventListener("storage", handleViewStorage));
+  }
+
+  // Baseline snapshot of what this tab last knew to be persisted to localStorage
+  // (starts at the state this tab loaded at boot). Used by commitSnapshot() to work
+  // out which top-level fields THIS tab actually changed, so a debounced write only
+  // overlays those fields onto whatever is CURRENTLY on disk instead of blindly
+  // overwriting with this tab's full (possibly stale) in-memory snapshot. Without
+  // this, a full-object overwrite from Tab A could silently revert a newer value
+  // Tab B wrote for some other field (e.g. jiraCustomOrder) in the gap between when
+  // Tab A's debounce timer started and when it actually fires.
+  let lastSyncedSnapshot: Record<string, unknown> = JSON.parse(JSON.stringify(untrack(() => viewState)));
+
+  function readOnDiskState(): Record<string, unknown> | undefined {
+    try {
+      const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+      if (raw === null) return undefined;
+      const parsed = JSON.parse(raw) as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+      // Only trust keys that are part of the current ViewState schema AND whose value
+      // passes that field's own Zod validation. localStorage is writable by any
+      // same-origin script (extensions, a stale/incompatible schema version, manual
+      // tampering), and commitSnapshot() below folds this content into every future
+      // write for fields this tab doesn't happen to touch itself — without both the
+      // key-name allowlist and per-field value validation, unrecognized or malformed
+      // on-disk content would be perpetually re-persisted instead of self-healing on
+      // the next write, as it did before the merge-on-write logic existed. Validated
+      // one key at a time (not a single ViewStateSchema.pick(...).safeParse() over the
+      // whole object) so one malformed field can't cause every other valid field to be
+      // dropped too.
+      const filtered: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!VIEW_STATE_KEYS.has(key)) continue;
+        const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({ [key]: value });
+        if (result.success) filtered[key] = (result.data as Record<string, unknown>)[key];
+      }
+      return filtered;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function commitSnapshot(snapshot: Record<string, unknown>): void {
+    const onDisk = readOnDiskState();
+    // Start from whatever is currently on disk (may include newer values another tab
+    // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
+    const merged: Record<string, unknown> = { ...(onDisk ?? snapshot) };
+    for (const key of Object.keys(snapshot)) {
+      // Always include a key this tab knows about but that's missing from the on-disk
+      // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
+      // produces a ViewState with a top-level key truly absent, so treat that as
+      // recoverable staleness rather than silently dropping this tab's known value
+      // (which Zod's .default() would otherwise backfill on the next load).
+      if (!(key in merged) || JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])) {
+        merged[key] = snapshot[key];
+      }
+    }
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged));
+      lastSyncedSnapshot = merged;
+    } catch {
+      pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
+    }
+  }
+
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingJson: string | undefined;
+  let pendingSnapshot: Record<string, unknown> | undefined;
   createEffect(() => {
     const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
-    pendingJson = json;
+    const snapshot = JSON.parse(json) as Record<string, unknown>;
+    pendingSnapshot = snapshot;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      pendingJson = undefined;
-      try {
-        localStorage.setItem(VIEW_STORAGE_KEY, json);
-      } catch {
-        pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
-      }
+      pendingSnapshot = undefined;
+      commitSnapshot(snapshot);
     }, 200);
-    onCleanup(() => {
-      clearTimeout(debounceTimer);
-      // Flush pending write synchronously so HMR doesn't lose state
-      if (pendingJson !== undefined) {
-        try { localStorage.setItem(VIEW_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
-        pendingJson = undefined;
-      }
-    });
+  });
+
+  // Registered on the OUTER owner, as a sibling of createEffect rather than
+  // nested inside it (matching the storage-listener cleanup above). Solid
+  // invokes a computation's onCleanup on BOTH disposal AND recomputation —
+  // nesting this inside createEffect would flush the stale pending snapshot
+  // synchronously on every dependency change (any viewState mutation),
+  // defeating the 200ms debounce for every change except the trailing one.
+  // Registered here instead, it only fires once, when this owner (the App
+  // component) is truly disposed — the unmount/HMR case the comment below
+  // describes.
+  onCleanup(() => {
+    clearTimeout(debounceTimer);
+    // Flush pending write synchronously so HMR doesn't lose state
+    if (pendingSnapshot !== undefined) {
+      commitSnapshot(pendingSnapshot);
+      pendingSnapshot = undefined;
+    }
   });
 }

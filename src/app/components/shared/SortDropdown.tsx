@@ -13,6 +13,7 @@ interface SortDropdownProps {
   value: string;
   direction: "asc" | "desc";
   onChange: (field: string, direction: "asc" | "desc") => void;
+  placeholder?: string;
 }
 
 interface FlatOption {
@@ -57,6 +58,7 @@ export default function SortDropdown(props: SortDropdownProps) {
       optionTextValue="label"
       value={flatOptions().find((o) => o.value === selected()) ?? null}
       onChange={(opt) => handleChange(opt?.value ?? null)}
+      placeholder={props.placeholder ?? "Sort by"}
       itemComponent={(itemProps) => (
         <Select.Item
           item={itemProps.item}
@@ -70,7 +72,7 @@ export default function SortDropdown(props: SortDropdownProps) {
         aria-label="Sort by"
         class="btn btn-outline btn-sm compact:btn-xs w-auto min-w-[180px] justify-between"
       >
-        <Select.Value<FlatOption>>{(state) => state.selectedOption()?.label ?? "Sort by"}</Select.Value>
+        <Select.Value<FlatOption>>{(state) => state.selectedOption()?.label ?? (props.placeholder ?? "Sort by")}</Select.Value>
         <Select.Icon class="ml-2">▾</Select.Icon>
       </Select.Trigger>
       <Select.Portal>
