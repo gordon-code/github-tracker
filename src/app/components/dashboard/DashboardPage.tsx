@@ -1209,7 +1209,10 @@ export default function DashboardPage() {
   // classification survives page refresh without visual jank.
   createEffect(() => {
     if (!config.dependencies.enabled) return;
-    if (_fetchingDepBodies) return;
+    if (_fetchingDepBodies) {
+      console.debug("[dashboard] depBodies effect: skipped — fetch already in flight (this run's tracked deps are now narrowed to config.dependencies.enabled only)");
+      return;
+    }
     const octokit = getClient();
     if (!octokit) return;
 
@@ -1217,13 +1220,19 @@ export default function DashboardPage() {
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
     const toFetch = visibleDepPrs.filter((pr) => !meta.has(pr.id) && needsBodyFallback(pr));
-    if (toFetch.length === 0) return;
+    if (toFetch.length === 0) {
+      console.debug("[dashboard] depBodies effect: nothing to fetch", { metaSize: meta.size, visibleDepPrCount: visibleDepPrs.length });
+      return;
+    }
 
     _fetchingDepBodies = true;
+    const effectStart = Date.now();
+    console.debug(`[dashboard] depBodies effect: fetch started for ${toFetch.length} PRs at ${effectStart}`);
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
         const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
+        console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size });
         if (bodyMap.size === 0) return;
 
         const merged = new Map(meta);
@@ -1237,9 +1246,11 @@ export default function DashboardPage() {
           if (!depPrIds.has(k)) merged.delete(k);
         }
         setDepMeta(merged);
+        console.debug(`[dashboard] depBodies effect: depMeta updated, size=${merged.size}`);
         setTimeout(() => persistDepMeta(merged), 0);
       } finally {
         _fetchingDepBodies = false;
+        console.debug(`[dashboard] depBodies effect: guard released after ${Date.now() - effectStart}ms`);
       }
     })();
   });

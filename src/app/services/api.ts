@@ -1162,6 +1162,29 @@ export async function fetchPREnrichment(
   return { enrichments, errors };
 }
 
+// Shared timeout guard for body-fetch GraphQL calls. Prevents a hung request
+// (e.g. octokit's secondary-rate-limit retry logic stalling indefinitely)
+// from wedging the caller's fetch-in-progress gate.
+
+export const GRAPHQL_BODY_FETCH_TIMEOUT_MS = 20_000;
+
+export class GraphqlFetchTimeoutError extends Error {}
+
+export function raceWithTimeout<T>(promise: Promise<T>, ms: number, controller: AbortController): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new GraphqlFetchTimeoutError(`GraphQL request exceeded ${ms}ms`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
 // ── Dashboard issue body fetch ────────────────────────────────────────────────
 
 const DASHBOARD_ISSUE_BODIES_QUERY = `
@@ -1187,11 +1210,19 @@ export async function fetchDashboardIssueBodies(
   if (issueNodeIds.length === 0) return result;
 
   const batches = chunkArray(issueNodeIds, NODES_BATCH_SIZE);
+  let hadFailure = false;
   await Promise.allSettled(batches.map(async (batch) => {
+    const batchStart = Date.now();
+    console.debug(`[api] dashboardBodies batch started (${batch.length} ids) at ${batchStart}`);
+    const controller = new AbortController();
     try {
-      const response = await octokit.graphql<DashboardIssueBodiesResponse>(
-        DASHBOARD_ISSUE_BODIES_QUERY,
-        { ids: batch, request: { apiSource: "dashboardBodies" } }
+      const response = await raceWithTimeout(
+        octokit.graphql<DashboardIssueBodiesResponse>(
+          DASHBOARD_ISSUE_BODIES_QUERY,
+          { ids: batch, request: { apiSource: "dashboardBodies", signal: controller.signal } }
+        ),
+        GRAPHQL_BODY_FETCH_TIMEOUT_MS,
+        controller,
       );
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
       for (const node of response.nodes) {
@@ -1199,14 +1230,23 @@ export async function fetchDashboardIssueBodies(
         result.set(node.id, node.body);
       }
     } catch (err) {
+      hadFailure = true;
+      console.warn("[api] dashboardBodies batch failed or timed out:", err);
+      Sentry.captureException(err, { tags: { source: "dashboardBodies" } });
       const partialErr =
         err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
           ? (err.data as Partial<DashboardIssueBodiesResponse>)
           : null;
       if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
       // Partial failures return null bodies — callers handle missing entries gracefully
+    } finally {
+      console.debug(`[api] dashboardBodies batch settled after ${Date.now() - batchStart}ms`);
     }
   }));
+
+  if (hadFailure && getClient() === octokit) {
+    pushNotification("dashboardBodies", "Some dependency dashboard data could not be loaded", "warning");
+  }
 
   return result;
 }
@@ -1235,11 +1275,19 @@ export async function fetchDepPRBodies(
   if (prNodeIds.length === 0) return result;
 
   const batches = chunkArray(prNodeIds, NODES_BATCH_SIZE);
+  let hadFailure = false;
   await Promise.allSettled(batches.map(async (batch) => {
+    const batchStart = Date.now();
+    console.debug(`[api] depPRBodies batch started (${batch.length} ids) at ${batchStart}`);
+    const controller = new AbortController();
     try {
-      const response = await octokit.graphql<DepPRBodiesResponse>(
-        DEP_PR_BODIES_QUERY,
-        { ids: batch, request: { apiSource: "depPRBodies" } }
+      const response = await raceWithTimeout(
+        octokit.graphql<DepPRBodiesResponse>(
+          DEP_PR_BODIES_QUERY,
+          { ids: batch, request: { apiSource: "depPRBodies", signal: controller.signal } }
+        ),
+        GRAPHQL_BODY_FETCH_TIMEOUT_MS,
+        controller,
       );
       if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
       for (const node of response.nodes) {
@@ -1247,13 +1295,22 @@ export async function fetchDepPRBodies(
         result.set(node.databaseId, node.body);
       }
     } catch (err) {
+      hadFailure = true;
+      console.warn("[api] depPRBodies batch failed or timed out:", err);
+      Sentry.captureException(err, { tags: { source: "depPRBodies" } });
       const partialErr =
         err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
           ? (err.data as Partial<DepPRBodiesResponse>)
           : null;
       if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+    } finally {
+      console.debug(`[api] depPRBodies batch settled after ${Date.now() - batchStart}ms`);
     }
   }));
+
+  if (hadFailure && getClient() === octokit) {
+    pushNotification("depPRBodies", "Some dependency PR types could not be determined — badges may be missing", "warning");
+  }
 
   return result;
 }
