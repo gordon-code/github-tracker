@@ -145,10 +145,28 @@ export function extractVersionInfo(title: string): VersionInfo | null {
     return { packageName: actionMatch[1]!, to: actionMatch[2]! };
   }
 
+  // "Update (rust) crate X to vY"
+  const crateMatch = /^Update\s+(?:rust\s+)?crate\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
+  if (crateMatch && /^v?\d/.test(crateMatch[2]!)) {
+    return { packageName: crateMatch[1]!, to: crateMatch[2]! };
+  }
+
+  // "Update X Docker tag to vY"
+  const dockerMatch = /^Update\s+(.+?)\s+docker\s+tag\s+to\s+(v?[\w.\-+]+)/i.exec(body);
+  if (dockerMatch && /^v?\d/.test(dockerMatch[2]!)) {
+    return { packageName: dockerMatch[1]!, to: dockerMatch[2]! };
+  }
+
   // Generic "from A to B" anywhere
   const genericMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
   if (genericMatch) {
     return { from: genericMatch[1]!, to: genericMatch[2]!, updateType: semverUpdateType(genericMatch[1]!, genericMatch[2]!) ?? undefined };
+  }
+
+  // Generic "Update X to vY" (last resort, single-target version only)
+  const singleTargetMatch = /^Update\s+(.+?)\s+to\s+(v?[\w.\-+]+)$/i.exec(body);
+  if (singleTargetMatch && /^v?\d/.test(singleTargetMatch[2]!)) {
+    return { packageName: singleTargetMatch[1]!, to: singleTargetMatch[2]! };
   }
 
   return null;

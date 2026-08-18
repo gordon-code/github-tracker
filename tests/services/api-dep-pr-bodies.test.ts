@@ -1,10 +1,13 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchDepPRBodies } from "../../src/app/services/api";
+import { fetchDepPRBodies, raceWithTimeout, GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
+import { getClient } from "../../src/app/services/github";
+import { pushNotification } from "../../src/app/lib/errors";
+import { captureException } from "@sentry/solid";
 
 const mockUpdateGraphqlRateLimit = vi.fn();
 vi.mock("../../src/app/services/github", () => ({
-  getClient: vi.fn(() => null),
+  getClient: vi.fn(),
   cachedRequest: vi.fn(),
   updateGraphqlRateLimit: (...args: unknown[]) => mockUpdateGraphqlRateLimit(...args),
   fetchRateLimitDetails: vi.fn(),
@@ -23,6 +26,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   getUnreadCount: vi.fn().mockReturnValue(0),
   markAllAsRead: vi.fn(),
   isMuted: vi.fn(() => false),
+}));
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
 }));
 
 const NODES_BATCH_SIZE = 100;
@@ -191,5 +198,74 @@ describe("fetchDepPRBodies — error resilience", () => {
     await fetchDepPRBodies(octokit, ["N_1"]);
 
     expect(mockUpdateGraphqlRateLimit).toHaveBeenCalledWith(rl);
+  });
+});
+
+describe("fetchDepPRBodies — hung request timeout", () => {
+  it("times out a never-resolving batch, warns, reports to Sentry, and notifies the user", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const octokit = makeOctokit(() => new Promise(() => {}));
+      vi.mocked(getClient).mockReturnValue(octokit);
+
+      const resultPromise = fetchDepPRBodies(octokit, ["N_1"]);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      const result = await resultPromise;
+
+      expect(result).toBeInstanceOf(Map);
+      expect(result.size).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        { tags: { source: "depPRBodies" } }
+      );
+      expect(pushNotification).toHaveBeenCalledWith(
+        "depPRBodies",
+        expect.stringContaining("could not be determined"),
+        "warning"
+      );
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("suppresses the notification (but keeps diagnostics) when the client changed before the timeout fired", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const octokit = makeOctokit(() => new Promise(() => {}));
+      vi.mocked(getClient).mockReturnValue(octokit);
+
+      const resultPromise = fetchDepPRBodies(octokit, ["N_1"]);
+      vi.mocked(getClient).mockReturnValue(null);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      await resultPromise;
+
+      expect(warnSpy).toHaveBeenCalled();
+      expect(captureException).toHaveBeenCalled();
+      expect(pushNotification).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("raceWithTimeout", () => {
+  it("clears the timeout once the wrapped promise wins, so it never fires afterward", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const result = await raceWithTimeout(Promise.resolve("done"), GRAPHQL_BODY_FETCH_TIMEOUT_MS, controller);
+      expect(result).toBe("done");
+
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+
+      expect(controller.signal.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

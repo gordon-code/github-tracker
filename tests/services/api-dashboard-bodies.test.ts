@@ -1,13 +1,16 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchDashboardIssueBodies } from "../../src/app/services/api";
+import { fetchDashboardIssueBodies, GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
+import { getClient } from "../../src/app/services/github";
+import { pushNotification } from "../../src/app/lib/errors";
+import { captureException } from "@sentry/solid";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 // updateGraphqlRateLimit lives in github.ts — mock the whole module
 const mockUpdateGraphqlRateLimit = vi.fn();
 vi.mock("../../src/app/services/github", () => ({
-  getClient: vi.fn(() => null),
+  getClient: vi.fn(),
   cachedRequest: vi.fn(),
   updateGraphqlRateLimit: (...args: unknown[]) => mockUpdateGraphqlRateLimit(...args),
   fetchRateLimitDetails: vi.fn(),
@@ -26,6 +29,10 @@ vi.mock("../../src/app/lib/errors", () => ({
   getUnreadCount: vi.fn().mockReturnValue(0),
   markAllAsRead: vi.fn(),
   isMuted: vi.fn(() => false),
+}));
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -246,5 +253,57 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
     // Second batch (1 item) should succeed despite first failing
     expect(result.size).toBe(1);
     expect(result.get(`N_${NODES_BATCH_SIZE}`)).toBe(`body-N_${NODES_BATCH_SIZE}`);
+  });
+});
+
+describe("fetchDashboardIssueBodies — hung request timeout", () => {
+  it("times out a never-resolving batch, warns, reports to Sentry, and notifies the user", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const octokit = makeOctokit(() => new Promise(() => {}));
+      vi.mocked(getClient).mockReturnValue(octokit);
+
+      const resultPromise = fetchDashboardIssueBodies(octokit, ["N_1"]);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      const result = await resultPromise;
+
+      expect(result).toBeInstanceOf(Map);
+      expect(result.size).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        { tags: { source: "dashboardBodies" } }
+      );
+      expect(pushNotification).toHaveBeenCalledWith(
+        "dashboardBodies",
+        expect.stringContaining("could not be loaded"),
+        "warning"
+      );
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("suppresses the notification (but keeps diagnostics) when the client changed before the timeout fired", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const octokit = makeOctokit(() => new Promise(() => {}));
+      vi.mocked(getClient).mockReturnValue(octokit);
+
+      const resultPromise = fetchDashboardIssueBodies(octokit, ["N_1"]);
+      vi.mocked(getClient).mockReturnValue(null);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      await resultPromise;
+
+      expect(warnSpy).toHaveBeenCalled();
+      expect(captureException).toHaveBeenCalled();
+      expect(pushNotification).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
