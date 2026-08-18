@@ -445,6 +445,18 @@ describe("DependenciesTab — updateType filter", () => {
     expect(screen.getByText("Lock file maintenance")).toBeDefined();
   });
 
+  it("filters to digest only when updateType=digest is set", () => {
+    const digest = makeMergeablePR({
+      title: "chore(deps): refresh vendored dependencies",
+      labels: [{ name: "digest", color: "1a7f37" }],
+    });
+    const patch = makeMergeablePR({ title: "Bump axios from 0.27.1 to 0.27.2" });
+    setTabFilter("dependencies", "updateType", "digest");
+    renderTab({ pullRequests: [digest, patch] });
+    expect(screen.getByText("Refresh vendored dependencies")).toBeDefined();
+    expect(screen.queryByText("axios: 0.27.1 → 0.27.2")).toBeNull();
+  });
+
   it("uses label as fallback when title has no version info", () => {
     const pr = makeMergeablePR({
       title: "chore(deps): update dependency foo to v2",
@@ -509,6 +521,46 @@ describe("DependenciesTab — category classification", () => {
       .map((item) => item.querySelector(".badge")?.textContent?.trim())
       .filter((c): c is string => !!c);
     expect(categories).toEqual(["pin", "digest", "patch"]);
+  });
+
+  it("sorts all 7 categories in strict risk order: maintenance, pin, digest, patch, minor, major, other", () => {
+    const prMaintenance = makeMergeablePR({ id: 7101, title: "chore(deps): lock file maintenance" });
+    const prPin = makeMergeablePR({ id: 7102, title: "chore(deps): pin dependencies" });
+    const prDigest = makeMergeablePR({
+      id: 7103,
+      title: "chore(deps): refresh vendored dependencies",
+      labels: [{ name: "digest", color: "1a7f37" }],
+    });
+    const prPatch = makeMergeablePR({ id: 7104, title: "Bump axios from 0.27.1 to 0.27.2" });
+    const prMinor = makeMergeablePR({ id: 7105, title: "Bump lodash from 4.16.0 to 4.17.0" });
+    const prMajor = makeMergeablePR({ id: 7106, title: "Bump react from 17.0.0 to 18.0.0" });
+    // Regression guard: an unparseable title with no matching labels must classify as "other"
+    // (unknown risk) and sort last, not fall back to "maintenance" (verified-safe) and sort first.
+    const prOther = makeMergeablePR({
+      id: 7107,
+      title: "chore(deps): refresh vendored dependencies for widgets",
+    });
+
+    // Deliberately shuffled input order to prove the sort — not insertion order — determines output.
+    renderTab({ pullRequests: [prOther, prMajor, prMinor, prPatch, prDigest, prPin, prMaintenance] });
+
+    const items = screen.getAllByRole("listitem");
+    const order = items.map((item) => {
+      const text = item.textContent ?? "";
+      if (text.includes("Lock file maintenance")) return "maintenance";
+      if (text.includes("Pin dependencies")) return "pin";
+      if (text.includes("Refresh vendored dependencies for widgets")) return "other";
+      if (text.includes("Refresh vendored dependencies")) return "digest";
+      if (text.includes("axios")) return "patch";
+      if (text.includes("lodash")) return "minor";
+      if (text.includes("react")) return "major";
+      return "unknown";
+    });
+
+    expect(order).toEqual(["maintenance", "pin", "digest", "patch", "minor", "major", "other"]);
+    // "other" renders no risk badge (Show when={category !== "other"}) — confirm it's not mislabeled "maintenance".
+    expect(screen.queryByText("maintenance")).not.toBeNull();
+    expect(screen.getAllByText("maintenance")).toHaveLength(1);
   });
 
   it("PR with unparseable title and no matching labels renders as 'other' (hidden badge), not 'maintenance'", () => {

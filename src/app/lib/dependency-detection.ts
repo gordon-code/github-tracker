@@ -145,6 +145,17 @@ export function extractVersionInfo(title: string): VersionInfo | null {
     return { packageName: actionMatch[1]!, to: actionMatch[2]! };
   }
 
+  // Generic "from A to B" anywhere. Checked before crateMatch/dockerMatch below so that a title
+  // combining the literal "crate"/"docker tag" keyword with "from...to" phrasing (e.g. "Update
+  // crate pyo3 from 0.29.0 to 0.29.1") is classified via the correct semver-diff path instead of
+  // having crateMatch/dockerMatch's lazy capture group absorb the "from" clause into the package
+  // name (their (.+?) group expands until the first " to " match, which would land after the
+  // "from" version, not after the package name).
+  const genericMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
+  if (genericMatch) {
+    return { from: genericMatch[1]!, to: genericMatch[2]!, updateType: semverUpdateType(genericMatch[1]!, genericMatch[2]!) ?? undefined };
+  }
+
   // "Update (rust) crate X to vY"
   const crateMatch = /^Update\s+(?:rust\s+)?crate\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
   if (crateMatch && /^v?\d/.test(crateMatch[2]!)) {
@@ -157,14 +168,13 @@ export function extractVersionInfo(title: string): VersionInfo | null {
     return { packageName: dockerMatch[1]!, to: dockerMatch[2]! };
   }
 
-  // Generic "from A to B" anywhere
-  const genericMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
-  if (genericMatch) {
-    return { from: genericMatch[1]!, to: genericMatch[2]!, updateType: semverUpdateType(genericMatch[1]!, genericMatch[2]!) ?? undefined };
-  }
-
-  // Generic "Update X to vY" (last resort, single-target version only)
-  const singleTargetMatch = /^Update\s+(.+?)\s+to\s+(v?[\w.\-+]+)$/i.exec(body);
+  // Generic "Update X to vY" (last resort, single-target version only). The package-name group
+  // requires a single whitespace-free token (rather than any characters) so a human-authored,
+  // multi-word title like "Update the docs to v2" — reachable via isDependencyPr()'s label-only
+  // admission path, which needs no bot-like title at all — isn't misclassified as a dependency
+  // bump. Real bot-generated titles for this fallback (e.g. "update renovate to v44", "update
+  // node to v24.18.1") are single-token package names and are unaffected.
+  const singleTargetMatch = /^Update\s+(\S+)\s+to\s+(v?[\w.\-+]+)$/i.exec(body);
   if (singleTargetMatch && /^v?\d/.test(singleTargetMatch[2]!)) {
     return { packageName: singleTargetMatch[1]!, to: singleTargetMatch[2]! };
   }
@@ -249,7 +259,7 @@ export function needsBodyFallback(pr: PullRequest): boolean {
   if (/lock\s*file\s+maintenance/i.test(pr.title)) return false;
   for (const l of pr.labels) {
     const name = l.name.toLowerCase();
-    if (name === "major" || name === "minor" || name === "patch") return false;
+    if (name === "major" || name === "minor" || name === "patch" || name === "digest" || name === "pin" || name === "maintenance") return false;
   }
   return true;
 }
