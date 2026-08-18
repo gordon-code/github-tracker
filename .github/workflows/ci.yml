@@ -18,8 +18,9 @@ jobs:
         run: bash scripts/verify-csp-hash.sh
       - run: pnpm run typecheck
       - run: pnpm test
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+      # No `playwright install` step: playwright.config.ts uses channel: "chrome",
+      # which resolves to ubuntu-latest's preinstalled Google Chrome — Playwright's
+      # own bundled Chromium download is never used and would be wasted work.
       - name: Run E2E tests
         run: pnpm test:e2e
         env:
