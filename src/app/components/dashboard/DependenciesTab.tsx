@@ -34,6 +34,7 @@ const UPDATE_TYPE_OPTIONS: FilterChipGroupDef = {
   options: [
     { value: "maintenance", label: "Maintenance" },
     { value: "pin", label: "Pin" },
+    { value: "digest", label: "Digest" },
     { value: "patch", label: "Patch" },
     { value: "minor", label: "Minor" },
     { value: "major", label: "Major" },
@@ -48,20 +49,16 @@ const STATUS_META: Record<DepStatus, { label: string }> = {
   "stale":           { label: "Stale" },
 };
 
-type DepCategory = "major" | "minor" | "patch" | "pin" | "maintenance" | "other";
-
-function mapUpdateType(ut: NonNullable<VersionInfo["updateType"]>): DepCategory {
-  if (ut === "digest") return "patch";
-  return ut;
-}
+type DepCategory = "major" | "minor" | "patch" | "digest" | "pin" | "maintenance" | "other";
 
 const CATEGORY_SORT_ORDER: Record<DepCategory, number> = {
   maintenance: 0,
   pin: 1,
-  patch: 2,
-  minor: 3,
-  major: 4,
-  other: 5,
+  digest: 2,
+  patch: 3,
+  minor: 4,
+  major: 5,
+  other: 6,
 };
 
 const CATEGORY_BADGE_CLASS: Partial<Record<DepCategory, string>> = {
@@ -69,21 +66,25 @@ const CATEGORY_BADGE_CLASS: Partial<Record<DepCategory, string>> = {
   minor: "badge-warning",
   patch: "badge-success",
   pin: "badge-success",
+  digest: "badge-success",
 };
 
 function depCategory(pr: PullRequest, versionInfo: VersionInfo | null): DepCategory {
-  if (versionInfo?.updateType) return mapUpdateType(versionInfo.updateType);
+  if (versionInfo?.updateType) return versionInfo.updateType;
 
   const titleLower = pr.title.toLowerCase();
   if (/pin\s+dep/.test(titleLower)) return "pin";
   if (/lock\s*file\s+maintenance/.test(titleLower)) return "maintenance";
 
-  const fallback: DepCategory = versionInfo ? "other" : "maintenance";
+  const fallback: DepCategory = "other";
   for (const l of pr.labels) {
     const name = l.name.toLowerCase();
     if (name === "major") return "major";
     if (name === "minor") return "minor";
     if (name === "patch") return "patch";
+    if (name === "digest") return "digest";
+    if (name === "pin") return "pin";
+    if (name === "maintenance") return "maintenance";
   }
   return fallback;
 }

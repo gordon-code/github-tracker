@@ -467,6 +467,100 @@ describe("DependenciesTab — bot filter", () => {
   });
 });
 
+// ── Update type filter options order ─────────────────────────────────────────
+
+describe("DependenciesTab — update type filter options order", () => {
+  it("shows options in risk order: Maintenance, Pin, Digest, Patch, Minor, Major, Other", () => {
+    vi.useFakeTimers();
+    try {
+      const pr = makeMergeablePR();
+      renderTab({ pullRequests: [pr] });
+      const trigger = screen.getByRole("button", { name: /filter by update type/i });
+      fireEvent.click(trigger);
+      vi.advanceTimersByTime(0);
+      const content = document.querySelector('[aria-label="Update type"]')!;
+      const optionLabels = Array.from(content.querySelectorAll("button"))
+        .map((b) => b.textContent?.replace(/^✓\s*/, "").trim())
+        .filter((t): t is string => !!t && t !== "All");
+      expect(optionLabels).toEqual(["Maintenance", "Pin", "Digest", "Patch", "Minor", "Major", "Other"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── Category classification ───────────────────────────────────────────────────
+
+describe("DependenciesTab — category classification", () => {
+  it("digest category sorts between pin and patch, and renders a visible badge", () => {
+    const prPin = makeMergeablePR({ id: 7001, title: "chore(deps): pin dependencies" });
+    const prDigest = makeMergeablePR({ id: 7002, title: "chore(deps): update rust crate pyo3 to v0.29.1" });
+    const prPatch = makeMergeablePR({ id: 7003, title: "Bump axios from 0.27.1 to 0.27.2" });
+    const depMeta = new Map([
+      [prDigest.id, { updateType: "digest" as const, packageName: "pyo3", to: "v0.29.1" }],
+    ]);
+
+    renderTab({ pullRequests: [prPatch, prPin, prDigest], depMeta });
+
+    expect(screen.getByText("digest")).toBeDefined();
+
+    const items = screen.getAllByRole("listitem");
+    const categories = items
+      .map((item) => item.querySelector(".badge")?.textContent?.trim())
+      .filter((c): c is string => !!c);
+    expect(categories).toEqual(["pin", "digest", "patch"]);
+  });
+
+  it("PR with unparseable title and no matching labels renders as 'other' (hidden badge), not 'maintenance'", () => {
+    const pr = makeMergeablePR({ title: "chore(deps): refresh vendored dependencies" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.queryByText("maintenance")).toBeNull();
+    expect(screen.queryByText("other")).toBeNull();
+
+    const item = screen.getByRole("listitem");
+    expect(item.querySelector(".badge")).toBeNull();
+  });
+
+  it("PR with a lock-file-maintenance title still renders as 'maintenance' (regression guard)", () => {
+    const pr = makeMergeablePR({ title: "chore(deps): lock file maintenance" });
+    renderTab({ pullRequests: [pr] });
+    expect(screen.getByText("maintenance")).toBeDefined();
+  });
+
+  it("PR with unparseable title and a 'digest' label renders category 'digest' with a visible badge", () => {
+    const pr = makeMergeablePR({
+      title: "chore(deps): refresh vendored dependencies",
+      labels: [{ name: "digest", color: "1a7f37" }],
+    });
+    renderTab({ pullRequests: [pr] });
+
+    const item = screen.getByRole("listitem");
+    expect(item.querySelector(".badge")?.textContent?.trim()).toBe("digest");
+  });
+
+  it("PR with unparseable title and a 'pin' label renders category 'pin' with a visible badge", () => {
+    const pr = makeMergeablePR({
+      title: "chore(deps): refresh vendored dependencies",
+      labels: [{ name: "pin", color: "1a7f37" }],
+    });
+    renderTab({ pullRequests: [pr] });
+
+    const item = screen.getByRole("listitem");
+    expect(item.querySelector(".badge")?.textContent?.trim()).toBe("pin");
+  });
+
+  it("PR with unparseable title and a 'maintenance' label renders category 'maintenance' with a visible badge", () => {
+    const pr = makeMergeablePR({
+      title: "chore(deps): refresh vendored dependencies",
+      labels: [{ name: "maintenance", color: "1a7f37" }],
+    });
+    renderTab({ pullRequests: [pr] });
+
+    const item = screen.getByRole("listitem");
+    expect(item.querySelector(".badge")?.textContent?.trim()).toBe("maintenance");
+  });
+});
+
 // ── Label filtering ──────────────────────────────────────────────────────────
 
 describe("DependenciesTab — label filtering", () => {

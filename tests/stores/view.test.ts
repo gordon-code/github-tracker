@@ -948,6 +948,11 @@ describe("DependencyFiltersSchema", () => {
     const result = DependencyFiltersSchema.parse({ updateType: "major" });
     expect(result.bot).toBe("all");
   });
+
+  it("accepts 'digest' as a valid updateType value", () => {
+    const result = DependencyFiltersSchema.safeParse({ updateType: "digest", bot: "all" });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("setTabFilter / resetAllTabFilters — dependencies", () => {

@@ -47,7 +47,7 @@ export const ActionsFiltersSchema = z.object({
 });
 
 export const DependencyFiltersSchema = z.object({
-  updateType: z.enum(["all", "major", "minor", "patch", "pin", "maintenance", "other"]).default("all"),
+  updateType: z.enum(["all", "major", "minor", "patch", "pin", "digest", "maintenance", "other"]).default("all"),
   bot: z.string().default("all"),
 });
 

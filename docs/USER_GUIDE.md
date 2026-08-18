@@ -301,7 +301,7 @@ Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups
 | **Needs Action** | CI pending, checks still running, or PR is a draft — not yet actionable |
 | **Stale** | PR has been open more than 14 days without merging — may need a rebase or manual review |
 
-Within each group, PRs are sorted by repository name, then update category (maintenance, pin, patch, minor, major), then update date.
+Within each group, PRs are sorted by repository name, then update category (maintenance, pin, digest, patch, minor, major), then update date.
 
 ### Abandoned Dependencies
 
@@ -323,7 +323,7 @@ Go to **Settings > Dependencies** to configure:
 
 | Filter | Options | Default |
 |--------|---------|---------|
-| Update type | All / Major / Minor / Patch | All |
+| Update type | All / Major / Minor / Patch / Digest | All |
 | Bot | All / (detected bot logins) | All (shown when multiple bots are active) |
 
 The update type filter reads the PR title for SemVer version bump signals (e.g., `1.x → 2.x` = Major). PRs with titles that do not contain recognizable version patterns are grouped under the currently active filter if it is set to All.
