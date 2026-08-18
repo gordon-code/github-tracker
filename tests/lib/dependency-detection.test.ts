@@ -209,6 +209,66 @@ describe("extractVersionInfo", () => {
     const result = extractVersionInfo("Bump lodash from 4.17.21 to 4.17.21");
     expect(result).toEqual({ packageName: "lodash", from: "4.17.21", to: "4.17.21", updateType: undefined });
   });
+
+  it("extracts package name and to-version for Renovate rust crate title", () => {
+    const result = extractVersionInfo("chore(deps): update rust crate pyo3 to v0.29.1");
+    expect(result).toEqual({ packageName: "pyo3", to: "v0.29.1" });
+  });
+
+  it("extracts package name and to-version for Renovate Docker tag title", () => {
+    const result = extractVersionInfo("chore(deps): update node Docker tag to v24.18.1");
+    expect(result).toEqual({ packageName: "node", to: "v24.18.1" });
+  });
+
+  it("returns exactly the depName (not 'depName Docker tag') for Docker tag title", () => {
+    const result = extractVersionInfo("chore(deps): update postgres Docker tag to v15");
+    expect(result).toEqual({ packageName: "postgres", to: "v15" });
+  });
+
+  it("does not match the crate pattern when the captured target is not version-shaped", () => {
+    const result = extractVersionInfo("chore(deps): update crate foo to latest");
+    expect(result).toBeNull();
+  });
+
+  it("does not match the Docker tag pattern when the captured target is not version-shaped", () => {
+    const result = extractVersionInfo("chore(deps): update node Docker tag to latest");
+    expect(result).toBeNull();
+  });
+
+  it("extracts package name and to-version via generic single-target fallback (renovate)", () => {
+    const result = extractVersionInfo("chore(deps): update renovate to v44");
+    expect(result).toEqual({ packageName: "renovate", to: "v44" });
+  });
+
+  it("extracts package name and to-version via generic single-target fallback (node)", () => {
+    const result = extractVersionInfo("chore(deps): update node to v24.18.1");
+    expect(result).toEqual({ packageName: "node", to: "v24.18.1" });
+  });
+
+  it("falls through to the generic single-target fallback, not the Docker/crate patterns, for titles without those keywords", () => {
+    const titles = ["chore(deps): update renovate to v44", "chore(deps): update node to v24.18.1"];
+    for (const title of titles) {
+      expect(title.toLowerCase()).not.toContain("docker");
+      expect(title.toLowerCase()).not.toContain("crate");
+    }
+    expect(extractVersionInfo(titles[0]!)).toEqual({ packageName: "renovate", to: "v44" });
+    expect(extractVersionInfo(titles[1]!)).toEqual({ packageName: "node", to: "v24.18.1" });
+  });
+
+  it("does not match the generic single-target fallback when the captured target is not version-shaped", () => {
+    const result = extractVersionInfo("chore(deps): update the documentation to latest");
+    expect(result).toBeNull();
+  });
+
+  it("still prefers genericMatch's semver-diff path over the new single-target patterns when 'from' is present", () => {
+    // Synthetic "Update X from A to B"-style title (no real crate-manager sample of this shape was
+    // found) without the literal "crate"/"docker tag" keywords, since a title that combines those
+    // keywords with "from...to" hits the documented absorption caveat on the crate/docker patterns
+    // themselves (see Task 2 Step 1's ASSUMPTION note) rather than exercising this fallback-ordering
+    // regression check.
+    const result = extractVersionInfo("chore(deps): update pyo3 from 0.29.0 to 0.29.1");
+    expect(result).toEqual({ from: "0.29.0", to: "0.29.1", updateType: "patch" });
+  });
 });
 
 describe("stripVersionSpecifier", () => {
