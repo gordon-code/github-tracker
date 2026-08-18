@@ -24,6 +24,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
     name: "The Octocat",
   }),
   clearAuth: vi.fn(),
+  onAuthCleared: vi.fn(),
 }));
 
 // Mock errors module so Header's notification imports work
