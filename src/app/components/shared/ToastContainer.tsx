@@ -5,6 +5,7 @@ import {
   type AppNotification,
   type NotificationSeverity,
 } from "../../lib/errors";
+import { onAuthCleared } from "../../stores/auth";
 
 export interface SeverityConfig {
   path: string;
@@ -47,14 +48,83 @@ interface ToastItem {
   dismissing: boolean;
 }
 
+// Persisted (sessionStorage) record of the last message actually toasted per
+// source. This component only renders inside Header, which the router mounts
+// for /dashboard but not /settings — navigating away and back fully unmounts
+// and remounts it, wiping any in-memory-only dedup state. A hard page refresh
+// wipes the entire notification store too. Either way, a still-active,
+// unchanged notification (most visibly a GitHub-status outage, which can sit
+// unchanged in the store for hours) would otherwise look brand new again and
+// re-toast. sessionStorage survives both a remount and a refresh, so this is
+// the one place dedup needs to persist beyond the component's own lifetime.
+const TOASTED_MESSAGES_KEY = "github-tracker:toasted-messages";
+
+function loadToastedMessages(): Map<string, string> {
+  try {
+    const raw = sessionStorage.getItem(TOASTED_MESSAGES_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Map();
+    return new Map(
+      parsed.filter(
+        (e): e is [string, string] =>
+          Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "string"
+      )
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function persistToastedMessages(map: Map<string, string>): void {
+  try {
+    sessionStorage.setItem(TOASTED_MESSAGES_KEY, JSON.stringify([...map.entries()]));
+  } catch {
+    /* best-effort — dedup persistence is low-stakes, no user-facing notification needed */
+  }
+}
+
+// Resets toast dedup state. Called on logout via the onAuthCleared registration
+// below, and directly by tests to isolate sessionStorage between cases (mirrors
+// resetGitHubStatusState()/resetPollState() etc.).
+export function resetToastState(): void {
+  sessionStorage.removeItem(TOASTED_MESSAGES_KEY);
+}
+
+// toastedMessages stores per-source API/search/graphql error text, which is
+// user-scoped data (unlike github-status.ts's global GitHub-status feed, which
+// intentionally does NOT hook into onAuthCleared — see the note in that file).
+// Clear it on logout so a previous user's toast history can't leak into the
+// next session on a shared browser tab.
+onAuthCleared(resetToastState);
+
 export default function ToastContainer() {
   const seenTimestamps = new Map<string, number>();
-  const lastToastedAt = new Map<string, number>();
+  const toastedMessages = loadToastedMessages();
   const [visibleToasts, setVisibleToasts] = createSignal<Map<string, ToastItem>>(new Map());
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
   const dismissingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
-  const COOLDOWN_MS = 60_000;
+  // lastToastedAt + COALESCE_MS: short, in-memory-only per-source throttle.
+  // Distinct from toastedMessages above (which persists which exact message
+  // was last shown, surviving a remount/refresh): lastToastedAt only
+  // coalesces a rapid burst of textually-DIFFERENT updates from the same
+  // source (e.g. a fast-ticking rate-limit retry countdown) into a single
+  // visible toast, so it doesn't need to survive a remount — a genuinely new
+  // incident more than a few seconds later should always show promptly.
+  const lastToastedAt = new Map<string, number>();
+  const COALESCE_MS = 3_000;
+
+  // A coalesced (suppressed) update can be the LAST thing that ever happens
+  // for a source — e.g. a flapping status message settles back to a value
+  // that's already in toastedMessages, at which point errors.ts's own
+  // same-message no-op guard means the store never fires another change
+  // event for it, so this component would never get another chance to
+  // re-evaluate it. coalesceTimers schedules a one-shot re-check for exactly
+  // when the coalescing window ends, reading whatever the store holds AT
+  // THAT TIME (not the coalesced value itself) so a value that was
+  // suppressed and never superseded still surfaces once the window elapses.
+  const coalesceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const animDelay = reducedMotion ? 0 : 300;
 
@@ -93,12 +163,45 @@ export default function ToastContainer() {
   }
 
   function scheduleAutoDismiss(notification: AppNotification) {
+    // Clear any prior timer so an update to an existing toast gets a fresh
+    // full dismiss window, rather than inheriting a timer sized for the
+    // original (now possibly stale) message.
+    const existing = timeouts.get(notification.id);
+    if (existing !== undefined) clearTimeout(existing);
+
     const delay = notification.severity === "error" ? 10_000 : 5_000;
     const t = setTimeout(() => {
       timeouts.delete(notification.id);
       startDismissAnimation(notification.id);
     }, delay);
     timeouts.set(notification.id, t);
+  }
+
+  function showToast(notif: AppNotification) {
+    lastToastedAt.set(notif.source, Date.now());
+    toastedMessages.set(notif.source, notif.message);
+    persistToastedMessages(toastedMessages);
+    setVisibleToasts((prev) => {
+      const next = new Map(prev);
+      next.set(notif.id, { notification: notif, dismissing: false });
+      return next;
+    });
+    scheduleAutoDismiss(notif);
+  }
+
+  function scheduleCoalesceRecheck(source: string) {
+    if (coalesceTimers.has(source)) return;
+    const lastToasted = lastToastedAt.get(source) ?? Date.now();
+    const remaining = Math.max(0, COALESCE_MS - (Date.now() - lastToasted));
+    const t = setTimeout(() => {
+      coalesceTimers.delete(source);
+      const current = getNotifications().find(n => n.source === source);
+      if (!current || isMuted(source)) return;
+      if (toastedMessages.get(source) === current.message) return;
+      seenTimestamps.set(current.id, current.timestamp);
+      showToast(current);
+    }, remaining);
+    coalesceTimers.set(source, t);
   }
 
   createEffect(() => {
@@ -113,18 +216,16 @@ export default function ToastContainer() {
       seenTimestamps.set(notif.id, notif.timestamp);
 
       const lastToasted = lastToastedAt.get(notif.source);
-      const inCooldown = lastToasted !== undefined && Date.now() - lastToasted < COOLDOWN_MS;
+      const coalescing = lastToasted !== undefined && Date.now() - lastToasted < COALESCE_MS;
       const muted = isMuted(notif.source);
+      const alreadyToasted = toastedMessages.get(notif.source) === notif.message;
 
-      if (inCooldown || muted) continue;
+      if (coalescing || muted || alreadyToasted) {
+        if (coalescing) scheduleCoalesceRecheck(notif.source);
+        continue;
+      }
 
-      lastToastedAt.set(notif.source, Date.now());
-      setVisibleToasts((prev) => {
-        const next = new Map(prev);
-        next.set(notif.id, { notification: notif, dismissing: false });
-        return next;
-      });
-      scheduleAutoDismiss(notif);
+      showToast(notif);
     }
 
     const currentIds = new Set(notifs.map(n => n.id));
@@ -132,9 +233,17 @@ export default function ToastContainer() {
       if (!currentIds.has(id)) seenTimestamps.delete(id);
     }
     const currentSources = new Set(notifs.map(n => n.source));
-    for (const source of lastToastedAt.keys()) {
-      if (!currentSources.has(source)) lastToastedAt.delete(source);
+    const staleSources = new Set(
+      [...lastToastedAt.keys(), ...toastedMessages.keys()].filter(source => !currentSources.has(source))
+    );
+    let toastedMessagesChanged = false;
+    for (const source of staleSources) {
+      lastToastedAt.delete(source);
+      if (toastedMessages.delete(source)) toastedMessagesChanged = true;
+      const ct = coalesceTimers.get(source);
+      if (ct !== undefined) { clearTimeout(ct); coalesceTimers.delete(source); }
     }
+    if (toastedMessagesChanged) persistToastedMessages(toastedMessages);
     for (const id of visibleToasts().keys()) {
       if (!currentIds.has(id)) {
         const t = timeouts.get(id);
@@ -149,6 +258,7 @@ export default function ToastContainer() {
   onCleanup(() => {
     for (const t of timeouts.values()) clearTimeout(t);
     for (const t of dismissingTimeouts.values()) clearTimeout(t);
+    for (const t of coalesceTimers.values()) clearTimeout(t);
   });
 
   return (

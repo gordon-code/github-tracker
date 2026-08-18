@@ -193,6 +193,40 @@ export function setAuth(response: TokenExchangeResponse): void {
 }
 
 export function setAuthFromPat(token: string, userData: GitHubUser): void {
+  const previousLogin = user()?.login;
+  const isIdentitySwitch =
+    previousLogin !== undefined && previousLogin.toLowerCase() !== userData.login.toLowerCase();
+
+  if (isIdentitySwitch) {
+    // A different GitHub identity is taking over this browser tab/session
+    // (Settings > Replace token, used for a user switch rather than rotating
+    // one's own token) — do a full reset matching clearAuth(): config
+    // (selectedRepos/selectedOrgs/trackedUsers/etc.) and view state are
+    // genuinely per-identity data, not just UI preferences, so the incoming
+    // identity must not inherit the outgoing one's. Reset in-memory stores
+    // BEFORE clearing localStorage, so the persistence effects re-write
+    // defaults (not stale user data) — same ordering as clearAuth(). We do
+    // NOT touch AUTH_STORAGE_KEY or DASHBOARD_STORAGE_KEY here: the former is
+    // overwritten below with the new token, and the latter is already
+    // cleared by resetDashboardData() in the callback loop below.
+    resetConfig();
+    resetViewState();
+    localStorage.removeItem(CONFIG_STORAGE_KEY);
+    localStorage.removeItem(VIEW_STORAGE_KEY);
+    // Clear IndexedDB cache to prevent data leakage between identities.
+    clearCache().catch((err) => {
+      console.warn("[auth] Cache clear failed during identity switch:", err);
+      Sentry.captureException(err, { tags: { source: "auth-identity-switch-cache-clear" } });
+    });
+    // Clear per-user in-memory + cached state (poll data, notifications,
+    // toast dedup, dashboard cache) the same way a real logout does, BEFORE
+    // adopting the new identity below, so the incoming identity doesn't
+    // inherit the outgoing one's data.
+    for (const cb of _onClearCallbacks) {
+      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity switch:", e); }
+    }
+  }
+
   setAuth({ access_token: token });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat" });
