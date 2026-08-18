@@ -54,8 +54,9 @@ describe("fetchDepPRBodies — empty input", () => {
   it("returns an empty Map without calling graphql", async () => {
     const octokit = makeOctokit(async () => ({}));
     const result = await fetchDepPRBodies(octokit, []);
-    expect(result).toBeInstanceOf(Map);
-    expect(result.size).toBe(0);
+    expect(result.bodies).toBeInstanceOf(Map);
+    expect(result.bodies.size).toBe(0);
+    expect(result.failedIds.size).toBe(0);
     expect(octokit.graphql).not.toHaveBeenCalled();
   });
 });
@@ -72,9 +73,9 @@ describe("fetchDepPRBodies — single batch", () => {
 
     const result = await fetchDepPRBodies(octokit, ["PR_node_1", "PR_node_2"]);
 
-    expect(result.size).toBe(2);
-    expect(result.get(42)).toContain("lodash");
-    expect(result.get(99)).toBe("Some PR body");
+    expect(result.bodies.size).toBe(2);
+    expect(result.bodies.get(42)).toContain("lodash");
+    expect(result.bodies.get(99)).toBe("Some PR body");
   });
 
   it("skips nodes with null body", async () => {
@@ -88,9 +89,9 @@ describe("fetchDepPRBodies — single batch", () => {
 
     const result = await fetchDepPRBodies(octokit, ["N_1", "N_2"]);
 
-    expect(result.size).toBe(1);
-    expect(result.get(1)).toBe("has body");
-    expect(result.has(2)).toBe(false);
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get(1)).toBe("has body");
+    expect(result.bodies.has(2)).toBe(false);
   });
 
   it("skips nodes with empty string body", async () => {
@@ -104,9 +105,9 @@ describe("fetchDepPRBodies — single batch", () => {
 
     const result = await fetchDepPRBodies(octokit, ["N_1", "N_2"]);
 
-    expect(result.size).toBe(1);
-    expect(result.has(1)).toBe(false);
-    expect(result.get(2)).toBe("content");
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.has(1)).toBe(false);
+    expect(result.bodies.get(2)).toBe("content");
   });
 
   it("skips null nodes in the response array", async () => {
@@ -117,8 +118,8 @@ describe("fetchDepPRBodies — single batch", () => {
 
     const result = await fetchDepPRBodies(octokit, ["N_1", "N_2", "N_3"]);
 
-    expect(result.size).toBe(1);
-    expect(result.get(5)).toBe("valid");
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get(5)).toBe("valid");
   });
 
   it("skips nodes with null databaseId", async () => {
@@ -132,8 +133,8 @@ describe("fetchDepPRBodies — single batch", () => {
 
     const result = await fetchDepPRBodies(octokit, ["N_1", "N_2"]);
 
-    expect(result.size).toBe(1);
-    expect(result.get(10)).toBe("good");
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get(10)).toBe("good");
   });
 
   it("updates graphql rate limit from response", async () => {
@@ -183,8 +184,10 @@ describe("fetchDepPRBodies — error resilience", () => {
     ];
     const result = await fetchDepPRBodies(octokit, ids);
 
-    expect(result.size).toBe(1);
-    expect(result.get(1)).toBe("batch1");
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get(1)).toBe("batch1");
+    expect(result.failedIds.has("batch2_0")).toBe(true);
+    expect(result.failedIds.size).toBe(1);
   });
 
   it("updates rate limit from partial error response", async () => {
@@ -213,8 +216,9 @@ describe("fetchDepPRBodies — hung request timeout", () => {
       await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
       const result = await resultPromise;
 
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(0);
+      expect(result.bodies).toBeInstanceOf(Map);
+      expect(result.bodies.size).toBe(0);
+      expect(result.failedIds.has("N_1")).toBe(true);
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalledWith(
         expect.any(Error),
@@ -241,8 +245,9 @@ describe("fetchDepPRBodies — hung request timeout", () => {
       const resultPromise = fetchDepPRBodies(octokit, ["N_1"]);
       vi.mocked(getClient).mockReturnValue(null);
       await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
-      await resultPromise;
+      const result = await resultPromise;
 
+      expect(result.failedIds.has("N_1")).toBe(true);
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalled();
       expect(pushNotification).not.toHaveBeenCalled();

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { HotPRStatusUpdate, HotWorkflowRunUpdate } from "../../src/app/services/api";
+import { GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
 
 const mockLocationReplace = vi.fn();
 
@@ -97,6 +98,7 @@ let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[]) => v
 // so the module-level _coordinator variable is always fresh (null) per test.
 let DashboardPage: typeof import("../../src/app/components/dashboard/DashboardPage").default;
 let _resetHasFetchedFresh: typeof import("../../src/app/components/dashboard/DashboardPage")._resetHasFetchedFresh;
+let DEP_BODY_FAILURE_COOLDOWN_MS: typeof import("../../src/app/components/dashboard/DashboardPage").DEP_BODY_FAILURE_COOLDOWN_MS;
 let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 let viewStore: typeof import("../../src/app/stores/view");
@@ -157,6 +159,7 @@ beforeEach(async () => {
   const dashboardModule = await import("../../src/app/components/dashboard/DashboardPage");
   DashboardPage = dashboardModule.default;
   _resetHasFetchedFresh = dashboardModule._resetHasFetchedFresh;
+  DEP_BODY_FAILURE_COOLDOWN_MS = dashboardModule.DEP_BODY_FAILURE_COOLDOWN_MS;
   pollService = await import("../../src/app/services/poll");
   authStore = await import("../../src/app/stores/auth");
   viewStore = await import("../../src/app/stores/view");
@@ -2716,6 +2719,284 @@ describe("DashboardPage — pruneJiraCustomOrder on refresh", () => {
     await flushPromises();
 
     expect(freshView.viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2", "PROJ-3"]);
+  });
+});
+
+// ── Dependencies tab — depBodies fetch guard recovers from a hung request ───────
+
+describe("DashboardPage — depBodies fetch guard recovers from a hung GraphQL request", () => {
+  it("releases the _fetchingDepBodies guard after the GraphQL timeout fires, so a later poll cycle retries the fetch", async () => {
+    vi.useFakeTimers();
+    try {
+      const githubService = await import("../../src/app/services/github");
+      // Never resolves — reproduces a hung GraphQL request: without
+      // raceWithTimeout, awaiting this promise would never settle, and
+      // the effect's finally block (which releases _fetchingDepBodies) would
+      // never run, permanently wedging the fetch-in-progress guard.
+      const graphqlSpy = vi.fn(() => new Promise<never>(() => {}));
+      vi.mocked(githubService.getClient).mockReturnValue(
+        { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+      );
+
+      const depPR1 = makePullRequest({
+        id: 100,
+        nodeId: "PR_A",
+        repoFullName: "owner/repo",
+        title: "Update dependency some-pkg",
+        userLogin: "dependabot[bot]",
+        headRef: "dependabot/npm_and_yarn/some-pkg",
+      });
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [depPR1],
+        workflowRuns: [],
+        errors: [],
+      });
+
+      render(() => <DashboardPage />);
+
+      // vi.waitFor polls using real (un-mocked) timers even while fake timers
+      // are installed, so this settles as soon as the pending microtasks from
+      // fetchAllData's resolved mock and Solid's reactive depBodies effect
+      // propagate — no timer advance is needed to reach the first graphql call.
+      await vi.waitFor(() => {
+        expect(graphqlSpy).toHaveBeenCalledTimes(1);
+      }, { timeout: 5000 });
+
+      // Advance past the body-fetch timeout. raceWithTimeout's internal
+      // setTimeout fires, aborts the controller, and rejects the race;
+      // fetchDepPRBodies swallows that per-batch failure (Promise.allSettled)
+      // and resolves with an empty bodies Map — so the depBodies effect's
+      // `finally` block runs and releases the _fetchingDepBodies guard.
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+
+      // A second dependency PR arrives on a later poll cycle. If the guard
+      // was truly released, the depBodies effect fires again and retries the
+      // fetch (a second graphql call). Without the timeout fix, a hung request
+      // would leave the guard stuck forever and this second call would never happen.
+      const depPR2 = makePullRequest({
+        id: 200,
+        nodeId: "PR_B",
+        repoFullName: "owner/repo2",
+        title: "Update dependency other-pkg",
+        userLogin: "dependabot[bot]",
+        headRef: "dependabot/npm_and_yarn/other-pkg",
+      });
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [depPR1, depPR2],
+        workflowRuns: [],
+        errors: [],
+      });
+      if (capturedFetchAll) {
+        await capturedFetchAll();
+      }
+
+      await vi.waitFor(() => {
+        expect(graphqlSpy).toHaveBeenCalledTimes(2);
+      }, { timeout: 5000 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("excludes a PR whose body-fetch failed from retry until the failure cooldown elapses", async () => {
+    // Only Date is faked (not setTimeout/setInterval) so we can jump the clock
+    // forward by the cooldown window without executing DashboardPage's other
+    // unrelated real timers/intervals along the way.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const githubService = await import("../../src/app/services/github");
+      const graphqlSpy = vi.fn()
+        .mockRejectedValueOnce(new Error("boom"))
+        .mockResolvedValue({ nodes: [{ databaseId: 100, body: "not a renovate table" }], rateLimit: null });
+      vi.mocked(githubService.getClient).mockReturnValue(
+        { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+      );
+
+      const depPR = makePullRequest({
+        id: 100,
+        nodeId: "PR_A",
+        repoFullName: "owner/repo",
+        title: "Update dependency some-pkg",
+        userLogin: "dependabot[bot]",
+        headRef: "dependabot/npm_and_yarn/some-pkg",
+      });
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [depPR],
+        workflowRuns: [],
+        errors: [],
+      });
+
+      render(() => <DashboardPage />);
+      await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+      // capturedFetchAll only awaits the poll fetch itself, not the effect's
+      // fire-and-forget async body-fetch — give the (immediately-rejecting,
+      // no real network delay) catch/finally chain a moment to actually
+      // settle and release the guard before triggering the next poll, or it
+      // races the in-flight fetch and gets silently skipped ("fetch already
+      // in flight").
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Second poll cycle, same PR unchanged — the cooldown should suppress the
+      // retry. Re-issue the mock with a fresh array (same PR object) so SolidJS's
+      // store sees a reference change and actually re-runs dependent effects —
+      // reusing the exact same array/response object across polls is a no-op
+      // for reactivity and would make this test pass for the wrong reason.
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [depPR],
+        workflowRuns: [],
+        errors: [],
+      });
+      if (capturedFetchAll) await capturedFetchAll();
+      // Real (unfaked) short delay to let the reactive effect chain settle
+      // before asserting the call count did NOT increase.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(graphqlSpy).toHaveBeenCalledTimes(1);
+
+      // Jump the clock past the cooldown window (no intervening timers run —
+      // only Date.now() changes) so the PR becomes eligible again.
+      vi.setSystemTime(new Date(Date.now() + DEP_BODY_FAILURE_COOLDOWN_MS));
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [depPR],
+        workflowRuns: [],
+        errors: [],
+      });
+      if (capturedFetchAll) await capturedFetchAll();
+      await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prunes a stale cooldown entry when its PR leaves the dependency set, so a later reappearance is retried immediately", async () => {
+    const githubService = await import("../../src/app/services/github");
+    const graphqlSpy = vi.fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue({ nodes: [], rateLimit: null });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const depPRA = makePullRequest({
+      id: 100,
+      nodeId: "PR_A",
+      repoFullName: "owner/repo",
+      title: "Update dependency some-pkg",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/some-pkg",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRA],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    // capturedFetchAll only awaits the poll fetch itself, not the effect's
+    // fire-and-forget async body-fetch — give the (immediately-rejecting,
+    // no real network delay) catch/finally chain a moment to actually settle
+    // and release the guard before triggering the next poll, or it races the
+    // in-flight fetch and gets silently skipped ("fetch already in flight").
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // PR_A closes/merges and disappears; a new PR_B needs its own fetch —
+    // this re-runs the effect (and its cooldown-prune step) even though
+    // PR_A itself is no longer in toFetch.
+    const depPRB = makePullRequest({
+      id: 200,
+      nodeId: "PR_B",
+      repoFullName: "owner/repo2",
+      title: "Update dependency other-pkg",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/other-pkg",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRB],
+      workflowRuns: [],
+      errors: [],
+    });
+    if (capturedFetchAll) await capturedFetchAll();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // PR_A reappears (e.g. reopened) well within what would have been its
+    // cooldown window. If its stale cooldown entry survived PR_A leaving the
+    // dependency set, it would incorrectly still be excluded here.
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRA, depPRB],
+      workflowRuns: [],
+      errors: [],
+    });
+    if (capturedFetchAll) await capturedFetchAll();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(3));
+
+    const idsRequestedInThirdCall = (graphqlSpy.mock.calls[2]?.[1] as { ids: string[] } | undefined)?.ids ?? [];
+    expect(idsRequestedInThirdCall).toContain("PR_A");
+  });
+
+  it("prunes a stale cooldown entry even when no other PR triggers a fetch in between", async () => {
+    // Regression guard: the cooldown-prune loop must run on every effect
+    // evaluation, not only when toFetch is non-empty — otherwise a PR that
+    // fails, disappears, and reopens with nothing else needing a fetch in
+    // between would stay incorrectly excluded on a stale cooldown entry.
+    const githubService = await import("../../src/app/services/github");
+    const graphqlSpy = vi.fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue({ nodes: [], rateLimit: null });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const depPRA = makePullRequest({
+      id: 100,
+      nodeId: "PR_A",
+      repoFullName: "owner/repo",
+      title: "Update dependency some-pkg",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/some-pkg",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRA],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // PR_A closes/merges and disappears — no other dependency PR takes its
+    // place, so toFetch is empty this cycle. The prune step must still run.
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    if (capturedFetchAll) await capturedFetchAll();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(graphqlSpy).toHaveBeenCalledTimes(1);
+
+    // PR_A reappears (e.g. reopened) well within what would have been its
+    // cooldown window. If the stale entry wasn't pruned while PR_A was absent,
+    // it would incorrectly still be excluded here.
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRA],
+      workflowRuns: [],
+      errors: [],
+    });
+    if (capturedFetchAll) await capturedFetchAll();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
   });
 });
 

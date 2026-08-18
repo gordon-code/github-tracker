@@ -179,6 +179,13 @@ const [depMeta, setDepMeta] = createSignal<ReadonlyMap<number, VersionInfo>>(loa
 let _fetchingDashboardBodies = false;
 let _fetchingDepBodies = false;
 
+// Skip retrying a dep-PR body fetch that errored/timed out on its last attempt until
+// this cooldown elapses — prevents burning a full GRAPHQL_BODY_FETCH_TIMEOUT_MS timeout,
+// an undeduped Sentry event, and a repeated user notification every poll cycle for as
+// long as the underlying failure (e.g. a secondary-rate-limit stall) persists.
+export const DEP_BODY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const _depBodyFailureCooldown = new Map<number, number>();
+
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   resetDashboardData();
@@ -193,6 +200,7 @@ onAuthCleared(() => {
   localStorage.removeItem?.(DEP_META_STORAGE_KEY);
   _fetchingDashboardBodies = false;
   _fetchingDepBodies = false;
+  _depBodyFailureCooldown.clear();
   resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {
@@ -1194,7 +1202,7 @@ export default function DashboardPage() {
           if (relevant.length === 0) return;
 
           const nodeIds = relevant.map((di) => di.nodeId);
-          const bodyMap = await fetchDashboardIssueBodies(octokit, nodeIds);
+          const { bodies: bodyMap } = await fetchDashboardIssueBodies(octokit, nodeIds);
 
           const newAbandonedMap = new Map<string, AbandonedDependency[]>();
           const newUrlMap = new Map<string, string>();
@@ -1223,7 +1231,7 @@ export default function DashboardPage() {
   createEffect(() => {
     if (!config.dependencies.enabled) return;
     if (_fetchingDepBodies) {
-      console.debug("[dashboard] depBodies effect: skipped — fetch already in flight (this run's tracked deps are now narrowed to config.dependencies.enabled only)");
+      console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;
     }
     const octokit = getClient();
@@ -1232,7 +1240,23 @@ export default function DashboardPage() {
     const meta = depMeta();
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
-    const toFetch = visibleDepPrs.filter((pr) => !meta.has(pr.id) && needsBodyFallback(pr));
+    const now = Date.now();
+
+    // Prune cooldown entries for PRs no longer in the dependency set on every
+    // effect run, regardless of whether anything needs fetching this cycle —
+    // otherwise a PR that fails, leaves the set, and reopens before some OTHER
+    // PR happens to trigger a fetch would incorrectly stay excluded on a stale
+    // cooldown entry for up to DEP_BODY_FAILURE_COOLDOWN_MS.
+    const depPrIds = new Set(depPrs.map((pr) => pr.id));
+    for (const k of [..._depBodyFailureCooldown.keys()]) {
+      if (!depPrIds.has(k)) _depBodyFailureCooldown.delete(k);
+    }
+
+    const toFetch = visibleDepPrs.filter((pr) => {
+      if (meta.has(pr.id) || !needsBodyFallback(pr)) return false;
+      const failedAt = _depBodyFailureCooldown.get(pr.id);
+      return !failedAt || now - failedAt >= DEP_BODY_FAILURE_COOLDOWN_MS;
+    });
     if (toFetch.length === 0) {
       console.debug("[dashboard] depBodies effect: nothing to fetch", { metaSize: meta.size, visibleDepPrCount: visibleDepPrs.length });
       return;
@@ -1244,8 +1268,19 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
-        const bodyMap = await fetchDepPRBodies(octokit, nodeIds);
-        console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size });
+        const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
+        console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
+
+        // Record/clear per-PR cooldown so a batch that errored or timed out isn't
+        // retried again until DEP_BODY_FAILURE_COOLDOWN_MS has elapsed.
+        for (const pr of toFetch) {
+          if (pr.nodeId && failedIds.has(pr.nodeId)) {
+            _depBodyFailureCooldown.set(pr.id, now);
+          } else {
+            _depBodyFailureCooldown.delete(pr.id);
+          }
+        }
+
         if (bodyMap.size === 0) return;
 
         const merged = new Map(meta);
@@ -1254,7 +1289,6 @@ export default function DashboardPage() {
           if (parsed) merged.set(id, parsed);
         }
         // Prune entries for PRs no longer in the dependency set
-        const depPrIds = new Set(depPrs.map((pr) => pr.id));
         for (const k of [...merged.keys()]) {
           if (!depPrIds.has(k)) merged.delete(k);
         }
