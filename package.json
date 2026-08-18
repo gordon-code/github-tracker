@@ -2,7 +2,7 @@
   "name": "github-tracker",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.20.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -21,10 +21,10 @@
   },
   "dependencies": {
     "@kobalte/core": "0.13.12",
-    "@octokit/core": "7.0.6",
+    "@octokit/core": "7.0.7",
     "@octokit/plugin-paginate-rest": "15.0.0",
-    "@octokit/plugin-retry": "8.1.0",
-    "@octokit/plugin-throttling": "11.0.3",
+    "@octokit/plugin-retry": "8.1.1",
+    "@octokit/plugin-throttling": "11.0.5",
     "@sentry/cloudflare": "10.69.0",
     "@sentry/solid": "10.69.0",
     "@solidjs/router": "1.0.0",
@@ -34,22 +34,22 @@
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "7.0.0",
-    "@cloudflare/vite-plugin": "1.48.0",
-    "@cloudflare/vitest-pool-workers": "0.19.0",
+    "@cloudflare/vite-plugin": "1.50.0",
+    "@cloudflare/vitest-pool-workers": "0.20.1",
     "@fast-check/vitest": "0.4.1",
-    "@playwright/test": "1.62.0",
+    "@playwright/test": "1.62.1",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
-    "@testing-library/user-event": "14.6.1",
+    "@testing-library/user-event": "14.6.3",
     "@types/node": "26.1.2",
-    "daisyui": "5.7.7",
+    "daisyui": "5.7.15",
     "fake-indexeddb": "6.2.5",
     "happy-dom": "20.11.1",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.1.5",
+    "vite": "8.2.0",
     "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.10",
-    "wrangler": "4.115.0"
+    "wrangler": "4.118.0"
   }
 }
