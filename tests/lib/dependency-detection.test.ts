@@ -260,13 +260,43 @@ describe("extractVersionInfo", () => {
     expect(result).toBeNull();
   });
 
+  it("extracts a scoped npm package name via the generic single-target fallback", () => {
+    const result = extractVersionInfo("chore(deps): update @actions/checkout to v5");
+    expect(result).toEqual({ packageName: "@actions/checkout", to: "v5" });
+  });
+
+  it("extracts a slash-containing Go module path via the generic single-target fallback", () => {
+    const result = extractVersionInfo("chore(deps): update golang.org/x/net to v0.20.0");
+    expect(result).toEqual({ packageName: "golang.org/x/net", to: "v0.20.0" });
+  });
+
+  it("does not match the generic single-target fallback for a human-authored multi-word title with no dependency-specific signal", () => {
+    // "Update the docs to v2" satisfies the version-shape check ("v2" starts with a digit) and
+    // would have matched the old (.+?) capture group, producing a spurious
+    // { packageName: "the docs", to: "v2" }. It's reachable via isDependencyPr()'s label-only
+    // admission path (a PR manually labeled "dependencies" needs no bot-like title). The
+    // single-token (\S+) requirement rejects it since the captured text would have to include a
+    // space.
+    const result = extractVersionInfo("Update the docs to v2");
+    expect(result).toBeNull();
+  });
+
   it("still prefers genericMatch's semver-diff path over the new single-target patterns when 'from' is present", () => {
-    // Synthetic "Update X from A to B"-style title (no real crate-manager sample of this shape was
-    // found) without the literal "crate"/"docker tag" keywords, since a title that combines those
-    // keywords with "from...to" hits the documented absorption caveat on the crate/docker patterns
-    // themselves (see Task 2 Step 1's ASSUMPTION note) rather than exercising this fallback-ordering
-    // regression check.
+    // Title has no "crate"/"docker tag" keyword, so crateMatch/dockerMatch never get a chance to
+    // run here — this just confirms genericMatch's bare "from...to" phrasing still wins over the
+    // generic single-target fallback.
     const result = extractVersionInfo("chore(deps): update pyo3 from 0.29.0 to 0.29.1");
+    expect(result).toEqual({ from: "0.29.0", to: "0.29.1", updateType: "patch" });
+  });
+
+  it("prefers genericMatch's semver-diff path over crateMatch even when the title combines the 'crate' keyword with 'from...to' phrasing", () => {
+    // Regression test for the crate/docker absorption bug: genericMatch is checked before
+    // crateMatch/dockerMatch precisely so that a title combining the literal "crate" keyword with
+    // "from...to" phrasing is classified via the correct semver-diff path. Before this ordering
+    // fix, crateMatch's lazy capture group would have absorbed the "from" clause into the package
+    // name (packageName: "pyo3 from 0.29.0"), since its lazy (.+?) group expands until the first
+    // " to " match, which occurs after "0.29.0", not after "pyo3".
+    const result = extractVersionInfo("chore(deps): update crate pyo3 from 0.29.0 to 0.29.1");
     expect(result).toEqual({ from: "0.29.0", to: "0.29.1", updateType: "patch" });
   });
 });
@@ -796,6 +826,57 @@ describe("needsBodyFallback", () => {
       title: "chore(deps): update something action to v5",
       nodeId: "PR_abc",
       labels: [{ name: "major", color: "ff0000" }],
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns true for a crate-matched title with no updateType and no risk label", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update rust crate pyo3 to v0.29.1",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(true);
+  });
+
+  it("returns true for a Docker-tag-matched title with no updateType and no risk label", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update node Docker tag to v24.18.1",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(true);
+  });
+
+  it("returns true for a generic single-target-matched title with no updateType and no risk label", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update renovate to v44",
+      nodeId: "PR_abc",
+    });
+    expect(needsBodyFallback(pr)).toBe(true);
+  });
+
+  it("returns false when digest label present (mirrors depCategory's label list)", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update node Docker tag to v24.18.1",
+      nodeId: "PR_abc",
+      labels: [{ name: "digest", color: "ff0000" }],
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false when pin label present (mirrors depCategory's label list)", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update rust crate pyo3 to v0.29.1",
+      nodeId: "PR_abc",
+      labels: [{ name: "pin", color: "00ff00" }],
+    });
+    expect(needsBodyFallback(pr)).toBe(false);
+  });
+
+  it("returns false when maintenance label present (mirrors depCategory's label list)", () => {
+    const pr = makePullRequest({
+      title: "chore(deps): update renovate to v44",
+      nodeId: "PR_abc",
+      labels: [{ name: "maintenance", color: "0000ff" }],
     });
     expect(needsBodyFallback(pr)).toBe(false);
   });

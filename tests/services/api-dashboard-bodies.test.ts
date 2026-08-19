@@ -62,8 +62,9 @@ describe("fetchDashboardIssueBodies — empty input", () => {
   it("returns an empty Map immediately without calling graphql", async () => {
     const octokit = makeOctokit(async () => ({}));
     const result = await fetchDashboardIssueBodies(octokit, []);
-    expect(result).toBeInstanceOf(Map);
-    expect(result.size).toBe(0);
+    expect(result.bodies).toBeInstanceOf(Map);
+    expect(result.bodies.size).toBe(0);
+    expect(result.failedIds.size).toBe(0);
     expect(octokit.graphql).not.toHaveBeenCalled();
   });
 });
@@ -81,9 +82,9 @@ describe("fetchDashboardIssueBodies — single batch", () => {
 
     const result = await fetchDashboardIssueBodies(octokit, ["N_1", "N_2"]);
 
-    expect(result.get("N_1")).toBe("Dashboard body text");
-    expect(result.get("N_2")).toBeNull();
-    expect(result.size).toBe(2);
+    expect(result.bodies.get("N_1")).toBe("Dashboard body text");
+    expect(result.bodies.get("N_2")).toBeNull();
+    expect(result.bodies.size).toBe(2);
   });
 
   it("calls updateGraphqlRateLimit when rateLimit is in response", async () => {
@@ -116,8 +117,8 @@ describe("fetchDashboardIssueBodies — single batch", () => {
 
     const result = await fetchDashboardIssueBodies(octokit, ["N_1", "N_2", "N_3"]);
 
-    expect(result.size).toBe(1);
-    expect(result.get("N_2")).toBe("valid body");
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get("N_2")).toBe("valid body");
   });
 });
 
@@ -134,7 +135,7 @@ describe("fetchDashboardIssueBodies — batch splitting", () => {
     const result = await fetchDashboardIssueBodies(octokit, ids);
 
     expect(octokit.graphql).toHaveBeenCalledTimes(2);
-    expect(result.size).toBe(NODES_BATCH_SIZE + 1);
+    expect(result.bodies.size).toBe(NODES_BATCH_SIZE + 1);
   });
 
   it("first batch has exactly NODES_BATCH_SIZE items", async () => {
@@ -166,9 +167,9 @@ describe("fetchDashboardIssueBodies — batch splitting", () => {
 
     const result = await fetchDashboardIssueBodies(octokit, allIds);
 
-    expect(result.size).toBe(NODES_BATCH_SIZE + 2);
-    expect(result.get("A_0")).toBe("body-A_0");
-    expect(result.get("B_1")).toBe("body-B_1");
+    expect(result.bodies.size).toBe(NODES_BATCH_SIZE + 2);
+    expect(result.bodies.get("A_0")).toBe("body-A_0");
+    expect(result.bodies.get("B_1")).toBe("body-B_1");
   });
 });
 
@@ -184,8 +185,8 @@ describe("fetchDashboardIssueBodies — partial error handling", () => {
 
     const result = await fetchDashboardIssueBodies(octokit, ["N_null1", "N_ok", "N_null2"]);
 
-    expect(result.get("N_ok")).toBe("good body");
-    expect(result.size).toBe(1);
+    expect(result.bodies.get("N_ok")).toBe("good body");
+    expect(result.bodies.size).toBe(1);
   });
 
   it("gracefully ignores nodes missing an id field", async () => {
@@ -199,8 +200,8 @@ describe("fetchDashboardIssueBodies — partial error handling", () => {
     const result = await fetchDashboardIssueBodies(octokit, ["N_empty", "N_valid"]);
 
     // Node with empty id is skipped (falsy guard: !node.id)
-    expect(result.get("N_valid")).toBe("kept");
-    expect(result.size).toBe(1);
+    expect(result.bodies.get("N_valid")).toBe("kept");
+    expect(result.bodies.size).toBe(1);
   });
 });
 
@@ -212,8 +213,9 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
 
     const result = await fetchDashboardIssueBodies(octokit, ["N_1"]);
 
-    expect(result).toBeInstanceOf(Map);
-    expect(result.size).toBe(0);
+    expect(result.bodies).toBeInstanceOf(Map);
+    expect(result.bodies.size).toBe(0);
+    expect(result.failedIds.has("N_1")).toBe(true);
   });
 
   it("calls updateGraphqlRateLimit from partial data on GraphQL error", async () => {
@@ -251,8 +253,9 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
     const result = await fetchDashboardIssueBodies(octokit, ids);
 
     // Second batch (1 item) should succeed despite first failing
-    expect(result.size).toBe(1);
-    expect(result.get(`N_${NODES_BATCH_SIZE}`)).toBe(`body-N_${NODES_BATCH_SIZE}`);
+    expect(result.bodies.size).toBe(1);
+    expect(result.bodies.get(`N_${NODES_BATCH_SIZE}`)).toBe(`body-N_${NODES_BATCH_SIZE}`);
+    expect(result.failedIds.size).toBe(NODES_BATCH_SIZE);
   });
 });
 
@@ -268,8 +271,9 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
       const result = await resultPromise;
 
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(0);
+      expect(result.bodies).toBeInstanceOf(Map);
+      expect(result.bodies.size).toBe(0);
+      expect(result.failedIds.has("N_1")).toBe(true);
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalledWith(
         expect.any(Error),
