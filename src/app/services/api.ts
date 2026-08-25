@@ -1151,6 +1151,8 @@ export async function fetchPREnrichment(
         updateGraphqlRateLimit(partialErr.rateLimit);
       }
       const { statusCode, message } = extractRejectionError(err);
+      console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+      Sentry.captureException(err, { tags: { source: "prEnrichment" } });
       errors.push({
         repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
         statusCode, message,
@@ -1356,6 +1358,40 @@ function mergeEnrichment(
       comments: e.comments,
       reviewThreads: e.reviewThreads,
       totalReviewCount: e.totalReviewCount,
+      enriched: true,
+    };
+  });
+}
+
+/**
+ * Carries forward a PR's last-known enrichment when this cycle's backfill
+ * failed for it, instead of regressing an already-enriched PR to unenriched.
+ * Without this, a single transient backfill failure wipes size/check-status
+ * data and can flip dependency-status classification (e.g. Mergeable ->
+ * Needs Action) until the next successful poll re-enriches it.
+ */
+export function fallbackToPreviousEnrichment(
+  previous: PullRequest[],
+  next: PullRequest[]
+): PullRequest[] {
+  if (previous.length === 0) return next;
+  const previousMap = new Map(previous.map((pr) => [pr.id, pr]));
+  return next.map((pr) => {
+    if (pr.enriched !== false) return pr;
+    const prev = previousMap.get(pr.id);
+    if (!prev || prev.enriched === false) return pr;
+    return {
+      ...pr,
+      headSha: prev.headSha,
+      assigneeLogins: prev.assigneeLogins,
+      reviewerLogins: prev.reviewerLogins,
+      checkStatus: prev.checkStatus,
+      additions: prev.additions,
+      deletions: prev.deletions,
+      changedFiles: prev.changedFiles,
+      comments: prev.comments,
+      reviewThreads: prev.reviewThreads,
+      totalReviewCount: prev.totalReviewCount,
       enriched: true,
     };
   });
