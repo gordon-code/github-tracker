@@ -14,7 +14,7 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -285,23 +285,20 @@ async function pollFetch(): Promise<DashboardData> {
           for (let i = 0; i < state.pullRequests.length; i++) {
             const e = enrichedMap.get(state.pullRequests[i].id)!;
             const pr = state.pullRequests[i];
-            pr.headSha = e.headSha;
-            pr.assigneeLogins = e.assigneeLogins;
-            pr.reviewerLogins = e.reviewerLogins;
-            pr.checkStatus = e.checkStatus;
-            pr.additions = e.additions;
-            pr.deletions = e.deletions;
-            pr.changedFiles = e.changedFiles;
-            pr.comments = e.comments;
-            pr.reviewThreads = e.reviewThreads;
-            pr.totalReviewCount = e.totalReviewCount;
-            pr.enriched = e.enriched;
+            // A failed backfill batch returns e.enriched === false for PRs it
+            // couldn't reach — don't let that regress a PR that was already
+            // enriched from a prior cycle.
+            const regressing = e.enriched === false && pr.enriched !== false;
+            if (!regressing) {
+              Object.assign(pr, pickEnrichmentFields(e));
+              pr.enriched = e.enriched;
+            }
             pr.nodeId = e.nodeId;
             pr.surfacedBy = e.surfacedBy;
             pr.starCount = e.starCount;
           }
         } else {
-          state.pullRequests = data.pullRequests;
+          state.pullRequests = fallbackToPreviousEnrichment(state.pullRequests, data.pullRequests);
         }
       }));
     } else {
@@ -310,10 +307,11 @@ async function pollFetch(): Promise<DashboardData> {
       // changed since the last cycle. Preserve scroll position: SolidJS
       // DOM updates are synchronous within the setter, so save/restore
       // around it to prevent scroll reset from <For> DOM rebuild.
+      const pullRequests = fallbackToPreviousEnrichment(dashboardData.pullRequests, data.pullRequests);
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
-          pullRequests: data.pullRequests,
+          pullRequests,
           workflowRuns: config.enableActions ? data.workflowRuns : [],
           loading: false,
           lastRefreshedAt: now,

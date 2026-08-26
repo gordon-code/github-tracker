@@ -1151,6 +1151,8 @@ export async function fetchPREnrichment(
         updateGraphqlRateLimit(partialErr.rateLimit);
       }
       const { statusCode, message } = extractRejectionError(err);
+      console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+      Sentry.captureException(err, { tags: { source: "prEnrichment" } });
       errors.push({
         repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
         statusCode, message,
@@ -1328,6 +1330,42 @@ export async function fetchDepPRBodies(
 }
 
 /**
+ * The heavy PR fields populated by phase-2 enrichment. Centralized so the sites
+ * that copy enrichment onto a PR — mergeEnrichment, fallbackToPreviousEnrichment,
+ * and the fine-grained store merge in DashboardPage — stay in sync when a field
+ * is added or removed.
+ */
+type EnrichmentFields = Pick<
+  PullRequest,
+  | "headSha"
+  | "assigneeLogins"
+  | "reviewerLogins"
+  | "checkStatus"
+  | "additions"
+  | "deletions"
+  | "changedFiles"
+  | "comments"
+  | "reviewThreads"
+  | "totalReviewCount"
+>;
+
+/** Extracts just the heavy enrichment fields from any PR-shaped source. */
+export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields {
+  return {
+    headSha: source.headSha,
+    assigneeLogins: source.assigneeLogins,
+    reviewerLogins: source.reviewerLogins,
+    checkStatus: source.checkStatus,
+    additions: source.additions,
+    deletions: source.deletions,
+    changedFiles: source.changedFiles,
+    comments: source.comments,
+    reviewThreads: source.reviewThreads,
+    totalReviewCount: source.totalReviewCount,
+  };
+}
+
+/**
  * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
  * Also detects fork PRs for the statusCheckRollup fallback.
  */
@@ -1346,16 +1384,32 @@ function mergeEnrichment(
 
     return {
       ...pr,
-      headSha: e.headSha,
-      assigneeLogins: e.assigneeLogins,
-      reviewerLogins: e.reviewerLogins,
-      checkStatus: e.checkStatus,
-      additions: e.additions,
-      deletions: e.deletions,
-      changedFiles: e.changedFiles,
-      comments: e.comments,
-      reviewThreads: e.reviewThreads,
-      totalReviewCount: e.totalReviewCount,
+      ...pickEnrichmentFields(e),
+      enriched: true,
+    };
+  });
+}
+
+/**
+ * Carries forward a PR's last-known enrichment when this cycle's backfill
+ * failed for it, instead of regressing an already-enriched PR to unenriched.
+ * Without this, a single transient backfill failure wipes size/check-status
+ * data and can flip dependency-status classification (e.g. Mergeable ->
+ * Needs Action) until the next successful poll re-enriches it.
+ */
+export function fallbackToPreviousEnrichment(
+  previous: PullRequest[],
+  next: PullRequest[]
+): PullRequest[] {
+  if (previous.length === 0) return next;
+  const previousMap = new Map(previous.map((pr) => [pr.id, pr]));
+  return next.map((pr) => {
+    if (pr.enriched !== false) return pr;
+    const prev = previousMap.get(pr.id);
+    if (!prev || prev.enriched === false) return pr;
+    return {
+      ...pr,
+      ...pickEnrichmentFields(prev),
       enriched: true,
     };
   });
