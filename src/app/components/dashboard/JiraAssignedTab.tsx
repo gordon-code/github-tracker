@@ -423,7 +423,11 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     reorderTimeoutId = setTimeout(() => setReordering(false), 200);
   }
 
-  function renderIssueRow(issue: JiraItem, boundary?: { isFirst: boolean; isLast: boolean }) {
+  // boundary.isFirst/isLast are accessors (not plain booleans) so the disabled
+  // state re-tracks the row's live position: keyed <For> moves cached row nodes
+  // on reorder without re-running the callback, so a snapshotted index() would
+  // freeze the first/last state to where the row was originally rendered.
+  function renderIssueRow(issue: JiraItem, boundary?: { isFirst: () => boolean; isLast: () => boolean }) {
     const isPinned = () => pinnedJiraKeys().has(issue.key);
     const browseUrl = () => isSafeJiraSiteUrl(props.siteUrl) ? `${props.siteUrl}/browse/${issue.key}` : "#";
     const isIssueExpanded = () => expandByDefault() ? !toggledIssues().has(issue.key) : toggledIssues().has(issue.key);
@@ -436,11 +440,11 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         ref={(el) => { if (isCustomMode()) itemRefs.set(issue.key, el); }}
       >
         <Show when={isCustomMode()}>
-          <div class="flex flex-col shrink-0 justify-center gap-0.5 pl-2 compact:pl-1">
+          <div class="flex shrink-0 items-center justify-center gap-0.5 pl-2 compact:pl-1">
             <button
               type="button"
               class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
-              disabled={!canReorder() || reordering() || !!boundary?.isFirst}
+              disabled={!canReorder() || reordering() || !!boundary?.isFirst()}
               aria-label={`Move up: ${issue.key}`}
               title={reorderTitle()}
               onClick={() => handleCustomMove(issue.key, "up")}
@@ -452,7 +456,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
             <button
               type="button"
               class="btn btn-ghost btn-xs compact:min-h-0 compact:h-6 compact:w-7 compact:px-0"
-              disabled={!canReorder() || reordering() || !!boundary?.isLast}
+              disabled={!canReorder() || reordering() || !!boundary?.isLast()}
               aria-label={`Move down: ${issue.key}`}
               title={reorderTitle()}
               onClick={() => handleCustomMove(issue.key, "down")}
@@ -759,8 +763,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
             <For each={customPageItems()}>
               {(issue, index) =>
                 renderIssueRow(issue, {
-                  isFirst: page() === 0 && index() === 0,
-                  isLast: page() === pageCount() - 1 && index() === customPageItems().length - 1,
+                  isFirst: () => page() === 0 && index() === 0,
+                  isLast: () => page() === pageCount() - 1 && index() === customPageItems().length - 1,
                 })
               }
             </For>

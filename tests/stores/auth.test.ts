@@ -501,7 +501,17 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_abc");
   });
 
-  it("updates token signal when another tab writes a different non-null value", () => {
+  it("updates token signal when another tab writes a different non-null value", async () => {
+    // A different non-null value fires the listener's fire-and-forget /user fetch
+    // (auth.ts) to refresh the profile for the adopted token. Stub it so the request
+    // never hits the real happy-dom network and cannot leak past teardown.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "replaced", avatar_url: "", name: null }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
     mod.setAuth({ access_token: "ghs_abc" });
 
     window.dispatchEvent(new StorageEvent("storage", {
@@ -509,8 +519,11 @@ describe("cross-tab auth sync", () => {
       newValue: "ghs_replacement",
     }));
 
-    // Token updated to the replacement value
+    // Token updated to the replacement value synchronously
     expect(mod.token()).toBe("ghs_replacement");
+
+    // Let the fire-and-forget fetch settle so nothing survives into teardown.
+    await new Promise((r) => setTimeout(r, 0));
   });
 
   it("same-value StorageEvent is a no-op (dedup guard)", () => {
