@@ -717,20 +717,20 @@ describe("ViewStateSchema", () => {
   });
 
   it("migrates pre-expandDefault data: Jira defaults to expanded, GitHub tabs collapsed, existing entries preserved", () => {
-    // Pre-refactor blob: no expandDefault key; expandedRepos has explicit manual-expand
-    // entries. Projects the user previously collapsed are simply absent from the map.
+    // Legacy blob: no expandDefault key; expandedRepos holds explicit per-repo entries.
+    // A Jira project with no entry in the map has no recorded expand/collapse state.
     const oldData = {
       lastActiveTab: "issues",
       expandedRepos: { issues: { "org/repo": true }, jiraAssigned: { "PROJ": true } },
     };
     const result = ViewStateSchema.parse(oldData);
-    // Backfilled default: Jira expanded (preserves prior auto-expand), GitHub tabs collapsed.
+    // Backfilled default: jiraAssigned defaults to expanded; GitHub tabs default to collapsed.
     expect(result.expandDefault).toEqual({ jiraAssigned: true });
     // Explicit entries are preserved as exceptions.
     expect(result.expandedRepos.issues["org/repo"]).toBe(true);
     expect(result.expandedRepos.jiraAssigned["PROJ"]).toBe(true);
-    // A Jira project absent from the map (default true, no exception) now reads expanded —
-    // the intended one-time reset for projects collapsed under the old delete-on-collapse model.
+    // A Jira project absent from the map has no exception recorded, so it reads
+    // expanded via the jiraAssigned default.
     expect(result.expandedRepos.jiraAssigned["ABSENT-PROJ"]).toBeUndefined();
     expect(result.expandDefault.jiraAssigned).toBe(true);
   });
@@ -793,6 +793,15 @@ describe("expandedRepos helpers", () => {
     setAllExpanded("issues", false);
     expect(viewState.expandDefault.issues).toBe(false);
     expect(isRepoExpanded("issues", "owner/anything")).toBe(false);
+  });
+
+  it("jiraAssigned defaults to expanded on a fresh store", () => {
+    expect(isRepoExpanded("jiraAssigned", "SOMEPROJ")).toBe(true);
+  });
+
+  it("setAllExpanded('jiraAssigned', false) persists for a later-surfacing project group", () => {
+    setAllExpanded("jiraAssigned", false);
+    expect(isRepoExpanded("jiraAssigned", "LATER-PROJ")).toBe(false);
   });
 
   it("pruneExpandedRepos removes stale exception keys and keeps active ones", () => {
@@ -1257,6 +1266,13 @@ describe("removeCustomTabState", () => {
     expect("tab-abc" in viewState.expandedRepos).toBe(false);
   });
 
+  it("cleans expandDefault for the given tab ID", () => {
+    setAllExpanded("tab-abc", true);
+    expect(viewState.expandDefault["tab-abc"]).toBe(true);
+    removeCustomTabState("tab-abc");
+    expect("tab-abc" in viewState.expandDefault).toBe(false);
+  });
+
   it("removes both customTabFilters and expandedRepos in a single call", () => {
     setCustomTabFilter("tab-abc", "scope", "all");
     toggleExpandedRepo("tab-abc", "owner/repo");
@@ -1307,6 +1323,16 @@ describe("resetViewState — custom tab fields", () => {
     expect(viewState.expandedRepos["actions"]).toEqual({});
     // Custom key is fully deleted
     expect("tab-custom" in viewState.expandedRepos).toBe(false);
+  });
+
+  it("clears custom tab keys from expandDefault while preserving the jiraAssigned default", () => {
+    setAllExpanded("tab-custom", true);
+    expect(viewState.expandDefault["tab-custom"]).toBe(true);
+    resetViewState();
+    // Builtin jiraAssigned default is preserved (not deleted)
+    expect(viewState.expandDefault["jiraAssigned"]).toBe(true);
+    // Custom key is fully deleted
+    expect("tab-custom" in viewState.expandDefault).toBe(false);
   });
 
   it("clears custom tab keys from lockedRepos and resets built-in keys to []", () => {

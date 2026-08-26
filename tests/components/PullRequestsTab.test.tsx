@@ -613,6 +613,28 @@ describe("PullRequestsTab", () => {
     screen.getByText("Repo B PR 0");
   });
 
+  it("expand all keeps a repo that appears in a later data update expanded", async () => {
+    const user = userEvent.setup();
+    const [prs, setPrs] = createSignal<PullRequest[]>([
+      makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" }),
+    ]);
+    render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
+
+    // Expand all — sets the tab default to expanded
+    await user.click(screen.getByLabelText("Expand all repos"));
+    screen.getByText("Repo A PR");
+
+    // A brand-new repo arrives later (never present when Expand all was clicked)
+    setPrs([
+      makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" }),
+      makePullRequest({ id: 2, title: "Repo B PR", repoFullName: "org/repo-b" }),
+    ]);
+
+    // It inherits the expanded default with no further interaction
+    screen.getByText("org/repo-b");
+    screen.getByText("Repo B PR");
+  });
+
   it("applies shimmer class to rows whose IDs are in hotPollingPRIds", () => {
     const prs = [
       makePullRequest({ id: 42, number: 42, title: "Hot PR", repoFullName: "org/repo" }),

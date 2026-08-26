@@ -394,6 +394,28 @@ describe("ActionsTab", () => {
     expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("expand all keeps a repo that appears in a later data update expanded", async () => {
+    const user = userEvent.setup();
+    const [runs, setRuns] = createSignal<WorkflowRun[]>([
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+    ]);
+    render(() => <ActionsTab workflowRuns={runs()} />);
+
+    // Expand all — sets the tab default to expanded
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+    expect(screen.getAllByText("CI-A").length).toBeGreaterThanOrEqual(1);
+
+    // A brand-new repo arrives later (never present when Expand all was clicked)
+    setRuns([
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+      makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B" }),
+    ]);
+
+    // It inherits the expanded default with no further interaction
+    screen.getByText("owner/repo-b");
+    expect(screen.getAllByText("CI-B").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("expanded repo state persists in viewState", async () => {
     const user = userEvent.setup();
     const runs = [
