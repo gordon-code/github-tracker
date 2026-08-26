@@ -661,4 +661,93 @@ describe("LoginPage — Import from backup", () => {
     expect(clearOrder).toBeLessThan(authOrder);
     expect(clearOrder).toBeLessThan(cfgOrder);
   });
+
+  // ── STRUCT-C-001: generation guard + in-flight close lock ───────────────────
+
+  it("STRUCT-C-001: a Cancel during resolve discards the stale continuation — no auto-login/navigation as the abandoned identity", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    // Defer the resolve so the flow can be abandoned while it is pending.
+    let finishResolve!: (v: { ok: true; bundle: CredentialBundle; identity: typeof IDENTITY }) => void;
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
+      new Promise((r) => { finishResolve = r as never; })
+    );
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false); // would otherwise auto-login
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    // Unseal done (unsealInFlight false), resolve in flight — Cancel is enabled.
+    await waitFor(() => expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Cancel" })); // abandons the flow (gen++)
+
+    // The stale resolve now completes — the generation guard must discard it, so
+    // no commit and no auto-login/navigation as the abandoned file's identity.
+    finishResolve({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("STRUCT-C-001: Cancel is disabled while the unseal is in flight", async () => {
+    mockValidCredsFile();
+    let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(new Promise((r) => { resolveUnseal = r; }));
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+    );
+    resolveUnseal({ ok: true, ciphertext: "CT" });
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+  });
+
+  it("a retryable network unseal keeps the code prompt (not terminal)", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "network" });
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/network problem/i));
+    screen.getByLabelText("One-time code"); // NON-terminal — retry still possible
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("a commit failure during finalize surfaces an inline error (finalizeImport catch branch)", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false); // auto-commit path
+    vi.mocked(settingsTransfer.commitImportedSettings).mockRejectedValue(new Error("commit boom"));
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/something went wrong/i));
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
 });

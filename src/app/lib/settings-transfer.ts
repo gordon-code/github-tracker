@@ -103,6 +103,23 @@ export function parseImportFile(rawText: string): ParseImportResult {
     return { ok: false, errors: ["File is not valid JSON."] };
   }
 
+  // (b2) file-level version gate — reject a file stamped with a NEWER export
+  // version up front with a clear message, mirroring the envelope/seal
+  // version-byte fail-clean behavior (STRUCT-I-001). A missing/absent
+  // _exportVersion is treated as version 1 (back-compat with pre-version
+  // exports); ConfigSchema strips the key, so it must be read from rawJson here.
+  if (rawJson && typeof rawJson === "object") {
+    const rawVersion = (rawJson as Record<string, unknown>)._exportVersion;
+    if (typeof rawVersion === "number" && rawVersion > EXPORT_VERSION) {
+      return {
+        ok: false,
+        errors: [
+          `This settings file was made by a newer version of the app (export v${rawVersion}). Update the app, then try importing again.`,
+        ],
+      };
+    }
+  }
+
   // (c) pre-parse migrations (theme salvage, [bot]-suffix strip)
   const fixed = preParseConfigFixups(rawJson);
 
@@ -302,21 +319,26 @@ export const CredentialBundleSchema = z.object({
   }),
   jira: z.union([
     z.null(),
+    // Jira identity fields mirror JiraAuthStateSchema's constraints
+    // (cloudId/siteName .min(1), siteUrl .url()) so a malformed bundle fails
+    // clearly at import via resolveImportedCredentials' generic failure, instead
+    // of importing + working in-session then silently vanishing on the next
+    // reload when the stricter JiraAuthStateSchema rejects it (SEC-002).
     z.discriminatedUnion("authMethod", [
       z.object({
         authMethod: z.literal("oauth"),
         sealedRefreshToken: z.string(),
-        cloudId: z.string(),
-        siteUrl: z.string(),
-        siteName: z.string(),
+        cloudId: z.string().min(1),
+        siteUrl: z.string().url(),
+        siteName: z.string().min(1),
       }),
       z.object({
         authMethod: z.literal("token"),
         sealedApiToken: z.string(),
         email: z.string(),
-        cloudId: z.string(),
-        siteUrl: z.string(),
-        siteName: z.string(),
+        cloudId: z.string().min(1),
+        siteUrl: z.string().url(),
+        siteName: z.string().min(1),
       }),
     ]),
   ]),
@@ -411,6 +433,17 @@ const IMPORT_INSECURE_CONTEXT =
   "Encrypted credential import requires a secure context (HTTPS or localhost) — this page was loaded insecurely.";
 
 /**
+ * Standard GitHub REST headers for the identity check, mirroring auth.ts's
+ * VALIDATE_HEADERS (not exported there) used at every other GET /user site —
+ * pins the API version so a future default change can't shift this validation
+ * (QA-002).
+ */
+const GITHUB_API_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+} as const;
+
+/**
  * Resolves (validates — does NOT commit) imported credentials from an
  * already-unsealed inner ciphertext. NON-mutating and retryable against a cached
  * ciphertext: the single-use network unseal happens once in the caller (via
@@ -458,7 +491,7 @@ export async function resolveImportedCredentials(
   let resp: Response;
   try {
     resp = await fetch("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${bundle.github.token}` },
+      headers: { ...GITHUB_API_HEADERS, Authorization: `Bearer ${bundle.github.token}` },
     });
   } catch {
     return { ok: false, error: IMPORT_GITHUB_INVALID };
@@ -505,10 +538,19 @@ export async function commitImportedSettings(
   setAuthFromCredential(resolved.bundle.github.token, resolved.identity);
 
   // (b) apply the imported config wholesale AFTER identity is established.
+  // STRUCT-I-003: the sealed bundle's authMethod is the tamper-proof source of
+  // truth for the restored credential SHAPE (the plaintext config.jira.authMethod
+  // is user-editable via the export file). Align the config to the bundle so
+  // runtime createJiraClient/ensureJiraTokenValid take the branch matching the
+  // JiraAuthState we actually restore below — otherwise a hand-edited
+  // config.jira.authMethod could make Jira silently never work.
+  const jira = resolved.bundle.jira;
+  if (jira !== null && importedConfig.jira) {
+    importedConfig.jira = { ...importedConfig.jira, authMethod: jira.authMethod };
+  }
   setConfig(importedConfig);
 
   // (c) restore Jira.
-  const jira = resolved.bundle.jira;
   if (jira === null) {
     return { jiraRestored: true };
   }
@@ -561,10 +603,14 @@ export async function commitImportedSettings(
     sealed_refresh_token: string;
     expires_in: number;
   };
+  // STRUCT-I-002: clamp expires_in defensively, matching ensureJiraTokenValid's
+  // handling of the same endpoint's contract — a non-positive/absent value would
+  // otherwise yield a past/NaN expiresAt.
+  const ttl = typeof data.expires_in === "number" && data.expires_in > 0 ? data.expires_in : 3600;
   const state: JiraAuthState = {
     accessToken: data.access_token,
     sealedRefreshToken: data.sealed_refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    expiresAt: Date.now() + ttl * 1000,
     cloudId: jira.cloudId,
     siteUrl: jira.siteUrl,
     siteName: jira.siteName,

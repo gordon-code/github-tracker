@@ -227,10 +227,15 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 }
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
-const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "credential-export-bundle"]);
-// Single-value allowlist for /api/proxy/unseal — deliberately NOT derived from or
-// shared with VALID_PURPOSES, so Jira's sealed tokens can never be unsealed here.
-const UNSEAL_PURPOSE = "credential-export-bundle";
+// The one purpose string for the credential-export-bundle flow. Single-sourced
+// here so the seal allowlist (VALID_PURPOSES), the seal-side size cap +
+// sealWithExpiry branch, and the unseal-side allowlist all reference ONE value —
+// changing it can never leave the seal and unseal sides silently disagreeing
+// (which would drop bundles back to the 2048 cap + plain sealToken while unseal
+// accepts only the new value). Declared before VALID_PURPOSES so it can be
+// referenced in the Set initializer without hitting the TDZ.
+const CREDENTIAL_BUNDLE_PURPOSE = "credential-export-bundle";
+const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", CREDENTIAL_BUNDLE_PURPOSE]);
 const ALLOWED_SEARCH_PARAMS = new Set(["jql", "maxResults", "fields", "startAt"]);
 const ALLOWED_ISSUE_PARAMS = new Set(["issueIdsOrKeys", "fields"]);
 
@@ -307,7 +312,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   // plus Jira credentials envelope-encrypted client-side, so it needs headroom
   // (4096) for future growth; all other purposes stay at 2048. Checked AFTER the
   // purpose is validated so the raise is scoped to exactly one purpose.
-  const maxTokenLength = purpose === UNSEAL_PURPOSE ? 4096 : 2048;
+  const maxTokenLength = purpose === CREDENTIAL_BUNDLE_PURPOSE ? 4096 : 2048;
   if (token.length > maxTokenLength) {
     return errorResponse("invalid_request", 400);
   }
@@ -319,7 +324,7 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
     // The credential-export bundle is wrapped with a server-clock timestamp +
     // content-fingerprint nonce (for expiry + single-use); all other purposes
     // use the plain sealToken path unchanged.
-    sealed = purpose === UNSEAL_PURPOSE
+    sealed = purpose === CREDENTIAL_BUNDLE_PURPOSE
       ? await sealWithExpiry(token, key)
       : await sealToken(token, key);
   } catch (err) {
@@ -424,9 +429,10 @@ async function handleProxyUnseal(request: Request, env: Env): Promise<Response> 
     log("warn", "unseal_sealed_too_long", { sealed_length: sealed.length }, request);
     return errorResponse("invalid_request", 400);
   }
-  // Single-value purpose allowlist — any other value is treated identically to a
-  // corrupted blob (generic invalid), so Jira's sealed tokens gain no path here.
-  if (purpose !== UNSEAL_PURPOSE) {
+  // Single-value allowlist — a standalone equality check, NOT an iteration over
+  // VALID_PURPOSES; any other value is treated identically to a corrupted blob
+  // (generic invalid), so Jira's sealed-token purposes gain no path here.
+  if (purpose !== CREDENTIAL_BUNDLE_PURPOSE) {
     return errorResponse("invalid", 401);
   }
 

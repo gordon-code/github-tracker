@@ -108,7 +108,17 @@ export default function LoginPage() {
 
   // ── Import handlers ──────────────────────────────────────────────────────────
 
+  // Generation counter tying an in-flight unseal/resolve to the file that started
+  // it (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
+  // new file selection; the submit handler captures it before each await and
+  // bails if it changed, so a Cancel-then-reselect during the multi-second
+  // unseal/resolve window can't strand one file's ciphertext/credential into a
+  // different file's shared signals — which pre-auth would auto-login the
+  // abandoned file's identity.
+  let unsealGen = 0;
+
   function resetImportState() {
+    unsealGen++;
     setCredImport(null);
     setCodeInput("");
     setShowCode(false);
@@ -198,6 +208,7 @@ export default function LoginPage() {
     if (!ci) return;
     const code = codeInput();
     setImportError(null);
+    const gen = unsealGen; // capture before the first await
 
     let ciphertext = cachedCiphertext();
     if (ciphertext === null) {
@@ -207,12 +218,22 @@ export default function LoginPage() {
       const res = await unsealCredentialBundle(ci.credentials.sealed).finally(() =>
         setUnsealInFlight(false)
       );
+      // A changed unsealGen means a Cancel-then-reselect started a different file
+      // while this await was pending; writing any signal now (or auto-logging in)
+      // would use the abandoned file's identity, so stop here.
+      if (gen !== unsealGen) return;
       if (!res.ok) {
-        if (res.reason === "turnstile") {
-          // Client-side Turnstile hiccup BEFORE any request — the nonce was NOT
-          // consumed, so this is retryable. Keep the code prompt available and
-          // show a retryable inline message (R-101).
-          setImportError("Verification failed — please try again.");
+        if (res.reason === "turnstile" || res.reason === "network" || res.reason === "rate-limited") {
+          // Pre-nonce-consumption failure — the nonce was NOT consumed, so this
+          // is retryable. Keep the code prompt available and show a retryable
+          // inline message (do NOT withdraw the prompt).
+          setImportError(
+            res.reason === "rate-limited"
+              ? "Too many attempts — wait a moment and try again."
+              : res.reason === "network"
+                ? "Network problem — please try again."
+                : "Verification failed — please try again."
+          );
           return;
         }
         // expired/invalid are terminal — the single-use bundle is spent. Show the
@@ -230,6 +251,9 @@ export default function LoginPage() {
 
     // Client-side, retryable against the cached ciphertext (no re-unseal).
     const resolved = await resolveImportedCredentials(ciphertext, ci.credentials.salt, code);
+    // The resolve await is another window where a Cancel-then-reselect can change
+    // unsealGen (unsealInFlight is false here); discard the result if so.
+    if (gen !== unsealGen) return;
     if (!resolved.ok) {
       setImportError(resolved.error);
       return;
@@ -496,7 +520,7 @@ export default function LoginPage() {
                           >
                             {unsealInFlight() ? "Checking..." : "Restore credentials"}
                           </button>
-                          <button type="button" onClick={closeImport} class="btn btn-sm btn-ghost">
+                          <button type="button" onClick={closeImport} disabled={unsealInFlight()} class="btn btn-sm btn-ghost">
                             Cancel
                           </button>
                         </div>

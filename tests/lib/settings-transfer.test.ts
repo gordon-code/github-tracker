@@ -241,6 +241,19 @@ describe("parseImportFile", () => {
       expect(result.config.theme).toBe("auto");
     }
   });
+
+  it("STRUCT-I-001: rejects a file stamped with a NEWER export version, with a clear message", () => {
+    const result = parseImportFile(JSON.stringify({ _exportVersion: 2, theme: "dark" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]).toMatch(/newer version/i);
+  });
+
+  it("STRUCT-I-001: accepts version 1 and a missing _exportVersion (treated as v1)", () => {
+    expect(parseImportFile(JSON.stringify({ _exportVersion: 1, theme: "dark" })).ok).toBe(true);
+    expect(parseImportFile(JSON.stringify({ theme: "dark" })).ok).toBe(true);
+    // A round-tripped real export (stamped v1 by buildExportPayload) also parses.
+    expect(parseImportFile(JSON.stringify(buildExportPayload(ConfigSchema.parse({})))).ok).toBe(true);
+  });
 });
 
 // ── Task 4: client-side envelope encryption ──────────────────────────────────
@@ -504,8 +517,32 @@ describe("proxy — sealCredentialBundle / unsealCredentialBundle (Task 5/6)", (
     expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("unsealCredentialBundle maps a network failure to { ok:false, reason:'invalid' }", async () => {
+  it("unsealCredentialBundle maps a thrown proxyFetch to { ok:false, reason:'network' } (retryable, no nonce consumed)", async () => {
+    // SEC-001: a network throw means NO server response arrived, so the single-use
+    // nonce was never reached — retryable, NOT the terminal 'invalid'.
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+    expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("unsealCredentialBundle maps a 429 to { ok:false, reason:'rate-limited' } (retryable, pre-nonce)", async () => {
+    // API-001: the pre-gate rate limiter fires before Turnstile and long before
+    // nonce access, so the bundle is still valid — retryable.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({ error: "rate_limited" }) }));
+    expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "rate-limited" });
+  });
+
+  it("unsealCredentialBundle maps a 403 turnstile_failed to { ok:false, reason:'network' } (retryable, pre-nonce)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "turnstile_failed" }) }));
+    expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("unsealCredentialBundle maps a 503 internal_error to { ok:false, reason:'network' } (retryable, pre-nonce)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "internal_error" }) }));
+    expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("unsealCredentialBundle keeps a genuine 401 { error:'invalid' } TERMINAL (bad blob / consumed nonce)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: "invalid" }) }));
     expect(await proxyLib.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "invalid" });
   });
 });
@@ -549,6 +586,47 @@ describe("buildEncryptedCredentialsSection", () => {
     expect(decrypted).not.toBeNull();
     const roundTripped = JSON.parse(decrypted!) as CredentialBundle;
     expect(roundTripped.github.token).toBe("ghp_SECRET_GITHUB_TOKEN");
+  });
+
+  it("full round-trip for a Jira-inclusive bundle near the 4096 pre-check boundary (assemble→encrypt→seal)", async () => {
+    updateJiraConfig({ enabled: true, authMethod: "token" });
+    const bigSealed = "S".repeat(2700); // pushes the envelope ciphertext near the 4096 client cap
+    authStore.setJiraAuth({
+      accessToken: bigSealed,
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "cloud-2",
+      siteUrl: "https://token.atlassian.net",
+      siteName: "TokenSite",
+      email: "user@example.com",
+    });
+
+    // Echo the ciphertext back as the sealed blob so we can decrypt it and prove
+    // the whole assemble→encrypt→seal chain produced a recoverable Jira bundle.
+    let sealedInput = "";
+    vi.spyOn(proxyLib, "sealCredentialBundle").mockImplementation(async (ct: string) => {
+      sealedInput = ct;
+      return ct;
+    });
+
+    const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
+    expect(sealed).toBe(sealedInput);
+    // Within — and near — the client 4096 pre-check cap.
+    expect(sealedInput.length).toBeLessThanOrEqual(4096);
+    expect(sealedInput.length).toBeGreaterThan(3000);
+
+    const decrypted = await decryptWithCode(sealed, salt, oneTimeCode);
+    expect(decrypted).not.toBeNull();
+    const bundle = JSON.parse(decrypted!) as CredentialBundle;
+    expect(bundle.github.token).toBe("ghp_SECRET_GITHUB_TOKEN");
+    expect(bundle.jira).toEqual({
+      authMethod: "token",
+      sealedApiToken: bigSealed,
+      email: "user@example.com",
+      cloudId: "cloud-2",
+      siteUrl: "https://token.atlassian.net",
+      siteName: "TokenSite",
+    });
   });
 });
 
@@ -628,6 +706,38 @@ describe("resolveImportedCredentials", () => {
     }
     expect(setConfigSpy).not.toHaveBeenCalled();
     expect(setAuthSpy).not.toHaveBeenCalled();
+  });
+
+  it("QA-002: the /user identity check sends the standard GitHub API headers", async () => {
+    const code = generateOneTimeCode();
+    const { ciphertext, salt } = await makeCiphertext(code);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ login: "u", avatar_url: "a", name: "N" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await resolveImportedCredentials(ciphertext, salt, code);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Accept).toBe("application/vnd.github+json");
+    expect(headers["X-GitHub-Api-Version"]).toBe("2022-11-28");
+    expect(headers.Authorization).toBe("Bearer ghp_valid_token");
+  });
+
+  it("SEC-002: a bundle with a malformed jira.siteUrl fails resolution before any /user call", async () => {
+    // The tightened CredentialBundleSchema (siteUrl .url(), cloudId/siteName
+    // .min(1)) rejects at import via the generic decrypt-failure path, instead of
+    // importing + working in-session then silently vanishing on the next reload
+    // when the stricter JiraAuthStateSchema rejects it.
+    const code = generateOneTimeCode();
+    const malformed = {
+      github: { token: "ghp_valid_token", method: "pat" },
+      jira: { authMethod: "token", sealedApiToken: "s", email: "e@e.com", cloudId: "c", siteUrl: "not-a-url", siteName: "S" },
+    };
+    const { ciphertext, salt } = await encryptWithCode(JSON.stringify(malformed), code);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await resolveImportedCredentials(ciphertext, salt, code);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/check the code and file match/i);
+    expect(fetchMock).not.toHaveBeenCalled(); // schema fails before the identity check
   });
 
   it("R-001: surfaces the secure-context precondition distinctly on the decrypt path", async () => {
@@ -850,6 +960,98 @@ describe("commitImportedSettings", () => {
     await new Promise((r) => setTimeout(r, 250));
     expect(JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY)!)).toEqual(importedConfig);
     dispose();
+  });
+
+  it("STRUCT-I-002: a non-positive expires_in yields a sane future expiresAt (default 3600s), not past/NaN", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
+    vi.spyOn(configStore, "setConfig").mockImplementation(() => {});
+    const jiraSpy = vi.spyOn(authStore, "setJiraAuth").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: "A", sealed_refresh_token: "RT", expires_in: 0 }),
+    }));
+    vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    await commitImportedSettings(
+      {
+        bundle: {
+          github: { token: "gho_x", method: "oauth" },
+          jira: { authMethod: "oauth", sealedRefreshToken: "OLD", cloudId: "c", siteUrl: "https://s.atlassian.net", siteName: "S" },
+        },
+        identity,
+      },
+      ConfigSchema.parse({})
+    );
+    const state = jiraSpy.mock.calls[0][0];
+    expect(state.expiresAt).toBe(1_000_000 + 3600 * 1000); // clamped to the 3600s default
+    expect(Number.isNaN(state.expiresAt)).toBe(false);
+  });
+
+  it("STRUCT-I-003: aligns the imported config's jira.authMethod with the tamper-proof bundle authMethod", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
+    vi.spyOn(authStore, "setJiraAuth").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn());
+    const cfgSpy = vi.spyOn(configStore, "setConfig").mockImplementation(() => {});
+    // Plaintext config claims OAuth, but the sealed bundle is token-mode → the
+    // committed config must follow the bundle so runtime Jira branching matches
+    // the restored credential shape.
+    const importedConfig = ConfigSchema.parse({ jira: { enabled: true, authMethod: "oauth" } });
+    await commitImportedSettings(
+      {
+        bundle: {
+          github: { token: "ghp_x", method: "pat" },
+          jira: { authMethod: "token", sealedApiToken: "SA", email: "e@e.com", cloudId: "c", siteUrl: "https://s.atlassian.net", siteName: "S" },
+        },
+        identity,
+      },
+      importedConfig
+    );
+    const committed = cfgSpy.mock.calls[0][0] as { jira: { authMethod: string } };
+    expect(committed.jira.authMethod).toBe("token");
+  });
+
+  it("QA-003: OAuth-Jira identity-switch (REAL cascade) — final jiraAuth reflects the refreshed token, not the cascade-cleared null", async () => {
+    vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: "REFRESHED-ACCESS", sealed_refresh_token: "NEW-RT", expires_in: 3600 }),
+    }));
+
+    // Seed a prior, DIFFERENT identity + a prior Jira auth blob so the real
+    // setAuthFromCredential identity-switch cascade runs (and clears jiraAuth).
+    authStore.setAuthFromPat("ghp_old", { login: "olduser", avatar_url: "https://a/old", name: "Old" });
+    authStore.setJiraAuth({
+      accessToken: "old-access",
+      sealedRefreshToken: "old-rt",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "old-cloud",
+      siteUrl: "https://old.atlassian.net",
+      siteName: "Old",
+    });
+
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    const importedConfig = ConfigSchema.parse({ authMethod: "oauth", jira: { enabled: true, authMethod: "oauth" } });
+    const bundle: CredentialBundle = {
+      github: { token: "gho_new", method: "oauth" },
+      jira: { authMethod: "oauth", sealedRefreshToken: "EXPORTED-RT", cloudId: "new-cloud", siteUrl: "https://new.atlassian.net", siteName: "New" },
+    };
+
+    const res = await commitImportedSettings(
+      { bundle, identity: { login: "newuser", avatar_url: "https://a/new", name: "New" } },
+      importedConfig
+    );
+
+    expect(res.jiraRestored).toBe(true);
+    // The cascade nulled jiraAuth; the OAuth refresh restored it with the minted token.
+    expect(authStore.jiraAuth()).toEqual({
+      accessToken: "REFRESHED-ACCESS",
+      sealedRefreshToken: "NEW-RT",
+      expiresAt: 2_000_000 + 3600 * 1000,
+      cloudId: "new-cloud",
+      siteUrl: "https://new.atlassian.net",
+      siteName: "New",
+    });
   });
 });
 

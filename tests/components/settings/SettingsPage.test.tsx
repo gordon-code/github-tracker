@@ -1500,6 +1500,61 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
     expect(createObjSpy).not.toHaveBeenCalled();
     expect(checkbox.checked).toBe(true);
   });
+
+  it("dismissing the code modal (Cancel) downloads nothing and leaves no residual state", async () => {
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED", salt: "SALT", oneTimeCode: CODE,
+    });
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    const clickSpy = vi.fn();
+    const origCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = origCreate(tag);
+      if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(clickSpy);
+      return el;
+    });
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => screen.getByText(/shown only once/i));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    // No file was downloaded on dismiss. (Kobalte's exit Presence lingers the
+    // modal content in happy-dom, so this asserts the download behavior rather
+    // than the modal's DOM removal.)
+    expect(createObjSpy).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    // No residual pending download: a fresh export cleanly re-runs the seal flow
+    // (proving handleDismissExportCode cleared exportCode + pendingExportJson).
+    // fireEvent (not userEvent): the dismissed Kobalte modal lingers its
+    // pointer-events:none on <body> in happy-dom, blocking a userEvent click.
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(settingsTransfer.buildEncryptedCredentialsSection).toHaveBeenCalledTimes(2));
+  });
+
+  it("a second export while the code modal is open does NOT mint a new code / re-run the seal flow", async () => {
+    const buildSpy = vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED", salt: "SALT", oneTimeCode: CODE,
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
+    const exportBtn = screen.getByRole("button", { name: "Export" });
+    await user.click(exportBtn);
+    await waitFor(() => screen.getByText(/shown only once/i));
+    expect(buildSpy).toHaveBeenCalledTimes(1);
+
+    // The Kobalte Dialog traps + restores focus so the Export button can't be
+    // re-fired behind the modal; the re-entry guard closes the gap for any other
+    // trigger path. Re-fire the handler directly and assert no new code is minted.
+    fireEvent.click(exportBtn);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(buildSpy).toHaveBeenCalledTimes(1);
+    screen.getByText(CODE); // the original code is still the one shown
+  });
 });
 
 // ── Import with encrypted credentials (Task 6) ────────────────────────────────
@@ -1631,7 +1686,7 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     });
   });
 
-  it("'continue without credentials' applies the plaintext config only (no unseal)", async () => {
+  it("'continue without credentials' routes through the shared two-click confirm, then applies plaintext config (no unseal)", async () => {
     const user = userEvent.setup();
     updateConfig({ theme: "light" });
     renderSettings();
@@ -1639,7 +1694,19 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await waitFor(() => screen.getByLabelText(/one-time code/i));
     await user.click(screen.getByRole("button", { name: /continue without credentials/i }));
 
-    expect(config.theme).toBe("dark"); // plaintext config applied
+    // UI-003: the SAME plaintext two-click confirm the plaintext-import path uses
+    // appears (inline in the Import row) — nothing applied until it's confirmed.
+    // (The Kobalte dialog's exit Presence doesn't unmount synchronously in
+    // happy-dom, so this asserts behavior rather than the code input's removal —
+    // matching the CustomTabModal/NotificationDrawer test convention.)
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("light");
+
+    // fireEvent (not userEvent): the just-closed Kobalte modal lingers its
+    // pointer-events:none on <body> in happy-dom, which would block a userEvent
+    // pointer interaction with this now-inline confirm button.
+    fireEvent.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark"); // plaintext config applied on confirm
     expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
   });
 
@@ -1651,9 +1718,13 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await waitFor(() => screen.getByLabelText(/one-time code/i));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
-    expect(config.theme).toBe("light"); // untouched
+    // Config + session untouched, no unseal attempted, and no identity-confirm or
+    // plaintext-confirm was triggered. (Kobalte's exit Presence lingers the code
+    // input in happy-dom, so this asserts behavior rather than DOM removal.)
+    expect(config.theme).toBe("light");
     expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
   });
 
   it("a null _credentials falls through to the plaintext import path (no code prompt)", async () => {
@@ -1667,5 +1738,137 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Yes, import" }));
     expect(config.theme).toBe("dark");
+  });
+
+  it("STRUCT-C-001: Cancel and 'continue without credentials' are disabled while the unseal is in flight", async () => {
+    let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(new Promise((r) => { resolveUnseal = r; }));
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // Unseal in flight — the single-use nonce must not be abandonable mid-flight.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+    );
+    expect((screen.getByRole("button", { name: /continue without credentials/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Checking..." }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveUnseal({ ok: true, ciphertext: "CIPHER" });
+    await waitFor(() => screen.getByText(/sign you in as/i));
+  });
+
+  it("STRUCT-C-001: a Cancel-then-reselect during resolve discards the stale continuation (no wrong-identity dialog)", async () => {
+    // Unseal resolves immediately; resolve is deferred so the test can cancel and
+    // reselect a different file while file X's resolve is still pending.
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER-X" });
+    let finishResolveX!: (v: { ok: true; bundle: typeof BUNDLE; identity: typeof IDENTITY }) => void;
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
+      new Promise((r) => { finishResolveX = r as never; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile(); // file X
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // X's unseal done (unsealInFlight false), X's resolve in flight — Cancel enabled.
+    await waitFor(() => expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Cancel" })); // abandons file X (gen++)
+
+    // Reselect a different file Y.
+    selectCredFile({ theme: "light" });
+    await waitFor(() => screen.getByLabelText(/one-time code/i)); // Y's code form
+
+    // X's stale resolve now completes — the generation guard must discard it.
+    finishResolveX({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // No identity-confirm dialog appears for the abandoned file's identity, and
+    // no commit happens; the freshly-selected file's code form is still shown.
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+    screen.getByLabelText(/one-time code/i);
+  });
+
+  it("a retryable network unseal keeps the code input available (not terminal)", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "network" });
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/network problem/i));
+    // Non-terminal: the code input + Submit stay available (no terminal screen).
+    screen.getByLabelText(/one-time code/i);
+    screen.getByRole("button", { name: "Submit" });
+  });
+
+  it("a rate-limited unseal keeps the code input available with a retryable message", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "rate-limited" });
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/too many attempts/i));
+    screen.getByLabelText(/one-time code/i);
+  });
+
+  it("a commit failure during cred import pushes a warning (handleConfirmCredImport catch branch)", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.commitImportedSettings).mockRejectedValue(new Error("commit boom"));
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/something went wrong/i),
+        "warning"
+      );
+    });
+  });
+
+  it("CR-001: after import, the Repositories editor reflects the imported repos (local copies resynced)", async () => {
+    const user = userEvent.setup();
+    updateConfig({ selectedRepos: [], upstreamRepos: [] });
+    renderSettings();
+    const input = screen.getByLabelText(/import settings file/i);
+    const imported = JSON.stringify({
+      selectedRepos: [
+        { owner: "acme", name: "api", fullName: "acme/api" },
+        { owner: "acme", name: "web", fullName: "acme/web" },
+      ],
+    });
+    fireEvent.change(input, { target: { files: [new File([imported], "s.json", { type: "application/json" })] } });
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+
+    expect(config.selectedRepos).toHaveLength(2);
+    // The Repositories summary is driven by the localRepos editor copy; without
+    // the post-import resync it would still read the stale (empty) pre-import set.
+    await waitFor(() => screen.getByText(/2 selected/i));
   });
 });

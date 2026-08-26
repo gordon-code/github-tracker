@@ -173,8 +173,9 @@ export const CREDENTIAL_BUNDLE_MAX_CIPHERTEXT = 4096;
 /**
  * Seals a client-side envelope ciphertext (already encrypted with the one-time
  * code — encrypt-THEN-seal) under the `credential-export-bundle` purpose.
- * Mirrors `sealApiToken()` but with a distinct purpose and a client-side size
- * pre-check. Uses `proxyFetch()` so the `X-Requested-With` CSRF header is set.
+ * Adds a client-side size pre-check, then delegates to `sealApiToken()` — same
+ * `/api/proxy/seal` endpoint, `seal` Turnstile action, `{ token, purpose }` body,
+ * `X-Requested-With` CSRF header (via `proxyFetch`), and `SealError` handling.
  */
 export async function sealCredentialBundle(ciphertext: string): Promise<string> {
   if (ciphertext.length > CREDENTIAL_BUNDLE_MAX_CIPHERTEXT) {
@@ -182,30 +183,7 @@ export async function sealCredentialBundle(ciphertext: string): Promise<string> 
       "Credentials are too large to export securely. Please report this — it should not happen for a normal account."
     );
   }
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
-  const turnstileToken = await acquireTurnstileToken(siteKey ?? "", "seal");
-
-  const res = await proxyFetch("/api/proxy/seal", {
-    method: "POST",
-    headers: {
-      "cf-turnstile-response": turnstileToken,
-    },
-    body: JSON.stringify({ token: ciphertext, purpose: "credential-export-bundle" }),
-  });
-
-  if (!res.ok) {
-    let code = "unknown_error";
-    try {
-      const body = (await res.json()) as { error?: string };
-      code = body.error ?? code;
-    } catch {
-      // ignore parse errors — keep default code
-    }
-    throw new SealError(res.status, code);
-  }
-
-  const data = (await res.json()) as { sealed: string };
-  return data.sealed;
+  return sealApiToken(ciphertext, "credential-export-bundle");
 }
 
 /**
@@ -220,17 +198,28 @@ export async function sealCredentialBundle(ciphertext: string): Promise<string> 
  *
  * MUST use `proxyFetch()` (sets `X-Requested-With`); a raw fetch would be
  * rejected with `403 missing_csrf_header`. Only `expired` is distinguished from
- * the uniform `invalid` failure among SERVER responses (per the endpoint's
- * contract). A `turnstile` reason is distinct from both: it signals a CLIENT-side
- * Turnstile-acquisition failure that happened BEFORE any request reached the
- * server, so the bundle's single-use nonce was NOT consumed and the whole unseal
- * is safely retryable (R-101) — callers must treat it as non-terminal.
+ * the uniform `invalid` failure among SERVER responses that reached the nonce
+ * step (per the endpoint's contract).
+ *
+ * RETRYABLE (non-consuming) reasons — these all happen BEFORE the server reaches
+ * the single-use nonce, so the bundle is STILL valid and callers MUST treat them
+ * as non-terminal (keep the code/unseal step available), NOT as a burned bundle:
+ *   - `turnstile`: a CLIENT-side Turnstile-acquisition failure BEFORE any request
+ *     reached the server (R-101).
+ *   - `network`: a thrown `proxyFetch` (no server response at all), or a server
+ *     403 (turnstile_failed) / 503 (internal_error / KV) — all pre-nonce
+ *     (SEC-001/API-001).
+ *   - `rate-limited`: a server 429 from the pre-gate rate limiter, which fires
+ *     before Turnstile and long before nonce access (API-001).
+ * Only `expired` and `invalid` are TERMINAL (the single-use bundle is spent /
+ * unusable): `invalid` covers a genuine bad blob, wrong key, or already-consumed
+ * nonce (401 with no `expired` marker).
  */
 export async function unsealCredentialBundle(
   sealed: string
 ): Promise<
   | { ok: true; ciphertext: string }
-  | { ok: false; reason: "expired" | "invalid" | "turnstile" }
+  | { ok: false; reason: "expired" | "invalid" | "turnstile" | "network" | "rate-limited" }
 > {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
   let turnstileToken: string;
@@ -253,7 +242,10 @@ export async function unsealCredentialBundle(
       body: JSON.stringify({ sealed, purpose: "credential-export-bundle" }),
     });
   } catch {
-    return { ok: false, reason: "invalid" };
+    // A network throw means NO server response arrived — the single-use nonce was
+    // never reached, so the bundle is still valid. Retryable, NOT terminal
+    // `invalid` (SEC-001).
+    return { ok: false, reason: "network" };
   }
 
   if (res.ok) {
@@ -268,6 +260,15 @@ export async function unsealCredentialBundle(
     return { ok: false, reason: "invalid" };
   }
 
+  // Non-2xx. Statuses that fire BEFORE the server reaches nonce consumption leave
+  // the bundle valid → retryable, NOT the terminal `invalid` path
+  // (SEC-001/API-001): 429 rate_limited (pre-gate), 403 turnstile_failed, 503
+  // internal_error / KV outage.
+  if (res.status === 429) return { ok: false, reason: "rate-limited" };
+  if (res.status === 403 || res.status === 503) return { ok: false, reason: "network" };
+
+  // 401 (and anything else): distinguish the server's `expired` marker from the
+  // uniform terminal `invalid` (bad blob / wrong key / already-consumed nonce).
   try {
     const body = (await res.json()) as { error?: string };
     if (body.error === "expired") return { ok: false, reason: "expired" };

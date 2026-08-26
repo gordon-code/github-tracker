@@ -1,5 +1,6 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
 import { Select } from "@kobalte/core/select";
+import { Dialog } from "@kobalte/core/dialog";
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
@@ -148,6 +149,18 @@ export default function SettingsPage() {
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
   const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
 
+  // These local editor copies are captured once at mount. An in-place import
+  // (handleConfirmImport / handleConfirmCredImport / handleContinueWithoutCredentials)
+  // replaces config wholesale via setConfig without a reload, so they must be
+  // resynced afterward — otherwise the next org/repo edit would save the stale,
+  // pre-import selection and silently discard the imported repos/orgs (CR-001).
+  // setConfig is synchronous, so config already reflects the import here.
+  function resyncLocalEditors() {
+    setLocalOrgs(config.selectedOrgs);
+    setLocalRepos(config.selectedRepos);
+    setLocalUpstream(config.upstreamRepos);
+  }
+
   const monitoredRepoNames = createMemo(() =>
     config.monitoredRepos.map(r => r.fullName).join(", ")
   );
@@ -271,6 +284,12 @@ export default function SettingsPage() {
 
   async function handleExportSettings() {
     if (exporting()) return;
+    // Re-entry guard: while the one-time-code modal is open a fresh export would
+    // mint a NEW code + a new seal call while the old code is still displayed.
+    // The Kobalte Dialog traps + restores focus (so the Export button can't be
+    // re-fired behind the modal), and this guard closes the gap for any other
+    // trigger path (QA-001).
+    if (exportCode() !== null) return;
     const payload = buildExportPayload(config);
     if (!includeCredentials()) {
       triggerDownload(JSON.stringify(payload, null, 2));
@@ -344,7 +363,16 @@ export default function SettingsPage() {
   const [resolvedCred, setResolvedCred] = createSignal<{ bundle: CredentialBundle; identity: GitHubUser } | null>(null);
   const [committing, setCommitting] = createSignal(false);
 
+  // Generation counter tying an in-flight unseal/resolve to the file that started
+  // it (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
+  // new file selection; the submit handler captures it before each await and
+  // bails if it changed, so a Cancel-then-reselect during the multi-second
+  // unseal/resolve window can't strand one file's ciphertext/credential into a
+  // different file's shared signals.
+  let unsealGen = 0;
+
   function resetCredImport() {
+    unsealGen++;
     setCredImport(null);
     setCodeInput("");
     setShowCode(false);
@@ -398,6 +426,7 @@ export default function SettingsPage() {
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
     // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
     setConfig(imported);
+    resyncLocalEditors();
     setPendingImport(null);
     pushNotification("settings-import", "Settings imported", "info");
   }
@@ -412,6 +441,7 @@ export default function SettingsPage() {
     if (!ci) return;
     const code = codeInput();
     setCredError(null);
+    const gen = unsealGen; // capture before the first await
 
     let ciphertext = cachedCiphertext();
     if (ciphertext === null) {
@@ -421,13 +451,23 @@ export default function SettingsPage() {
       const res = await unsealCredentialBundle(ci.credentials.sealed).finally(() =>
         setUnsealInFlight(false)
       );
+      // A changed unsealGen means a Cancel-then-reselect started a different file
+      // while this await was pending; writing any signal now would strand this
+      // file's result into the newly-selected file's state, so stop here.
+      if (gen !== unsealGen) return;
       if (!res.ok) {
-        if (res.reason === "turnstile") {
-          // Client-side Turnstile hiccup BEFORE any request — the single-use
-          // nonce was NOT consumed, so this is retryable. Keep the code prompt
-          // available (do NOT fall through to the terminal "continue without
-          // credentials" screen); surface a retryable inline message (R-101).
-          setCredError("Verification failed — please try again.");
+        if (res.reason === "turnstile" || res.reason === "network" || res.reason === "rate-limited") {
+          // Pre-nonce-consumption failure — the single-use nonce was NOT
+          // consumed, so this is retryable. Keep the code prompt available (do
+          // NOT fall through to the terminal "continue without credentials"
+          // screen); surface a retryable inline message.
+          setCredError(
+            res.reason === "rate-limited"
+              ? "Too many attempts — wait a moment and try again."
+              : res.reason === "network"
+                ? "Network problem — please try again."
+                : "Verification failed — please try again."
+          );
           return;
         }
         setCredTerminalMsg(
@@ -443,6 +483,9 @@ export default function SettingsPage() {
 
     // Client-side, retryable against the cached ciphertext (no re-unseal).
     const resolved = await resolveImportedCredentials(ciphertext, ci.credentials.salt, code);
+    // The resolve await is another window where a Cancel-then-reselect can change
+    // unsealGen (unsealInFlight is false here); discard the result if so.
+    if (gen !== unsealGen) return;
     if (!resolved.ok) {
       setCredError(resolved.error);
       return;
@@ -457,6 +500,7 @@ export default function SettingsPage() {
     setCommitting(true);
     try {
       await commitImportedSettings(rc, ci.config);
+      resyncLocalEditors();
       resetCredImport();
       pushNotification("settings-import", "Settings and credentials imported", "info");
     } catch {
@@ -469,9 +513,12 @@ export default function SettingsPage() {
   function handleContinueWithoutCredentials() {
     const ci = credImport();
     if (!ci) return;
-    setConfig(ci.config);
+    const cfg = ci.config;
     resetCredImport();
-    pushNotification("settings-import", "Settings imported (credentials skipped)", "info");
+    // Route the plaintext-only path through the SAME two-click confirm the
+    // plaintext import uses (pendingImport), so both wholesale-replace paths
+    // confirm consistently. handleConfirmImport applies it + resyncs the editors.
+    setPendingImport(cfg);
   }
 
   function handleCancelCredImport() {
@@ -1840,55 +1887,62 @@ export default function SettingsPage() {
           }
         />
 
-        {/* One-time-code modal (encrypted export). Download is deferred until ack. */}
-        <Show when={exportCode()}>
-          {(code) => (
-            <div
-              class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Save your one-time code"
-            >
-              <div class="card bg-base-100 shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
-                <h3 class="text-lg font-semibold">Save your one-time code</h3>
-                <p class="text-sm text-base-content/70">
-                  Save this code separately from the export file — you'll need both to restore
-                  credentials, and it's shown only once.
-                </p>
-                <div class="flex items-center gap-2">
-                  <code class="flex-1 select-all rounded bg-base-200 px-3 py-2 font-mono text-sm break-all">
-                    {code()}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyExportCode()}
-                    class="btn btn-sm btn-outline"
-                  >
-                    {codeCopied() ? "Copied" : "Copy"}
-                  </button>
-                </div>
-                <div class="flex justify-end gap-2">
-                  <button type="button" onClick={handleDismissExportCode} class="btn btn-sm btn-ghost">
-                    Cancel
-                  </button>
-                  <button type="button" onClick={handleAcknowledgeExportCode} class="btn btn-sm btn-primary">
-                    I've saved my code — download
-                  </button>
-                </div>
+        {/* One-time-code modal (encrypted export). Download is deferred until ack.
+            Kobalte Dialog provides the focus trap + focus restoration that keeps
+            the Export button from being re-fired behind the open modal. */}
+        <Dialog
+          open={exportCode() !== null}
+          onOpenChange={(isOpen) => { if (!isOpen) handleDismissExportCode(); }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
+              <Dialog.Title class="text-lg font-semibold">Save your one-time code</Dialog.Title>
+              <Dialog.Description class="text-sm text-base-content/70">
+                Save this code separately from the export file — you'll need both to restore
+                credentials, and it's shown only once.
+              </Dialog.Description>
+              <Show when={exportCode()}>
+                {(code) => (
+                  <div class="flex items-center gap-2">
+                    <code class="flex-1 select-all rounded bg-base-200 px-3 py-2 font-mono text-sm break-all">
+                      {code()}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyExportCode()}
+                      class="btn btn-sm btn-outline"
+                    >
+                      {codeCopied() ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </Show>
+              <div class="flex justify-end gap-2">
+                <button type="button" onClick={handleDismissExportCode} class="btn btn-sm btn-ghost">
+                  Cancel
+                </button>
+                <button type="button" onClick={handleAcknowledgeExportCode} class="btn btn-sm btn-primary">
+                  I've saved my code — download
+                </button>
               </div>
-            </div>
-          )}
-        </Show>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
 
-        {/* Encrypted-credentials import dialog: one-time-code entry → identity confirm. */}
-        <Show when={credImport()}>
-          <div
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Import encrypted credentials"
-          >
-            <div class="card bg-base-100 shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
+        {/* Encrypted-credentials import dialog: one-time-code entry → identity confirm.
+            Kobalte Dialog adds focus trap / Escape / scroll-lock / focus restore.
+            While a network unseal is in flight the close controls are disabled so
+            the single-use nonce can't be abandoned mid-flight. */}
+        <Dialog
+          open={credImport() !== null}
+          onOpenChange={(isOpen) => { if (!isOpen && !unsealInFlight()) handleCancelCredImport(); }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
               <Show
                 when={resolvedCred()}
                 fallback={
@@ -1896,8 +1950,8 @@ export default function SettingsPage() {
                     when={!credTerminalMsg()}
                     fallback={
                       <>
-                        <h3 class="text-lg font-semibold">Credentials unavailable</h3>
-                        <p class="text-sm text-error">{credTerminalMsg()}</p>
+                        <Dialog.Title class="text-lg font-semibold">Credentials unavailable</Dialog.Title>
+                        <p role="alert" class="text-sm text-error">{credTerminalMsg()}</p>
                         <div class="flex justify-end gap-2">
                           <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
                             Cancel
@@ -1909,7 +1963,7 @@ export default function SettingsPage() {
                       </>
                     }
                   >
-                    <h3 class="text-lg font-semibold">Restore encrypted credentials</h3>
+                    <Dialog.Title class="text-lg font-semibold">Restore encrypted credentials</Dialog.Title>
                     <p class="text-sm text-base-content/70">
                       Enter the one-time code shown when this file was exported.
                     </p>
@@ -1937,10 +1991,10 @@ export default function SettingsPage() {
                         <p role="alert" class="text-error text-xs mt-2">{credError()}</p>
                       </Show>
                       <div class="flex justify-end gap-2 mt-4">
-                        <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                        <button type="button" onClick={handleCancelCredImport} disabled={unsealInFlight()} class="btn btn-sm btn-ghost">
                           Cancel
                         </button>
-                        <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-outline">
+                        <button type="button" onClick={handleContinueWithoutCredentials} disabled={unsealInFlight()} class="btn btn-sm btn-outline">
                           Continue without credentials
                         </button>
                         <button
@@ -1958,7 +2012,7 @@ export default function SettingsPage() {
               >
                 {(rc) => (
                   <>
-                    <h3 class="text-lg font-semibold">Confirm identity</h3>
+                    <Dialog.Title class="text-lg font-semibold">Confirm identity</Dialog.Title>
                     <div class="flex items-center gap-3">
                       <img
                         src={rc().identity.avatar_url}
@@ -1990,9 +2044,9 @@ export default function SettingsPage() {
                   </>
                 )}
               </Show>
-            </div>
-          </div>
-        </Show>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
 
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">

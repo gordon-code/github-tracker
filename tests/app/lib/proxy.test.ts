@@ -704,3 +704,99 @@ describe("unsealCredentialBundle — turnstile failure (R-101)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// ── unsealCredentialBundle — retryable non-consuming failures (SEC-001/API-001) ──
+// Failures that fire BEFORE the server reaches the single-use nonce leave the
+// bundle valid and must map to a DISTINCT retryable reason, never the terminal
+// { reason: "invalid" } that callers treat as a burned bundle.
+
+describe("unsealCredentialBundle — retryable non-consuming failures (SEC-001/API-001)", () => {
+  let mod: typeof import("../../../src/app/lib/proxy");
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "test-site-key");
+    mod = await loadModule();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  // Turnstile succeeds (script onload + execute resolves a token) so the request
+  // reaches fetch, where each test varies the outcome.
+  function setupSuccessfulTurnstile() {
+    const mockTurnstile = makeMockTurnstile();
+    vi.stubGlobal("window", { ...window, turnstile: mockTurnstile });
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+    mockTurnstile.execute.mockImplementation(() => {
+      mockTurnstile._resolveToken("ts-token");
+    });
+  }
+
+  it("maps a thrown proxyFetch to { ok:false, reason:'network' } — retryable, nonce not consumed", async () => {
+    setupSuccessfulTurnstile();
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+    // A request was attempted but threw before any server response → no nonce burned.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a 429 response to { ok:false, reason:'rate-limited' } — retryable (pre-gate, pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "rate-limited" });
+  });
+
+  it("maps a 403 turnstile_failed to { ok:false, reason:'network' } — retryable (pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "turnstile_failed" }), { status: 403 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("maps a 503 internal_error to { ok:false, reason:'network' } — retryable (pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "internal_error" }), { status: 503 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("keeps a genuine 401 { error:'invalid' } TERMINAL (bad blob / consumed nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid" }), { status: 401 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("still distinguishes { error:'expired' } (terminal) from the retryable reasons", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "expired" }), { status: 401 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "expired" });
+  });
+
+  it("maps a 200 { payload } to { ok:true, ciphertext }", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ payload: "INNER" }), { status: 200 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: true, ciphertext: "INNER" });
+  });
+});
