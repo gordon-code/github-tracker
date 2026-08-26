@@ -1,7 +1,7 @@
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
-import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
+import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, isRepoExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isRunVisible } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
@@ -140,7 +140,7 @@ export default function ActionsTab(props: ActionsTabProps) {
   const { flashingIds: flashingRunIds, peekUpdates } = createFlashDetection({
     getItems: () => props.workflowRuns,
     getHotIds: () => props.hotPollingRunIds,
-    getExpandedRepos: () => viewState.expandedRepos[tabKey()] ?? {},
+    isRepoExpanded: (repo) => isRepoExpanded(tabKey(), repo),
     trackKey: (run) => `${run.status}|${run.conclusion}`,
     itemLabel: (run) => run.name,
     itemStatus: (run) => run.conclusion ?? run.status,
@@ -236,8 +236,8 @@ export default function ActionsTab(props: ActionsTabProps) {
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), false)}
           />
           <IgnoreBadge
             items={ignoredWorkflowRuns()}
@@ -256,7 +256,7 @@ export default function ActionsTab(props: ActionsTabProps) {
         <For each={repoGroups()}>
           {(repoGroup) => {
             const isEmpty = () => repoGroup.workflows.length === 0;
-            const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
+            const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup.repoFullName);
 
             const sortedWorkflows = createMemo(() =>
               sortWorkflowsByStatus(repoGroup.workflows)

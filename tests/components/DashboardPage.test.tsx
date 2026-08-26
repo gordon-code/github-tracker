@@ -1484,7 +1484,7 @@ describe("DashboardPage — runtime redirect when active custom tab is deleted",
 // ── Orphaned view state cleanup ──────────────────────────────────────────────
 
 describe("DashboardPage — orphaned view state cleanup", () => {
-  it("removes customTabFilters and expandedRepos keys when a custom tab is deleted", async () => {
+  it("removes customTabFilters, expandedRepos, and expandDefault keys when a custom tab is deleted", async () => {
     configStore.addCustomTab({
       id: "orphan01",
       name: "Orphan Tab",
@@ -1495,12 +1495,14 @@ describe("DashboardPage — orphaned view state cleanup", () => {
       exclusive: false,
     });
     viewStore.setCustomTabFilter("orphan01", "role", "author");
+    viewStore.setAllExpanded("orphan01", true);
     viewStore.toggleExpandedRepo("orphan01", "myorg/repo");
 
     render(() => <DashboardPage />);
 
     await waitFor(() => {
       expect(viewStore.viewState.customTabFilters["orphan01"]).toBeDefined();
+      expect(viewStore.viewState.expandDefault["orphan01"]).toBe(true);
     });
 
     configStore.removeCustomTab("orphan01");
@@ -1508,16 +1510,34 @@ describe("DashboardPage — orphaned view state cleanup", () => {
     await waitFor(() => {
       expect(viewStore.viewState.customTabFilters["orphan01"]).toBeUndefined();
       expect(viewStore.viewState.expandedRepos["orphan01"]).toBeUndefined();
+      expect(viewStore.viewState.expandDefault["orphan01"]).toBeUndefined();
     });
   });
 
-  it("prunes stale customTabFilters entries at mount time for unknown tab IDs", async () => {
+  it("prunes stale customTabFilters and expandDefault entries at mount time for unknown tab IDs", async () => {
     viewStore.setCustomTabFilter("ghost-tab", "role", "assignee");
+    viewStore.setAllExpanded("ghost-tab", true);
+    expect(viewStore.viewState.expandDefault["ghost-tab"]).toBe(true);
 
     render(() => <DashboardPage />);
 
     await waitFor(() => {
       expect(viewStore.viewState.customTabFilters["ghost-tab"]).toBeUndefined();
+      expect(viewStore.viewState.expandDefault["ghost-tab"]).toBeUndefined();
+    });
+  });
+
+  it("prunes a stale tab whose only footprint is an expandDefault entry at mount time", async () => {
+    // A divergent persisted blob can carry an expandDefault entry for a tab with no
+    // matching expandedRepos/customTabFilters key — the cleanup must still discover it
+    // via the expandDefault key set alone.
+    viewStore.updateViewState({ expandDefault: { jiraAssigned: true, "ghost-default": true } });
+    expect(viewStore.viewState.expandDefault["ghost-default"]).toBe(true);
+
+    render(() => <DashboardPage />);
+
+    await waitFor(() => {
+      expect(viewStore.viewState.expandDefault["ghost-default"]).toBeUndefined();
     });
   });
 });

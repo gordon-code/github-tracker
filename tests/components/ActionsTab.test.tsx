@@ -360,7 +360,7 @@ describe("ActionsTab", () => {
     // Workflow card expansion is local component state (not persisted in viewState)
     // It survives collapse/expand within the same mount because expandedWorkflows
     // is at component scope, but would reset on full component remount
-    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+    expect(viewStore.isRepoExpanded("actions", "owner/repo")).toBe(true);
     // Run row still visible — local store persists within same component instance
     screen.getByText("my-unique-run");
   });
@@ -370,12 +370,12 @@ describe("ActionsTab", () => {
       makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
       makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B" }),
     ]);
-    viewStore.setAllExpanded("actions", ["owner/repo-a", "owner/repo-b"], true);
+    viewStore.setAllExpanded("actions", true);
     render(() => <ActionsTab workflowRuns={runs()} />);
 
     // Remove repo-b from data — pruning effect should fire
     setRuns([makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" })]);
-    expect(viewState.expandedRepos.actions["owner/repo-a"]).toBe(true);
+    expect(viewStore.isRepoExpanded("actions", "owner/repo-a")).toBe(true);
     expect("owner/repo-b" in viewState.expandedRepos.actions).toBe(false);
   });
 
@@ -383,15 +383,37 @@ describe("ActionsTab", () => {
     const [runs, setRuns] = createSignal<WorkflowRun[]>([
       makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" }),
     ]);
-    viewStore.setAllExpanded("actions", ["owner/repo"], true);
+    viewStore.setAllExpanded("actions", true);
     render(() => <ActionsTab workflowRuns={runs()} />);
 
     setRuns([]);
-    expect(viewState.expandedRepos.actions["owner/repo"]).toBe(true);
+    expect(viewStore.isRepoExpanded("actions", "owner/repo")).toBe(true);
 
     // Data returns — UI should use preserved expanded state
     setRuns([makeWorkflowRun({ repoFullName: "owner/repo", workflowId: 1, name: "CI" })]);
     expect(screen.getAllByText("CI").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("expand all keeps a repo that appears in a later data update expanded", async () => {
+    const user = userEvent.setup();
+    const [runs, setRuns] = createSignal<WorkflowRun[]>([
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+    ]);
+    render(() => <ActionsTab workflowRuns={runs()} />);
+
+    // Expand all — sets the tab default to expanded
+    await user.click(screen.getByRole("button", { name: /Expand all/i }));
+    expect(screen.getAllByText("CI-A").length).toBeGreaterThanOrEqual(1);
+
+    // A brand-new repo arrives later (never present when Expand all was clicked)
+    setRuns([
+      makeWorkflowRun({ repoFullName: "owner/repo-a", workflowId: 1, name: "CI-A" }),
+      makeWorkflowRun({ repoFullName: "owner/repo-b", workflowId: 2, name: "CI-B" }),
+    ]);
+
+    // It inherits the expanded default with no further interaction
+    screen.getByText("owner/repo-b");
+    expect(screen.getAllByText("CI-B").length).toBeGreaterThanOrEqual(1);
   });
 
   it("expanded repo state persists in viewState", async () => {
@@ -442,7 +464,7 @@ describe("ActionsTab", () => {
       makeWorkflowRun({ id: 10, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "in_progress", conclusion: null }),
       makeWorkflowRun({ id: 20, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "completed", conclusion: "success" }),
     ];
-    setAllExpanded("actions", ["org/repo"], true);
+    setAllExpanded("actions", true);
     const { container } = render(() => (
       <ActionsTab workflowRuns={runs} hotPollingRunIds={new Set([10])} />
     ));
@@ -461,7 +483,7 @@ describe("ActionsTab", () => {
     const runs = [
       makeWorkflowRun({ id: 1, repoFullName: "org/repo", workflowId: 1, name: "CI", status: "in_progress", conclusion: null }),
     ];
-    setAllExpanded("actions", ["org/repo"], true);
+    setAllExpanded("actions", true);
     const { container } = render(() => <ActionsTab workflowRuns={runs} />);
     await user.click(screen.getByText("CI"));
     const runRows = container.querySelectorAll("[class*='flex items-center gap-3']");

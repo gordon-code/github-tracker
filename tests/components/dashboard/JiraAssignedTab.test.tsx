@@ -47,6 +47,8 @@ vi.mock("../../../src/app/stores/view", () => ({
   trackItem: vi.fn(),
   untrackJiraItem: vi.fn(),
   setAllExpanded: vi.fn(),
+  toggleExpandedRepo: vi.fn(),
+  isRepoExpanded: () => true,
   setJiraCustomOrder: vi.fn(),
   JIRA_CUSTOM_ORDER_SCOPE: "assigned",
   JIRA_CUSTOM_SORT_FIELD: "custom",
@@ -59,7 +61,7 @@ vi.mock("../../../src/app/stores/config", () => ({
 import JiraAssignedTab, { _resetJiraTabState, _getItemRefsCount } from "../../../src/app/components/dashboard/JiraAssignedTab";
 import type { JiraIssue } from "../../../src/shared/jira-types";
 import { config } from "../../../src/app/stores/config";
-import { trackItem, untrackJiraItem, setAllExpanded, setTabFilter, setJiraCustomOrder } from "../../../src/app/stores/view";
+import { trackItem, untrackJiraItem, toggleExpandedRepo, setTabFilter, setJiraCustomOrder } from "../../../src/app/stores/view";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -390,14 +392,14 @@ describe("JiraAssignedTab", () => {
     expect(toggleButton.textContent).toContain("PROJ");
   });
 
-  it("calls setAllExpanded when project header is clicked", () => {
+  it("calls toggleExpandedRepo when project header is clicked", () => {
     const issues = [makeIssue("PROJ-1")];
     render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
 
     const header = screen.getByRole("button", { expanded: true });
     header.click();
 
-    expect(vi.mocked(setAllExpanded)).toHaveBeenCalled();
+    expect(vi.mocked(toggleExpandedRepo)).toHaveBeenCalledWith("jiraAssigned", "PROJ");
   });
 
   it("renders expand-all and collapse-all buttons", () => {
@@ -667,7 +669,10 @@ describe("JiraAssignedTab", () => {
       expect(screen.queryByRole("button", { name: /pin alpha to top of list/i })).toBeNull();
     });
 
-    it("auto-expands all project groups on first entry to a grouped sort", () => {
+    it("renders each project group header per its store expand state in a grouped sort", () => {
+      // Store expand state is mocked to expanded (isRepoExpanded → true); this verifies the
+      // component wires that state to each group's aria-expanded. The default *value*
+      // (expandDefault.jiraAssigned = true) is covered at the store level in view.test.ts.
       mockJiraFilters = { scope: "assigned", statusCategory: "all", priority: "all", sortField: "priority", sortDirection: "asc" };
       const issues = [
         makeIssue("ALPHA-1", "ALPHA"),
@@ -675,7 +680,8 @@ describe("JiraAssignedTab", () => {
       ];
       render(() => <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} />);
 
-      expect(vi.mocked(setAllExpanded)).toHaveBeenCalledWith("jiraAssigned", ["ALPHA", "BETA"], true);
+      const expandedHeaders = screen.getAllByRole("button", { expanded: true });
+      expect(expandedHeaders.length).toBeGreaterThanOrEqual(2);
     });
 
     it("clears itemRefs when the sortField changes away from custom while still mounted (live mode switch)", () => {

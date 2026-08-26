@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show, on, onCleanup } from "solid-js";
 import type { JiraIssue } from "../../../shared/jira-types";
-import { viewState, setTabFilter, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded, setJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE, JIRA_CUSTOM_SORT_FIELD } from "../../stores/view";
+import { viewState, setTabFilter, JiraFiltersSchema, trackItem, untrackJiraItem, setAllExpanded, toggleExpandedRepo, isRepoExpanded, setJiraCustomOrder, JIRA_CUSTOM_ORDER_SCOPE, JIRA_CUSTOM_SORT_FIELD } from "../../stores/view";
 import { config } from "../../stores/config";
 import JiraFieldValue from "./JiraFieldValue";
 import { jiraStatusCategoryClass, stripParenthetical } from "../../lib/format";
@@ -86,10 +86,7 @@ const STATUS_SDLC_ORDER: Record<string, number> = Object.assign(Object.create(nu
   "Stalled / Blocked": 8, "Blocked/On Hold": 8, "QA Blocked": 8,
 });
 
-let _jiraExpandInitialized = false;
-
 export function _resetJiraTabState() {
-  _jiraExpandInitialized = false;
   itemRefs.clear();
 }
 
@@ -350,20 +347,9 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     slicePageGroups(repoGroups(), pageLayout().boundaries, pageLayout().pageCount, page())
   );
 
-  const projectKeys = createMemo(() => repoGroups().map((g) => g.repoFullName));
-
   createEffect(() => {
     const max = pageCount() - 1;
     if (page() > max) setPage(max);
-  });
-
-  createEffect(() => {
-    const keys = projectKeys();
-    if (keys.length === 0 || _jiraExpandInitialized) return;
-    const expanded = viewState.expandedRepos[TAB_KEY];
-    if (expanded && Object.keys(expanded).length > 0) return;
-    _jiraExpandInitialized = true;
-    setAllExpanded(TAB_KEY, keys, true);
   });
 
   // Reordering is only meaningful — and safe — against the canonical, unfiltered
@@ -698,8 +684,8 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           />
           <Show when={!isCustomMode()}>
             <ExpandCollapseButtons
-              onExpandAll={() => setAllExpanded(TAB_KEY, projectKeys(), true)}
-              onCollapseAll={() => setAllExpanded(TAB_KEY, projectKeys(), false)}
+              onExpandAll={() => setAllExpanded(TAB_KEY, true)}
+              onCollapseAll={() => setAllExpanded(TAB_KEY, false)}
             />
           </Show>
         </div>
@@ -720,13 +706,13 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
               <For each={pageGroups()}>
                 {(group) => {
                   const isEmpty = () => group.items.length === 0;
-                  const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[TAB_KEY] ?? {})[group.repoFullName];
+                  const isExpanded = () => !isEmpty() && isRepoExpanded(TAB_KEY, group.repoFullName);
 
                   return (
                     <div>
                       <div class="group/repo-header flex items-center bg-info/5 border-y border-base-300 hover:bg-info/10 transition-colors">
                         <button
-                          onClick={() => setAllExpanded(TAB_KEY, [group.repoFullName], !isExpanded())}
+                          onClick={() => toggleExpandedRepo(TAB_KEY, group.repoFullName)}
                           aria-expanded={isExpanded()}
                           class="flex-1 flex items-center gap-2 px-4 py-2.5 compact:py-1.5 text-left text-base compact:text-sm font-bold"
                         >

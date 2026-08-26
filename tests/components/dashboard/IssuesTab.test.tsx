@@ -89,7 +89,7 @@ describe("IssuesTab — user filter logic", () => {
       makeIssue({ id: 2, title: "Tracked issue", repoFullName: "owner/repo-b", surfacedBy: ["tracked1"] }),
     ];
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -114,7 +114,7 @@ describe("IssuesTab — user filter logic", () => {
 
     setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "tracked1");
-    setAllExpanded("issues", ["owner/repo-a", "owner/repo-b"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -138,7 +138,7 @@ describe("IssuesTab — user filter logic", () => {
 
     // Filter to "me" — legacy items without surfacedBy should show as belonging to the main user
     setTabFilter("issues", "user", "me");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -160,7 +160,7 @@ describe("IssuesTab — user filter logic", () => {
     ];
 
     setTabFilter("issues", "user", "tracked1");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -183,7 +183,7 @@ describe("IssuesTab — user filter logic", () => {
 
     // Set filter to a user that no longer exists in allUsers
     setTabFilter("issues", "user", "removed-user");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -208,7 +208,7 @@ describe("IssuesTab — avatar badge", () => {
     ];
 
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -232,7 +232,7 @@ describe("IssuesTab — avatar badge", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "owner/repo", surfacedBy: ["me"] }),
     ];
 
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     const { container } = render(() => (
       <IssuesTab
@@ -255,7 +255,7 @@ describe("IssuesTab — monitored repos filter bypass", () => {
     ];
     setTabFilter("issues", "scope", "all");
     setTabFilter("issues", "user", "me");
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -328,7 +328,7 @@ describe("IssuesTab — scope filter", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Tracked User issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -349,7 +349,7 @@ describe("IssuesTab — scope filter", () => {
       makeIssue({ id: 2, title: "Community issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
     ];
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -368,7 +368,7 @@ describe("IssuesTab — scope filter", () => {
     const issues = [
       makeIssue({ id: 1, title: "My monitored issue", repoFullName: "org/monitored", userLogin: "me" }),
     ];
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -385,7 +385,7 @@ describe("IssuesTab — scope filter", () => {
     const issues = [
       makeIssue({ id: 1, title: "Community monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: [] }),
     ];
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -402,7 +402,7 @@ describe("IssuesTab — scope filter", () => {
     const issues = [
       makeIssue({ id: 1, title: "Assigned monitored issue", repoFullName: "org/monitored", userLogin: "other-user", assigneeLogins: ["me"] }),
     ];
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -424,7 +424,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
     ];
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
 
     const { container } = render(() => (
       <IssuesTab
@@ -443,7 +443,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
       makeIssue({ id: 1, title: "Community issue", repoFullName: "org/monitored", userLogin: "other", assigneeLogins: [] }),
     ];
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     const { container } = render(() => (
       <IssuesTab
@@ -462,7 +462,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
       makeIssue({ id: 1, title: "Bot issue", repoFullName: "org/monitored", surfacedBy: ["tracked-bot[bot]"] }),
     ];
     setTabFilter("issues", "scope", "all");
-    setAllExpanded("issues", ["org/monitored"], true);
+    setAllExpanded("issues", true);
 
     const { container } = render(() => (
       <IssuesTab
@@ -480,7 +480,7 @@ describe("IssuesTab — left border accent in 'all' scope", () => {
     const issues = [
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
 
     const { container } = render(() => (
       <IssuesTab
@@ -555,7 +555,7 @@ describe("IssuesTab — scope filter with undefined surfacedBy (non-monitored re
     const issues = [
       makeIssue({ id: 1, title: "Legacy issue", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab
@@ -636,7 +636,7 @@ describe("IssuesTab — pin button wiring", () => {
   it("pin button not rendered when enableTracking is false", () => {
     updateConfig({ enableTracking: false });
     const issue = makeIssue({ id: 1, title: "Pin test issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={[issue]} userLogin="me" />
@@ -649,7 +649,7 @@ describe("IssuesTab — pin button wiring", () => {
   it("pin button rendered when enableTracking is true", async () => {
     updateConfig({ enableTracking: true });
     const issue = makeIssue({ id: 1, title: "Pin test issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={[issue]} userLogin="me" />
@@ -662,7 +662,7 @@ describe("IssuesTab — pin button wiring", () => {
     const user = userEvent.setup();
     updateConfig({ enableTracking: true });
     const issue = makeIssue({ id: 50, title: "My issue", repoFullName: "owner/repo", surfacedBy: ["me"] });
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={[issue]} userLogin="me" />
@@ -679,7 +679,7 @@ describe("IssuesTab — pin button wiring", () => {
     updateConfig({ enableTracking: true });
     const issue = makeIssue({ id: 51, title: "Already tracked", repoFullName: "owner/repo", surfacedBy: ["me"] });
     updateViewState({ trackedItems: [makeTrackedItem({ id: 51, type: "issue", repoFullName: "owner/repo", title: "Already tracked" })] });
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={[issue]} userLogin="me" />
@@ -696,7 +696,7 @@ describe("IssuesTab — pin button wiring", () => {
     updateConfig({ enableTracking: true });
     const issue = makeIssue({ id: 52, title: "Tracked and ignored", repoFullName: "owner/repo", surfacedBy: ["me"] });
     updateViewState({ trackedItems: [makeTrackedItem({ id: 52, type: "issue", repoFullName: "owner/repo", title: "Tracked and ignored" })] });
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={[issue]} userLogin="me" />
@@ -852,7 +852,7 @@ describe("IssuesTab — state filter", () => {
       makeIssue({ id: 1, title: "Open issue", repoFullName: "owner/repo", state: "OPEN", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Closed issue", repoFullName: "owner/repo", state: "CLOSED", surfacedBy: ["me"] }),
     ];
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
 
     render(() => (
       <IssuesTab issues={issues} userLogin="me" />
@@ -871,7 +871,7 @@ describe("IssuesTab — customTabId filter preset", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
     ];
-    setAllExpanded("custom-tab-1", ["org/repo"], true);
+    setAllExpanded("custom-tab-1", true);
 
     render(() => (
       <IssuesTab
@@ -892,7 +892,7 @@ describe("IssuesTab — customTabId filter preset", () => {
       makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", userLogin: "other", surfacedBy: ["me"] }),
     ];
     setCustomTabFilter("custom-tab-3", "role", "all");
-    setAllExpanded("custom-tab-3", ["org/repo"], true);
+    setAllExpanded("custom-tab-3", true);
 
     render(() => (
       <IssuesTab
@@ -912,7 +912,7 @@ describe("IssuesTab — customTabId filter preset", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", surfacedBy: ["me"] }),
       makeIssue({ id: 2, title: "Other issue", repoFullName: "org/repo", surfacedBy: ["other"] }),
     ];
-    setAllExpanded("custom-tab-4", ["org/repo"], true);
+    setAllExpanded("custom-tab-4", true);
 
     render(() => (
       <IssuesTab
@@ -933,7 +933,7 @@ describe("IssuesTab — customTabId filter preset", () => {
       makeIssue({ id: 1, title: "My issue", repoFullName: "org/repo", userLogin: "me", surfacedBy: ["me"] }),
     ];
     setTabFilter("issues", "role", "assignee");
-    setAllExpanded("custom-tab-5", ["org/repo"], true);
+    setAllExpanded("custom-tab-5", true);
 
     render(() => (
       <IssuesTab

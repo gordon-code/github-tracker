@@ -598,7 +598,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     unmount();
 
     // Render PullRequestsTab with same data and applied filters
-    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b", "org/repo-c", "org/repo-d"], true);
+    setAllExpanded("pullRequests", true);
     render(() => (
       <PullRequestsTab pullRequests={mixedPRs} userLogin={userLogin} monitoredRepos={[]} />
     ));
@@ -626,7 +626,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     fireEvent.click(reviewButton);
     unmount();
 
-    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b", "org/repo-c", "org/repo-d"], true);
+    setAllExpanded("pullRequests", true);
     render(() => (
       <PullRequestsTab pullRequests={mixedPRs} userLogin={userLogin} monitoredRepos={[]}
         allUsers={[{ login: "me", label: "Me" }, { login: "other-author", label: "other-author" }]}
@@ -652,7 +652,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     fireEvent.click(mergeButton);
     unmount();
 
-    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b", "org/repo-c", "org/repo-d"], true);
+    setAllExpanded("pullRequests", true);
     render(() => (
       <PullRequestsTab pullRequests={mixedPRs} userLogin={userLogin} monitoredRepos={[]} />
     ));
@@ -677,7 +677,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     fireEvent.click(assignedButton);
     unmount();
 
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     render(() => (
       <IssuesTab issues={mixedIssues} userLogin={userLogin} monitoredRepos={[]} />
     ));
@@ -705,7 +705,7 @@ describe("PersonalSummaryStrip — count-to-filter contract", () => {
     fireEvent.click(blockedButton);
     unmount();
 
-    setAllExpanded("pullRequests", ["org/tracked-repo"], true);
+    setAllExpanded("pullRequests", true);
     render(() => (
       <PullRequestsTab pullRequests={trackedOnlyPRs} userLogin={userLogin} monitoredRepos={[]}
         allUsers={[{ login: "me", label: "Me" }, { login: "tracked-user", label: "tracked-user" }]}

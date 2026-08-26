@@ -128,6 +128,11 @@ export const ViewStateSchema = z.object({
     actions: {},
     jiraAssigned: {},
   }),
+  // Per-tab default expand state. A repo with no entry in `expandedRepos[tab]` follows
+  // this default (a tab with no entry here defaults to collapsed). Expand All / Collapse
+  // All set this default so repos that appear later inherit it; a manual per-repo toggle
+  // records an exception in `expandedRepos[tab]`. Jira project groups default to expanded.
+  expandDefault: z.record(z.string(), z.boolean()).default({ jiraAssigned: true }),
   lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
   trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
   dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
@@ -206,6 +211,11 @@ export function resetViewState(): void {
           delete draft.expandedRepos[key];
         }
       }
+      for (const key of Object.keys(draft.expandDefault)) {
+        if (!(REPO_STATE_TAB_IDS as readonly string[]).includes(key)) {
+          delete draft.expandDefault[key];
+        }
+      }
       for (const key of Object.keys(draft.customTabFilters)) {
         delete draft.customTabFilters[key];
       }
@@ -230,6 +240,7 @@ export function resetViewState(): void {
         hideDepDashboard: true,
         customTabFilters: {},
         expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
+        expandDefault: { jiraAssigned: true },
         lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
         trackedItems: [],
         dependencyExpandedGroups: ["mergeable"],
@@ -370,39 +381,48 @@ export function setDependencyExpandedGroups(groups: string[]): void {
   );
 }
 
+// Effective expand state for a single repo: its per-repo exception if one exists,
+// otherwise the tab's default (a tab with no default is collapsed). The per-repo key
+// is read unconditionally so SolidJS tracks it — a `hasOwnProperty` guard would skip
+// the tracked read and leave callers stale when an exception is added or removed.
+export function isRepoExpanded(tab: string, repoFullName: string): boolean {
+  const override = viewState.expandedRepos[tab]?.[repoFullName];
+  if (override !== undefined) return override;
+  return viewState.expandDefault[tab] ?? false;
+}
+
 export function toggleExpandedRepo(
   tab: string,
   repoFullName: string
 ): void {
   setViewState(
     produce((draft) => {
+      const def = draft.expandDefault[tab] ?? false;
       if (!draft.expandedRepos[tab]) draft.expandedRepos[tab] = {};
-      if (draft.expandedRepos[tab][repoFullName]) {
-        delete draft.expandedRepos[tab][repoFullName];
+      const overrides = draft.expandedRepos[tab];
+      const current = Object.prototype.hasOwnProperty.call(overrides, repoFullName)
+        ? overrides[repoFullName]
+        : def;
+      const next = !current;
+      if (next === def) {
+        // Back in line with the tab default — drop the exception so this repo follows
+        // the default again (and any future Expand/Collapse All).
+        delete overrides[repoFullName];
       } else {
-        draft.expandedRepos[tab][repoFullName] = true;
+        overrides[repoFullName] = next;
       }
     })
   );
 }
 
-export function setAllExpanded(
-  tab: string,
-  repoFullNames: string[],
-  expanded: boolean
-): void {
+// Expand All / Collapse All. Sets the tab-wide default so repos that appear later
+// inherit it, and clears every per-repo exception so all current repos (including any
+// manually toggled the other way) snap to the new default.
+export function setAllExpanded(tab: string, expanded: boolean): void {
   setViewState(
     produce((draft) => {
-      if (!draft.expandedRepos[tab]) draft.expandedRepos[tab] = {};
-      if (expanded) {
-        for (const name of repoFullNames) {
-          draft.expandedRepos[tab][name] = true;
-        }
-      } else {
-        for (const name of repoFullNames) {
-          delete draft.expandedRepos[tab][name];
-        }
-      }
+      draft.expandDefault[tab] = expanded;
+      draft.expandedRepos[tab] = {};
     })
   );
 }
@@ -448,6 +468,7 @@ export function removeCustomTabState(tabId: string): void {
     produce((draft) => {
       delete draft.customTabFilters[tabId];
       delete draft.expandedRepos[tabId];
+      delete draft.expandDefault[tabId];
       delete draft.lockedRepos[tabId];
     })
   );

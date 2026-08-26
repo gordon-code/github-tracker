@@ -136,7 +136,7 @@ Counts are computed across all repos regardless of any org or repo filter you ha
 
 Items are grouped by repository. Each repo group has a header row showing the repo name, item count, and a summary of statuses (check results, review decisions, role counts). Click a repo header to expand or collapse that group.
 
-Use the **Expand all** / **Collapse all** buttons in the toolbar to expand or collapse all groups at once.
+Use the **Expand all** / **Collapse all** buttons in the toolbar to set the default for that tab. The default applies to every group, including repos that appear later — so **Expand all** keeps newly-surfaced repos expanded without needing another click. Clicking an individual repo header overrides the default for just that repo and is remembered as an exception, until the next **Expand all** / **Collapse all** resets every group to the new default. GitHub tabs start collapsed by default; Jira project groups start expanded.
 
 When a group is collapsed, a brief preview of any status change detected by the hot poll appears under the header for a few seconds before fading.
 
