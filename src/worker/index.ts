@@ -451,9 +451,13 @@ async function handleProxyUnseal(request: Request, env: Env): Promise<Response> 
   // Check-and-consume the content-fingerprint nonce. FAIL CLOSED on any KV error
   // — never return the payload if the nonce could not be checked-and-recorded,
   // otherwise a KV outage would silently disable the single-use protection. This
-  // also closes the unseal-then-reseal renewal loophole: resealing the same
+  // also blunts the unseal-then-reseal renewal loophole: resealing the same
   // payload reproduces the identical nonce (deterministic), so a resealed copy is
-  // rejected as already-consumed even though its own createdAt is fresh.
+  // rejected as already-consumed even though its own createdAt is fresh. This is
+  // best-effort and bounded by the nonce's TTL below: once the nonce expires from
+  // KV a resealed copy becomes unsealable again. That is harmless — a code-less
+  // unseal only ever yields the inert, still-code-encrypted ciphertext, so
+  // single-use here is an availability guarantee, not a confidentiality one.
   try {
     const consumed = await nonceKv.get(result.nonce);
     if (consumed !== null) {
