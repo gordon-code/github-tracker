@@ -14,7 +14,7 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -290,16 +290,7 @@ async function pollFetch(): Promise<DashboardData> {
             // enriched from a prior cycle.
             const regressing = e.enriched === false && pr.enriched !== false;
             if (!regressing) {
-              pr.headSha = e.headSha;
-              pr.assigneeLogins = e.assigneeLogins;
-              pr.reviewerLogins = e.reviewerLogins;
-              pr.checkStatus = e.checkStatus;
-              pr.additions = e.additions;
-              pr.deletions = e.deletions;
-              pr.changedFiles = e.changedFiles;
-              pr.comments = e.comments;
-              pr.reviewThreads = e.reviewThreads;
-              pr.totalReviewCount = e.totalReviewCount;
+              Object.assign(pr, pickEnrichmentFields(e));
               pr.enriched = e.enriched;
             }
             pr.nodeId = e.nodeId;

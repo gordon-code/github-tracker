@@ -4,9 +4,12 @@ import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
   fetchPREnrichment,
+  fallbackToPreviousEnrichment,
+  pickEnrichmentFields,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
+import { makePullRequest } from "../helpers/factories";
 
 vi.mock("../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
@@ -595,5 +598,132 @@ describe("fetchPREnrichment mergeStateStatus UNSTABLE override", () => {
     const octokit = makeEnrichmentOctokit("UNSTABLE", null);
     const { enrichments } = await fetchPREnrichment(octokit as never, ["PR_node1"]);
     expect(enrichments.get(100)!.checkStatus).toBe("failure");
+  });
+});
+
+// ── Enrichment carry-forward on backfill failure ──────────────────────────────
+
+describe("fallbackToPreviousEnrichment", () => {
+  it("returns next unchanged when previous is empty", () => {
+    const next = [makePullRequest({ id: 1, enriched: false })];
+    const result = fallbackToPreviousEnrichment([], next);
+    expect(result).toBe(next);
+  });
+
+  it("passes through a PR that is already enriched in next (no carry-forward)", () => {
+    const previous = [makePullRequest({ id: 1, enriched: true, checkStatus: "failure" })];
+    const next = [makePullRequest({ id: 1, enriched: true, checkStatus: "success" })];
+    const result = fallbackToPreviousEnrichment(previous, next);
+    // Fresh enriched data wins — prior "failure" must not overwrite fresh "success".
+    expect(result[0].checkStatus).toBe("success");
+    expect(result[0]).toBe(next[0]);
+  });
+
+  it("passes through an unenriched next PR with no matching previous entry", () => {
+    const previous = [makePullRequest({ id: 99, enriched: true })];
+    const next = [makePullRequest({ id: 1, enriched: false })];
+    const result = fallbackToPreviousEnrichment(previous, next);
+    expect(result[0]).toBe(next[0]);
+    expect(result[0].enriched).toBe(false);
+  });
+
+  it("passes through an unenriched next PR whose previous entry was also unenriched", () => {
+    const previous = [makePullRequest({ id: 1, enriched: false })];
+    const next = [makePullRequest({ id: 1, enriched: false })];
+    const result = fallbackToPreviousEnrichment(previous, next);
+    expect(result[0]).toBe(next[0]);
+    expect(result[0].enriched).toBe(false);
+  });
+
+  it("carries forward prior enrichment for an unenriched next PR that was enriched before", () => {
+    const previous = [
+      makePullRequest({
+        id: 1,
+        enriched: true,
+        checkStatus: "success",
+        additions: 42,
+        deletions: 7,
+        changedFiles: 3,
+        comments: 5,
+        reviewThreads: 2,
+        totalReviewCount: 4,
+        reviewerLogins: ["reviewer1"],
+        assigneeLogins: ["assignee1"],
+        headSha: "prevsha",
+      }),
+    ];
+    const next = [
+      makePullRequest({
+        id: 1,
+        enriched: false,
+        state: "OPEN",
+        title: "Fresh title",
+        checkStatus: null,
+        additions: 0,
+        deletions: 0,
+        changedFiles: 0,
+        comments: 0,
+        reviewThreads: 0,
+        totalReviewCount: 0,
+        reviewerLogins: [],
+        assigneeLogins: [],
+        headSha: "",
+      }),
+    ];
+    const result = fallbackToPreviousEnrichment(previous, next);
+    // Heavy fields restored from the prior cycle...
+    expect(result[0].enriched).toBe(true);
+    expect(result[0].checkStatus).toBe("success");
+    expect(result[0].additions).toBe(42);
+    expect(result[0].deletions).toBe(7);
+    expect(result[0].changedFiles).toBe(3);
+    expect(result[0].comments).toBe(5);
+    expect(result[0].reviewThreads).toBe(2);
+    expect(result[0].totalReviewCount).toBe(4);
+    expect(result[0].reviewerLogins).toEqual(["reviewer1"]);
+    expect(result[0].assigneeLogins).toEqual(["assignee1"]);
+    expect(result[0].headSha).toBe("prevsha");
+    // ...but fresh light fields survive.
+    expect(result[0].title).toBe("Fresh title");
+  });
+
+  it("drops a PR that closed (present in previous, absent from next)", () => {
+    const previous = [
+      makePullRequest({ id: 1, enriched: true }),
+      makePullRequest({ id: 2, enriched: true }),
+    ];
+    const next = [makePullRequest({ id: 1, enriched: false })];
+    const result = fallbackToPreviousEnrichment(previous, next);
+    // Only the PR still in `next` remains — the closed PR (id 2) is not resurrected.
+    expect(result.map((pr) => pr.id)).toEqual([1]);
+  });
+});
+
+describe("pickEnrichmentFields", () => {
+  it("returns only the heavy enrichment fields, not light fields", () => {
+    const pr = makePullRequest({
+      id: 1,
+      title: "light title",
+      state: "OPEN",
+      checkStatus: "success",
+      additions: 10,
+      reviewerLogins: ["r1"],
+    });
+    const fields = pickEnrichmentFields(pr);
+    expect(fields).toEqual({
+      headSha: pr.headSha,
+      assigneeLogins: pr.assigneeLogins,
+      reviewerLogins: pr.reviewerLogins,
+      checkStatus: pr.checkStatus,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changedFiles,
+      comments: pr.comments,
+      reviewThreads: pr.reviewThreads,
+      totalReviewCount: pr.totalReviewCount,
+    });
+    expect(fields).not.toHaveProperty("title");
+    expect(fields).not.toHaveProperty("state");
+    expect(fields).not.toHaveProperty("enriched");
   });
 });

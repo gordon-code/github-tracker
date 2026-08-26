@@ -1330,6 +1330,42 @@ export async function fetchDepPRBodies(
 }
 
 /**
+ * The heavy PR fields populated by phase-2 enrichment. Centralized so the sites
+ * that copy enrichment onto a PR — mergeEnrichment, fallbackToPreviousEnrichment,
+ * and the fine-grained store merge in DashboardPage — stay in sync when a field
+ * is added or removed.
+ */
+type EnrichmentFields = Pick<
+  PullRequest,
+  | "headSha"
+  | "assigneeLogins"
+  | "reviewerLogins"
+  | "checkStatus"
+  | "additions"
+  | "deletions"
+  | "changedFiles"
+  | "comments"
+  | "reviewThreads"
+  | "totalReviewCount"
+>;
+
+/** Extracts just the heavy enrichment fields from any PR-shaped source. */
+export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields {
+  return {
+    headSha: source.headSha,
+    assigneeLogins: source.assigneeLogins,
+    reviewerLogins: source.reviewerLogins,
+    checkStatus: source.checkStatus,
+    additions: source.additions,
+    deletions: source.deletions,
+    changedFiles: source.changedFiles,
+    comments: source.comments,
+    reviewThreads: source.reviewThreads,
+    totalReviewCount: source.totalReviewCount,
+  };
+}
+
+/**
  * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
  * Also detects fork PRs for the statusCheckRollup fallback.
  */
@@ -1348,16 +1384,7 @@ function mergeEnrichment(
 
     return {
       ...pr,
-      headSha: e.headSha,
-      assigneeLogins: e.assigneeLogins,
-      reviewerLogins: e.reviewerLogins,
-      checkStatus: e.checkStatus,
-      additions: e.additions,
-      deletions: e.deletions,
-      changedFiles: e.changedFiles,
-      comments: e.comments,
-      reviewThreads: e.reviewThreads,
-      totalReviewCount: e.totalReviewCount,
+      ...pickEnrichmentFields(e),
       enriched: true,
     };
   });
@@ -1382,16 +1409,7 @@ export function fallbackToPreviousEnrichment(
     if (!prev || prev.enriched === false) return pr;
     return {
       ...pr,
-      headSha: prev.headSha,
-      assigneeLogins: prev.assigneeLogins,
-      reviewerLogins: prev.reviewerLogins,
-      checkStatus: prev.checkStatus,
-      additions: prev.additions,
-      deletions: prev.deletions,
-      changedFiles: prev.changedFiles,
-      comments: prev.comments,
-      reviewThreads: prev.reviewThreads,
-      totalReviewCount: prev.totalReviewCount,
+      ...pickEnrichmentFields(prev),
       enriched: true,
     };
   });
