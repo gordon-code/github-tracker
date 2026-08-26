@@ -642,3 +642,65 @@ describe("sealApiToken", () => {
     );
   });
 });
+
+// ── unsealCredentialBundle — R-101 turnstile retryability ─────────────────────
+// A CLIENT-side Turnstile-acquisition failure happens BEFORE any request reaches
+// the server, so the bundle's single-use nonce is never consumed and the whole
+// unseal is safely retryable. It MUST map to a distinct { reason: "turnstile" },
+// never the terminal { reason: "invalid" } (which callers treat as a burned
+// bundle).
+
+describe("unsealCredentialBundle — turnstile failure (R-101)", () => {
+  let mod: typeof import("../../../src/app/lib/proxy");
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "test-site-key");
+    mod = await loadModule();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("maps a client-side Turnstile acquisition failure to { ok:false, reason:'turnstile' } without sending a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Force acquireTurnstileToken to reject before any request: fire the script's
+    // onerror (proxy.ts rejects loadTurnstileScript with "Failed to load ...").
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onerror: (() => void) | null }).onerror?.();
+        return node;
+      }
+      return node;
+    });
+
+    const res = await mod.unsealCredentialBundle("SEALED-BLOB");
+    expect(res).toEqual({ ok: false, reason: "turnstile" });
+    // No unseal request was ever sent → the server nonce was not consumed.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("is retryable after a turnstile failure — repeated attempts never send a request (nonce never consumed)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onerror: (() => void) | null }).onerror?.();
+        return node;
+      }
+      return node;
+    });
+
+    const first = await mod.unsealCredentialBundle("SEALED-BLOB");
+    const second = await mod.unsealCredentialBundle("SEALED-BLOB");
+    expect(first).toEqual({ ok: false, reason: "turnstile" });
+    expect(second).toEqual({ ok: false, reason: "turnstile" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

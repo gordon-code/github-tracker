@@ -572,3 +572,22 @@ export async function commitImportedSettings(
   setJiraAuth(state);
   return { jiraRestored: true };
 }
+
+// ── Login-page import (Task 7) ────────────────────────────────────────────────
+
+/**
+ * True when the local config indicates prior onboarding or use — the signal the
+ * pre-auth Login-page import uses to decide whether to show the identity-confirm
+ * dialog before finalizing. A genuinely fresh browser/incognito session (no
+ * onboarding, no repo/org selections) returns `false` and imports straight
+ * through to the dashboard without a confirmation prompt. On the Settings page
+ * the user is always already authenticated, so that flow always confirms and
+ * never consults this helper. (Plan Key Decisions + Task 7 Step 1.)
+ */
+export function hasExistingLocalConfig(config: Config): boolean {
+  return (
+    config.onboardingComplete === true ||
+    config.selectedRepos.length > 0 ||
+    config.selectedOrgs.length > 0
+  );
+}

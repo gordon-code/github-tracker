@@ -220,17 +220,27 @@ export async function sealCredentialBundle(ciphertext: string): Promise<string> 
  *
  * MUST use `proxyFetch()` (sets `X-Requested-With`); a raw fetch would be
  * rejected with `403 missing_csrf_header`. Only `expired` is distinguished from
- * the uniform `invalid` failure (per the endpoint's contract).
+ * the uniform `invalid` failure among SERVER responses (per the endpoint's
+ * contract). A `turnstile` reason is distinct from both: it signals a CLIENT-side
+ * Turnstile-acquisition failure that happened BEFORE any request reached the
+ * server, so the bundle's single-use nonce was NOT consumed and the whole unseal
+ * is safely retryable (R-101) — callers must treat it as non-terminal.
  */
 export async function unsealCredentialBundle(
   sealed: string
-): Promise<{ ok: true; ciphertext: string } | { ok: false; reason: "expired" | "invalid" }> {
+): Promise<
+  | { ok: true; ciphertext: string }
+  | { ok: false; reason: "expired" | "invalid" | "turnstile" }
+> {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
   let turnstileToken: string;
   try {
     turnstileToken = await acquireTurnstileToken(siteKey ?? "", "unseal");
   } catch {
-    return { ok: false, reason: "invalid" };
+    // Acquisition threw (widget hiccup/timeout/missing key) BEFORE any network
+    // request — the server nonce is untouched and the bundle is still valid.
+    // Return a DISTINCT retryable result, NOT the terminal `invalid` (R-101).
+    return { ok: false, reason: "turnstile" };
   }
 
   let res: Response;

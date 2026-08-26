@@ -30,6 +30,7 @@ import {
   buildEncryptedCredentialsSection,
   resolveImportedCredentials,
   commitImportedSettings,
+  hasExistingLocalConfig,
 } from "../../src/app/lib/settings-transfer";
 import type { CredentialBundle } from "../../src/app/lib/settings-transfer";
 import * as proxyLib from "../../src/app/lib/proxy";
@@ -849,5 +850,38 @@ describe("commitImportedSettings", () => {
     await new Promise((r) => setTimeout(r, 250));
     expect(JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY)!)).toEqual(importedConfig);
     dispose();
+  });
+});
+
+// ── Task 7: hasExistingLocalConfig (Login-page confirmation-skip detector) ─────
+
+describe("hasExistingLocalConfig", () => {
+  it("returns false for a default/empty config (fresh browser / incognito)", () => {
+    const cfg = ConfigSchema.parse({});
+    expect(cfg.onboardingComplete).toBe(false);
+    expect(cfg.selectedRepos).toEqual([]);
+    expect(cfg.selectedOrgs).toEqual([]);
+    expect(hasExistingLocalConfig(cfg)).toBe(false);
+  });
+
+  it("returns true when onboardingComplete is true even with empty repo/org arrays", () => {
+    const cfg = ConfigSchema.parse({ onboardingComplete: true });
+    expect(cfg.selectedRepos).toEqual([]);
+    expect(cfg.selectedOrgs).toEqual([]);
+    expect(hasExistingLocalConfig(cfg)).toBe(true);
+  });
+
+  it("returns true for non-empty selectedRepos even when onboardingComplete is false", () => {
+    const cfg = ConfigSchema.parse({
+      onboardingComplete: false,
+      selectedRepos: [{ owner: "acme", name: "api", fullName: "acme/api" }],
+    });
+    expect(cfg.onboardingComplete).toBe(false);
+    expect(hasExistingLocalConfig(cfg)).toBe(true);
+  });
+
+  it("returns true for non-empty selectedOrgs even when onboardingComplete is false", () => {
+    const cfg = ConfigSchema.parse({ onboardingComplete: false, selectedOrgs: ["acme"] });
+    expect(hasExistingLocalConfig(cfg)).toBe(true);
   });
 });

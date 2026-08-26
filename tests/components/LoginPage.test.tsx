@@ -1,11 +1,48 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { render, screen, waitFor, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("../../src/app/stores/auth", () => ({
-  setAuthFromPat: vi.fn(),
+// Partial mock: keep the REAL user()/token()/clearIdentityData()/setJiraAuth()
+// (the cross-identity test drives the REAL commitImportedSettings through them),
+// but replace the identity setters with spies. setAuthFromCredential is a SEPARATE
+// spy so the import-commit path's call is observable and ordered.
+vi.mock("../../src/app/stores/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
+  return {
+    ...actual,
+    setAuthFromPat: vi.fn(),
+    setAuthFromCredential: vi.fn(),
+  };
+});
+
+// Partial mock: keep CredentialsSectionSchema (the component validates
+// `_credentials` with it) + the real commitImportedSettings available to delegate
+// to; stub the flow functions per-test.
+vi.mock("../../src/app/lib/settings-transfer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/lib/settings-transfer")>();
+  return {
+    ...actual,
+    parseImportFile: vi.fn(),
+    resolveImportedCredentials: vi.fn(),
+    commitImportedSettings: vi.fn(),
+    hasExistingLocalConfig: vi.fn(),
+  };
+});
+
+vi.mock("../../src/app/lib/proxy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/lib/proxy")>();
+  return { ...actual, unsealCredentialBundle: vi.fn() };
+});
+
+vi.mock("../../src/app/stores/cache", () => ({
+  clearCache: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+  withSentryErrorBoundary: vi.fn((c: unknown) => c),
 }));
 
 vi.mock("../../src/app/lib/pat", async (importOriginal) => {
@@ -35,6 +72,12 @@ vi.mock("@solidjs/router", () => ({
 import LoginPage from "../../src/app/pages/LoginPage";
 import * as authStore from "../../src/app/stores/auth";
 import * as patLib from "../../src/app/lib/pat";
+import * as settingsTransfer from "../../src/app/lib/settings-transfer";
+import * as proxyLib from "../../src/app/lib/proxy";
+import * as cacheStore from "../../src/app/stores/cache";
+import * as configStore from "../../src/app/stores/config";
+import { ConfigSchema } from "../../src/shared/schemas";
+import type { CredentialBundle } from "../../src/app/lib/settings-transfer";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -314,5 +357,308 @@ describe("LoginPage — PAT form validation", () => {
       expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
     });
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+// ── Import from backup (Task 7) ───────────────────────────────────────────────
+
+describe("LoginPage — Import from backup", () => {
+  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+  const IDENTITY = { login: "newuser", avatar_url: "https://a/new", name: "New User" };
+  const BUNDLE: CredentialBundle = { github: { token: "ghp_new", method: "pat" }, jira: null };
+
+  function baseConfig() {
+    return ConfigSchema.parse({});
+  }
+
+  beforeEach(() => {
+    // clearAllMocks (parent beforeEach) only clears CALL history; reset the flow
+    // stubs' implementations so a mockReturnValue from one test can't leak.
+    vi.mocked(settingsTransfer.parseImportFile).mockReset();
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReset();
+    vi.mocked(settingsTransfer.commitImportedSettings).mockReset();
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReset();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReset();
+  });
+
+  async function openImport(user: ReturnType<typeof userEvent.setup>) {
+    render(() => <LoginPage />);
+    await user.click(screen.getByRole("button", { name: "Import from backup" }));
+  }
+
+  // Fires the file-input change; parseImportFile is mocked, so the file content
+  // itself is irrelevant beyond File.text() resolving.
+  function fireFileChange() {
+    const input = screen.getByLabelText("Import backup file");
+    const file = new File(["{}"], "settings.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+  }
+
+  function mockValidCredsFile() {
+    vi.mocked(settingsTransfer.parseImportFile).mockReturnValue({
+      ok: true,
+      config: baseConfig(),
+      rawJson: { _credentials: { sealed: "S", salt: "SA" } },
+    });
+  }
+
+  // ── Step 2: file detection + local error area ──────────────────────────────
+
+  it("shows a parse-error message in the local error area (never a toast)", async () => {
+    vi.mocked(settingsTransfer.parseImportFile).mockReturnValue({
+      ok: false,
+      errors: ["File is not valid JSON."],
+    });
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/not valid JSON/i));
+    expect(screen.queryByLabelText("One-time code")).toBeNull();
+  });
+
+  it("shows the sign-in-first guidance for a credentials-less export, with no code prompt", async () => {
+    vi.mocked(settingsTransfer.parseImportFile).mockReturnValue({
+      ok: true,
+      config: baseConfig(),
+      rawJson: { theme: "dark" },
+    });
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/doesn't contain credentials/i)
+    );
+    expect(screen.queryByLabelText("One-time code")).toBeNull();
+  });
+
+  it("treats a null _credentials as no-credentials (guidance, no TypeError, no code prompt)", async () => {
+    vi.mocked(settingsTransfer.parseImportFile).mockReturnValue({
+      ok: true,
+      config: baseConfig(),
+      rawJson: { _credentials: null },
+    });
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/doesn't contain credentials/i)
+    );
+    expect(screen.queryByLabelText("One-time code")).toBeNull();
+  });
+
+  it("renders a password-type one-time-code input for a valid _credentials section", async () => {
+    mockValidCredsFile();
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    expect((screen.getByLabelText("One-time code") as HTMLInputElement).type).toBe("password");
+    // No error surfaced on a clean valid-creds detection.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // ── Step 3: unseal → resolve → conditional confirm → commit → navigate ──────
+
+  it("fresh local config skips the confirmation dialog and navigates directly", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+    expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledWith(
+      { bundle: BUNDLE, identity: IDENTITY },
+      expect.objectContaining({ theme: expect.any(String) })
+    );
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+  });
+
+  it("existing local config shows the identity dialog and navigates only after confirm", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(true);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    screen.getByText(/@newuser/);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+    expect(settingsTransfer.commitImportedSettings).toHaveBeenCalled();
+  });
+
+  it("declining the identity dialog leaves the page in place — no navigation, no commit", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(true);
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+  });
+
+  it("wrong code then correct code: retries against the cached ciphertext, unseals only ONCE", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials)
+      .mockResolvedValueOnce({ ok: false, error: "Couldn't decrypt credentials — check the code and file match." })
+      .mockResolvedValueOnce({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    const codeField = screen.getByLabelText("One-time code");
+    await user.type(codeField, "wrong");
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/check the code and file match/i));
+    expect(mockNavigate).not.toHaveBeenCalled();
+    screen.getByLabelText("One-time code"); // still available for retry
+
+    await user.clear(codeField);
+    await user.type(codeField, CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it("an expired unseal shows the distinct expired message and withdraws the code prompt", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "expired" });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/expired/i));
+    expect(screen.queryByLabelText("One-time code")).toBeNull(); // terminal — no retry
+    screen.getByRole("button", { name: "Back to sign in" });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("a revoked GitHub credential surfaces the distinct revoked message and keeps the code prompt", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({
+      ok: false,
+      error: "Imported GitHub credential is no longer valid — it may have been revoked, or the token/session has expired.",
+    });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/no longer valid|revoked/i));
+    screen.getByLabelText("One-time code"); // still available (retryable)
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("R-101: a turnstile failure shows a retryable message, keeps the code prompt, and re-unseals on retry", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle)
+      .mockResolvedValueOnce({ ok: false, reason: "turnstile" })
+      .mockResolvedValueOnce({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/verification failed/i));
+    screen.getByLabelText("One-time code"); // NON-terminal — retry still possible
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+    // Re-unsealed (nonce never consumed on the client-side turnstile failure).
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(2);
+  });
+
+  // ── Must-have: cross-identity IndexedDB isolation (REAL clearIdentityData) ───
+
+  it("cross-identity: clears the prior identity's IndexedDB cache (real clearIdentityData) BEFORE establishing the imported identity/config", async () => {
+    // Delegate to the REAL commitImportedSettings so the pre-auth (user()===null)
+    // clearIdentityData ordering actually executes. Auth is partially mocked so
+    // user()/clearIdentityData() are real; clearCache is mocked (no real IndexedDB).
+    const actualTransfer = await vi.importActual<typeof import("../../src/app/lib/settings-transfer")>(
+      "../../src/app/lib/settings-transfer"
+    );
+    vi.mocked(settingsTransfer.commitImportedSettings).mockImplementation(actualTransfer.commitImportedSettings);
+
+    vi.mocked(settingsTransfer.parseImportFile).mockReturnValue({
+      ok: true,
+      config: ConfigSchema.parse({}),
+      rawJson: { _credentials: { sealed: "S", salt: "SA" } },
+    });
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({
+      ok: true,
+      bundle: { github: { token: "ghp_new", method: "pat" }, jira: null },
+      identity: IDENTITY,
+    });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false); // skip dialog → immediate commit
+
+    const setConfigSpy = vi.spyOn(configStore, "setConfig");
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+
+    // clearCache (fired by the REAL clearIdentityData, pre-auth path) ran, and
+    // strictly BEFORE the imported identity/config were established.
+    expect(cacheStore.clearCache).toHaveBeenCalled();
+    expect(authStore.setAuthFromCredential).toHaveBeenCalled();
+    const clearOrder = vi.mocked(cacheStore.clearCache).mock.invocationCallOrder[0];
+    const authOrder = vi.mocked(authStore.setAuthFromCredential).mock.invocationCallOrder[0];
+    const cfgOrder = setConfigSpy.mock.invocationCallOrder[0];
+    expect(clearOrder).toBeLessThan(authOrder);
+    expect(clearOrder).toBeLessThan(cfgOrder);
   });
 });

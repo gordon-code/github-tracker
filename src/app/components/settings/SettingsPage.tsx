@@ -422,6 +422,14 @@ export default function SettingsPage() {
         setUnsealInFlight(false)
       );
       if (!res.ok) {
+        if (res.reason === "turnstile") {
+          // Client-side Turnstile hiccup BEFORE any request — the single-use
+          // nonce was NOT consumed, so this is retryable. Keep the code prompt
+          // available (do NOT fall through to the terminal "continue without
+          // credentials" screen); surface a retryable inline message (R-101).
+          setCredError("Verification failed — please try again.");
+          return;
+        }
         setCredTerminalMsg(
           res.reason === "expired"
             ? "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials."

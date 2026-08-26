@@ -1582,6 +1582,32 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     screen.getByRole("button", { name: /continue without credentials/i });
   });
 
+  it("R-101: a turnstile failure keeps the code input (retryable) and re-unseals on retry", async () => {
+    // A client-side Turnstile failure happens BEFORE any request, so the nonce is
+    // never consumed — this is retryable, NOT the terminal expired/invalid screen.
+    vi.mocked(proxyLib.unsealCredentialBundle)
+      .mockResolvedValueOnce({ ok: false, reason: "turnstile" })
+      .mockResolvedValueOnce({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // Retryable inline error; code input + Submit still present (non-terminal).
+    await waitFor(() => screen.getByText(/verification failed/i));
+    screen.getByLabelText(/one-time code/i);
+    screen.getByRole("button", { name: "Submit" });
+
+    // Retry re-attempts the unseal (nonce never consumed) → success → confirm.
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(2);
+  });
+
   it("concurrent double-submit calls unsealCredentialBundle EXACTLY once (in-flight guard)", async () => {
     let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
     vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(
