@@ -20,7 +20,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 1, number: 1, title: "First PR", repoFullName: "org/repo-a" }),
       makePullRequest({ id: 2, number: 2, title: "Second PR", repoFullName: "org/repo-a" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("First PR");
     screen.getByText("Second PR");
@@ -58,7 +58,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, number: 2, title: "In other repo", repoFullName: "owner/other" }),
     ];
     viewStore.setGlobalFilter(null, "owner/target");
-    setAllExpanded("pullRequests", ["owner/target"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
@@ -70,7 +70,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
-    setAllExpanded("pullRequests", ["myorg/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
@@ -81,7 +81,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 1, title: "Older PR", updatedAt: "2024-01-10T00:00:00Z", repoFullName: "org/repo-a" }),
       makePullRequest({ id: 2, title: "Newer PR", updatedAt: "2024-01-20T00:00:00Z", repoFullName: "org/repo-a" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     const items = screen.getAllByRole("listitem");
     const texts = items.map((el) => el.textContent ?? "");
@@ -107,14 +107,14 @@ describe("PullRequestsTab", () => {
     const prs = [
       makePullRequest({ id: 1, title: "PR with status", checkStatus: "success", repoFullName: "org/repo-a" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByLabelText("All checks passed");
   });
 
   it("shows Draft badge for draft PRs when expanded", () => {
     const pr = makePullRequest({ id: 1, title: "Draft PR", draft: true, repoFullName: "org/repo-a" });
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // "Draft" appears as a PR badge
     const draftEls = screen.getAllByText("Draft");
@@ -134,7 +134,7 @@ describe("PullRequestsTab", () => {
 
   it("shows Author role badge when userLogin matches PR author", () => {
     const pr = makePullRequest({ id: 1, title: "My PR", userLogin: "alice", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" });
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
     // "Author" appears as a role badge
     const authorEls = screen.getAllByText("Author");
@@ -144,7 +144,7 @@ describe("PullRequestsTab", () => {
 
   it("shows Reviewer role badge when userLogin is a reviewer", () => {
     const pr = makePullRequest({ id: 1, title: "Review PR", userLogin: "bob", reviewerLogins: ["alice"], assigneeLogins: [], repoFullName: "org/repo-a" });
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="alice" />);
     // "Reviewer" appears as a role badge
     const reviewerEls = screen.getAllByText("Reviewer");
@@ -154,7 +154,7 @@ describe("PullRequestsTab", () => {
 
   it("shows ReviewBadge for approved PRs when expanded", () => {
     const pr = makePullRequest({ id: 1, title: "Approved PR", reviewDecision: "APPROVED", repoFullName: "org/repo-a" });
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // "Approved" appears as a review badge
     const approvedEls = screen.getAllByText("Approved");
@@ -164,7 +164,7 @@ describe("PullRequestsTab", () => {
 
   it("shows SizeBadge for each PR when expanded", () => {
     const pr = makePullRequest({ id: 1, title: "Big PR", additions: 300, deletions: 100, repoFullName: "org/repo-a" });
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={[pr]} userLogin="" />);
     // prSizeCategory(300, 100) = 400 total -> L
     const lEls = screen.getAllByText("L");
@@ -178,7 +178,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Other PR", userLogin: "bob", reviewerLogins: [], assigneeLogins: [], repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "role", "author");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="alice" />);
     screen.getByText("My PR");
     expect(screen.queryByText("Other PR")).toBeNull();
@@ -190,7 +190,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Pending PR", reviewDecision: null, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "reviewDecision", "APPROVED");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Approved PR");
     expect(screen.queryByText("Pending PR")).toBeNull();
@@ -202,7 +202,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Ready PR", draft: false, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "draft", "draft");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Draft PR");
     expect(screen.queryByText("Ready PR")).toBeNull();
@@ -214,7 +214,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Failing PR", checkStatus: "failure", repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "checkStatus", "success");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Passing PR");
     expect(screen.queryByText("Failing PR")).toBeNull();
@@ -226,7 +226,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Has CI PR", checkStatus: "success", repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "checkStatus", "none");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("No CI PR");
     expect(screen.queryByText("Has CI PR")).toBeNull();
@@ -238,7 +238,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Large PR", additions: 600, deletions: 200, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "sizeCategory", "XS");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Small PR");
     expect(screen.queryByText("Large PR")).toBeNull();
@@ -250,7 +250,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "Medium PR", additions: 30, deletions: 20, repoFullName: "org/repo-a" }),
     ];
     viewStore.setTabFilter("pullRequests", "sizeCategory", "XXL");
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("Huge PR");
     expect(screen.queryByText("Medium PR")).toBeNull();
@@ -262,7 +262,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 2, title: "PR in repo B", repoFullName: "org/repo-b" }),
       makePullRequest({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    viewStore.toggleExpandedRepo("pullRequests", "org/repo-a");
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("org/repo-a");
     screen.getByText("org/repo-b");
@@ -451,7 +451,7 @@ describe("PullRequestsTab", () => {
     const prs = Array.from({ length: 15 }, (_, i) =>
       makePullRequest({ id: 300 + i, title: `Big repo PR ${i}`, repoFullName: "org/big-repo" })
     );
-    setAllExpanded("pullRequests", ["org/big-repo"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     screen.getByText("org/big-repo");
     screen.getByText("Big repo PR 0");
@@ -506,7 +506,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 1, title: "PR in repo A", repoFullName: "org/repo-a" }),
       makePullRequest({ id: 2, title: "PR in repo B", repoFullName: "org/repo-b" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
     // Both start expanded
     screen.getByText("PR in repo A");
@@ -560,14 +560,14 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" }),
       makePullRequest({ id: 2, title: "Repo B PR", repoFullName: "org/repo-b" }),
     ]);
-    setAllExpanded("pullRequests", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
     screen.getByText("Repo A PR");
     screen.getByText("Repo B PR");
 
     // Remove repo-b from data — pruning effect should fire
     setPrs([makePullRequest({ id: 1, title: "Repo A PR", repoFullName: "org/repo-a" })]);
-    expect(viewStore.viewState.expandedRepos.pullRequests["org/repo-a"]).toBe(true);
+    expect(viewStore.isRepoExpanded("pullRequests", "org/repo-a")).toBe(true);
     expect("org/repo-b" in viewStore.viewState.expandedRepos.pullRequests).toBe(false);
   });
 
@@ -575,12 +575,12 @@ describe("PullRequestsTab", () => {
     const [prs, setPrs] = createSignal<PullRequest[]>([
       makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" }),
     ]);
-    setAllExpanded("pullRequests", ["org/repo-a"], true);
+    setAllExpanded("pullRequests", true);
     render(() => <PullRequestsTab pullRequests={prs()} userLogin="" />);
     screen.getByText("PR A");
 
     setPrs([]);
-    expect(viewStore.viewState.expandedRepos.pullRequests["org/repo-a"]).toBe(true);
+    expect(viewStore.isRepoExpanded("pullRequests", "org/repo-a")).toBe(true);
 
     // Data returns — UI should use preserved expanded state
     setPrs([makePullRequest({ id: 1, title: "PR A", repoFullName: "org/repo-a" })]);
@@ -618,7 +618,7 @@ describe("PullRequestsTab", () => {
       makePullRequest({ id: 42, number: 42, title: "Hot PR", repoFullName: "org/repo" }),
       makePullRequest({ id: 99, number: 99, title: "Cold PR", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo"], true);
+    setAllExpanded("pullRequests", true);
     const { container } = render(() => (
       <PullRequestsTab pullRequests={prs} userLogin="" hotPollingPRIds={new Set([42])} />
     ));
@@ -634,7 +634,7 @@ describe("PullRequestsTab", () => {
     const prs = [
       makePullRequest({ id: 1, number: 1, title: "Normal PR", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("pullRequests", ["org/repo"], true);
+    setAllExpanded("pullRequests", true);
     const { container } = render(() => (
       <PullRequestsTab pullRequests={prs} userLogin="" />
     ));

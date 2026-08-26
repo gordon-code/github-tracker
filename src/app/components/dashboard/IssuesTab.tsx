@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
+import { viewState, updateViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, isRepoExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, IssueFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import type { Issue, RepoRef } from "../../services/api";
 import { isIssueVisible } from "../../lib/filters";
@@ -294,8 +294,8 @@ export default function IssuesTab(props: IssuesTabProps) {
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), false)}
           />
           <IgnoreBadge
             items={ignoredIssues()}
@@ -315,7 +315,7 @@ export default function IssuesTab(props: IssuesTabProps) {
           <For each={pageGroups()}>
             {(repoGroup) => {
                 const isEmpty = () => repoGroup.items.length === 0;
-                const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
+                const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup.repoFullName);
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};

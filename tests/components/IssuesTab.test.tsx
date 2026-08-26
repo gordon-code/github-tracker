@@ -20,7 +20,7 @@ describe("IssuesTab", () => {
       makeIssue({ number: 1, title: "First issue" }),
       makeIssue({ number: 2, title: "Second issue" }),
     ];
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("First issue");
     screen.getByText("Second issue");
@@ -59,7 +59,7 @@ describe("IssuesTab", () => {
       makeIssue({ number: 2, title: "In other repo", repoFullName: "owner/other" }),
     ];
     viewStore.setGlobalFilter(null, "owner/target");
-    setAllExpanded("issues", ["owner/target"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("In target repo");
     expect(screen.queryByText("In other repo")).toBeNull();
@@ -71,7 +71,7 @@ describe("IssuesTab", () => {
       makeIssue({ number: 2, title: "Outside org", repoFullName: "otherorg/repo-b" }),
     ];
     viewStore.setGlobalFilter("myorg", null);
-    setAllExpanded("issues", ["myorg/repo-a"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("In org");
     expect(screen.queryByText("Outside org")).toBeNull();
@@ -82,7 +82,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 1, title: "Older issue", updatedAt: "2024-01-10T00:00:00Z" }),
       makeIssue({ id: 2, title: "Newer issue", updatedAt: "2024-01-20T00:00:00Z" }),
     ];
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     const allText = screen.getAllByRole("listitem");
     const texts = allText.map((el) => el.textContent ?? "");
@@ -123,7 +123,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 2, title: "Other Issue", userLogin: "bob", assigneeLogins: [] }),
     ];
     viewStore.setTabFilter("issues", "role", "author");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="alice" />);
     screen.getByText("My Issue");
     expect(screen.queryByText("Other Issue")).toBeNull();
@@ -135,7 +135,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 2, title: "Silent Issue", comments: 0 }),
     ];
     viewStore.setTabFilter("issues", "comments", "has");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Discussed Issue");
     expect(screen.queryByText("Silent Issue")).toBeNull();
@@ -147,7 +147,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 2, title: "Silent Issue", comments: 0 }),
     ];
     viewStore.setTabFilter("issues", "comments", "none");
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Silent Issue");
     expect(screen.queryByText("Discussed Issue")).toBeNull();
@@ -159,7 +159,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 2, title: "Issue in repo B", repoFullName: "org/repo-b" }),
       makeIssue({ id: 3, title: "Another in repo A", repoFullName: "org/repo-a" }),
     ];
-    setAllExpanded("issues", ["org/repo-a"], true);
+    viewStore.toggleExpandedRepo("issues", "org/repo-a");
     render(() => <IssuesTab issues={issues} userLogin="" />);
     // Both repo headers visible
     screen.getByText("org/repo-a");
@@ -362,13 +362,13 @@ describe("IssuesTab", () => {
     expect(screen.queryByText("Bob issue")).toBeNull();
   });
 
-  it("collapse all with active filter preserves hidden repos' expanded state", async () => {
+  it("collapse all also collapses repos hidden by an active filter", async () => {
     const user = userEvent.setup();
     const issues = [
       makeIssue({ id: 1, title: "Alice issue", repoFullName: "org/repo-a", userLogin: "alice" }),
       makeIssue({ id: 2, title: "Bob issue", repoFullName: "org/repo-b", userLogin: "bob" }),
     ];
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="alice" />);
     screen.getByText("Alice issue");
     screen.getByText("Bob issue");
@@ -378,14 +378,15 @@ describe("IssuesTab", () => {
     screen.getByText("Alice issue");
     expect(screen.queryByText("org/repo-b")).toBeNull();
 
-    // Collapse all — only affects visible (filtered) repos
+    // Collapse all — sets the tab default to collapsed and clears every exception
     await user.click(screen.getByLabelText("Collapse all repos"));
     expect(screen.queryByText("Alice issue")).toBeNull();
 
-    // Remove filter — repo-b should still be expanded (was hidden during collapse-all)
+    // Remove filter — repo-b is collapsed too: the new default applies to every repo,
+    // even ones hidden when Collapse all ran.
     viewStore.setTabFilter("issues", "role", "all");
-    screen.getByText("Bob issue");
-    // repo-a was collapsed by collapse-all
+    screen.getByText("org/repo-b");
+    expect(screen.queryByText("Bob issue")).toBeNull();
     expect(screen.queryByText("Alice issue")).toBeNull();
   });
 
@@ -398,7 +399,7 @@ describe("IssuesTab", () => {
     const repoBIssues = Array.from({ length: 6 }, (_, i) =>
       makeIssue({ id: 200 + i, title: `Repo B issue ${i}`, repoFullName: "org/repo-b" })
     );
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     const [issues, setIssues] = createSignal<Issue[]>([...repoAIssues, ...repoBIssues]);
     render(() => <IssuesTab issues={issues()} userLogin="" />);
 
@@ -420,7 +421,7 @@ describe("IssuesTab", () => {
     const issues = Array.from({ length: 15 }, (_, i) =>
       makeIssue({ id: 300 + i, title: `Big repo issue ${i}`, repoFullName: "org/big-repo" })
     );
-    setAllExpanded("issues", ["org/big-repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     // All 15 items in one group — whole-groups-only pagination keeps them together
     screen.getByText("org/big-repo");
@@ -452,7 +453,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a" }),
       makeIssue({ id: 2, title: "Issue B", repoFullName: "org/repo-b" }),
     ];
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Issue A");
     screen.getByText("Issue B");
@@ -494,7 +495,7 @@ describe("IssuesTab", () => {
       makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
       makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" }),
     ]);
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues()} userLogin="" />);
     // Both repos expanded
     screen.getByText("Repo A issue");
@@ -502,7 +503,7 @@ describe("IssuesTab", () => {
 
     // Remove repo-b from data — pruning effect should fire
     setIssues([makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" })]);
-    expect(viewState.expandedRepos.issues["org/repo-a"]).toBe(true);
+    expect(viewStore.isRepoExpanded("issues", "org/repo-a")).toBe(true);
     expect("org/repo-b" in viewState.expandedRepos.issues).toBe(false);
   });
 
@@ -511,26 +512,26 @@ describe("IssuesTab", () => {
       makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
       makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" }),
     ]);
-    setAllExpanded("issues", ["org/repo-a", "org/repo-b"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues()} userLogin="" />);
 
     // Remove repo-a (first), keep repo-b (second)
     setIssues([makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" })]);
     expect("org/repo-a" in viewState.expandedRepos.issues).toBe(false);
-    expect(viewState.expandedRepos.issues["org/repo-b"]).toBe(true);
+    expect(viewStore.isRepoExpanded("issues", "org/repo-b")).toBe(true);
   });
 
   it("preserves expanded keys when data becomes empty and restores UI on re-population", () => {
     const [issues, setIssues] = createSignal<Issue[]>([
       makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a" }),
     ]);
-    setAllExpanded("issues", ["org/repo-a"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues()} userLogin="" />);
     screen.getByText("Issue A");
 
     // Data becomes empty (e.g. loading state) — expanded state should be preserved
     setIssues([]);
-    expect(viewState.expandedRepos.issues["org/repo-a"]).toBe(true);
+    expect(viewStore.isRepoExpanded("issues", "org/repo-a")).toBe(true);
 
     // Data returns — UI should use preserved expanded state
     setIssues([makeIssue({ id: 1, title: "Issue A", repoFullName: "org/repo-a" })]);
@@ -563,9 +564,31 @@ describe("IssuesTab", () => {
     screen.getByText("Repo B issue 0");
   });
 
+  it("expand all keeps a repo that appears in a later data update expanded", async () => {
+    const user = userEvent.setup();
+    const [issues, setIssues] = createSignal<Issue[]>([
+      makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
+    ]);
+    render(() => <IssuesTab issues={issues()} userLogin="" />);
+
+    // Expand all — sets the tab default to expanded
+    await user.click(screen.getByLabelText("Expand all repos"));
+    screen.getByText("Repo A issue");
+
+    // A brand-new repo arrives later (never present when Expand all was clicked)
+    setIssues([
+      makeIssue({ id: 1, title: "Repo A issue", repoFullName: "org/repo-a" }),
+      makeIssue({ id: 2, title: "Repo B issue", repoFullName: "org/repo-b" }),
+    ]);
+
+    // It inherits the expanded default with no further interaction
+    screen.getByText("org/repo-b");
+    screen.getByText("Repo B issue");
+  });
+
   it("renders repo header link to GitHub issues", () => {
     const issues = [makeIssue({ id: 1 })];
-    setAllExpanded("issues", ["owner/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     const link = screen.getByLabelText("Open owner/repo issues on GitHub");
     expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/issues");
@@ -581,7 +604,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled interaction", ()
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo", userLogin: "me" }),
     ];
-    setAllExpanded("my-custom-tab", ["org/repo"], true);
+    setAllExpanded("my-custom-tab", true);
     render(() => <IssuesTab issues={issues} userLogin="me" customTabId="my-custom-tab" />);
     screen.getByText("Dependency Dashboard");
   });
@@ -595,7 +618,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
       makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     expect(screen.queryByText("Dependency Dashboard")).toBeNull();
     screen.getByText("Regular issue");
@@ -608,7 +631,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
       makeIssue({ id: 2, title: "Regular issue", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Dependency Dashboard");
     screen.getByText("Regular issue");
@@ -620,7 +643,7 @@ describe("IssuesTab — hideDepDashboard + dependencies.enabled", () => {
     const issues = [
       makeIssue({ id: 1, title: "Dependency Dashboard", repoFullName: "org/repo" }),
     ];
-    setAllExpanded("issues", ["org/repo"], true);
+    setAllExpanded("issues", true);
     render(() => <IssuesTab issues={issues} userLogin="" />);
     screen.getByText("Dependency Dashboard");
   });

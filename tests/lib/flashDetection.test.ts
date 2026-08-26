@@ -17,7 +17,7 @@ describe("createFlashDetection", () => {
       const { flashingIds, peekUpdates } = createFlashDetection({
         getItems: () => items,
         getHotIds: () => undefined,
-        getExpandedRepos: () => ({}),
+        isRepoExpanded: () => false,
         trackKey: (item) => item.status,
         itemLabel: (item) => `Item ${item.id}`,
         itemStatus: (item) => item.status,
@@ -40,7 +40,7 @@ describe("createFlashDetection", () => {
       const { flashingIds } = createFlashDetection({
         getItems: items,
         getHotIds: () => new Set<number>(),
-        getExpandedRepos: () => ({}),
+        isRepoExpanded: () => false,
         trackKey: (item) => item.status,
         itemLabel: (item) => `Item ${item.id}`,
         itemStatus: (item) => item.status,
@@ -62,7 +62,7 @@ describe("createFlashDetection", () => {
       const { flashingIds } = createFlashDetection({
         getItems: items,
         getHotIds: () => undefined,
-        getExpandedRepos: () => ({}),
+        isRepoExpanded: () => false,
         trackKey: (item) => item.status,
         itemLabel: (item) => `Item ${item.id}`,
         itemStatus: (item) => item.status,
@@ -84,7 +84,7 @@ describe("createFlashDetection", () => {
       const { flashingIds } = createFlashDetection({
         getItems: items,
         getHotIds: () => undefined,
-        getExpandedRepos: () => ({}),
+        isRepoExpanded: () => false,
         trackKey: (item) => item.status,
         itemLabel: (item) => `Item ${item.id}`,
         itemStatus: (item) => item.status,

@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { config, type TrackedUser } from "../../stores/config";
-import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, PullRequestFiltersSchema } from "../../stores/view";
+import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, isRepoExpanded, pruneExpandedRepos, pruneLockedRepos, trackItem, untrackItem, PullRequestFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
@@ -295,7 +295,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
   const { flashingIds: flashingPRIds, peekUpdates } = createFlashDetection({
     getItems: () => props.pullRequests,
     getHotIds: () => props.hotPollingPRIds,
-    getExpandedRepos: () => viewState.expandedRepos[tabKey()] ?? {},
+    isRepoExpanded: (repo) => isRepoExpanded(tabKey(), repo),
     trackKey: (pr) => `${pr.checkStatus}|${pr.reviewDecision}`,
     itemLabel: (pr) => `#${pr.number} ${pr.title}`,
     itemStatus: (pr) => pr.checkStatus ?? pr.reviewDecision ?? "updated",
@@ -355,8 +355,8 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
         </div>
         <div class="shrink-0 flex items-center gap-2 py-0.5">
           <ExpandCollapseButtons
-            onExpandAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), true)}
-            onCollapseAll={() => setAllExpanded(tabKey(), repoGroups().map((g) => g.repoFullName), false)}
+            onExpandAll={() => setAllExpanded(tabKey(), true)}
+            onCollapseAll={() => setAllExpanded(tabKey(), false)}
           />
           <IgnoreBadge
             items={ignoredPullRequests()}
@@ -376,7 +376,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
           <For each={pageGroups()}>
             {(repoGroup) => {
                 const isEmpty = () => repoGroup.items.length === 0;
-                const isExpanded = () => !isEmpty() && !!(viewState.expandedRepos[tabKey()] ?? {})[repoGroup.repoFullName];
+                const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup.repoFullName);
 
                 const summaryMeta = createMemo(() => {
                   const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };

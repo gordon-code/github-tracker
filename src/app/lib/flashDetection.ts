@@ -8,7 +8,7 @@ export interface PeekUpdate {
 export function createFlashDetection<T extends { id: number; repoFullName: string }>(opts: {
   getItems: Accessor<T[]>;
   getHotIds: Accessor<ReadonlySet<number> | undefined>;
-  getExpandedRepos: Accessor<Record<string, boolean>>;
+  isRepoExpanded: (repoFullName: string) => boolean;
   trackKey: (item: T) => string;
   itemLabel: (item: T) => string;
   itemStatus: (item: T) => string;
@@ -62,10 +62,9 @@ export function createFlashDetection<T extends { id: number; repoFullName: strin
       const peeks = new Map<string, PeekUpdate>();
       const peekCounts = new Map<string, number>();
       const peekFirstLabels = new Map<string, string>();
-      const expandedRepos = opts.getExpandedRepos();
       for (const item of items) {
         if (changed.has(item.id)) {
-          if (!expandedRepos[item.repoFullName]) {
+          if (!opts.isRepoExpanded(item.repoFullName)) {
             const count = (peekCounts.get(item.repoFullName) ?? 0) + 1;
             peekCounts.set(item.repoFullName, count);
             if (count === 1) {
