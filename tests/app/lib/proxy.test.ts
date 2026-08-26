@@ -190,14 +190,14 @@ describe("acquireTurnstileToken", () => {
   });
 
   it("throws immediately when siteKey is empty", async () => {
-    await expect(mod.acquireTurnstileToken("")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("", "seal")).rejects.toThrow(
       "VITE_TURNSTILE_SITE_KEY not configured",
     );
   });
 
   it("throws immediately when siteKey is undefined-like empty", async () => {
     await expect(
-      mod.acquireTurnstileToken("" as string),
+      mod.acquireTurnstileToken("" as string, "seal"),
     ).rejects.toThrow("VITE_TURNSTILE_SITE_KEY not configured");
   });
 
@@ -240,7 +240,7 @@ describe("acquireTurnstileToken", () => {
       return realHeadAppend(node);
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     // Allow the loadTurnstileScript + render to complete
     await Promise.resolve();
@@ -274,7 +274,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -300,7 +300,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -326,7 +326,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -355,7 +355,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("test-site-key", "seal")).rejects.toThrow(
       "Invalid sitekey",
     );
   });
@@ -370,7 +370,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("test-site-key", "seal")).rejects.toThrow(
       "Failed to load Turnstile script",
     );
   });
@@ -411,7 +411,7 @@ describe("acquireTurnstileToken — 30-second outer timeout", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
     // Prevent unhandled rejection during timer advancement
     void tokenPromise.catch(() => {});
 
@@ -458,10 +458,10 @@ describe("acquireTurnstileToken — script reuse", () => {
       return node;
     });
 
-    const token1 = await mod.acquireTurnstileToken("test-site-key");
+    const token1 = await mod.acquireTurnstileToken("test-site-key", "seal");
     expect(token1).toBe("reuse-token");
 
-    const token2 = await mod.acquireTurnstileToken("test-site-key");
+    const token2 = await mod.acquireTurnstileToken("test-site-key", "seal");
     expect(token2).toBe("reuse-token");
 
     const scriptAppends = appendSpy.mock.calls.filter(

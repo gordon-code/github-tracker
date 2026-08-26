@@ -5,7 +5,15 @@ import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config, JiraCustomField } from "../../../shared/schemas";
-import { buildExportPayload, parseImportFile } from "../../lib/settings-transfer";
+import {
+  buildExportPayload,
+  parseImportFile,
+  buildEncryptedCredentialsSection,
+  resolveImportedCredentials,
+  commitImportedSettings,
+  CredentialsSectionSchema,
+} from "../../lib/settings-transfer";
+import type { CredentialBundle, CredentialsSection } from "../../lib/settings-transfer";
 import { viewState, updateViewState, setTabFilter } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
@@ -13,7 +21,7 @@ import { isValidPatFormat } from "../../lib/pat";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
-import { sealApiToken } from "../../lib/proxy";
+import { sealApiToken, unsealCredentialBundle } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
@@ -241,11 +249,18 @@ export default function SettingsPage() {
     }
   }
 
-  function handleExportSettings() {
-    // Schema-driven payload (spread of Config + denylist) — see
-    // src/app/lib/settings-transfer.ts. Blob/anchor-download mechanics unchanged.
-    const data = JSON.stringify(buildExportPayload(config), null, 2);
-    const blob = new Blob([data], { type: "application/json" });
+  // ── Export settings ────────────────────────────────────────────────────────
+  // includeCredentials opts into an encrypted-credentials section (Task 5). On
+  // success the one-time code is shown in a modal and the file download is
+  // DEFERRED until the user acknowledges — the code is shown only once.
+  const [includeCredentials, setIncludeCredentials] = createSignal(false);
+  const [exporting, setExporting] = createSignal(false);
+  const [exportCode, setExportCode] = createSignal<string | null>(null);
+  const [codeCopied, setCodeCopied] = createSignal(false);
+  let pendingExportJson: string | null = null;
+
+  function triggerDownload(jsonText: string) {
+    const blob = new Blob([jsonText], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -254,11 +269,91 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function handleExportSettings() {
+    if (exporting()) return;
+    const payload = buildExportPayload(config);
+    if (!includeCredentials()) {
+      triggerDownload(JSON.stringify(payload, null, 2));
+      return;
+    }
+    setExporting(true);
+    try {
+      // buildEncryptedCredentialsSection generates the code, encrypts the bundle
+      // with it, THEN seals the ciphertext (encrypt-then-seal). No secret is
+      // logged here (SD-002).
+      const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
+      pendingExportJson = JSON.stringify({ ...payload, _credentials: { sealed, salt } }, null, 2);
+      setCodeCopied(false);
+      setExportCode(oneTimeCode); // opens the modal; download deferred to ack
+    } catch {
+      // Turnstile rejection / SealError / oversized pre-check — leave the
+      // checkbox checked so the user can retry; do NOT download anything.
+      pushNotification(
+        "settings-export",
+        "Couldn't prepare encrypted credentials for export — please try again.",
+        "warning"
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleCopyExportCode() {
+    const code = exportCode();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+    } catch {
+      // clipboard unavailable — user can still select/copy the shown code
+    }
+  }
+
+  function handleAcknowledgeExportCode() {
+    if (pendingExportJson) {
+      triggerDownload(pendingExportJson);
+      pendingExportJson = null;
+    }
+    setExportCode(null);
+    setCodeCopied(false);
+  }
+
+  function handleDismissExportCode() {
+    // Dismiss without downloading. The sealed blob held in memory is inert
+    // ciphertext without the code; nothing needs cleanup.
+    pendingExportJson = null;
+    setExportCode(null);
+    setCodeCopied(false);
+  }
+
   // ── Import settings (plaintext) ────────────────────────────────────────────
   // pendingImport holds the parsed-and-validated Config awaiting confirmation;
   // non-null doubles as the two-click confirm state (mirrors confirmReset).
   const [pendingImport, setPendingImport] = createSignal<Config | null>(null);
   let importInputRef: HTMLInputElement | undefined;
+
+  // ── Import settings (encrypted credentials, Task 6) ──────────────────────────
+  // credImport is set when the selected file has a valid _credentials section.
+  const [credImport, setCredImport] = createSignal<{ config: Config; credentials: CredentialsSection } | null>(null);
+  const [codeInput, setCodeInput] = createSignal("");
+  const [showCode, setShowCode] = createSignal(false);
+  const [unsealInFlight, setUnsealInFlight] = createSignal(false);
+  const [cachedCiphertext, setCachedCiphertext] = createSignal<string | null>(null);
+  const [credError, setCredError] = createSignal<string | null>(null);
+  const [credTerminalMsg, setCredTerminalMsg] = createSignal<string | null>(null);
+  const [resolvedCred, setResolvedCred] = createSignal<{ bundle: CredentialBundle; identity: GitHubUser } | null>(null);
+  const [committing, setCommitting] = createSignal(false);
+
+  function resetCredImport() {
+    setCredImport(null);
+    setCodeInput("");
+    setShowCode(false);
+    setUnsealInFlight(false);
+    setCachedCiphertext(null);
+    setCredError(null);
+    setCredTerminalMsg(null);
+    setResolvedCred(null);
+  }
 
   async function handleImportFileSelected(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
@@ -280,6 +375,20 @@ export default function SettingsPage() {
       pushNotification("settings-import", `Import failed: ${result.errors[0] ?? "invalid settings file"}`, "warning");
       return;
     }
+    // Detect an encrypted-credentials section via schema validation (NOT a bare
+    // "in" check — a hand-crafted `_credentials: null` would pass that and then
+    // throw on dereference). A malformed/null/non-object one falls through to the
+    // plaintext-only path.
+    const rawCreds =
+      result.rawJson && typeof result.rawJson === "object"
+        ? (result.rawJson as Record<string, unknown>)._credentials
+        : undefined;
+    const credSection = CredentialsSectionSchema.safeParse(rawCreds);
+    if (credSection.success) {
+      resetCredImport();
+      setCredImport({ config: result.config, credentials: credSection.data });
+      return;
+    }
     setPendingImport(result.config);
   }
 
@@ -295,6 +404,70 @@ export default function SettingsPage() {
 
   function handleCancelImport() {
     setPendingImport(null);
+  }
+
+  async function handleCredCodeSubmit() {
+    if (unsealInFlight()) return; // in-flight guard: exactly one network unseal
+    const ci = credImport();
+    if (!ci) return;
+    const code = codeInput();
+    setCredError(null);
+
+    let ciphertext = cachedCiphertext();
+    if (ciphertext === null) {
+      // FIRST submission — single-use network unseal (consumes the bundle nonce
+      // server-side). Never retried; wrong-code retries run against the cache.
+      setUnsealInFlight(true);
+      const res = await unsealCredentialBundle(ci.credentials.sealed).finally(() =>
+        setUnsealInFlight(false)
+      );
+      if (!res.ok) {
+        setCredTerminalMsg(
+          res.reason === "expired"
+            ? "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials."
+            : "Couldn't decrypt credentials — check the code and file match."
+        );
+        return;
+      }
+      ciphertext = res.ciphertext;
+      setCachedCiphertext(ciphertext);
+    }
+
+    // Client-side, retryable against the cached ciphertext (no re-unseal).
+    const resolved = await resolveImportedCredentials(ciphertext, ci.credentials.salt, code);
+    if (!resolved.ok) {
+      setCredError(resolved.error);
+      return;
+    }
+    setResolvedCred({ bundle: resolved.bundle, identity: resolved.identity });
+  }
+
+  async function handleConfirmCredImport() {
+    const ci = credImport();
+    const rc = resolvedCred();
+    if (!ci || !rc) return;
+    setCommitting(true);
+    try {
+      await commitImportedSettings(rc, ci.config);
+      resetCredImport();
+      pushNotification("settings-import", "Settings and credentials imported", "info");
+    } catch {
+      pushNotification("settings-import", "Something went wrong finishing the import — please try again.", "warning");
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  function handleContinueWithoutCredentials() {
+    const ci = credImport();
+    if (!ci) return;
+    setConfig(ci.config);
+    resetCredImport();
+    pushNotification("settings-import", "Settings imported (credentials skipped)", "info");
+  }
+
+  function handleCancelCredImport() {
+    resetCredImport();
   }
 
   function handleResetAll() {
@@ -1523,13 +1696,27 @@ export default function SettingsPage() {
             label="Export settings"
             description="Download your configuration as a JSON file"
           >
-            <button
-              type="button"
-              onClick={handleExportSettings}
-              class="btn btn-sm btn-outline"
-            >
-              Export
-            </button>
+            <div class="flex flex-col items-end gap-2">
+              <label class="flex items-center gap-2 text-xs text-base-content/70 cursor-pointer">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-xs"
+                  aria-label="Include encrypted credentials for migration"
+                  checked={includeCredentials()}
+                  onChange={(e) => setIncludeCredentials(e.currentTarget.checked)}
+                />
+                Include encrypted credentials for migration
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleExportSettings()}
+                disabled={exporting()}
+                aria-busy={exporting()}
+                class="btn btn-sm btn-outline"
+              >
+                {exporting() ? "Preparing..." : "Export"}
+              </button>
+            </div>
           </SettingRow>
 
           {/* Import settings */}
@@ -1538,42 +1725,44 @@ export default function SettingsPage() {
             description="Replace your configuration from a previously exported JSON file"
           >
             <Show
-              when={!pendingImport()}
+              when={pendingImport()}
               fallback={
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-base-content/60">This will replace your current settings — continue?</span>
+                <Show when={!credImport()}>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    class="hidden"
+                    aria-label="Import settings file"
+                    onChange={(e) => void handleImportFileSelected(e)}
+                  />
                   <button
                     type="button"
-                    onClick={handleConfirmImport}
-                    class="btn btn-warning btn-xs"
+                    onClick={() => importInputRef?.click()}
+                    class="btn btn-sm btn-outline"
                   >
-                    Yes, import
+                    Import
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelImport}
-                    class="btn btn-ghost btn-xs"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                </Show>
               }
             >
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json,.json"
-                class="hidden"
-                aria-label="Import settings file"
-                onChange={(e) => void handleImportFileSelected(e)}
-              />
-              <button
-                type="button"
-                onClick={() => importInputRef?.click()}
-                class="btn btn-sm btn-outline"
-              >
-                Import
-              </button>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-base-content/60">This will replace your current settings — continue?</span>
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  class="btn btn-warning btn-xs"
+                >
+                  Yes, import
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelImport}
+                  class="btn btn-ghost btn-xs"
+                >
+                  Cancel
+                </button>
+              </div>
             </Show>
           </SettingRow>
 
@@ -1642,6 +1831,160 @@ export default function SettingsPage() {
             saveWithFeedback({ dependencies: { ...config.dependencies, excludedOrgs: orgs, excludedRepos: repos } })
           }
         />
+
+        {/* One-time-code modal (encrypted export). Download is deferred until ack. */}
+        <Show when={exportCode()}>
+          {(code) => (
+            <div
+              class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Save your one-time code"
+            >
+              <div class="card bg-base-100 shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
+                <h3 class="text-lg font-semibold">Save your one-time code</h3>
+                <p class="text-sm text-base-content/70">
+                  Save this code separately from the export file — you'll need both to restore
+                  credentials, and it's shown only once.
+                </p>
+                <div class="flex items-center gap-2">
+                  <code class="flex-1 select-all rounded bg-base-200 px-3 py-2 font-mono text-sm break-all">
+                    {code()}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyExportCode()}
+                    class="btn btn-sm btn-outline"
+                  >
+                    {codeCopied() ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <div class="flex justify-end gap-2">
+                  <button type="button" onClick={handleDismissExportCode} class="btn btn-sm btn-ghost">
+                    Cancel
+                  </button>
+                  <button type="button" onClick={handleAcknowledgeExportCode} class="btn btn-sm btn-primary">
+                    I've saved my code — download
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </Show>
+
+        {/* Encrypted-credentials import dialog: one-time-code entry → identity confirm. */}
+        <Show when={credImport()}>
+          <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Import encrypted credentials"
+          >
+            <div class="card bg-base-100 shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
+              <Show
+                when={resolvedCred()}
+                fallback={
+                  <Show
+                    when={!credTerminalMsg()}
+                    fallback={
+                      <>
+                        <h3 class="text-lg font-semibold">Credentials unavailable</h3>
+                        <p class="text-sm text-error">{credTerminalMsg()}</p>
+                        <div class="flex justify-end gap-2">
+                          <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                            Cancel
+                          </button>
+                          <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-primary">
+                            Continue without credentials
+                          </button>
+                        </div>
+                      </>
+                    }
+                  >
+                    <h3 class="text-lg font-semibold">Restore encrypted credentials</h3>
+                    <p class="text-sm text-base-content/70">
+                      Enter the one-time code shown when this file was exported.
+                    </p>
+                    <form onSubmit={(e) => { e.preventDefault(); void handleCredCodeSubmit(); }}>
+                      <div class="flex items-center gap-2">
+                        <input
+                          type={showCode() ? "text" : "password"}
+                          class="input input-sm w-full font-mono"
+                          aria-label="One-time code"
+                          autocomplete="off"
+                          placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                          value={codeInput()}
+                          onInput={(e) => setCodeInput(e.currentTarget.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowCode((v) => !v)}
+                          class="btn btn-sm btn-ghost"
+                          aria-pressed={showCode()}
+                        >
+                          {showCode() ? "Hide" : "Show"}
+                        </button>
+                      </div>
+                      <Show when={credError()}>
+                        <p role="alert" class="text-error text-xs mt-2">{credError()}</p>
+                      </Show>
+                      <div class="flex justify-end gap-2 mt-4">
+                        <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                          Cancel
+                        </button>
+                        <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-outline">
+                          Continue without credentials
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={unsealInFlight()}
+                          aria-busy={unsealInFlight()}
+                          class="btn btn-sm btn-primary"
+                        >
+                          {unsealInFlight() ? "Checking..." : "Submit"}
+                        </button>
+                      </div>
+                    </form>
+                  </Show>
+                }
+              >
+                {(rc) => (
+                  <>
+                    <h3 class="text-lg font-semibold">Confirm identity</h3>
+                    <div class="flex items-center gap-3">
+                      <img
+                        src={rc().identity.avatar_url}
+                        alt=""
+                        class="h-10 w-10 rounded-full"
+                      />
+                      <p class="text-sm">
+                        This will sign you in as <strong>@{rc().identity.login}</strong> and replace
+                        your current settings — continue?
+                      </p>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                      <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-outline">
+                        Continue without credentials
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleConfirmCredImport()}
+                        disabled={committing()}
+                        aria-busy={committing()}
+                        class="btn btn-sm btn-primary"
+                      >
+                        {committing() ? "Importing..." : "Continue"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Show>
+            </div>
+          </div>
+        </Show>
 
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">

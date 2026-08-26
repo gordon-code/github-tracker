@@ -27,12 +27,31 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearJiraAuth: vi.fn(),
   setJiraAuth: vi.fn(),
   setAuthFromPat: vi.fn(),
+  setAuthFromCredential: vi.fn(),
+  clearIdentityData: vi.fn().mockResolvedValue(undefined),
   jiraAuth: () => null,
   isJiraAuthenticated: () => false,
   ensureJiraTokenValid: vi.fn(),
   token: vi.fn(() => "fake-token"),
-  user: () => ({ login: "testuser", name: "Test User" }),
+  user: () => ({ login: "testuser", avatar_url: "https://avatars/test", name: "Test User" }),
   onAuthCleared: vi.fn(),
+}));
+
+// Partial mock: keep the real buildExportPayload/parseImportFile/CredentialsSectionSchema
+// (used by the plaintext export/import paths), stub the credential-flow functions.
+vi.mock("../../../src/app/lib/settings-transfer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/app/lib/settings-transfer")>();
+  return {
+    ...actual,
+    buildEncryptedCredentialsSection: vi.fn(),
+    resolveImportedCredentials: vi.fn(),
+    commitImportedSettings: vi.fn(),
+  };
+});
+
+vi.mock("../../../src/app/lib/proxy", () => ({
+  sealApiToken: vi.fn(),
+  unsealCredentialBundle: vi.fn(),
 }));
 
 vi.mock("@sentry/solid", () => ({
@@ -75,6 +94,8 @@ import { updateConfig, config } from "../../../src/app/stores/config";
 import { viewState, updateViewState } from "../../../src/app/stores/view";
 import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
+import * as settingsTransfer from "../../../src/app/lib/settings-transfer";
+import * as proxyLib from "../../../src/app/lib/proxy";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -543,6 +564,18 @@ describe("SettingsPage — Data: Import settings", () => {
     });
     expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
     expect(config.theme).toBe("light");
+  });
+
+  it("wholesale-replaces config: a pre-set selectedRepos clears when absent from the imported file", async () => {
+    const user = userEvent.setup();
+    updateConfig({ selectedRepos: [{ owner: "o", name: "r", fullName: "o/r" }] });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark" })); // no selectedRepos in the imported file
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    // Proves setConfig (wholesale) not updateConfig (partial merge): the prior field is gone.
+    expect(config.selectedRepos).toEqual([]);
+    expect(config.theme).toBe("dark");
   });
 });
 
@@ -1410,5 +1443,203 @@ describe("Dependencies settings section", () => {
     expect(config.dependencies.excludedRepos).toEqual([
       { owner: "org1", name: "repo1", fullName: "org1/repo1" },
     ]);
+  });
+});
+
+// ── Export with encrypted credentials (Task 5) ────────────────────────────────
+
+describe("SettingsPage — Data: Export with encrypted credentials", () => {
+  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+
+  it("checking the box + export shows the one-time-code modal and defers download until acknowledged", async () => {
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED",
+      salt: "SALT",
+      oneTimeCode: CODE,
+    });
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi.fn();
+    const origCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = origCreate(tag);
+      if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(clickSpy);
+      return el;
+    });
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => screen.getByText(/shown only once/i));
+    // Modal shows the generated code; download NOT yet triggered.
+    screen.getByText(CODE);
+    expect(createObjSpy).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /saved my code/i }));
+    expect(createObjSpy).toHaveBeenCalledOnce();
+    expect(clickSpy).toHaveBeenCalledOnce();
+  });
+
+  it("a seal failure pushes a warning, leaves the checkbox checked, and never downloads", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockRejectedValue(new Error("seal failed"));
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+
+    const user = userEvent.setup();
+    renderSettings();
+    const checkbox = screen.getByRole<HTMLInputElement>("checkbox", { name: /include encrypted credentials/i });
+    await user.click(checkbox);
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith("settings-export", expect.any(String), "warning");
+    });
+    expect(createObjSpy).not.toHaveBeenCalled();
+    expect(checkbox.checked).toBe(true);
+  });
+});
+
+// ── Import with encrypted credentials (Task 6) ────────────────────────────────
+
+describe("SettingsPage — Data: Import with encrypted credentials", () => {
+  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+  const IDENTITY = { login: "octo", avatar_url: "https://avatars/octo", name: "Octo" };
+  const BUNDLE = { github: { token: "ghp_x", method: "pat" as const }, jira: null };
+
+  function selectCredFile(extra: Record<string, unknown> = {}) {
+    const input = screen.getByLabelText(/import settings file/i);
+    const content = JSON.stringify({ theme: "dark", ...extra, _credentials: { sealed: "S", salt: "SA" } });
+    const file = new File([content], "settings.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+  }
+
+  it("valid _credentials + correct code: unseals once, shows identity confirm, confirm commits", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+    screen.getByText(/@octo/);
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => {
+      expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledWith(
+        { bundle: BUNDLE, identity: IDENTITY },
+        expect.objectContaining({ theme: "dark" })
+      );
+    });
+  });
+
+  it("wrong code then correct code: retries on cached ciphertext, unseals only ONCE total", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials)
+      .mockResolvedValueOnce({ ok: false, error: "Couldn't decrypt credentials — check the code and file match." })
+      .mockResolvedValueOnce({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+
+    const codeField = screen.getByLabelText(/one-time code/i);
+    await user.type(codeField, "wrong-code");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/check the code and file match/i));
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+
+    await user.clear(codeField);
+    await user.type(codeField, CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it("expired unseal shows the distinct expired message with no code-retry prompt", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "expired" });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => screen.getByText(/expired/i));
+    // The code input is gone — the single-use bundle is spent, only the fallback remains.
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    screen.getByRole("button", { name: /continue without credentials/i });
+  });
+
+  it("concurrent double-submit calls unsealCredentialBundle EXACTLY once (in-flight guard)", async () => {
+    let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(
+      new Promise((r) => { resolveUnseal = r; })
+    );
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    const codeField = screen.getByLabelText(/one-time code/i) as HTMLInputElement;
+    fireEvent.input(codeField, { target: { value: CODE } });
+    const form = codeField.closest("form")!;
+    // Two submits fired before the first unseal resolves — guard must dedupe.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    resolveUnseal({ ok: true, ciphertext: "CIPHER" });
+
+    await waitFor(() => {
+      expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("'continue without credentials' applies the plaintext config only (no unseal)", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.click(screen.getByRole("button", { name: /continue without credentials/i }));
+
+    expect(config.theme).toBe("dark"); // plaintext config applied
+    expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
+  });
+
+  it("declining (Cancel) leaves the session and config untouched", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    expect(config.theme).toBe("light"); // untouched
+    expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
+  });
+
+  it("a null _credentials falls through to the plaintext import path (no code prompt)", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const input = screen.getByLabelText(/import settings file/i);
+    const file = new File([JSON.stringify({ theme: "dark", _credentials: null })], "s.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+    // No code prompt; the plaintext two-click confirm appears instead.
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark");
   });
 });

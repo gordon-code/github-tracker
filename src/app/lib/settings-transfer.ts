@@ -14,9 +14,21 @@
 // contents, or raw GitHub/Jira tokens — no console.* and no Sentry capture here
 // (console output is production-visible and captured as Sentry breadcrumbs).
 
+import { z } from "zod";
 import { ConfigSchema } from "../../shared/schemas";
 import type { Config } from "../../shared/schemas";
-import { preParseConfigFixups, postParseConfigFixups } from "../stores/config";
+import { preParseConfigFixups, postParseConfigFixups, config, setConfig } from "../stores/config";
+import {
+  token,
+  jiraAuth,
+  user,
+  setJiraAuth,
+  setAuthFromCredential,
+  clearIdentityData,
+} from "../stores/auth";
+import type { GitHubUser, JiraAuthState } from "../stores/auth";
+import { pushNotification } from "./errors";
+import { proxyFetch, sealCredentialBundle } from "./proxy";
 
 // ── Export (Task 1) ────────────────────────────────────────────────────────────
 
@@ -271,4 +283,292 @@ export async function decryptWithCode(
   } catch {
     return null;
   }
+}
+
+// ── Encrypted credentials export (Task 5) ────────────────────────────────────
+
+/**
+ * Schema for the decrypted credential bundle. The Jira sub-object is a
+ * discriminated union on `authMethod` so TypeScript narrows
+ * `sealedRefreshToken`/`sealedApiToken` to defined after the check (avoids a cast
+ * in `commitImportedSettings`). Reused on import to validate the decrypted bundle
+ * before use, matching this codebase's Zod-validate-every-persisted-blob
+ * convention.
+ */
+export const CredentialBundleSchema = z.object({
+  github: z.object({
+    token: z.string(),
+    method: z.enum(["pat", "oauth"]),
+  }),
+  jira: z.union([
+    z.null(),
+    z.discriminatedUnion("authMethod", [
+      z.object({
+        authMethod: z.literal("oauth"),
+        sealedRefreshToken: z.string(),
+        cloudId: z.string(),
+        siteUrl: z.string(),
+        siteName: z.string(),
+      }),
+      z.object({
+        authMethod: z.literal("token"),
+        sealedApiToken: z.string(),
+        email: z.string(),
+        cloudId: z.string(),
+        siteUrl: z.string(),
+        siteName: z.string(),
+      }),
+    ]),
+  ]),
+});
+
+export type CredentialBundle = z.infer<typeof CredentialBundleSchema>;
+
+/**
+ * Schema for the export file's `_credentials` section (sealed blob + salt).
+ * Import uses `.safeParse()` on `rawJson._credentials` (NOT a bare `"in"` check —
+ * a hand-crafted `_credentials: null` would pass that and then throw on
+ * dereference) to decide whether a credentials section is present.
+ */
+export const CredentialsSectionSchema = z.object({
+  sealed: z.string(),
+  salt: z.string(),
+});
+
+export type CredentialsSection = z.infer<typeof CredentialsSectionSchema>;
+
+/**
+ * Assembles the credential bundle from the live auth + config stores.
+ * Non-nullable — the Settings page always has an authenticated GitHub session.
+ *
+ * Jira identity fields (cloudId/siteUrl/siteName) are read from `JiraAuthState`,
+ * the authoritative source restored on import — NOT `config.jira`'s independent
+ * copies. The Jira OAuth branch deliberately excludes the short-lived plaintext
+ * `accessToken` (re-minted on import via `/api/oauth/jira/refresh`); the
+ * token-mode branch carries the already-Worker-sealed API token + email.
+ */
+export function assembleCredentialBundle(): CredentialBundle {
+  const githubToken = token() ?? "";
+  const method = config.authMethod; // "oauth" | "pat"
+
+  const auth = jiraAuth();
+  let jira: CredentialBundle["jira"] = null;
+  if (config.jira?.enabled && auth) {
+    if (config.jira.authMethod === "oauth") {
+      jira = {
+        authMethod: "oauth",
+        sealedRefreshToken: auth.sealedRefreshToken,
+        cloudId: auth.cloudId,
+        siteUrl: auth.siteUrl,
+        siteName: auth.siteName,
+      };
+    } else {
+      jira = {
+        authMethod: "token",
+        sealedApiToken: auth.accessToken,
+        email: auth.email ?? config.jira.email ?? "",
+        cloudId: auth.cloudId,
+        siteUrl: auth.siteUrl,
+        siteName: auth.siteName,
+      };
+    }
+  }
+
+  return { github: { token: githubToken, method }, jira };
+}
+
+/**
+ * Orchestrates the encrypted-credentials export section:
+ *   1. generate a one-time code (client-side CSPRNG),
+ *   2. encrypt the JSON-stringified bundle WITH that code (client-side), THEN
+ *   3. seal ONLY that ciphertext server-side.
+ *
+ * ENCRYPT-THEN-SEAL ordering is load-bearing (see the plan's security review):
+ * `sealCredentialBundle` receives ONLY `encryptWithCode`'s ciphertext output,
+ * never the raw bundle. Returns the sealed blob + salt (both safe to store in the
+ * export file) and the one-time code (returned for one-time display, NEVER
+ * written into the export JSON).
+ */
+export async function buildEncryptedCredentialsSection(): Promise<{
+  sealed: string;
+  salt: string;
+  oneTimeCode: string;
+}> {
+  const bundle = assembleCredentialBundle();
+  const oneTimeCode = generateOneTimeCode();
+  const { ciphertext, salt } = await encryptWithCode(JSON.stringify(bundle), oneTimeCode);
+  const sealed = await sealCredentialBundle(ciphertext);
+  return { sealed, salt, oneTimeCode };
+}
+
+// ── Encrypted credentials import (Task 6) ────────────────────────────────────
+
+const IMPORT_DECRYPT_FAILED =
+  "Couldn't decrypt credentials — check the code and file match.";
+const IMPORT_GITHUB_INVALID =
+  "Imported GitHub credential is no longer valid — it may have been revoked, or the token/session has expired.";
+const IMPORT_INSECURE_CONTEXT =
+  "Encrypted credential import requires a secure context (HTTPS or localhost) — this page was loaded insecurely.";
+
+/**
+ * Resolves (validates — does NOT commit) imported credentials from an
+ * already-unsealed inner ciphertext. NON-mutating and retryable against a cached
+ * ciphertext: the single-use network unseal happens once in the caller (via
+ * `unsealCredentialBundle`); this only decrypts, schema-validates, and makes a
+ * read-only `GET /user` identity check, so wrong-code retries never re-hit the
+ * single-use endpoint.
+ *
+ * Failure messages: wrong-code and corrupted-file both surface the SAME generic
+ * message (uniform-failure security decision); a revoked/expired GitHub token
+ * (401 OR network failure) surfaces a distinct message; and the secure-context
+ * precondition — an environment condition, not a secret — is surfaced distinctly
+ * (R-001) up front so it isn't swallowed into a null that masquerades as a wrong
+ * code.
+ */
+export async function resolveImportedCredentials(
+  unsealedCiphertext: string,
+  salt: string,
+  code: string
+): Promise<
+  | { ok: true; bundle: CredentialBundle; identity: GitHubUser }
+  | { ok: false; error: string }
+> {
+  if (!crypto.subtle) {
+    return { ok: false, error: IMPORT_INSECURE_CONTEXT };
+  }
+
+  const decrypted = await decryptWithCode(unsealedCiphertext, salt, code);
+  if (decrypted === null) {
+    return { ok: false, error: IMPORT_DECRYPT_FAILED };
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(decrypted);
+  } catch {
+    return { ok: false, error: IMPORT_DECRYPT_FAILED };
+  }
+
+  const bundleResult = CredentialBundleSchema.safeParse(parsedJson);
+  if (!bundleResult.success) {
+    return { ok: false, error: IMPORT_DECRYPT_FAILED };
+  }
+  const bundle = bundleResult.data;
+
+  let resp: Response;
+  try {
+    resp = await fetch("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${bundle.github.token}` },
+    });
+  } catch {
+    return { ok: false, error: IMPORT_GITHUB_INVALID };
+  }
+  if (!resp.ok) {
+    return { ok: false, error: IMPORT_GITHUB_INVALID };
+  }
+
+  const identity = (await resp.json()) as GitHubUser;
+  return { ok: true, bundle, identity };
+}
+
+/**
+ * Commits resolved credentials + imported config in a strict order. Called ONLY
+ * after user confirmation.
+ *
+ *   (a0) pre-auth (user() === null, the Login-page path): `await
+ *        clearIdentityData()` FIRST so a prior identity's IndexedDB cache + poll
+ *        state can't leak into the just-imported identity. On the Settings page
+ *        user() is non-null, so this is skipped and setAuthFromCredential's own
+ *        identity-switch reset handles isolation.
+ *   (a)  `setAuthFromCredential(token, identity)` — establishes the GitHub
+ *        session (auth-method-agnostic; runs the identity-switch reset cascade
+ *        when the login differs).
+ *   (b)  `setConfig(importedConfig)` — full replacement, AFTER (a) so the reset
+ *        cascade can't clobber the just-imported config (and this corrects the
+ *        transient `authMethod: "pat"` the cascade sets).
+ *   (c)  Jira restore — token-mode: build JiraAuthState locally (no network);
+ *        oauth-mode: POST /api/oauth/jira/refresh to mint a fresh access token.
+ *        Jira restore failure does NOT abort — GitHub identity/config are already
+ *        committed; it pushes a reconnect warning and returns jiraRestored:false.
+ */
+export async function commitImportedSettings(
+  resolved: { bundle: CredentialBundle; identity: GitHubUser },
+  importedConfig: Config
+): Promise<{ jiraRestored: boolean }> {
+  // (a0) pre-auth identity isolation — awaited, so the cache clear + reset
+  // callbacks fully complete before the new identity/config are established.
+  if (user() === null) {
+    await clearIdentityData();
+  }
+
+  // (a) establish the GitHub credential (used for BOTH pat and oauth methods).
+  setAuthFromCredential(resolved.bundle.github.token, resolved.identity);
+
+  // (b) apply the imported config wholesale AFTER identity is established.
+  setConfig(importedConfig);
+
+  // (c) restore Jira.
+  const jira = resolved.bundle.jira;
+  if (jira === null) {
+    return { jiraRestored: true };
+  }
+
+  if (jira.authMethod === "token") {
+    const state: JiraAuthState = {
+      accessToken: jira.sealedApiToken,
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: jira.cloudId,
+      siteUrl: jira.siteUrl,
+      siteName: jira.siteName,
+      email: jira.email,
+    };
+    setJiraAuth(state);
+    return { jiraRestored: true };
+  }
+
+  // oauth-mode: mint a fresh access token from the sealed refresh token. Uses
+  // proxyFetch (X-Requested-With) — handleJiraTokenRefresh calls
+  // validateProxyRequest even though /api/oauth/* is not an isProxyPath route, so
+  // a bare fetch would 403. Body key is snake_case (endpoint contract), NOT the
+  // bundle's camelCase field name.
+  let resp: Response;
+  try {
+    resp = await proxyFetch("/api/oauth/jira/refresh", {
+      method: "POST",
+      body: JSON.stringify({ sealed_refresh_token: jira.sealedRefreshToken }),
+    });
+  } catch {
+    pushNotification(
+      "settings-import-jira",
+      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
+      "warning"
+    );
+    return { jiraRestored: false };
+  }
+
+  if (!resp.ok) {
+    pushNotification(
+      "settings-import-jira",
+      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
+      "warning"
+    );
+    return { jiraRestored: false };
+  }
+
+  const data = (await resp.json()) as {
+    access_token: string;
+    sealed_refresh_token: string;
+    expires_in: number;
+  };
+  const state: JiraAuthState = {
+    accessToken: data.access_token,
+    sealedRefreshToken: data.sealed_refresh_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+    cloudId: jira.cloudId,
+    siteUrl: jira.siteUrl,
+    siteName: jira.siteName,
+  };
+  setJiraAuth(state);
+  return { jiraRestored: true };
 }

@@ -94,10 +94,14 @@ export default function JiraCallback() {
       return;
     }
 
-    // Acquire Turnstile token before exchange
+    // Acquire Turnstile token before exchange. Action MUST be "jira-token" to
+    // match the Worker's verifyTurnstile(..., "jira-token") check for
+    // /api/oauth/jira/token (src/worker/index.ts) — previously this inherited the
+    // hardcoded "seal" default, a pre-existing mismatch fixed here now that
+    // acquireTurnstileToken takes an explicit action.
     let turnstileToken: string;
     try {
-      turnstileToken = await acquireTurnstileToken(import.meta.env.VITE_TURNSTILE_SITE_KEY as string ?? "");
+      turnstileToken = await acquireTurnstileToken(import.meta.env.VITE_TURNSTILE_SITE_KEY as string ?? "", "jira-token");
     } catch (err) {
       Sentry.captureException(err, { tags: { source: "jira-callback-turnstile" } });
       setError("Human verification failed. Please try again.");

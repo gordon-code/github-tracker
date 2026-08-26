@@ -24,7 +24,7 @@ function loadTurnstileScript(): Promise<void> {
   return turnstilePromise;
 }
 
-export async function acquireTurnstileToken(siteKey: string): Promise<string> {
+export async function acquireTurnstileToken(siteKey: string, action: string): Promise<string> {
   if (!siteKey) {
     throw new Error("VITE_TURNSTILE_SITE_KEY not configured");
   }
@@ -62,7 +62,7 @@ export async function acquireTurnstileToken(siteKey: string): Promise<string> {
     try {
       const widgetId = window.turnstile.render(container, {
         sitekey: siteKey,
-        action: "seal",
+        action,
         size: "compact",
         execution: "execute",
         retry: "never",
@@ -140,7 +140,7 @@ export class SealError extends Error {
 
 export async function sealApiToken(token: string, purpose: string): Promise<string> {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
-  const turnstileToken = await acquireTurnstileToken(siteKey ?? "");
+  const turnstileToken = await acquireTurnstileToken(siteKey ?? "", "seal");
 
   const res = await proxyFetch("/api/proxy/seal", {
     method: "POST",
@@ -163,4 +163,106 @@ export async function sealApiToken(token: string, purpose: string): Promise<stri
 
   const data = (await res.json()) as { sealed: string };
   return data.sealed;
+}
+
+// The purpose-specific inner-ciphertext cap the Worker enforces for
+// "credential-export-bundle" seals (src/worker/index.ts). Checked client-side
+// so an oversized bundle fails fast with a clear error instead of a generic 400.
+export const CREDENTIAL_BUNDLE_MAX_CIPHERTEXT = 4096;
+
+/**
+ * Seals a client-side envelope ciphertext (already encrypted with the one-time
+ * code — encrypt-THEN-seal) under the `credential-export-bundle` purpose.
+ * Mirrors `sealApiToken()` but with a distinct purpose and a client-side size
+ * pre-check. Uses `proxyFetch()` so the `X-Requested-With` CSRF header is set.
+ */
+export async function sealCredentialBundle(ciphertext: string): Promise<string> {
+  if (ciphertext.length > CREDENTIAL_BUNDLE_MAX_CIPHERTEXT) {
+    throw new Error(
+      "Credentials are too large to export securely. Please report this — it should not happen for a normal account."
+    );
+  }
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
+  const turnstileToken = await acquireTurnstileToken(siteKey ?? "", "seal");
+
+  const res = await proxyFetch("/api/proxy/seal", {
+    method: "POST",
+    headers: {
+      "cf-turnstile-response": turnstileToken,
+    },
+    body: JSON.stringify({ token: ciphertext, purpose: "credential-export-bundle" }),
+  });
+
+  if (!res.ok) {
+    let code = "unknown_error";
+    try {
+      const body = (await res.json()) as { error?: string };
+      code = body.error ?? code;
+    } catch {
+      // ignore parse errors — keep default code
+    }
+    throw new SealError(res.status, code);
+  }
+
+  const data = (await res.json()) as { sealed: string };
+  return data.sealed;
+}
+
+/**
+ * Unseals a credential-export-bundle blob via the pre-auth-reachable
+ * `/api/proxy/unseal` endpoint. Returns the still-code-encrypted inner
+ * ciphertext (never plaintext credentials — encrypt-then-seal design).
+ *
+ * SINGLE-USE: the endpoint consumes the bundle's nonce server-side on the first
+ * successful unseal, so callers MUST call this exactly once per bundle, cache the
+ * returned `ciphertext`, and run any wrong-code retries against the cache via
+ * `resolveImportedCredentials()` — re-calling this on a retry burns the bundle.
+ *
+ * MUST use `proxyFetch()` (sets `X-Requested-With`); a raw fetch would be
+ * rejected with `403 missing_csrf_header`. Only `expired` is distinguished from
+ * the uniform `invalid` failure (per the endpoint's contract).
+ */
+export async function unsealCredentialBundle(
+  sealed: string
+): Promise<{ ok: true; ciphertext: string } | { ok: false; reason: "expired" | "invalid" }> {
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
+  let turnstileToken: string;
+  try {
+    turnstileToken = await acquireTurnstileToken(siteKey ?? "", "unseal");
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+
+  let res: Response;
+  try {
+    res = await proxyFetch("/api/proxy/unseal", {
+      method: "POST",
+      headers: {
+        "cf-turnstile-response": turnstileToken,
+      },
+      body: JSON.stringify({ sealed, purpose: "credential-export-bundle" }),
+    });
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (res.ok) {
+    try {
+      const data = (await res.json()) as { payload?: unknown };
+      if (typeof data.payload === "string") {
+        return { ok: true, ciphertext: data.payload };
+      }
+    } catch {
+      // fall through to invalid
+    }
+    return { ok: false, reason: "invalid" };
+  }
+
+  try {
+    const body = (await res.json()) as { error?: string };
+    if (body.error === "expired") return { ok: false, reason: "expired" };
+  } catch {
+    // fall through to invalid
+  }
+  return { ok: false, reason: "invalid" };
 }

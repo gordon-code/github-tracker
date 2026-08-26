@@ -213,23 +213,54 @@ export function setAuthFromPat(token: string, userData: GitHubUser): void {
     resetViewState();
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     localStorage.removeItem(VIEW_STORAGE_KEY);
-    // Clear IndexedDB cache to prevent data leakage between identities.
-    clearCache().catch((err) => {
-      console.warn("[auth] Cache clear failed during identity switch:", err);
-      Sentry.captureException(err, { tags: { source: "auth-identity-switch-cache-clear" } });
-    });
-    // Clear per-user in-memory + cached state (poll data, notifications,
-    // toast dedup, dashboard cache) the same way a real logout does, BEFORE
-    // adopting the new identity below, so the incoming identity doesn't
-    // inherit the outgoing one's data.
-    for (const cb of _onClearCallbacks) {
-      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity switch:", e); }
-    }
+    // Clear IndexedDB cache + per-identity in-memory state. Fire-and-forget
+    // here (preserving this synchronous path's long-standing non-blocking
+    // behavior — the callback loop still runs synchronously because it precedes
+    // the awaited cache clear inside clearIdentityData). The pre-auth Login-page
+    // import path calls `await clearIdentityData()` directly when it needs a
+    // real ordering guarantee before establishing a new identity.
+    void clearIdentityData();
   }
 
   setAuth({ access_token: token });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat" });
+}
+
+/**
+ * One-line self-documenting alias: an imported credential (PAT or OAuth) is
+ * established via the same identity-agnostic mechanics as a PAT replacement
+ * (store token, store user, detect identity switch, reset per-identity state).
+ * The alias makes that agnosticism visible at the import call site without a
+ * reader tracing into `setAuthFromPat`.
+ */
+export const setAuthFromCredential = setAuthFromPat;
+
+/**
+ * Clears per-identity data: the `onAuthCleared` callback loop (poll data,
+ * notifications, toast dedup, dashboard cache, Jira signal) AND the IndexedDB
+ * dashboard cache. The callbacks run synchronously first, so a fire-and-forget
+ * `void clearIdentityData()` preserves `setAuthFromPat`'s historical synchronous
+ * callback behavior; the IndexedDB `clearCache()` is AWAITED (not
+ * fire-and-forget) so a caller doing `await clearIdentityData()` gets a real
+ * ordering guarantee — required by the pre-auth Login-page import path, where
+ * `setAuthFromPat`'s own cache-clear is inert (`isIdentitySwitch` needs `user()`
+ * non-null) and `expireToken()` never clears IndexedDB.
+ */
+export async function clearIdentityData(): Promise<void> {
+  // Synchronous per-identity resets first (matches the ordering the identity-
+  // switch branch has always had: callbacks complete before the awaited work).
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity data clear:", e); }
+  }
+  // IndexedDB cache clear — AWAITED so callers can sequence work strictly after
+  // it (prevents a new identity rendering the previous identity's cached data).
+  try {
+    await clearCache();
+  } catch (err) {
+    console.warn("[auth] Cache clear failed during identity data clear:", err);
+    Sentry.captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
+  }
 }
 
 const _onClearCallbacks: (() => void)[] = [];
