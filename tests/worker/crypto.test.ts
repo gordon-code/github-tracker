@@ -7,6 +7,10 @@ import {
   sealToken,
   unsealToken,
   unsealTokenWithRotation,
+  sealWithExpiry,
+  unsealWithExpiry,
+  CREDENTIAL_BUNDLE_EXPIRY_MS,
+  SEAL_SALT,
   signSession,
   verifySession,
 } from "../../src/worker/crypto";
@@ -218,6 +222,120 @@ describe("unsealTokenWithRotation", () => {
       "aes-gcm-key"
     );
     expect(result).toBeNull();
+  });
+});
+
+describe("sealWithExpiry / unsealWithExpiry", () => {
+  const BUNDLE_INFO = "aes-gcm-key:credential-export-bundle";
+
+  it("round-trips payload, and surfaces a stable nonce + the seal createdAt", async () => {
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const before = Date.now();
+    const sealed = await sealWithExpiry("inner-ciphertext", key);
+    const after = Date.now();
+    const result = await unsealWithExpiry(
+      sealed,
+      KEY_A,
+      undefined,
+      SEAL_SALT,
+      BUNDLE_INFO,
+      CREDENTIAL_BUNDLE_EXPIRY_MS
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toBe("inner-ciphertext");
+      expect(typeof result.nonce).toBe("string");
+      expect(result.nonce.length).toBeGreaterThan(0);
+      // createdAt is surfaced so the caller can derive a KV TTL from it.
+      expect(result.createdAt).toBeGreaterThanOrEqual(before);
+      expect(result.createdAt).toBeLessThanOrEqual(after);
+    }
+  });
+
+  it("produces a DETERMINISTIC nonce for identical plaintext across independent seals", async () => {
+    // This is the property the reseal-detection in the unseal endpoint depends on:
+    // resealing the same plaintext must reproduce the same content fingerprint.
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const s1 = await sealWithExpiry("same-inner-payload", key);
+    const s2 = await sealWithExpiry("same-inner-payload", key);
+    // Outer blobs differ (fresh IV + createdAt), but the inner nonce is stable.
+    expect(s1).not.toBe(s2);
+    const r1 = await unsealWithExpiry(s1, KEY_A, undefined, SEAL_SALT, BUNDLE_INFO, CREDENTIAL_BUNDLE_EXPIRY_MS);
+    const r2 = await unsealWithExpiry(s2, KEY_A, undefined, SEAL_SALT, BUNDLE_INFO, CREDENTIAL_BUNDLE_EXPIRY_MS);
+    expect(r1.ok && r2.ok).toBe(true);
+    if (r1.ok && r2.ok) {
+      expect(r1.nonce).toBe(r2.nonce);
+    }
+  });
+
+  it("returns reason 'expired' when createdAt is older than maxAgeMs", async () => {
+    // Hand-craft a wrapper with an old createdAt (sealWithExpiry always uses now()).
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const payload = "inner";
+    const nonce = toBase64Url(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload)))
+    );
+    const oldCreatedAt = Date.now() - CREDENTIAL_BUNDLE_EXPIRY_MS - 1000;
+    const sealed = await sealToken(JSON.stringify({ createdAt: oldCreatedAt, nonce, payload }), key);
+    const result = await unsealWithExpiry(
+      sealed,
+      KEY_A,
+      undefined,
+      SEAL_SALT,
+      BUNDLE_INFO,
+      CREDENTIAL_BUNDLE_EXPIRY_MS
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("expired");
+  });
+
+  it("returns reason 'invalid' for a bit-flipped ciphertext", async () => {
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const sealed = await sealWithExpiry("inner", key);
+    const bytes = fromBase64Url(sealed);
+    bytes[14] ^= 0xff; // corrupt the ciphertext portion → GCM auth tag fails
+    const result = await unsealWithExpiry(
+      toBase64Url(bytes),
+      KEY_A,
+      undefined,
+      SEAL_SALT,
+      BUNDLE_INFO,
+      CREDENTIAL_BUNDLE_EXPIRY_MS
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid");
+  });
+
+  it("returns reason 'invalid' for a blob sealed under a different purpose's key", async () => {
+    const sealKey = await deriveKey(KEY_A, SEAL_SALT, "aes-gcm-key:jira-api-token", "encrypt");
+    const sealed = await sealWithExpiry("inner", sealKey);
+    const result = await unsealWithExpiry(
+      sealed,
+      KEY_A,
+      undefined,
+      SEAL_SALT,
+      BUNDLE_INFO,
+      CREDENTIAL_BUNDLE_EXPIRY_MS
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid");
+  });
+
+  it("returns reason 'invalid' for a plain sealToken blob (no wrapper JSON)", async () => {
+    // A blob sealed by the plain sealToken path (correct key) decrypts to a
+    // non-JSON string, which must fail the wrapper parse as a generic invalid.
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const sealed = await sealToken("not-a-json-wrapper", key);
+    const result = await unsealWithExpiry(
+      sealed,
+      KEY_A,
+      undefined,
+      SEAL_SALT,
+      BUNDLE_INFO,
+      CREDENTIAL_BUNDLE_EXPIRY_MS
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid");
   });
 });
 

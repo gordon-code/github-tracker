@@ -466,6 +466,86 @@ describe("SettingsPage — Data: Export settings", () => {
   });
 });
 
+describe("SettingsPage — Data: Import settings", () => {
+  function selectImportFile(content: string, name = "settings.json") {
+    const input = screen.getByLabelText(/import settings file/i);
+    const file = new File([content], name, { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+    return file;
+  }
+
+  it("selecting a valid file shows the confirmation step without mutating the config store", async () => {
+    updateConfig({ theme: "light", itemsPerPage: 25 });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark", itemsPerPage: 50 }));
+    await waitFor(() => screen.getByText(/replace your current settings/i));
+    // Confirmation shown, but nothing applied yet
+    screen.getByRole("button", { name: "Yes, import" });
+    expect(config.theme).toBe("light");
+    expect(config.itemsPerPage).toBe(25);
+  });
+
+  it("confirming the import replaces config store fields", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light", itemsPerPage: 25 });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark", itemsPerPage: 50 }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark");
+    expect(config.itemsPerPage).toBe(50);
+    // Confirmation dismissed, Import button restored
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    screen.getByRole("button", { name: "Import" });
+  });
+
+  it("canceling the confirmation resets the confirm-state and leaves the config store untouched", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark" }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    screen.getByRole("button", { name: "Import" });
+    expect(config.theme).toBe("light");
+  });
+
+  it("selecting a malformed file pushes a warning, shows no confirmation, leaves config unchanged", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectImportFile("this is not json {{{");
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/import failed/i),
+        "warning"
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    expect(config.theme).toBe("light");
+  });
+
+  it("an unreadable file (File.text rejects) is treated identically to a parse failure", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    updateConfig({ theme: "light" });
+    renderSettings();
+    // A read rejection never reaches parseImportFile — distinct code path.
+    vi.spyOn(File.prototype, "text").mockRejectedValueOnce(new Error("unreadable"));
+    selectImportFile("irrelevant");
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/could not read/i),
+        "warning"
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    expect(config.theme).toBe("light");
+  });
+});
+
 describe("SettingsPage — Data: Reset all", () => {
   it("shows Reset all button initially", () => {
     renderSettings();

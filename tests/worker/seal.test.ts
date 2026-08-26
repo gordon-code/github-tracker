@@ -20,6 +20,8 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     SEAL_KEY: TEST_SEAL_KEY,
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
     PROXY_RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
+    // Seal endpoint never touches KV; a stub satisfies the Env type shape.
+    CREDENTIAL_NONCE_KV: { get: vi.fn(), put: vi.fn() },
     ...overrides,
   };
 }
@@ -516,6 +518,65 @@ describe("Worker /api/proxy/seal endpoint", () => {
     const json = await res.json() as Record<string, unknown>;
     expect(typeof json["sealed"]).toBe("string");
     expect((json["sealed"] as string).length).toBeGreaterThan(0);
+  });
+
+  // ── credential-export-bundle purpose + purpose-keyed size cap ──────────────
+
+  it("valid request with purpose 'credential-export-bundle' (realistic size) returns 200 with sealed token", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    // ~900 chars — a realistic envelope-encrypted bundle ciphertext.
+    const req = makeSealRequest({ body: { token: "c".repeat(900), purpose: "credential-export-bundle" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["sealed"]).toBe("string");
+    expect((json["sealed"] as string).length).toBeGreaterThan(0);
+    expect(json["sealed"]).not.toMatch(/[+/=]/);
+  });
+
+  it("credential-export-bundle accepts a payload between 2048 and 4096 chars (purpose-specific raise)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    // 3000 chars — over the 2048 global cap, under the 4096 purpose-specific cap.
+    const req = makeSealRequest({ body: { token: "c".repeat(3000), purpose: "credential-export-bundle" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as Record<string, unknown>;
+    expect(typeof json["sealed"]).toBe("string");
+  });
+
+  it("credential-export-bundle rejects a payload over 4096 chars with invalid_request", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    const req = makeSealRequest({ body: { token: "c".repeat(4097), purpose: "credential-export-bundle" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
+  });
+
+  it("jira-api-token payload between 2049 and 4096 chars is STILL rejected (raise is purpose-keyed)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, action: "seal" }), { status: 200 })
+    );
+
+    // 3000 chars — allowed for credential-export-bundle, but NOT for jira purposes.
+    const req = makeSealRequest({ body: { token: "a".repeat(3000), purpose: "jira-api-token" } });
+    const res = await worker.fetch(req, makeEnv());
+
+    expect(res.status).toBe(400);
+    const json = await res.json() as Record<string, unknown>;
+    expect(json["error"]).toBe("invalid_request");
   });
 
   // ── SEAL_KEY rotation / cache invalidation ────────────────────────────────

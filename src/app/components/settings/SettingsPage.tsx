@@ -3,8 +3,9 @@ import { Select } from "@kobalte/core/select";
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
-import type { JiraCustomField } from "../../../shared/schemas";
+import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import type { Config, JiraCustomField } from "../../../shared/schemas";
+import { buildExportPayload, parseImportFile } from "../../lib/settings-transfer";
 import { viewState, updateViewState, setTabFilter } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
@@ -241,42 +242,9 @@ export default function SettingsPage() {
   }
 
   function handleExportSettings() {
-    const data = JSON.stringify(
-      {
-        selectedOrgs: config.selectedOrgs,
-        selectedRepos: config.selectedRepos,
-        upstreamRepos: config.upstreamRepos,
-        monitoredRepos: config.monitoredRepos,
-        trackedUsers: config.trackedUsers,
-        refreshInterval: config.refreshInterval,
-        hotPollInterval: config.hotPollInterval,
-        maxWorkflowsPerRepo: config.maxWorkflowsPerRepo,
-        maxRunsPerWorkflow: config.maxRunsPerWorkflow,
-        notifications: config.notifications,
-        theme: config.theme,
-        viewDensity: config.viewDensity,
-        itemsPerPage: config.itemsPerPage,
-        defaultTab: config.defaultTab,
-        rememberLastTab: config.rememberLastTab,
-        enableTracking: config.enableTracking,
-        enableActions: config.enableActions,
-        customTabs: config.customTabs,
-        // Non-secret jira config fields only — no tokens, sealed blobs, or email
-        jira: {
-          enabled: config.jira?.enabled ?? false,
-          authMethod: config.jira?.authMethod ?? "oauth",
-          issueKeyDetection: config.jira?.issueKeyDetection ?? true,
-          cloudId: config.jira?.cloudId,
-          siteName: config.jira?.siteName,
-          siteUrl: config.jira?.siteUrl,
-          customFields: config.jira?.customFields ?? [],
-          customScopes: config.jira?.customScopes ?? [],
-        },
-        dependencies: config.dependencies,
-      },
-      null,
-      2
-    );
+    // Schema-driven payload (spread of Config + denylist) — see
+    // src/app/lib/settings-transfer.ts. Blob/anchor-download mechanics unchanged.
+    const data = JSON.stringify(buildExportPayload(config), null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -284,6 +252,49 @@ export default function SettingsPage() {
     a.download = "github-tracker-settings.json";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // ── Import settings (plaintext) ────────────────────────────────────────────
+  // pendingImport holds the parsed-and-validated Config awaiting confirmation;
+  // non-null doubles as the two-click confirm state (mirrors confirmReset).
+  const [pendingImport, setPendingImport] = createSignal<Config | null>(null);
+  let importInputRef: HTMLInputElement | undefined;
+
+  async function handleImportFileSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Allow re-selecting the same file (change won't fire otherwise).
+    try { input.value = ""; } catch { /* ignore if unsupported */ }
+    if (!file) return;
+    let text: string;
+    try {
+      // A read rejection (unreadable/binary file) is treated identically to a
+      // parse failure below — same notification path, no confirmation shown.
+      text = await file.text();
+    } catch {
+      pushNotification("settings-import", "Could not read that file — choose a valid settings export.", "warning");
+      return;
+    }
+    const result = parseImportFile(text);
+    if (!result.ok) {
+      pushNotification("settings-import", `Import failed: ${result.errors[0] ?? "invalid settings file"}`, "warning");
+      return;
+    }
+    setPendingImport(result.config);
+  }
+
+  function handleConfirmImport() {
+    const imported = pendingImport();
+    if (!imported) return;
+    // Wholesale replace — parseImportFile returns a fully-parsed Config (every
+    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
+    setConfig(imported);
+    setPendingImport(null);
+    pushNotification("settings-import", "Settings imported", "info");
+  }
+
+  function handleCancelImport() {
+    setPendingImport(null);
   }
 
   function handleResetAll() {
@@ -1519,6 +1530,51 @@ export default function SettingsPage() {
             >
               Export
             </button>
+          </SettingRow>
+
+          {/* Import settings */}
+          <SettingRow
+            label="Import settings"
+            description="Replace your configuration from a previously exported JSON file"
+          >
+            <Show
+              when={!pendingImport()}
+              fallback={
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-base-content/60">This will replace your current settings — continue?</span>
+                  <button
+                    type="button"
+                    onClick={handleConfirmImport}
+                    class="btn btn-warning btn-xs"
+                  >
+                    Yes, import
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelImport}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              }
+            >
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                class="hidden"
+                aria-label="Import settings file"
+                onChange={(e) => void handleImportFileSelected(e)}
+              />
+              <button
+                type="button"
+                onClick={() => importInputRef?.click()}
+                class="btn btn-sm btn-outline"
+              >
+                Import
+              </button>
+            </Show>
           </SettingRow>
 
           {/* Reset all */}

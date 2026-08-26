@@ -1,5 +1,14 @@
 import * as Sentry from "@sentry/cloudflare";
-import { CryptoEnv, deriveKey, sealToken, unsealTokenWithRotation, SEAL_SALT } from "./crypto";
+import {
+  CryptoEnv,
+  deriveKey,
+  sealToken,
+  unsealTokenWithRotation,
+  sealWithExpiry,
+  unsealWithExpiry,
+  CREDENTIAL_BUNDLE_EXPIRY_MS,
+  SEAL_SALT,
+} from "./crypto";
 import { SessionEnv, ensureSession } from "./session";
 import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
 import { validateProxyRequest, validateOrigin } from "./validation";
@@ -16,6 +25,13 @@ interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 
+// Local interface — project does not install @cloudflare/workers-types.
+// Matches the subset of Cloudflare's KVNamespace this worker uses (nonce store).
+interface KVNamespace {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+}
+
 export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   GITHUB_CLIENT_ID: string;
@@ -26,6 +42,10 @@ export interface Env extends CryptoEnv, SessionEnv, TurnstileEnv {
   SENTRY_DSN?: string; // e.g. "https://key@o123456.ingest.sentry.io/7890123"
   SENTRY_SECURITY_TOKEN?: string; // Optional: Sentry security token for Allowed Domains validation
   PROXY_RATE_LIMITER: RateLimiter; // Workers Rate Limiting Binding
+  // Single-use nonce store for /api/proxy/unseal. Optional at the type level so
+  // existing hand-built test Env fixtures (which never exercise unseal) remain
+  // valid; a genuinely missing binding is caught at runtime and surfaced as 503.
+  CREDENTIAL_NONCE_KV?: KVNamespace;
 }
 
 type ErrorCode =
@@ -44,7 +64,9 @@ type ErrorCode =
   | "internal_error"
   | "jira_token_exchange_failed"
   | "jira_refresh_failed"
-  | "jira_proxy_error";
+  | "jira_proxy_error"
+  | "expired"
+  | "invalid";
 
 // Structured logging — Cloudflare auto-indexes JSON fields for querying.
 // NEVER log secrets: codes, tokens, client_secret, cookie values.
@@ -130,6 +152,7 @@ const jiraTenantInfoLimiter = createIpRateLimiter(10, 60_000); // jira tenant in
 const sentryRateLimiter = createIpRateLimiter(15, 60_000);    // sentry tunnel: 15/min
 const cspRateLimiter = createIpRateLimiter(15, 60_000);       // csp report: 15/min
 const proxyPreGateLimiter = createIpRateLimiter(60, 60_000);  // proxy pre-gate: complements CF binding
+const unsealRateLimiter = createIpRateLimiter(5, 60_000);    // credential unseal: 5/min (pre-auth oracle — tighter than proxy pre-gate)
 
 // CF-Connecting-IP is set by Cloudflare's proxy layer in production and by
 // miniflare/workerd in local dev. Always present in any real request path.
@@ -204,7 +227,10 @@ function validateAndGuardProxyRoute(request: Request, env: Env, pathname: string
 }
 
 // ── Sealed-token endpoint ────────────────────────────────────────────────────
-const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token"]);
+const VALID_PURPOSES = new Set(["jira-api-token", "jira-refresh-token", "credential-export-bundle"]);
+// Single-value allowlist for /api/proxy/unseal — deliberately NOT derived from or
+// shared with VALID_PURPOSES, so Jira's sealed tokens can never be unsealed here.
+const UNSEAL_PURPOSE = "credential-export-bundle";
 const ALLOWED_SEARCH_PARAMS = new Set(["jql", "maxResults", "fields", "startAt"]);
 const ALLOWED_ISSUE_PARAMS = new Set(["issueIdsOrKeys", "fields"]);
 
@@ -214,7 +240,7 @@ const _nextKeyCache = new Map<string, CryptoKey>();
 let _nextKeyFingerprint = "";
 
 /** Get or derive the active encryption key for the given purpose, using SEAL_KEY_NEXT if set. */
-async function getJiraEncryptKey(env: Env, purpose: string): Promise<CryptoKey> {
+async function getEncryptKey(env: Env, purpose: string): Promise<CryptoKey> {
   const activeKey = env.SEAL_KEY_NEXT ?? env.SEAL_KEY;
   const fingerprint = activeKey;
   if (fingerprint !== _nextKeyFingerprint) {
@@ -270,9 +296,6 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   if (typeof token !== "string") {
     return errorResponse("invalid_request", 400);
   }
-  if (token.length > 2048) {
-    return errorResponse("invalid_request", 400);
-  }
   // Purpose field required for token audience binding
   if (typeof purpose !== "string" || purpose.length === 0) {
     return errorResponse("invalid_request", 400);
@@ -280,12 +303,25 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   if (!VALID_PURPOSES.has(purpose)) {
     return errorResponse("invalid_request", 400);
   }
+  // Purpose-keyed size cap: the credential-export bundle carries a GitHub token
+  // plus Jira credentials envelope-encrypted client-side, so it needs headroom
+  // (4096) for future growth; all other purposes stay at 2048. Checked AFTER the
+  // purpose is validated so the raise is scoped to exactly one purpose.
+  const maxTokenLength = purpose === UNSEAL_PURPOSE ? 4096 : 2048;
+  if (token.length > maxTokenLength) {
+    return errorResponse("invalid_request", 400);
+  }
 
   let sealed: string;
   try {
     // Use SEAL_KEY_NEXT if set (matches token exchange/refresh behavior), falling back to SEAL_KEY.
-    const key = await getJiraEncryptKey(env, "aes-gcm-key:" + purpose);
-    sealed = await sealToken(token, key);
+    const key = await getEncryptKey(env, "aes-gcm-key:" + purpose);
+    // The credential-export bundle is wrapped with a server-clock timestamp +
+    // content-fingerprint nonce (for expiry + single-use); all other purposes
+    // use the plain sealToken path unchanged.
+    sealed = purpose === UNSEAL_PURPOSE
+      ? await sealWithExpiry(token, key)
+      : await sealToken(token, key);
   } catch (err) {
     // Log error server-side — do not expose crypto error details in response
     log("error", "seal_failed", {
@@ -302,6 +338,142 @@ async function handleProxySeal(request: Request, env: Env, sessionId: string): P
   }, request);
 
   return new Response(JSON.stringify({ sealed }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      ...SECURITY_HEADERS,
+    },
+  });
+}
+
+// ── Credential-bundle unseal endpoint ──────────────────────────────────────
+// Pre-auth-reachable decryption oracle BY CONSTRUCTION. It only ever returns
+// the still-code-encrypted inner ciphertext (payload), NEVER plaintext — the
+// one-time code is verified client-side after unseal. Turnstile + tighter rate
+// limiting are abuse-cost multipliers, not the security boundary. Rejections use
+// a uniform generic errorResponse("invalid", 401) for every reason EXCEPT expiry
+// (errorResponse("expired", 401)), which leaks nothing attacker-exploitable.
+// Outer sealed length cap (6144) is intentionally larger than the seal endpoint's
+// 4096 inner cap: the outer blob is the inner ciphertext (≤4096) plus the
+// {createdAt,nonce} wrapper plus sealToken overhead and base64url expansion.
+const UNSEAL_SEALED_MAX_LENGTH = 6144;
+
+async function handleProxyUnseal(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return errorResponse("method_not_allowed", 405);
+  }
+
+  // Missing/misconfigured KV binding is a deploy error — surface it as a 503 up
+  // front (mirroring the rate_limiter_binding_missing pattern) rather than every
+  // import silently failing with the user-facing "check the code and file match."
+  // A binding that EXISTS but throws is handled below (fail closed → invalid).
+  const nonceKv = env.CREDENTIAL_NONCE_KV;
+  if (!nonceKv || typeof nonceKv.get !== "function") {
+    log("error", "unseal_nonce_kv_binding_missing", {}, request);
+    return errorResponse("internal_error", 503);
+  }
+
+  const ip = getClientIp(request);
+  if (!ip) {
+    return errorResponse("invalid_request", 400);
+  }
+
+  // IP rate limit BEFORE Turnstile (cheapest check first) — an over-limit
+  // attacker is rejected without forcing a Turnstile round-trip per request.
+  if (!unsealRateLimiter.check(ip)) {
+    log("warn", "unseal_rate_limited", {}, request);
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "60", ...SECURITY_HEADERS },
+    });
+  }
+
+  const turnstileToken = extractTurnstileToken(request);
+  if (!turnstileToken) {
+    log("warn", "unseal_turnstile_missing", {}, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+  if (turnstileToken.length > 2048) {
+    log("warn", "unseal_turnstile_token_too_long", { token_length: turnstileToken.length }, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+  const turnstileResult = await verifyTurnstile(turnstileToken, ip, env, "unseal");
+  if (!turnstileResult.success) {
+    log("warn", "unseal_turnstile_failed", { error_codes: turnstileResult.errorCodes }, request);
+    return errorResponse("turnstile_failed", 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("invalid_request", 400);
+  }
+  if (typeof body !== "object" || body === null) {
+    return errorResponse("invalid_request", 400);
+  }
+
+  const sealed = (body as Record<string, unknown>)["sealed"];
+  const purpose = (body as Record<string, unknown>)["purpose"];
+
+  if (typeof sealed !== "string" || sealed.length === 0) {
+    return errorResponse("invalid_request", 400);
+  }
+  // Length guard BEFORE any decode/crypto work (cheapest-check-first).
+  if (sealed.length > UNSEAL_SEALED_MAX_LENGTH) {
+    log("warn", "unseal_sealed_too_long", { sealed_length: sealed.length }, request);
+    return errorResponse("invalid_request", 400);
+  }
+  // Single-value purpose allowlist — any other value is treated identically to a
+  // corrupted blob (generic invalid), so Jira's sealed tokens gain no path here.
+  if (purpose !== UNSEAL_PURPOSE) {
+    return errorResponse("invalid", 401);
+  }
+
+  const result = await unsealWithExpiry(
+    sealed,
+    env.SEAL_KEY,
+    env.SEAL_KEY_NEXT,
+    SEAL_SALT,
+    "aes-gcm-key:credential-export-bundle",
+    CREDENTIAL_BUNDLE_EXPIRY_MS
+  );
+  if (!result.ok) {
+    return errorResponse(result.reason === "expired" ? "expired" : "invalid", 401);
+  }
+
+  // Check-and-consume the content-fingerprint nonce. FAIL CLOSED on any KV error
+  // — never return the payload if the nonce could not be checked-and-recorded,
+  // otherwise a KV outage would silently disable the single-use protection. This
+  // also closes the unseal-then-reseal renewal loophole: resealing the same
+  // payload reproduces the identical nonce (deterministic), so a resealed copy is
+  // rejected as already-consumed even though its own createdAt is fresh.
+  try {
+    const consumed = await nonceKv.get(result.nonce);
+    if (consumed !== null) {
+      log("info", "unseal_nonce_already_consumed", {}, request);
+      return errorResponse("invalid", 401);
+    }
+    // KV rejects sub-60s TTLs, so floor at 60 — a bundle unsealed in the last 60s
+    // of its life (or with small clock skew) would otherwise throw. The nonce
+    // record need not outlive the bundle (an expired bundle is rejected anyway).
+    const expirationTtl = Math.max(
+      60,
+      Math.ceil((result.createdAt + CREDENTIAL_BUNDLE_EXPIRY_MS - Date.now()) / 1000)
+    );
+    await nonceKv.put(result.nonce, "1", { expirationTtl });
+  } catch (err) {
+    log("error", "unseal_nonce_kv_failed", {
+      error: err instanceof Error ? err.message : "unknown",
+    }, request);
+    Sentry.captureException(err, { tags: { source: "worker-unseal-nonce" } });
+    return errorResponse("invalid", 401);
+  }
+
+  log("info", "credential_bundle_unsealed", {}, request);
+
+  // Return ONLY the still-code-encrypted inner ciphertext — never plaintext.
+  return new Response(JSON.stringify({ payload: result.payload }), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
@@ -891,7 +1063,7 @@ async function handleJiraTokenExchange(
 
   let sealedRefreshToken: string;
   try {
-    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
+    const key = await getEncryptKey(env, "aes-gcm-key:jira-refresh-token");
     sealedRefreshToken = await sealToken(refreshToken, key);
   } catch (err) {
     log("error", "jira_token_seal_failed", {
@@ -1007,7 +1179,7 @@ async function handleJiraTokenRefresh(
   let newSealedRefreshToken: string;
   try {
     // Always seal with active key (SEAL_KEY_NEXT if set) for natural key rotation
-    const key = await getJiraEncryptKey(env, "aes-gcm-key:jira-refresh-token");
+    const key = await getEncryptKey(env, "aes-gcm-key:jira-refresh-token");
     newSealedRefreshToken = await sealToken(newRefreshToken, key);
   } catch (err) {
     log("error", "jira_refresh_seal_failed", {
@@ -1337,7 +1509,7 @@ async function handleJiraProxy(
   let resealed: string | undefined;
   if (env.SEAL_KEY_NEXT) {
     try {
-      const nextKey = await getJiraEncryptKey(env, "aes-gcm-key:jira-api-token");
+      const nextKey = await getEncryptKey(env, "aes-gcm-key:jira-api-token");
       resealed = await sealToken(apiToken, nextKey);
     } catch {
       // Non-fatal: skip re-seal if it fails
@@ -1502,6 +1674,20 @@ export default Sentry.withSentry(
             });
           }
           return sealResponse;
+        }
+
+        // Credential-bundle unseal endpoint (pre-auth-reachable decryption oracle)
+        if (url.pathname === "/api/proxy/unseal") {
+          const unsealResponse = await handleProxyUnseal(request, env);
+          if (setCookie) {
+            const headers = new Headers(unsealResponse.headers);
+            headers.set("Set-Cookie", setCookie);
+            return new Response(unsealResponse.body, {
+              status: unsealResponse.status,
+              headers,
+            });
+          }
+          return unsealResponse;
         }
 
         if (url.pathname === "/api/jira/proxy") {
