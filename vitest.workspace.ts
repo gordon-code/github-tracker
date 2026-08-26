@@ -16,7 +16,9 @@ export default defineConfig({
           environment: "happy-dom",
           globals: true,
           hookTimeout: 30_000,
-          setupFiles: ["tests/setup.ts"],
+          // fetch-guard.ts is browser-project-only (not in tests/setup.ts) so the
+          // live-network smoke suite, which shares tests/setup.ts, stays unguarded.
+          setupFiles: ["tests/setup.ts", "tests/fetch-guard.ts"],
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.steps.tsx"],
           exclude: ["tests/worker/**", "tests/**/*.smoke.test.ts"],
         },
