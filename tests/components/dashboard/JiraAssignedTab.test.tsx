@@ -745,6 +745,43 @@ describe("JiraAssignedTab", () => {
       expect(downLast.disabled).toBe(true);
     });
 
+    it("re-tracks first/last disabled state on the moved rows after a reorder", () => {
+      // Regression guard: isFirst/isLast are accessors, not booleans snapshotted at
+      // first render. Keyed <For> moves reference-cached row nodes on reorder WITHOUT
+      // re-running the callback, so a snapshot would freeze the up/down disabled state
+      // to each row's original position — leaving the moved-away first row disabled and
+      // the new first row enabled. Drive the reorder through the reactive prop layer
+      // (same technique as the DOM-identity test below); no click, so the reordering()
+      // lockout is not involved and the assertions isolate the boundary state itself.
+      // Moving PROJ-1 from first to last exercises BOTH boundaries in one step.
+      mockJiraFilters = customFilters();
+      mockJiraCustomOrder = ["PROJ-1", "PROJ-2", "PROJ-3"];
+
+      const issueA = makeIssue("PROJ-1");
+      const issueB = makeIssue("PROJ-2");
+      const issueC = makeIssue("PROJ-3");
+
+      const [issues, setIssues] = createSignal<JiraIssue[]>([issueA, issueB, issueC]);
+      render(() => <JiraAssignedTab issues={issues()} loading={false} siteUrl={SITE_URL} />);
+
+      // Initial: PROJ-1 first (up disabled), PROJ-3 last (down disabled).
+      expect((screen.getByRole("button", { name: "Move up: PROJ-1" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Move down: PROJ-3" }) as HTMLButtonElement).disabled).toBe(true);
+
+      // Move PROJ-1 to the bottom; poke the signal (same object refs) to force
+      // filtered → filteredSorted → customPageItems → <For> to re-evaluate.
+      mockJiraCustomOrder = ["PROJ-2", "PROJ-3", "PROJ-1"];
+      setIssues([issueA, issueB, issueC]);
+
+      // New first row (PROJ-2): up disabled. Moved-to-last row (PROJ-1): up now
+      // enabled, down now disabled. Former-last row (PROJ-3): down now enabled.
+      // Pre-fix, every one of these was frozen at its first-render value.
+      expect((screen.getByRole("button", { name: "Move up: PROJ-2" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Move up: PROJ-1" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Move down: PROJ-3" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
     it("disables arrow buttons when a status filter is active", () => {
       mockJiraFilters = customFilters({ statusCategory: "new" });
       const issues = [makeIssue("PROJ-1", "PROJ", "new"), makeIssue("PROJ-2", "PROJ", "new")];
