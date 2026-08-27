@@ -390,7 +390,7 @@ export default function LoginPage() {
                             class="input input-bordered input-sm w-full font-mono"
                             aria-label="One-time code"
                             autocomplete="off"
-                            placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                            placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX"
                             value={credentialImport.codeInput()}
                             onInput={(e) => credentialImport.setCodeInput(e.currentTarget.value)}
                           />

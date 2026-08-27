@@ -1449,7 +1449,7 @@ describe("Dependencies settings section", () => {
 // ── Export with encrypted credentials (Task 5) ────────────────────────────────
 
 describe("SettingsPage — Data: Export with encrypted credentials", () => {
-  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+  const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
 
   it("checking the box + export shows the one-time-code modal and defers download until acknowledged", async () => {
     vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
@@ -1560,7 +1560,7 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
 // ── Import with encrypted credentials (Task 6) ────────────────────────────────
 
 describe("SettingsPage — Data: Import with encrypted credentials", () => {
-  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+  const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
   const IDENTITY = { login: "octo", avatar_url: "https://avatars/octo", name: "Octo" };
   const BUNDLE = { github: { token: "ghp_x", method: "pat" as const }, jira: null };
 

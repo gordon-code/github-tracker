@@ -363,7 +363,7 @@ describe("LoginPage — PAT form validation", () => {
 // ── Import from backup (Task 7) ───────────────────────────────────────────────
 
 describe("LoginPage — Import from backup", () => {
-  const CODE = "1111-2222-3333-4444-5555-6666-7777-8888";
+  const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
   const IDENTITY = { login: "newuser", avatar_url: "https://a/new", name: "New User" };
   const BUNDLE: CredentialBundle = { github: { token: "ghp_new", method: "pat" }, jira: null };
 

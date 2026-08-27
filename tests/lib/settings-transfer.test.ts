@@ -258,7 +258,21 @@ describe("parseImportFile", () => {
 
 // ── Task 4: client-side envelope encryption ──────────────────────────────────
 
-const CODE_DISPLAY_RE = /^[0-9a-f]{4}(-[0-9a-f]{4}){7}$/;
+// Mirrors src/app/lib/settings-transfer.ts's Crockford alphabet (excludes I, L, O, U).
+const CODE_DISPLAY_RE = /^([0-9A-HJKMNP-TV-Z]{4}-){5}[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{2}$/;
+
+// Independent reference encoder (NOT imported from src) so the round-trip test
+// below actually cross-checks decodeOneTimeCode against a second implementation,
+// instead of just calling the same code twice.
+function crockfordEncode(bytes: Uint8Array): string {
+  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  let value = 0n;
+  for (const b of bytes) value = (value << 8n) | BigInt(b);
+  value <<= 2n;
+  let out = "";
+  for (let i = 25; i >= 0; i--) out += alphabet[Number((value >> BigInt(i * 5)) & 0x1fn)];
+  return out;
+}
 
 // Test-local base64url helpers to construct/mutate wire bytes precisely.
 function b64urlEncode(bytes: Uint8Array): string {
@@ -276,7 +290,7 @@ function b64urlDecode(str: string): Uint8Array {
 }
 
 describe("generateOneTimeCode / decodeOneTimeCode", () => {
-  it("produces the display format (8 dash-separated groups of 4 hex chars)", () => {
+  it("produces the display format (26 Crockford base32 chars, dash-separated in groups of 4)", () => {
     expect(generateOneTimeCode()).toMatch(CODE_DISPLAY_RE);
   });
 
@@ -284,20 +298,52 @@ describe("generateOneTimeCode / decodeOneTimeCode", () => {
     expect(generateOneTimeCode()).not.toBe(generateOneTimeCode());
   });
 
-  it("round-trips: decodeOneTimeCode(generateOneTimeCode()) is the original 16 bytes", () => {
+  it("round-trips: decodeOneTimeCode(generateOneTimeCode()) is the original 16 bytes, and re-encodes identically", () => {
     const code = generateOneTimeCode();
     const bytes = decodeOneTimeCode(code);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBe(16);
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-    expect(hex).toBe(code.replace(/-/g, "").toLowerCase());
+    // Cross-checked against an independent reference encoder, not src's own.
+    expect(crockfordEncode(bytes)).toBe(code.replace(/-/g, ""));
   });
 
-  it("normalizes a manually-perturbed code (uppercased, whitespace, dashes removed) to the same bytes", () => {
+  it("normalizes a manually-perturbed code (lowercased, whitespace/dashes added) to the same bytes", () => {
     const code = generateOneTimeCode();
     const original = decodeOneTimeCode(code);
-    const perturbed = `  ${code.toUpperCase().replace(/-/g, "")}  `;
+    const perturbed = `  ${code.toLowerCase().replace(/-/g, "")}  `;
     expect(Array.from(decodeOneTimeCode(perturbed))).toEqual(Array.from(original));
+  });
+
+  it("applies Crockford's I/L->1, O->0 leniency (mixed case, non-standard dash placement)", () => {
+    // 26 valid Crockford chars containing both '0' and '1' digits.
+    const clean = "0011AABBCCDDEEFFGGHHJJKKMM";
+    const original = decodeOneTimeCode(clean);
+    // Same value retyped with I/L for 1, O/o for 0, mixed case, and dashes that
+    // don't even align to 4-char groups — normalization doesn't care about
+    // grouping, only about stripping dashes/whitespace before mapping.
+    const perturbed = "  oO-IL-aabbccddeeffgghhjjkkmm  ";
+    expect(Array.from(decodeOneTimeCode(perturbed))).toEqual(Array.from(original));
+  });
+
+  it("rejects 'U' — Crockford excludes it and it is never remapped", () => {
+    const bad = "0011AABBCCDDEEFFGGHHJJKKMU"; // valid 25 chars + trailing U
+    expect(() => decodeOneTimeCode(bad)).toThrow("One-time code is not in the expected format.");
+  });
+
+  it("rejects other out-of-alphabet characters", () => {
+    expect(() => decodeOneTimeCode("0011AABBCCDDEEFFGGHHJJKK!!")).toThrow(
+      "One-time code is not in the expected format."
+    );
+  });
+
+  it("rejects the wrong length", () => {
+    const valid = generateOneTimeCode().replace(/-/g, "");
+    expect(() => decodeOneTimeCode(valid.slice(0, 25))).toThrow(
+      "One-time code is not in the expected format."
+    );
+    expect(() => decodeOneTimeCode(valid + "0")).toThrow(
+      "One-time code is not in the expected format."
+    );
   });
 });
 
@@ -306,7 +352,7 @@ describe("deriveEnvelopeKey — secure-context guard", () => {
     const realCrypto = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: realCrypto.getRandomValues.bind(realCrypto) });
     await expect(
-      deriveEnvelopeKey("0000-0000-0000-0000-0000-0000-0000-0000", new Uint8Array(16))
+      deriveEnvelopeKey("0000-0000-0000-0000-0000-0000-00", new Uint8Array(16))
     ).rejects.toThrow(/secure context/i);
   });
 });
@@ -562,7 +608,7 @@ describe("buildEncryptedCredentialsSection", () => {
     const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
     expect(sealed).toBe("SEALED-OUTPUT");
     expect(typeof salt).toBe("string");
-    expect(oneTimeCode).toMatch(/^[0-9a-f]{4}(-[0-9a-f]{4}){7}$/);
+    expect(oneTimeCode).toMatch(CODE_DISPLAY_RE);
     // The one-time code must NOT appear in what gets written to the export file.
     expect(JSON.stringify({ sealed, salt })).not.toContain(oneTimeCode);
   });

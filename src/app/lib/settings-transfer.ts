@@ -159,8 +159,6 @@ export const ENVELOPE_VERSION = 0x01;
  */
 export const ENVELOPE_KEY_INFO = "envelope-key:credential-bundle-export";
 
-const ONE_TIME_CODE_HEX_RE = /^[0-9a-f]{32}$/;
-
 // ── base64url helpers (client-side, self-contained) ──────────────────────────
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -182,33 +180,96 @@ function fromBase64Url(str: string): Uint8Array {
   return bytes;
 }
 
+// ── Crockford base32 helpers (client-side, self-contained) ───────────────────
+//
+// The one-time code is encoded as Crockford base32 rather than hex: it's what
+// a user hand-types back in on the Login page, and Crockford's alphabet omits
+// I, L, O, U specifically to avoid characters that are easily confused with
+// each other (or, for U, with profanity) when read aloud or copied by hand.
+//
+// 16 bytes is 128 bits, which doesn't divide evenly into 5-bit groups, so the
+// value is treated as a 128-bit big-endian integer, left-shifted 2 bits to 130
+// bits (26 * 5 divides evenly), then emitted as 26 base32 digits MSB-first.
+// Decoding reverses this: parse 26 digits back to the 130-bit integer, then
+// right-shift 2 bits and serialize 16 big-endian bytes. The 2 padding bits
+// introduced by the left-shift are always 0, so this round-trips exactly for
+// any 16-byte input.
+
+const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 /**
- * Generates a one-time code: 16 CSPRNG bytes (128 bits) hex-encoded and
- * formatted for display/copy as 8 dash-separated groups of 4 hex chars
- * (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`).
+ * Crockford's documented human-entry leniency: I and L are easily misread as
+ * the digit 1, and O as the digit 0, so a hand-retyped code maps them back
+ * deterministically. U is deliberately NOT included here — it's simply not a
+ * valid alphabet character, so an input 'U' is rejected by the format check
+ * below rather than silently remapped (mapping it would make decoding
+ * ambiguous with whatever character it aliased to).
+ */
+const CROCKFORD_LENIENCY: Readonly<Record<string, string>> = { I: "1", L: "1", O: "0" };
+
+/** Exactly 26 Crockford base32 characters. Checked AFTER normalization (see `decodeOneTimeCode`), so this only ever sees uppercase, leniency-mapped input. */
+const ONE_TIME_CODE_FORMAT_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+function toCrockfordBase32(bytes: Uint8Array): string {
+  let value = 0n;
+  for (const b of bytes) {
+    value = (value << 8n) | BigInt(b);
+  }
+  value <<= 2n; // 128 -> 130 bits (26 * 5)
+  let out = "";
+  for (let i = 25; i >= 0; i--) {
+    out += CROCKFORD_ALPHABET[Number((value >> BigInt(i * 5)) & 0x1fn)];
+  }
+  return out;
+}
+
+/**
+ * Inverse of `toCrockfordBase32`. `chars` MUST already be normalized and
+ * format-validated (exactly 26 characters, all members of CROCKFORD_ALPHABET)
+ * — see `decodeOneTimeCode`, the only caller.
+ */
+function fromCrockfordBase32(chars: string): Uint8Array {
+  let value = 0n;
+  for (const ch of chars) {
+    value = (value << 5n) | BigInt(CROCKFORD_ALPHABET.indexOf(ch));
+  }
+  value >>= 2n; // 130 -> 128 bits
+  const bytes = new Uint8Array(16);
+  for (let i = 15; i >= 0; i--) {
+    bytes[i] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return bytes;
+}
+
+/**
+ * Generates a one-time code: 16 CSPRNG bytes (128 bits) Crockford base32-
+ * encoded (26 chars) and formatted for display/copy as dash-separated groups
+ * of 4 (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX`).
  */
 export function generateOneTimeCode(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  return hex.match(/.{4}/g)!.join("-");
+  const encoded = toCrockfordBase32(bytes);
+  return encoded.match(/.{1,4}/g)!.join("-");
 }
 
 /**
  * Decodes a one-time code (as displayed OR as manually retyped by a user) back
  * to its 16 raw bytes. Normalizes first — trims surrounding whitespace, strips
- * all internal dashes/whitespace, and lowercases — because on the pre-auth
- * Login page the code is retyped by hand and copy-paste may perturb it.
+ * all internal dashes/whitespace, uppercases, and applies Crockford's I/L->1,
+ * O->0 leniency — because on the pre-auth Login page the code is retyped by
+ * hand and copy-paste may perturb it.
  */
 export function decodeOneTimeCode(code: string): Uint8Array {
-  const normalized = code.trim().replace(/[\s-]/g, "").toLowerCase();
-  if (!ONE_TIME_CODE_HEX_RE.test(normalized)) {
+  const stripped = code.trim().replace(/[\s-]/g, "").toUpperCase();
+  let normalized = "";
+  for (const ch of stripped) {
+    normalized += CROCKFORD_LENIENCY[ch] ?? ch;
+  }
+  if (!ONE_TIME_CODE_FORMAT_RE.test(normalized)) {
     throw new Error("One-time code is not in the expected format.");
   }
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
+  return fromCrockfordBase32(normalized);
 }
 
 /**
