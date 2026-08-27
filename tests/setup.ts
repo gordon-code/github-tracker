@@ -37,6 +37,24 @@ globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
   originalClearTimeout(id);
 }) as typeof clearTimeout;
 
+// happy-dom implements requestAnimationFrame via TIMER.setImmediate (Node's
+// check phase), which can resolve *after* the zero-delay setTimeout chain
+// @testing-library/user-event uses internally to pace synthetic events. Kobalte's
+// Dialog schedules its exit-side cleanup (undoing the aria-hidden it applies to
+// background content while a modal is open, and restoring document.body's
+// pointer-events) via `setTimeout(() => requestAnimationFrame(fn))`. When the rAF
+// hop lags behind userEvent's own timer chain, `await user.click(...)` on a modal's
+// dismiss button can resolve before that cleanup runs, leaving the rest of the page
+// aria-hidden/pointer-events:none for whatever assertion or interaction comes next
+// in the same test. Rerouting rAF through a microtask keeps callback ordering
+// deterministic relative to userEvent's chain without making rAF fully synchronous
+// (real timestamp preserved so time-based animation loops, e.g. SettingsTOC's
+// smooth-scroll easing, still terminate normally when a test doesn't stub rAF).
+globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+  Promise.resolve().then(() => cb(performance.now()));
+  return 0;
+}) as typeof requestAnimationFrame;
+
 afterEach(() => {
   for (const id of pendingTimers) {
     originalClearTimeout(id);
