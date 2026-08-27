@@ -8,13 +8,10 @@ import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFiel
 import type { Config, JiraCustomField } from "../../../shared/schemas";
 import {
   buildExportPayload,
-  parseImportFile,
   buildEncryptedCredentialsSection,
-  resolveImportedCredentials,
   commitImportedSettings,
-  CredentialsSectionSchema,
 } from "../../lib/settings-transfer";
-import type { CredentialBundle, CredentialsSection } from "../../lib/settings-transfer";
+import { createCredentialImport } from "../../lib/use-credential-import";
 import { viewState, updateViewState, setTabFilter } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
@@ -22,7 +19,7 @@ import { isValidPatFormat } from "../../lib/pat";
 import { clearCache } from "../../stores/cache";
 import { pushNotification } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
-import { sealApiToken, unsealCredentialBundle } from "../../lib/proxy";
+import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
@@ -153,7 +150,7 @@ export default function SettingsPage() {
   // (handleConfirmImport / handleConfirmCredImport / handleContinueWithoutCredentials)
   // replaces config wholesale via setConfig without a reload, so they must be
   // resynced afterward — otherwise the next org/repo edit would save the stale,
-  // pre-import selection and silently discard the imported repos/orgs (CR-001).
+  // pre-import selection and silently discard the imported repos/orgs.
   // setConfig is synchronous, so config already reflects the import here.
   function resyncLocalEditors() {
     setLocalOrgs(config.selectedOrgs);
@@ -263,7 +260,7 @@ export default function SettingsPage() {
   }
 
   // ── Export settings ────────────────────────────────────────────────────────
-  // includeCredentials opts into an encrypted-credentials section (Task 5). On
+  // includeCredentials opts into an encrypted-credentials section. On
   // success the one-time code is shown in a modal and the file download is
   // DEFERRED until the user acknowledges — the code is shown only once.
   const [includeCredentials, setIncludeCredentials] = createSignal(false);
@@ -288,7 +285,7 @@ export default function SettingsPage() {
     // mint a NEW code + a new seal call while the old code is still displayed.
     // The Kobalte Dialog traps + restores focus (so the Export button can't be
     // re-fired behind the modal), and this guard closes the gap for any other
-    // trigger path (QA-001).
+    // trigger path.
     if (exportCode() !== null) return;
     const payload = buildExportPayload(config);
     if (!includeCredentials()) {
@@ -299,7 +296,7 @@ export default function SettingsPage() {
     try {
       // buildEncryptedCredentialsSection generates the code, encrypts the bundle
       // with it, THEN seals the ciphertext (encrypt-then-seal). No secret is
-      // logged here (SD-002).
+      // logged here.
       const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
       pendingExportJson = JSON.stringify({ ...payload, _credentials: { sealed, salt } }, null, 2);
       setCodeCopied(false);
@@ -351,37 +348,19 @@ export default function SettingsPage() {
   const [pendingImport, setPendingImport] = createSignal<Config | null>(null);
   let importInputRef: HTMLInputElement | undefined;
 
-  // ── Import settings (encrypted credentials, Task 6) ──────────────────────────
-  // credImport is set when the selected file has a valid _credentials section.
-  const [credImport, setCredImport] = createSignal<{ config: Config; credentials: CredentialsSection } | null>(null);
-  const [codeInput, setCodeInput] = createSignal("");
-  const [showCode, setShowCode] = createSignal(false);
-  const [unsealInFlight, setUnsealInFlight] = createSignal(false);
-  const [cachedCiphertext, setCachedCiphertext] = createSignal<string | null>(null);
-  const [credError, setCredError] = createSignal<string | null>(null);
-  const [credTerminalMsg, setCredTerminalMsg] = createSignal<string | null>(null);
-  const [resolvedCred, setResolvedCred] = createSignal<{ bundle: CredentialBundle; identity: GitHubUser } | null>(null);
+  // ── Import settings (encrypted credentials) ───────────────────────────────
+  // credentialImport.credImport() is set when the selected file has a valid
+  // _credentials section. On success it always shows the identity-confirm
+  // step below (unlike the Login page, which can skip it on a fresh session).
   const [committing, setCommitting] = createSignal(false);
-
-  // Generation counter tying an in-flight unseal/resolve to the file that started
-  // it (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
-  // new file selection; the submit handler captures it before each await and
-  // bails if it changed, so a Cancel-then-reselect during the multi-second
-  // unseal/resolve window can't strand one file's ciphertext/credential into a
-  // different file's shared signals.
-  let unsealGen = 0;
-
-  function resetCredImport() {
-    unsealGen++;
-    setCredImport(null);
-    setCodeInput("");
-    setShowCode(false);
-    setUnsealInFlight(false);
-    setCachedCiphertext(null);
-    setCredError(null);
-    setCredTerminalMsg(null);
-    setResolvedCred(null);
-  }
+  const credentialImport = createCredentialImport({
+    expiredMessage:
+      "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials.",
+    onReadError: (message) => pushNotification("settings-import", message, "warning"),
+    onParseError: (message) => pushNotification("settings-import", message, "warning"),
+    onNoCredentials: (importedConfig) => setPendingImport(importedConfig),
+    onResolved: (bundle, identity) => credentialImport.setResolvedCred({ bundle, identity }),
+  });
 
   async function handleImportFileSelected(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
@@ -389,35 +368,7 @@ export default function SettingsPage() {
     // Allow re-selecting the same file (change won't fire otherwise).
     try { input.value = ""; } catch { /* ignore if unsupported */ }
     if (!file) return;
-    let text: string;
-    try {
-      // A read rejection (unreadable/binary file) is treated identically to a
-      // parse failure below — same notification path, no confirmation shown.
-      text = await file.text();
-    } catch {
-      pushNotification("settings-import", "Could not read that file — choose a valid settings export.", "warning");
-      return;
-    }
-    const result = parseImportFile(text);
-    if (!result.ok) {
-      pushNotification("settings-import", `Import failed: ${result.errors[0] ?? "invalid settings file"}`, "warning");
-      return;
-    }
-    // Detect an encrypted-credentials section via schema validation (NOT a bare
-    // "in" check — a hand-crafted `_credentials: null` would pass that and then
-    // throw on dereference). A malformed/null/non-object one falls through to the
-    // plaintext-only path.
-    const rawCreds =
-      result.rawJson && typeof result.rawJson === "object"
-        ? (result.rawJson as Record<string, unknown>)._credentials
-        : undefined;
-    const credSection = CredentialsSectionSchema.safeParse(rawCreds);
-    if (credSection.success) {
-      resetCredImport();
-      setCredImport({ config: result.config, credentials: credSection.data });
-      return;
-    }
-    setPendingImport(result.config);
+    await credentialImport.handleFileSelected(file);
   }
 
   function handleConfirmImport() {
@@ -435,73 +386,16 @@ export default function SettingsPage() {
     setPendingImport(null);
   }
 
-  async function handleCredCodeSubmit() {
-    if (unsealInFlight()) return; // in-flight guard: exactly one network unseal
-    const ci = credImport();
-    if (!ci) return;
-    const code = codeInput();
-    setCredError(null);
-    const gen = unsealGen; // capture before the first await
-
-    let ciphertext = cachedCiphertext();
-    if (ciphertext === null) {
-      // FIRST submission — single-use network unseal (consumes the bundle nonce
-      // server-side). Never retried; wrong-code retries run against the cache.
-      setUnsealInFlight(true);
-      const res = await unsealCredentialBundle(ci.credentials.sealed).finally(() =>
-        setUnsealInFlight(false)
-      );
-      // A changed unsealGen means a Cancel-then-reselect started a different file
-      // while this await was pending; writing any signal now would strand this
-      // file's result into the newly-selected file's state, so stop here.
-      if (gen !== unsealGen) return;
-      if (!res.ok) {
-        if (res.reason === "turnstile" || res.reason === "network" || res.reason === "rate-limited") {
-          // Pre-nonce-consumption failure — the single-use nonce was NOT
-          // consumed, so this is retryable. Keep the code prompt available (do
-          // NOT fall through to the terminal "continue without credentials"
-          // screen); surface a retryable inline message.
-          setCredError(
-            res.reason === "rate-limited"
-              ? "Too many attempts — wait a moment and try again."
-              : res.reason === "network"
-                ? "Network problem — please try again."
-                : "Verification failed — please try again."
-          );
-          return;
-        }
-        setCredTerminalMsg(
-          res.reason === "expired"
-            ? "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials."
-            : "Couldn't decrypt credentials — check the code and file match."
-        );
-        return;
-      }
-      ciphertext = res.ciphertext;
-      setCachedCiphertext(ciphertext);
-    }
-
-    // Client-side, retryable against the cached ciphertext (no re-unseal).
-    const resolved = await resolveImportedCredentials(ciphertext, ci.credentials.salt, code);
-    // The resolve await is another window where a Cancel-then-reselect can change
-    // unsealGen (unsealInFlight is false here); discard the result if so.
-    if (gen !== unsealGen) return;
-    if (!resolved.ok) {
-      setCredError(resolved.error);
-      return;
-    }
-    setResolvedCred({ bundle: resolved.bundle, identity: resolved.identity });
-  }
-
   async function handleConfirmCredImport() {
-    const ci = credImport();
-    const rc = resolvedCred();
-    if (!ci || !rc) return;
+    if (committing()) return; // re-entry guard: exactly one commit
+    const cred = credentialImport.credImport();
+    const rc = credentialImport.resolvedCred();
+    if (!cred || !rc) return;
     setCommitting(true);
     try {
-      await commitImportedSettings(rc, ci.config);
+      await commitImportedSettings(rc, cred.config);
       resyncLocalEditors();
-      resetCredImport();
+      credentialImport.reset();
       pushNotification("settings-import", "Settings and credentials imported", "info");
     } catch {
       pushNotification("settings-import", "Something went wrong finishing the import — please try again.", "warning");
@@ -511,10 +405,10 @@ export default function SettingsPage() {
   }
 
   function handleContinueWithoutCredentials() {
-    const ci = credImport();
-    if (!ci) return;
-    const cfg = ci.config;
-    resetCredImport();
+    const cred = credentialImport.credImport();
+    if (!cred) return;
+    const cfg = cred.config;
+    credentialImport.reset();
     // Route the plaintext-only path through the SAME two-click confirm the
     // plaintext import uses (pendingImport), so both wholesale-replace paths
     // confirm consistently. handleConfirmImport applies it + resyncs the editors.
@@ -522,7 +416,7 @@ export default function SettingsPage() {
   }
 
   function handleCancelCredImport() {
-    resetCredImport();
+    credentialImport.reset();
   }
 
   function handleResetAll() {
@@ -1782,7 +1676,7 @@ export default function SettingsPage() {
             <Show
               when={pendingImport()}
               fallback={
-                <Show when={!credImport()}>
+                <Show when={!credentialImport.credImport()}>
                   <input
                     ref={importInputRef}
                     type="file"
@@ -1936,22 +1830,22 @@ export default function SettingsPage() {
             While a network unseal is in flight the close controls are disabled so
             the single-use nonce can't be abandoned mid-flight. */}
         <Dialog
-          open={credImport() !== null}
-          onOpenChange={(isOpen) => { if (!isOpen && !unsealInFlight()) handleCancelCredImport(); }}
+          open={credentialImport.credImport() !== null}
+          onOpenChange={(isOpen) => { if (!isOpen && !credentialImport.unsealInFlight() && !committing()) handleCancelCredImport(); }}
           modal
         >
           <Dialog.Portal>
             <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
             <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
               <Show
-                when={resolvedCred()}
+                when={credentialImport.resolvedCred()}
                 fallback={
                   <Show
-                    when={!credTerminalMsg()}
+                    when={!credentialImport.terminalError()}
                     fallback={
                       <>
                         <Dialog.Title class="text-lg font-semibold">Credentials unavailable</Dialog.Title>
-                        <p role="alert" class="text-sm text-error">{credTerminalMsg()}</p>
+                        <p role="alert" class="text-sm text-error">{credentialImport.terminalError()}</p>
                         <div class="flex justify-end gap-2">
                           <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
                             Cancel
@@ -1967,43 +1861,43 @@ export default function SettingsPage() {
                     <p class="text-sm text-base-content/70">
                       Enter the one-time code shown when this file was exported.
                     </p>
-                    <form onSubmit={(e) => { e.preventDefault(); void handleCredCodeSubmit(); }}>
+                    <form onSubmit={(e) => { e.preventDefault(); void credentialImport.handleCodeSubmit(); }}>
                       <div class="flex items-center gap-2">
                         <input
-                          type={showCode() ? "text" : "password"}
+                          type={credentialImport.showCode() ? "text" : "password"}
                           class="input input-sm w-full font-mono"
                           aria-label="One-time code"
                           autocomplete="off"
                           placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-                          value={codeInput()}
-                          onInput={(e) => setCodeInput(e.currentTarget.value)}
+                          value={credentialImport.codeInput()}
+                          onInput={(e) => credentialImport.setCodeInput(e.currentTarget.value)}
                         />
                         <button
                           type="button"
-                          onClick={() => setShowCode((v) => !v)}
+                          onClick={() => credentialImport.setShowCode((v) => !v)}
                           class="btn btn-sm btn-ghost"
-                          aria-pressed={showCode()}
+                          aria-pressed={credentialImport.showCode()}
                         >
-                          {showCode() ? "Hide" : "Show"}
+                          {credentialImport.showCode() ? "Hide" : "Show"}
                         </button>
                       </div>
-                      <Show when={credError()}>
-                        <p role="alert" class="text-error text-xs mt-2">{credError()}</p>
+                      <Show when={credentialImport.error()}>
+                        <p role="alert" class="text-error text-xs mt-2">{credentialImport.error()}</p>
                       </Show>
                       <div class="flex justify-end gap-2 mt-4">
-                        <button type="button" onClick={handleCancelCredImport} disabled={unsealInFlight()} class="btn btn-sm btn-ghost">
+                        <button type="button" onClick={handleCancelCredImport} disabled={credentialImport.unsealInFlight()} class="btn btn-sm btn-ghost">
                           Cancel
                         </button>
-                        <button type="button" onClick={handleContinueWithoutCredentials} disabled={unsealInFlight()} class="btn btn-sm btn-outline">
+                        <button type="button" onClick={handleContinueWithoutCredentials} disabled={credentialImport.unsealInFlight()} class="btn btn-sm btn-outline">
                           Continue without credentials
                         </button>
                         <button
                           type="submit"
-                          disabled={unsealInFlight()}
-                          aria-busy={unsealInFlight()}
+                          disabled={credentialImport.unsealInFlight()}
+                          aria-busy={credentialImport.unsealInFlight()}
                           class="btn btn-sm btn-primary"
                         >
-                          {unsealInFlight() ? "Checking..." : "Submit"}
+                          {credentialImport.unsealInFlight() ? "Checking..." : "Submit"}
                         </button>
                       </div>
                     </form>
@@ -2025,10 +1919,10 @@ export default function SettingsPage() {
                       </p>
                     </div>
                     <div class="flex justify-end gap-2">
-                      <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                      <button type="button" onClick={handleCancelCredImport} disabled={committing()} class="btn btn-sm btn-ghost">
                         Cancel
                       </button>
-                      <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-outline">
+                      <button type="button" onClick={handleContinueWithoutCredentials} disabled={committing()} class="btn btn-sm btn-outline">
                         Continue without credentials
                       </button>
                       <button

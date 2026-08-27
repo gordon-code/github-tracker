@@ -505,6 +505,26 @@ describe("LoginPage — Import from backup", () => {
     expect(settingsTransfer.commitImportedSettings).toHaveBeenCalled();
   });
 
+  it("a commit failure on the identity-confirm path surfaces an inline error and does not navigate", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(true);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockRejectedValue(new Error("commit boom"));
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => screen.getByText(/something went wrong finishing the import/i));
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it("declining the identity dialog leaves the page in place — no navigation, no commit", async () => {
     mockValidCredsFile();
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
@@ -522,6 +542,34 @@ describe("LoginPage — Import from backup", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+  });
+
+  it("pr-test-2: concurrent double-click on Continue calls commitImportedSettings EXACTLY once (finalizeImport in-flight guard)", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(true);
+    let resolveCommit!: (v: { jiraRestored: boolean }) => void;
+    vi.mocked(settingsTransfer.commitImportedSettings).mockReturnValue(
+      new Promise((r) => { resolveCommit = r; })
+    );
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    const continueBtn = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    fireEvent.click(continueBtn);
+    continueBtn.disabled = false;
+    fireEvent.click(continueBtn);
+    resolveCommit({ jiraRestored: true });
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
+    expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledTimes(1);
   });
 
   it("wrong code then correct code: retries against the cached ciphertext, unseals only ONCE", async () => {

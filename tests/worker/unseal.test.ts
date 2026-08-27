@@ -398,6 +398,53 @@ describe("Worker /api/proxy/unseal endpoint", () => {
     expect(json["payload"]).toBeUndefined();
   });
 
+  // (14) Concurrent unseal race — documents the TOCTOU availability-only guarantee ──
+  it("allows both requests of a forced-race concurrent unseal to succeed (single-use is best-effort, not atomic)", async () => {
+    // Forces the actual TOCTOU window in handleProxyUnseal: get-then-put is not
+    // atomic (Cloudflare KV has no compare-and-set). This gate makes the race
+    // deterministic instead of relying on incidental Promise.all interleaving —
+    // whichever request's get() call arrives first is held open until the SECOND
+    // request's get() call has also run, so both observe "not yet consumed"
+    // before either puts. Per the code comment above nonceKv.get/put in index.ts,
+    // this is accepted: a race only ever yields the same still-code-encrypted
+    // (inert) ciphertext, so single-use here is an availability guarantee, not a
+    // confidentiality one.
+    const store = new Map<string, string>();
+    let getCalls = 0;
+    let releaseFirstGet!: () => void;
+    const secondGetArrived = new Promise<void>((resolve) => {
+      releaseFirstGet = resolve;
+    });
+    const kv = {
+      get: vi.fn(async (key: string): Promise<string | null> => {
+        getCalls++;
+        if (getCalls === 1) {
+          await secondGetArrived;
+        } else if (getCalls === 2) {
+          releaseFirstGet();
+        }
+        return store.has(key) ? (store.get(key) as string) : null;
+      }),
+      put: vi.fn(async (key: string, value: string): Promise<void> => {
+        store.set(key, value);
+      }),
+    };
+    const env = makeEnv({ CREDENTIAL_NONCE_KV: kv });
+    const sealed = await sealViaEndpoint(env, "racing-payload");
+
+    const [first, second] = await Promise.all([
+      worker.fetch(makeUnsealRequest({ sealed }), env),
+      worker.fetch(makeUnsealRequest({ sealed }), env),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstJson = (await first.json()) as Record<string, unknown>;
+    const secondJson = (await second.json()) as Record<string, unknown>;
+    expect(firstJson["payload"]).toBe("racing-payload");
+    expect(secondJson["payload"]).toBe("racing-payload");
+  });
+
   // ── Bonus: missing binding surfaces as a deploy error, not a silent import fail ──
   it("returns 503 internal_error when the CREDENTIAL_NONCE_KV binding is missing", async () => {
     const env = makeEnv({ CREDENTIAL_NONCE_KV: undefined as unknown as Env["CREDENTIAL_NONCE_KV"] });

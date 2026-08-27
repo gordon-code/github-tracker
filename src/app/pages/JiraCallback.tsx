@@ -96,9 +96,7 @@ export default function JiraCallback() {
 
     // Acquire Turnstile token before exchange. Action MUST be "jira-token" to
     // match the Worker's verifyTurnstile(..., "jira-token") check for
-    // /api/oauth/jira/token (src/worker/index.ts) — previously this inherited the
-    // hardcoded "seal" default, a pre-existing mismatch fixed here now that
-    // acquireTurnstileToken takes an explicit action.
+    // /api/oauth/jira/token (src/worker/index.ts).
     let turnstileToken: string;
     try {
       turnstileToken = await acquireTurnstileToken(import.meta.env.VITE_TURNSTILE_SITE_KEY as string ?? "", "jira-token");

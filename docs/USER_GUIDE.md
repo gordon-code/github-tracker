@@ -757,12 +757,13 @@ Before signing in, click **Import from backup** on the Login page and choose an 
 
 The encrypted-credentials portion of an export can be **decrypted only once — the moment you first submit the one-time code**, not once per successful import. That first submission is irreversible for that file. This means any of the following, *after* the first code submission, permanently consumes the credentials portion:
 
-- entering a wrong code,
 - declining the identity confirmation,
 - the GitHub token turning out to be revoked or expired,
 - reloading the page or closing the tab.
 
 If any of these happen, the plaintext configuration still imports fine, but the credentials can no longer be restored from that file — **re-export to get a fresh, single-use file** for another migration, test session, or retry.
+
+Entering a wrong code is **not** one of these. Your one-time code is never sent to the server — it's checked locally against the result of that first submission — so a typo is safely retryable in the same session: just retype it and submit again, as long as you have not already declined the confirmation, reloaded the page, or closed the tab.
 
 ### Keep the Export File Safe
 

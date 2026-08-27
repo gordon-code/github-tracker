@@ -205,12 +205,11 @@ export async function sealCredentialBundle(ciphertext: string): Promise<string> 
  * the single-use nonce, so the bundle is STILL valid and callers MUST treat them
  * as non-terminal (keep the code/unseal step available), NOT as a burned bundle:
  *   - `turnstile`: a CLIENT-side Turnstile-acquisition failure BEFORE any request
- *     reached the server (R-101).
+ *     reached the server.
  *   - `network`: a thrown `proxyFetch` (no server response at all), or a server
- *     403 (turnstile_failed) / 503 (internal_error / KV) — all pre-nonce
- *     (SEC-001/API-001).
+ *     403 (turnstile_failed) / 503 (internal_error / KV) — all pre-nonce.
  *   - `rate-limited`: a server 429 from the pre-gate rate limiter, which fires
- *     before Turnstile and long before nonce access (API-001).
+ *     before Turnstile and long before nonce access.
  * Only `expired` and `invalid` are TERMINAL (the single-use bundle is spent /
  * unusable): `invalid` covers a genuine bad blob, wrong key, or already-consumed
  * nonce (401 with no `expired` marker).
@@ -228,7 +227,7 @@ export async function unsealCredentialBundle(
   } catch {
     // Acquisition threw (widget hiccup/timeout/missing key) BEFORE any network
     // request — the server nonce is untouched and the bundle is still valid.
-    // Return a DISTINCT retryable result, NOT the terminal `invalid` (R-101).
+    // Return a DISTINCT retryable result, NOT the terminal `invalid`.
     return { ok: false, reason: "turnstile" };
   }
 
@@ -244,7 +243,7 @@ export async function unsealCredentialBundle(
   } catch {
     // A network throw means NO server response arrived — the single-use nonce was
     // never reached, so the bundle is still valid. Retryable, NOT terminal
-    // `invalid` (SEC-001).
+    // `invalid`.
     return { ok: false, reason: "network" };
   }
 
@@ -262,7 +261,7 @@ export async function unsealCredentialBundle(
 
   // Non-2xx. Statuses that fire BEFORE the server reaches nonce consumption leave
   // the bundle valid → retryable, NOT the terminal `invalid` path
-  // (SEC-001/API-001): 429 rate_limited (pre-gate), 403 turnstile_failed, 503
+  // 429 rate_limited (pre-gate), 403 turnstile_failed, 503
   // internal_error / KV outage.
   if (res.status === 429) return { ok: false, reason: "rate-limited" };
   if (res.status === 403 || res.status === 503) return { ok: false, reason: "network" };

@@ -30,7 +30,7 @@ import type { GitHubUser, JiraAuthState } from "../stores/auth";
 import { pushNotification } from "./errors";
 import { proxyFetch, sealCredentialBundle } from "./proxy";
 
-// ── Export (Task 1) ────────────────────────────────────────────────────────────
+// ── Export ────────────────────────────────────────────────────────────
 
 /**
  * Nested paths stripped from the exported config. Currently only `jira.email`
@@ -67,7 +67,7 @@ export function buildExportPayload(config: Config): Record<string, unknown> {
   return { ...snapshot, _exportVersion: EXPORT_VERSION };
 }
 
-// ── Import (Task 2) ──────────────────────────────────────────────────────────
+// ── Import ──────────────────────────────────────────────────────────
 
 /**
  * Max import file size, in BYTES. Legitimate exports are only a few KB; this
@@ -105,7 +105,7 @@ export function parseImportFile(rawText: string): ParseImportResult {
 
   // (b2) file-level version gate — reject a file stamped with a NEWER export
   // version up front with a clear message, mirroring the envelope/seal
-  // version-byte fail-clean behavior (STRUCT-I-001). A missing/absent
+  // version-byte fail-clean behavior. A missing/absent
   // _exportVersion is treated as version 1 (back-compat with pre-version
   // exports); ConfigSchema strips the key, so it must be read from rawJson here.
   if (rawJson && typeof rawJson === "object") {
@@ -141,7 +141,7 @@ export function parseImportFile(rawText: string): ParseImportResult {
   return { ok: true, config, rawJson };
 }
 
-// ── Client-side envelope encryption (Task 4) ─────────────────────────────────
+// ── Client-side envelope encryption ─────────────────────────────────
 //
 // A fully independent client-side AES-256-GCM implementation (NO shared code
 // with src/worker/crypto.ts). Wire format for the ciphertext genuinely mirrors
@@ -302,7 +302,7 @@ export async function decryptWithCode(
   }
 }
 
-// ── Encrypted credentials export (Task 5) ────────────────────────────────────
+// ── Encrypted credentials export ────────────────────────────────────
 
 /**
  * Schema for the decrypted credential bundle. The Jira sub-object is a
@@ -323,7 +323,7 @@ export const CredentialBundleSchema = z.object({
     // (cloudId/siteName .min(1), siteUrl .url()) so a malformed bundle fails
     // clearly at import via resolveImportedCredentials' generic failure, instead
     // of importing + working in-session then silently vanishing on the next
-    // reload when the stricter JiraAuthStateSchema rejects it (SEC-002).
+    // reload when the stricter JiraAuthStateSchema rejects it.
     z.discriminatedUnion("authMethod", [
       z.object({
         authMethod: z.literal("oauth"),
@@ -423,7 +423,7 @@ export async function buildEncryptedCredentialsSection(): Promise<{
   return { sealed, salt, oneTimeCode };
 }
 
-// ── Encrypted credentials import (Task 6) ────────────────────────────────────
+// ── Encrypted credentials import ────────────────────────────────────
 
 const IMPORT_DECRYPT_FAILED =
   "Couldn't decrypt credentials — check the code and file match.";
@@ -435,8 +435,7 @@ const IMPORT_INSECURE_CONTEXT =
 /**
  * Standard GitHub REST headers for the identity check, mirroring auth.ts's
  * VALIDATE_HEADERS (not exported there) used at every other GET /user site —
- * pins the API version so a future default change can't shift this validation
- * (QA-002).
+ * pins the API version so a future default change can't shift this validation.
  */
 const GITHUB_API_HEADERS = {
   Accept: "application/vnd.github+json",
@@ -455,7 +454,7 @@ const GITHUB_API_HEADERS = {
  * message (uniform-failure security decision); a revoked/expired GitHub token
  * (401 OR network failure) surfaces a distinct message; and the secure-context
  * precondition — an environment condition, not a secret — is surfaced distinctly
- * (R-001) up front so it isn't swallowed into a null that masquerades as a wrong
+ * up front so it isn't swallowed into a null that masquerades as a wrong
  * code.
  */
 export async function resolveImportedCredentials(
@@ -538,7 +537,7 @@ export async function commitImportedSettings(
   setAuthFromCredential(resolved.bundle.github.token, resolved.identity);
 
   // (b) apply the imported config wholesale AFTER identity is established.
-  // STRUCT-I-003: the sealed bundle's authMethod is the tamper-proof source of
+  // The sealed bundle's authMethod is the tamper-proof source of
   // truth for the restored credential SHAPE (the plaintext config.jira.authMethod
   // is user-editable via the export file). Align the config to the bundle so
   // runtime createJiraClient/ensureJiraTokenValid take the branch matching the
@@ -598,12 +597,25 @@ export async function commitImportedSettings(
     return { jiraRestored: false };
   }
 
-  const data = (await resp.json()) as {
-    access_token: string;
-    sealed_refresh_token: string;
-    expires_in: number;
-  };
-  // STRUCT-I-002: clamp expires_in defensively, matching ensureJiraTokenValid's
+  let data: { access_token: string; sealed_refresh_token: string; expires_in: number };
+  try {
+    data = (await resp.json()) as {
+      access_token: string;
+      sealed_refresh_token: string;
+      expires_in: number;
+    };
+  } catch {
+    // A malformed (but 200) refresh body degrades gracefully like the failures
+    // above — GitHub identity/config are already committed, so throwing here
+    // would abort a half-applied import instead of returning jiraRestored:false.
+    pushNotification(
+      "settings-import-jira",
+      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
+      "warning"
+    );
+    return { jiraRestored: false };
+  }
+  // Clamp expires_in defensively, matching ensureJiraTokenValid's
   // handling of the same endpoint's contract — a non-positive/absent value would
   // otherwise yield a past/NaN expiresAt.
   const ttl = typeof data.expires_in === "number" && data.expires_in > 0 ? data.expires_in : 3600;
@@ -619,7 +631,7 @@ export async function commitImportedSettings(
   return { jiraRestored: true };
 }
 
-// ── Login-page import (Task 7) ────────────────────────────────────────────────
+// ── Login-page import ────────────────────────────────────────────────
 
 /**
  * True when the local config indicates prior onboarding or use — the signal the
@@ -628,7 +640,7 @@ export async function commitImportedSettings(
  * onboarding, no repo/org selections) returns `false` and imports straight
  * through to the dashboard without a confirmation prompt. On the Settings page
  * the user is always already authenticated, so that flow always confirms and
- * never consults this helper. (Plan Key Decisions + Task 7 Step 1.)
+ * never consults this helper.
  */
 export function hasExistingLocalConfig(config: Config): boolean {
   return (

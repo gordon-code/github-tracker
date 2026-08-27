@@ -289,6 +289,40 @@ describe("sealWithExpiry / unsealWithExpiry", () => {
     if (!result.ok) expect(result.reason).toBe("expired");
   });
 
+  it("accepts a bundle exactly at the maxAgeMs boundary (strict '>' comparison is inclusive of the exact instant)", async () => {
+    // Freeze the clock so createdAt and the internal Date.now() check inside
+    // unsealWithExpiry read the identical instant — otherwise real time elapsed
+    // during the crypto operations below would push the age past maxAgeMs and
+    // make this boundary test flaky.
+    const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
+    const payload = "boundary-inner";
+    const nonce = toBase64Url(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload)))
+    );
+    const now = Date.now();
+    const createdAt = now - CREDENTIAL_BUNDLE_EXPIRY_MS; // Date.now() - createdAt === maxAgeMs exactly
+    const sealed = await sealToken(JSON.stringify({ createdAt, nonce, payload }), key);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const result = await unsealWithExpiry(
+        sealed,
+        KEY_A,
+        undefined,
+        SEAL_SALT,
+        BUNDLE_INFO,
+        CREDENTIAL_BUNDLE_EXPIRY_MS
+      );
+      // age === maxAgeMs exactly; the strict `>` check does not reject this —
+      // only strictly-greater ages expire.
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.payload).toBe(payload);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns reason 'invalid' for a bit-flipped ciphertext", async () => {
     const key = await deriveKey(KEY_A, SEAL_SALT, BUNDLE_INFO, "encrypt");
     const sealed = await sealWithExpiry("inner", key);

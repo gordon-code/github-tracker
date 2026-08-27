@@ -10,15 +10,9 @@ import {
   GITHUB_FINE_GRAINED_PAT_URL,
 } from "../lib/pat";
 import { buildAuthorizeUrl } from "../lib/oauth";
-import { unsealCredentialBundle } from "../lib/proxy";
-import {
-  parseImportFile,
-  resolveImportedCredentials,
-  commitImportedSettings,
-  hasExistingLocalConfig,
-  CredentialsSectionSchema,
-} from "../lib/settings-transfer";
-import type { CredentialBundle, CredentialsSection } from "../lib/settings-transfer";
+import { commitImportedSettings, hasExistingLocalConfig } from "../lib/settings-transfer";
+import type { CredentialBundle } from "../lib/settings-transfer";
+import { createCredentialImport } from "../lib/use-credential-import";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -41,7 +35,7 @@ export default function LoginPage() {
   const [patError, setPatError] = createSignal<string | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
 
-  // ── Import from backup (pre-auth, Task 7) ────────────────────────────────────
+  // ── Import from backup (pre-auth) ─────────────────────────────────────────
   // This is a SIBLING entry point to the PAT-form toggle. It has its OWN local
   // error area because patError()'s <p id="pat-error"> lives only inside the
   // PAT-form branch and never renders here; and pushNotification()/ToastContainer
@@ -49,16 +43,6 @@ export default function LoginPage() {
   // would be silently invisible — all errors here MUST use this local area.
   const [showImport, setShowImport] = createSignal(false);
   const [importError, setImportError] = createSignal<string | null>(null);
-  // Set when the selected file parses AND carries a valid _credentials section.
-  const [credImport, setCredImport] = createSignal<{ config: Config; credentials: CredentialsSection } | null>(null);
-  const [codeInput, setCodeInput] = createSignal("");
-  const [showCode, setShowCode] = createSignal(false);
-  const [unsealInFlight, setUnsealInFlight] = createSignal(false);
-  const [cachedCiphertext, setCachedCiphertext] = createSignal<string | null>(null);
-  // A terminal (non-retryable) message: the single-use bundle is spent
-  // (expired/invalid) — the code prompt is withdrawn.
-  const [credTerminal, setCredTerminal] = createSignal<string | null>(null);
-  const [resolvedCred, setResolvedCred] = createSignal<{ bundle: CredentialBundle; identity: GitHubUser } | null>(null);
   const [importCommitting, setImportCommitting] = createSignal(false);
   let importInputRef: HTMLInputElement | undefined;
 
@@ -108,86 +92,10 @@ export default function LoginPage() {
 
   // ── Import handlers ──────────────────────────────────────────────────────────
 
-  // Generation counter tying an in-flight unseal/resolve to the file that started
-  // it (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
-  // new file selection; the submit handler captures it before each await and
-  // bails if it changed, so a Cancel-then-reselect during the multi-second
-  // unseal/resolve window can't strand one file's ciphertext/credential into a
-  // different file's shared signals — which pre-auth would auto-login the
-  // abandoned file's identity.
-  let unsealGen = 0;
-
-  function resetImportState() {
-    unsealGen++;
-    setCredImport(null);
-    setCodeInput("");
-    setShowCode(false);
-    setUnsealInFlight(false);
-    setCachedCiphertext(null);
-    setCredTerminal(null);
-    setResolvedCred(null);
-    setImportError(null);
-  }
-
-  function openImport() {
-    setShowPatForm(false);
-    setPatError(null);
-    setPatInput("");
-    resetImportState();
-    setShowImport(true);
-  }
-
-  function closeImport() {
-    setShowImport(false);
-    resetImportState();
-  }
-
-  async function handleImportFileSelected(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    // Allow re-selecting the same file (change won't fire otherwise).
-    try { input.value = ""; } catch { /* ignore if unsupported */ }
-    if (!file) return;
-    resetImportState();
-    let text: string;
-    try {
-      // A read rejection (unreadable/binary file) is treated the same as a parse
-      // failure — surfaced in the local error area (never pushNotification).
-      text = await file.text();
-    } catch {
-      setImportError("Could not read that file — choose a valid settings export.");
-      return;
-    }
-    const result = parseImportFile(text);
-    if (!result.ok) {
-      // Case (a): malformed JSON / oversized / schema-invalid.
-      setImportError(`Import failed: ${result.errors[0] ?? "invalid settings file"}`);
-      return;
-    }
-    // Detect a credentials section via schema validation (NOT a bare "in" check —
-    // a hand-crafted `_credentials: null` would pass that and then throw on
-    // dereference). A malformed/null/non-object one is treated as case (b).
-    const rawCreds =
-      result.rawJson && typeof result.rawJson === "object"
-        ? (result.rawJson as Record<string, unknown>)._credentials
-        : undefined;
-    const credSection = CredentialsSectionSchema.safeParse(rawCreds);
-    if (!credSection.success) {
-      // Case (b): a valid export with NO credentials — the Login page can only
-      // auto-login from a credentials-bearing file. Point the user at the normal
-      // sign-in + Settings-page import path.
-      setImportError(
-        "This export doesn't contain credentials — sign in normally first, then use Import on the Settings page to restore your configuration."
-      );
-      return;
-    }
-    // Case (c): valid _credentials — prompt for the one-time code (Step 3).
-    setCredImport({ config: result.config, credentials: credSection.data });
-  }
-
   async function finalizeImport(bundle: CredentialBundle, identity: GitHubUser, importedConfig: Config) {
     if (importCommitting()) return;
     setImportCommitting(true);
+    setImportError(null);
     try {
       // commitImportedSettings awaits clearIdentityData() first when user() is
       // null (pre-auth) — clearing a prior identity's IndexedDB cache + poll
@@ -201,78 +109,62 @@ export default function LoginPage() {
     }
   }
 
-  async function handleImportCodeSubmit(e?: Event) {
-    e?.preventDefault();
-    if (unsealInFlight()) return; // in-flight guard: exactly one network unseal
-    const ci = credImport();
-    if (!ci) return;
-    const code = codeInput();
-    setImportError(null);
-    const gen = unsealGen; // capture before the first await
-
-    let ciphertext = cachedCiphertext();
-    if (ciphertext === null) {
-      // FIRST submission — single-use network unseal (consumes the bundle nonce
-      // server-side). Never retried; wrong-code retries run against the cache.
-      setUnsealInFlight(true);
-      const res = await unsealCredentialBundle(ci.credentials.sealed).finally(() =>
-        setUnsealInFlight(false)
+  const credentialImport = createCredentialImport({
+    expiredMessage:
+      "This export's credentials have expired — re-export from a machine where you're still signed in, then try again.",
+    onReadError: (message) => setImportError(message),
+    onParseError: (message) => setImportError(message),
+    onNoCredentials: () => {
+      // The Login page can only auto-login from a credentials-bearing file.
+      // Point the user at the normal sign-in + Settings-page import path.
+      setImportError(
+        "This export doesn't contain credentials — sign in normally first, then use Import on the Settings page to restore your configuration."
       );
-      // A changed unsealGen means a Cancel-then-reselect started a different file
-      // while this await was pending; writing any signal now (or auto-logging in)
-      // would use the abandoned file's identity, so stop here.
-      if (gen !== unsealGen) return;
-      if (!res.ok) {
-        if (res.reason === "turnstile" || res.reason === "network" || res.reason === "rate-limited") {
-          // Pre-nonce-consumption failure — the nonce was NOT consumed, so this
-          // is retryable. Keep the code prompt available and show a retryable
-          // inline message (do NOT withdraw the prompt).
-          setImportError(
-            res.reason === "rate-limited"
-              ? "Too many attempts — wait a moment and try again."
-              : res.reason === "network"
-                ? "Network problem — please try again."
-                : "Verification failed — please try again."
-          );
-          return;
-        }
-        // expired/invalid are terminal — the single-use bundle is spent. Show the
-        // message and withdraw the code prompt (re-export to retry).
-        setCredTerminal(
-          res.reason === "expired"
-            ? "This export's credentials have expired — re-export from a machine where you're still signed in, then try again."
-            : "Couldn't decrypt credentials — check the code and file match."
-        );
+    },
+    onResolved: (bundle, identity, importedConfig) => {
+      if (hasExistingLocalConfig(config)) {
+        // Prior local state to protect — confirm the identity switch first.
+        // Clear any error from a prior failed attempt so it can't render stale
+        // in the identity-confirm step's alert.
+        setImportError(null);
+        credentialImport.setResolvedCred({ bundle, identity });
         return;
       }
-      ciphertext = res.ciphertext;
-      setCachedCiphertext(ciphertext);
-    }
+      // Genuinely fresh/incognito session — skip the dialog, commit straight through.
+      void finalizeImport(bundle, identity, importedConfig);
+    },
+  });
 
-    // Client-side, retryable against the cached ciphertext (no re-unseal).
-    const resolved = await resolveImportedCredentials(ciphertext, ci.credentials.salt, code);
-    // The resolve await is another window where a Cancel-then-reselect can change
-    // unsealGen (unsealInFlight is false here); discard the result if so.
-    if (gen !== unsealGen) return;
-    if (!resolved.ok) {
-      setImportError(resolved.error);
-      return;
-    }
+  function openImport() {
+    setShowPatForm(false);
+    setPatError(null);
+    setPatInput("");
+    setImportError(null);
+    credentialImport.reset();
+    setShowImport(true);
+  }
 
-    if (hasExistingLocalConfig(config)) {
-      // Prior local state to protect — confirm the identity switch first.
-      setResolvedCred({ bundle: resolved.bundle, identity: resolved.identity });
-      return;
-    }
-    // Genuinely fresh/incognito session — skip the dialog, commit straight through.
-    await finalizeImport(resolved.bundle, resolved.identity, ci.config);
+  function closeImport() {
+    setShowImport(false);
+    setImportError(null);
+    credentialImport.reset();
+  }
+
+  async function handleImportFileSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Allow re-selecting the same file (change won't fire otherwise).
+    try { input.value = ""; } catch { /* ignore if unsupported */ }
+    if (!file) return;
+    setImportError(null);
+    await credentialImport.handleFileSelected(file);
   }
 
   async function handleConfirmImport() {
-    const ci = credImport();
-    const rc = resolvedCred();
-    if (!ci || !rc) return;
-    await finalizeImport(rc.bundle, rc.identity, ci.config);
+    const cred = credentialImport.credImport();
+    const rc = credentialImport.resolvedCred();
+    if (!cred || !rc) return;
+    await finalizeImport(rc.bundle, rc.identity, cred.config);
   }
 
   return (
@@ -441,7 +333,7 @@ export default function LoginPage() {
                     </>
                   }
                 >
-                  <Match when={resolvedCred()}>
+                  <Match when={credentialImport.resolvedCred()}>
                     {(rc) => (
                       <div class="flex flex-col gap-4">
                         <div class="flex items-center gap-3 text-left">
@@ -455,6 +347,9 @@ export default function LoginPage() {
                             replace your current settings — continue?
                           </p>
                         </div>
+                        <Show when={importError()}>
+                          <p role="alert" class="text-error text-xs text-left">{importError()}</p>
+                        </Show>
                         <div class="flex gap-2">
                           <button
                             type="button"
@@ -465,7 +360,7 @@ export default function LoginPage() {
                           >
                             {importCommitting() ? "Importing..." : "Continue"}
                           </button>
-                          <button type="button" onClick={closeImport} class="btn btn-sm btn-ghost">
+                          <button type="button" onClick={closeImport} disabled={importCommitting()} class="btn btn-sm btn-ghost">
                             Cancel
                           </button>
                         </div>
@@ -473,54 +368,59 @@ export default function LoginPage() {
                     )}
                   </Match>
 
-                  <Match when={credImport()}>
+                  <Match when={credentialImport.credImport()}>
                     <Show
-                      when={!credTerminal()}
+                      when={!credentialImport.terminalError()}
                       fallback={
                         <div class="flex flex-col gap-4">
-                          <p role="alert" class="text-error text-xs text-left">{credTerminal()}</p>
+                          <p role="alert" class="text-error text-xs text-left">{credentialImport.terminalError()}</p>
                           <button type="button" onClick={closeImport} class="btn btn-sm btn-neutral">
                             Back to sign in
                           </button>
                         </div>
                       }
                     >
-                      <form onSubmit={(e) => void handleImportCodeSubmit(e)} class="flex flex-col gap-4">
+                      <form onSubmit={(e) => { e.preventDefault(); void credentialImport.handleCodeSubmit(); }} class="flex flex-col gap-4">
                         <p class="text-sm text-base-content/70 text-left">
                           Enter the one-time code shown when this file was exported.
                         </p>
                         <div class="flex items-center gap-2">
                           <input
-                            type={showCode() ? "text" : "password"}
+                            type={credentialImport.showCode() ? "text" : "password"}
                             class="input input-bordered input-sm w-full font-mono"
                             aria-label="One-time code"
                             autocomplete="off"
                             placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-                            value={codeInput()}
-                            onInput={(e) => setCodeInput(e.currentTarget.value)}
+                            value={credentialImport.codeInput()}
+                            onInput={(e) => credentialImport.setCodeInput(e.currentTarget.value)}
                           />
                           <button
                             type="button"
-                            onClick={() => setShowCode((v) => !v)}
+                            onClick={() => credentialImport.setShowCode((v) => !v)}
                             class="btn btn-sm btn-ghost"
-                            aria-pressed={showCode()}
+                            aria-pressed={credentialImport.showCode()}
                           >
-                            {showCode() ? "Hide" : "Show"}
+                            {credentialImport.showCode() ? "Hide" : "Show"}
                           </button>
                         </div>
-                        <Show when={importError()}>
-                          <p role="alert" class="text-error text-xs text-left">{importError()}</p>
+                        {/* credentialImport.error() covers retryable code-submit
+                            failures (turnstile/network/wrong-code); importError()
+                            additionally covers a finalizeImport commit failure on
+                            the skip-the-dialog fast path, which surfaces here since
+                            this form is still the active branch when that happens. */}
+                        <Show when={credentialImport.error() ?? importError()}>
+                          <p role="alert" class="text-error text-xs text-left">{credentialImport.error() ?? importError()}</p>
                         </Show>
                         <div class="flex gap-2">
                           <button
                             type="submit"
-                            disabled={unsealInFlight()}
-                            aria-busy={unsealInFlight()}
+                            disabled={credentialImport.unsealInFlight() || importCommitting()}
+                            aria-busy={credentialImport.unsealInFlight() || importCommitting()}
                             class="btn btn-sm btn-primary flex-1"
                           >
-                            {unsealInFlight() ? "Checking..." : "Restore credentials"}
+                            {credentialImport.unsealInFlight() || importCommitting() ? "Checking..." : "Restore credentials"}
                           </button>
-                          <button type="button" onClick={closeImport} disabled={unsealInFlight()} class="btn btn-sm btn-ghost">
+                          <button type="button" onClick={closeImport} disabled={credentialImport.unsealInFlight() || importCommitting()} class="btn btn-sm btn-ghost">
                             Cancel
                           </button>
                         </div>

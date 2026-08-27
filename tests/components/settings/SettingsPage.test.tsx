@@ -1686,6 +1686,35 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     });
   });
 
+  it("pr-test-2: concurrent double-click on Continue calls commitImportedSettings EXACTLY once (in-flight guard)", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    let resolveCommit!: (v: { jiraRestored: boolean }) => void;
+    vi.mocked(settingsTransfer.commitImportedSettings).mockReturnValue(
+      new Promise((r) => { resolveCommit = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    const continueBtn = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    fireEvent.click(continueBtn);
+    // Force a second dispatch past the (already-applied) disabled attribute to
+    // exercise the in-function re-entry guard directly.
+    continueBtn.disabled = false;
+    fireEvent.click(continueBtn);
+    resolveCommit({ jiraRestored: true });
+
+    await waitFor(() => {
+      expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("'continue without credentials' routes through the shared two-click confirm, then applies plaintext config (no unseal)", async () => {
     const user = userEvent.setup();
     updateConfig({ theme: "light" });
