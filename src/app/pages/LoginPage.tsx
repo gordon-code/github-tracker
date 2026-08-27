@@ -92,15 +92,21 @@ export default function LoginPage() {
 
   // ── Import handlers ──────────────────────────────────────────────────────────
 
-  async function finalizeImport(bundle: CredentialBundle, identity: GitHubUser, importedConfig: Config) {
+  async function finalizeImport(
+    bundle: CredentialBundle,
+    identity: GitHubUser,
+    importedConfig: Config,
+    viewPreferences: unknown
+  ) {
     if (importCommitting()) return;
     setImportCommitting(true);
     setImportError(null);
     try {
       // commitImportedSettings awaits clearIdentityData() first when user() is
       // null (pre-auth) — clearing a prior identity's IndexedDB cache + poll
-      // state BEFORE the imported identity/config are established.
-      await commitImportedSettings({ bundle, identity }, importedConfig);
+      // state BEFORE the imported identity/config/view-preferences are
+      // established.
+      await commitImportedSettings({ bundle, identity }, importedConfig, viewPreferences);
       navigate("/", { replace: true });
     } catch {
       setImportError("Something went wrong finishing the import — please try again.");
@@ -121,7 +127,7 @@ export default function LoginPage() {
         "This export doesn't contain credentials — sign in normally first, then use Import on the Settings page to restore your configuration."
       );
     },
-    onResolved: (bundle, identity, importedConfig) => {
+    onResolved: (bundle, identity, importedConfig, viewPreferences) => {
       if (hasExistingLocalConfig(config)) {
         // Prior local state to protect — confirm the identity switch first.
         // Clear any error from a prior failed attempt so it can't render stale
@@ -131,7 +137,7 @@ export default function LoginPage() {
         return;
       }
       // Genuinely fresh/incognito session — skip the dialog, commit straight through.
-      void finalizeImport(bundle, identity, importedConfig);
+      void finalizeImport(bundle, identity, importedConfig, viewPreferences);
     },
   });
 
@@ -164,7 +170,7 @@ export default function LoginPage() {
     const cred = credentialImport.credImport();
     const rc = credentialImport.resolvedCred();
     if (!cred || !rc) return;
-    await finalizeImport(rc.bundle, rc.identity, cred.config);
+    await finalizeImport(rc.bundle, rc.identity, cred.config, cred.viewPreferences);
   }
 
   return (

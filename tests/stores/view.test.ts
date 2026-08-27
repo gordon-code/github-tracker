@@ -28,6 +28,8 @@ import {
   untrackJiraItem,
   moveJiraItem,
   setJiraCustomOrder,
+  applyImportedViewState,
+  EXPORTED_VIEW_PREF_KEYS,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem, ViewState } from "../../src/app/stores/view";
 import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
@@ -1505,5 +1507,102 @@ describe("loadViewState — cap-guard integration", () => {
 
     expect(mod.viewState.jiraCustomOrder).toEqual([]);
     expect(mod.viewState.lastActiveTab).toBe("jiraAssigned");
+  });
+});
+
+// ── Task 3: import + apply curated view preferences ───────────────────────────
+
+describe("applyImportedViewState", () => {
+  beforeEach(() => {
+    clearNotifications();
+  });
+
+  it("overlays curated keys present in the input", () => {
+    applyImportedViewState({ jiraCustomOrder: ["PROJ-1", "PROJ-2"], showPrRuns: true });
+    expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2"]);
+    expect(viewState.showPrRuns).toBe(true);
+  });
+
+  it("never touches lastActiveTab, globalSort, or globalFilter, even when present in the input", () => {
+    applyImportedViewState({
+      lastActiveTab: "actions",
+      globalSort: { field: "title", direction: "asc" },
+      globalFilter: { org: "evil-org", repo: "evil-repo" },
+      showPrRuns: true,
+    });
+    // The excluded keys stay at their pre-call (default) values...
+    expect(viewState.lastActiveTab).toBe("issues");
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
+    expect(viewState.globalFilter).toEqual({ org: null, repo: null });
+    // ...while a curated key in the SAME call still applies.
+    expect(viewState.showPrRuns).toBe(true);
+  });
+
+  it("defaults a stripped (missing) ignoredItems title to ''", () => {
+    applyImportedViewState({
+      ignoredItems: [{ id: 1, type: "issue", repo: "org/repo", ignoredAt: 1000 }],
+    });
+    expect(viewState.ignoredItems).toEqual([
+      { id: 1, type: "issue", repo: "org/repo", ignoredAt: 1000, title: "" },
+    ]);
+  });
+
+  it("defaults a stripped (missing) trackedItems title to '', leaving htmlUrl/jiraStatus absent", () => {
+    applyImportedViewState({
+      trackedItems: [
+        { id: 2, number: 42, type: "issue", source: "github", repoFullName: "org/repo", addedAt: 2000 },
+      ],
+    });
+    expect(viewState.trackedItems).toHaveLength(1);
+    expect(viewState.trackedItems[0]).toMatchObject({
+      id: 2,
+      number: 42,
+      type: "issue",
+      source: "github",
+      repoFullName: "org/repo",
+      addedAt: 2000,
+      title: "",
+    });
+    expect("htmlUrl" in viewState.trackedItems[0]).toBe(false);
+    expect("jiraStatus" in viewState.trackedItems[0]).toBe(false);
+  });
+
+  it.each([null, undefined, "a string", 42, [], ["also", "an", "array"]])(
+    "is a total silent no-op for wholly-malformed input: %p",
+    (malformed) => {
+      const before = JSON.parse(JSON.stringify(viewState));
+      expect(() => applyImportedViewState(malformed)).not.toThrow();
+      expect(JSON.parse(JSON.stringify(viewState))).toEqual(before);
+      expect(getNotifications()).toHaveLength(0);
+    }
+  );
+
+  it("skips an individually-invalid key without dropping other valid keys in the same call", () => {
+    applyImportedViewState({
+      showPrRuns: true,
+      // tabFilters must be an object; a string fails ViewStateSchema validation
+      // for this key and must be skipped, not thrown or allowed to corrupt state.
+      tabFilters: "not-an-object",
+    });
+    expect(viewState.showPrRuns).toBe(true);
+    // Untouched — still the schema default, not corrupted by the invalid input.
+    expect(viewState.tabFilters.issues.scope).toBe("involves_me");
+  });
+
+  it("never pushes a notification, unlike updateViewState's warn-on-reject behavior", () => {
+    applyImportedViewState({ tabFilters: "not-an-object", showPrRuns: "not-a-boolean" });
+    expect(getNotifications()).toHaveLength(0);
+  });
+
+  it("leaves an absent curated key untouched rather than resetting it to schema defaults", () => {
+    setJiraCustomOrder(["PRE-EXISTING"]);
+    applyImportedViewState({ showPrRuns: true }); // jiraCustomOrder absent from input
+    expect(viewState.jiraCustomOrder).toEqual(["PRE-EXISTING"]);
+  });
+
+  it("EXPORTED_VIEW_PREF_KEYS excludes lastActiveTab, globalSort, and globalFilter", () => {
+    expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("lastActiveTab");
+    expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("globalSort");
+    expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("globalFilter");
   });
 });

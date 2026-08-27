@@ -476,7 +476,8 @@ describe("LoginPage — Import from backup", () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));
     expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledWith(
       { bundle: BUNDLE, identity: IDENTITY },
-      expect.objectContaining({ theme: expect.any(String) })
+      expect.objectContaining({ theme: expect.any(String) }),
+      undefined // no _viewPreferences section in this test's mocked file content
     );
     expect(screen.queryByText(/sign you in as/i)).toBeNull();
   });

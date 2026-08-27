@@ -1271,6 +1271,96 @@ describe("commitImportedSettings", () => {
   });
 });
 
+// ── Task 3: full export -> import round-trip for view preferences ─────────────
+
+describe("commitImportedSettings — view preferences round-trip", () => {
+  const identity = { login: "newuser", avatar_url: "https://avatars/new", name: "New User" };
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(cacheStore.clearCache).mockResolvedValue(undefined);
+    authStore.clearAuth(); // clean baseline: token/user null, config/view reset
+  });
+
+  it("restores every curated view preference and scrubs item content, leaving transient keys at their post-import defaults", async () => {
+    // ── Arrange: one non-default value per curated key, on the "exporting" side.
+    updateViewState({
+      jiraCustomOrder: ["PROJ-1", "PROJ-2"],
+      expandedRepos: { issues: { "org/repo": true }, pullRequests: {}, actions: {}, jiraAssigned: {} },
+      lockedRepos: { issues: ["org/locked"], pullRequests: [], actions: [], jiraAssigned: [] },
+      tabFilters: {
+        issues: { scope: "all", role: "author", comments: "has", user: "someone" },
+        pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
+        actions: { conclusion: "all", event: "all" },
+        jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: "custom", sortDirection: "asc" },
+        dependencies: { updateType: "all", bot: "all" },
+      },
+      customTabFilters: { "custom-1": { status: "open" } },
+      dependencyExpandedGroups: ["major", "minor"],
+      showPrRuns: true,
+      hideDepDashboard: false,
+      ignoredItems: [{ id: 1, type: "issue", repo: "org/repo", title: "Secret ignored title", ignoredAt: 1000 }],
+      trackedItems: [
+        { id: 2, number: 42, type: "issue", source: "github", repoFullName: "org/repo", title: "Secret tracked title", addedAt: 2000, htmlUrl: "https://github.com/org/repo/issues/42" },
+      ],
+      // Deliberately non-default so a leak of these excluded keys would be caught.
+      lastActiveTab: "actions",
+      globalSort: { field: "title", direction: "asc" },
+      globalFilter: { org: "some-org", repo: "some-repo" },
+    });
+
+    const payload = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const fileText = JSON.stringify(payload);
+
+    // ── Simulate importing on a fresh machine with no prior view state.
+    resetViewState();
+    expect(viewState.jiraCustomOrder).toEqual([]); // sanity: reset actually cleared it
+
+    const parsed = parseImportFile(fileText);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const rawViewPreferences = (parsed.rawJson as Record<string, unknown>)._viewPreferences;
+
+    // user() mocked to the SAME identity being "imported" so setAuthFromCredential's
+    // identity-switch reset cascade doesn't fire and reset viewState out from under
+    // this test's own assertions (mirrors the "commits identity strictly before
+    // config" tests above).
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    await commitImportedSettings(
+      { bundle: { github: { token: "ghp_x", method: "pat" }, jira: null }, identity },
+      parsed.config,
+      rawViewPreferences
+    );
+
+    // ── Assert: every curated key restored...
+    expect(viewState.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2"]);
+    expect(viewState.expandedRepos.issues).toEqual({ "org/repo": true });
+    expect(viewState.lockedRepos.issues).toEqual(["org/locked"]);
+    expect(viewState.tabFilters.issues).toMatchObject({ scope: "all", role: "author", comments: "has", user: "someone" });
+    expect(viewState.customTabFilters).toEqual({ "custom-1": { status: "open" } });
+    expect(viewState.dependencyExpandedGroups).toEqual(["major", "minor"]);
+    expect(viewState.showPrRuns).toBe(true);
+    expect(viewState.hideDepDashboard).toBe(false);
+
+    // ...ignored/tracked items restored as REFERENCES ONLY — title stripped on
+    // export, defaulted back to "" on import (not the original secret content).
+    expect(viewState.ignoredItems).toEqual([
+      { id: 1, type: "issue", repo: "org/repo", ignoredAt: 1000, title: "" },
+    ]);
+    expect(viewState.trackedItems).toHaveLength(1);
+    expect(viewState.trackedItems[0]).toMatchObject({
+      id: 2, number: 42, type: "issue", source: "github", repoFullName: "org/repo", addedAt: 2000, title: "",
+    });
+    expect("htmlUrl" in viewState.trackedItems[0]).toBe(false);
+
+    // ...while the excluded/transient keys stay at their POST-RESET defaults —
+    // never restored, proving they were never in the export in the first place.
+    expect(viewState.lastActiveTab).toBe("issues");
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
+    expect(viewState.globalFilter).toEqual({ org: null, repo: null });
+  });
+});
+
 // ── Task 7: hasExistingLocalConfig (Login-page confirmation-skip detector) ─────
 
 describe("hasExistingLocalConfig", () => {

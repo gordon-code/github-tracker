@@ -22,10 +22,19 @@ export interface CreateCredentialImportOptions {
   onReadError: (message: string) => void;
   /** parseImportFile rejected the file (malformed JSON / oversized / schema-invalid). */
   onParseError: (message: string) => void;
-  /** The file parsed but carries no valid `_credentials` section. */
-  onNoCredentials: (config: Config) => void;
-  /** The one-time code resolved successfully against the (possibly cached) ciphertext. */
-  onResolved: (bundle: CredentialBundle, identity: GitHubUser, config: Config) => void;
+  /**
+   * The file parsed but carries no valid `_credentials` section.
+   * `viewPreferences` is the file's raw (unvalidated) `_viewPreferences`
+   * section, if present — pass it straight through to `applyImportedViewState`
+   * at whatever point the caller commits `config`; it's total/no-throw so
+   * passing `undefined` when absent is safe.
+   */
+  onNoCredentials: (config: Config, viewPreferences: unknown) => void;
+  /**
+   * The one-time code resolved successfully against the (possibly cached)
+   * ciphertext. `viewPreferences` — see `onNoCredentials` above.
+   */
+  onResolved: (bundle: CredentialBundle, identity: GitHubUser, config: Config, viewPreferences: unknown) => void;
 }
 
 /**
@@ -38,7 +47,7 @@ export interface CreateCredentialImportOptions {
  * policy via `onResolved`.
  */
 export function createCredentialImport(opts: CreateCredentialImportOptions) {
-  const [credImport, setCredImport] = createSignal<{ config: Config; credentials: CredentialsSection } | null>(null);
+  const [credImport, setCredImport] = createSignal<{ config: Config; credentials: CredentialsSection; viewPreferences: unknown } | null>(null);
   const [codeInput, setCodeInput] = createSignal("");
   const [showCode, setShowCode] = createSignal(false);
   const [unsealInFlight, setUnsealInFlight] = createSignal(false);
@@ -87,16 +96,19 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
     // "in" check — a hand-crafted `_credentials: null` would pass that and then
     // throw on dereference). A malformed/null/non-object one falls through to
     // the no-credentials callback.
-    const rawCreds =
+    const rawFile =
       result.rawJson && typeof result.rawJson === "object"
-        ? (result.rawJson as Record<string, unknown>)._credentials
+        ? (result.rawJson as Record<string, unknown>)
         : undefined;
-    const credSection = CredentialsSectionSchema.safeParse(rawCreds);
+    // Raw (unvalidated) — applyImportedViewState (called by whatever the
+    // caller commits config through) validates it, total/no-throw.
+    const viewPreferences = rawFile?._viewPreferences;
+    const credSection = CredentialsSectionSchema.safeParse(rawFile?._credentials);
     if (!credSection.success) {
-      opts.onNoCredentials(result.config);
+      opts.onNoCredentials(result.config, viewPreferences);
       return;
     }
-    setCredImport({ config: result.config, credentials: credSection.data });
+    setCredImport({ config: result.config, credentials: credSection.data, viewPreferences });
   }
 
   async function handleCodeSubmit() {
@@ -150,7 +162,7 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
       setError(resolved.error);
       return;
     }
-    opts.onResolved(resolved.bundle, resolved.identity, cred.config);
+    opts.onResolved(resolved.bundle, resolved.identity, cred.config, cred.viewPreferences);
   }
 
   return {

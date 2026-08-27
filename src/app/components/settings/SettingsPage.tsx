@@ -12,7 +12,7 @@ import {
   commitImportedSettings,
 } from "../../lib/settings-transfer";
 import { createCredentialImport } from "../../lib/use-credential-import";
-import { viewState, updateViewState, setTabFilter } from "../../stores/view";
+import { viewState, updateViewState, setTabFilter, applyImportedViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
 import { isValidPatFormat } from "../../lib/pat";
@@ -343,9 +343,10 @@ export default function SettingsPage() {
   }
 
   // ── Import settings (plaintext) ────────────────────────────────────────────
-  // pendingImport holds the parsed-and-validated Config awaiting confirmation;
+  // pendingImport holds the parsed-and-validated Config (+ the file's raw,
+  // as-yet-unvalidated _viewPreferences section, if any) awaiting confirmation;
   // non-null doubles as the two-click confirm state (mirrors confirmReset).
-  const [pendingImport, setPendingImport] = createSignal<Config | null>(null);
+  const [pendingImport, setPendingImport] = createSignal<{ config: Config; viewPreferences: unknown } | null>(null);
   let importInputRef: HTMLInputElement | undefined;
 
   // ── Import settings (encrypted credentials) ───────────────────────────────
@@ -358,7 +359,7 @@ export default function SettingsPage() {
       "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials.",
     onReadError: (message) => pushNotification("settings-import", message, "warning"),
     onParseError: (message) => pushNotification("settings-import", message, "warning"),
-    onNoCredentials: (importedConfig) => setPendingImport(importedConfig),
+    onNoCredentials: (importedConfig, viewPreferences) => setPendingImport({ config: importedConfig, viewPreferences }),
     onResolved: (bundle, identity) => credentialImport.setResolvedCred({ bundle, identity }),
   });
 
@@ -372,11 +373,15 @@ export default function SettingsPage() {
   }
 
   function handleConfirmImport() {
-    const imported = pendingImport();
-    if (!imported) return;
+    const pending = pendingImport();
+    if (!pending) return;
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
     // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
-    setConfig(imported);
+    setConfig(pending.config);
+    // Identity is already established on this page (Settings is post-auth) —
+    // applyImportedViewState is total/no-throw, so this is safe even when the
+    // file carries no _viewPreferences section at all.
+    applyImportedViewState(pending.viewPreferences);
     resyncLocalEditors();
     setPendingImport(null);
     pushNotification("settings-import", "Settings imported", "info");
@@ -393,7 +398,7 @@ export default function SettingsPage() {
     if (!cred || !rc) return;
     setCommitting(true);
     try {
-      await commitImportedSettings(rc, cred.config);
+      await commitImportedSettings(rc, cred.config, cred.viewPreferences);
       resyncLocalEditors();
       credentialImport.reset();
       pushNotification("settings-import", "Settings and credentials imported", "info");
@@ -407,12 +412,12 @@ export default function SettingsPage() {
   function handleContinueWithoutCredentials() {
     const cred = credentialImport.credImport();
     if (!cred) return;
-    const cfg = cred.config;
+    const { config: cfg, viewPreferences } = cred;
     credentialImport.reset();
     // Route the plaintext-only path through the SAME two-click confirm the
     // plaintext import uses (pendingImport), so both wholesale-replace paths
     // confirm consistently. handleConfirmImport applies it + resyncs the editors.
-    setPendingImport(cfg);
+    setPendingImport({ config: cfg, viewPreferences });
   }
 
   function handleCancelCredImport() {

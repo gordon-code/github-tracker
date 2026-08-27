@@ -18,6 +18,7 @@ import { z } from "zod";
 import { ConfigSchema } from "../../shared/schemas";
 import type { Config } from "../../shared/schemas";
 import { preParseConfigFixups, postParseConfigFixups, config, setConfig } from "../stores/config";
+import { EXPORTED_VIEW_PREF_KEYS, applyImportedViewState } from "../stores/view";
 import type { ViewState, TrackedItem, IgnoredItem } from "../stores/view";
 import {
   token,
@@ -47,33 +48,11 @@ export const EXPORT_DENYLIST: Record<string, readonly string[]> = {
 /** Version stamp on exported payloads (bump on an incompatible format change). */
 export const EXPORT_VERSION = 1;
 
-/**
- * Top-level ViewState keys included in an export's `_viewPreferences` section.
- * Deliberately a curated allowlist, NOT the full ViewState — three top-level
- * keys are excluded on purpose:
- *   - `lastActiveTab`, `globalSort`: transient session state, not a durable
- *     preference worth restoring on another device.
- *   - `globalFilter`: a free-typed org/repo search string. Even though it's
- *     not secret, it's arbitrary user-typed text with no bound on content, so
- *     it's excluded from the plaintext export on privacy-scrub grounds.
- * `satisfies readonly (keyof ViewState)[]` is a compile-time guard: if a key
- * here is ever renamed/removed from ViewStateSchema, this fails to typecheck.
- * The runtime schema-drift guard test in settings-transfer.test.ts is the
- * complementary check — it fails when ViewStateSchema gains or loses a
- * TOP-LEVEL key, forcing a conscious include/exclude decision here.
- */
-export const EXPORTED_VIEW_PREF_KEYS = [
-  "jiraCustomOrder",
-  "expandedRepos",
-  "lockedRepos",
-  "tabFilters",
-  "customTabFilters",
-  "dependencyExpandedGroups",
-  "showPrRuns",
-  "hideDepDashboard",
-  "ignoredItems",
-  "trackedItems",
-] as const satisfies readonly (keyof ViewState)[];
+// EXPORTED_VIEW_PREF_KEYS lives in stores/view.ts (not here) to avoid a
+// circular import — this module already transitively depends on that one via
+// stores/config.ts and stores/auth.ts. Re-exported so existing consumers of
+// this module (tests, EXPORT_DENYLIST-style callers) don't need to know that.
+export { EXPORTED_VIEW_PREF_KEYS };
 
 /**
  * `trackedItems` entry fields included in the export. An ALLOWLIST, not a
@@ -659,8 +638,8 @@ export async function resolveImportedCredentials(
 }
 
 /**
- * Commits resolved credentials + imported config in a strict order. Called ONLY
- * after user confirmation.
+ * Commits resolved credentials + imported config + imported view preferences
+ * in a strict order. Called ONLY after user confirmation.
  *
  *   (a0) pre-auth (user() === null, the Login-page path): `await
  *        clearIdentityData()` FIRST so a prior identity's IndexedDB cache + poll
@@ -672,7 +651,11 @@ export async function resolveImportedCredentials(
  *        when the login differs).
  *   (b)  `setConfig(importedConfig)` — full replacement, AFTER (a) so the reset
  *        cascade can't clobber the just-imported config (and this corrects the
- *        transient `authMethod: "pat"` the cascade sets).
+ *        transient `authMethod: "pat"` the cascade sets). Immediately followed
+ *        by `applyImportedViewState(viewPreferences)` — same identity-scoped
+ *        ordering rationale, and it's a total/no-throw no-op when
+ *        `viewPreferences` is absent or malformed, so callers with no
+ *        `_viewPreferences` section can pass `undefined` unconditionally.
  *   (c)  Jira restore — token-mode: build JiraAuthState locally (no network);
  *        oauth-mode: POST /api/oauth/jira/refresh to mint a fresh access token.
  *        Jira restore failure does NOT abort — GitHub identity/config are already
@@ -680,7 +663,8 @@ export async function resolveImportedCredentials(
  */
 export async function commitImportedSettings(
   resolved: { bundle: CredentialBundle; identity: GitHubUser },
-  importedConfig: Config
+  importedConfig: Config,
+  viewPreferences?: unknown
 ): Promise<{ jiraRestored: boolean }> {
   // (a0) pre-auth identity isolation — awaited, so the cache clear + reset
   // callbacks fully complete before the new identity/config are established.
@@ -703,6 +687,7 @@ export async function commitImportedSettings(
     importedConfig.jira = { ...importedConfig.jira, authMethod: jira.authMethod };
   }
   setConfig(importedConfig);
+  applyImportedViewState(viewPreferences);
 
   // (c) restore Jira.
   if (jira === null) {

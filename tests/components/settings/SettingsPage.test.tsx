@@ -1591,7 +1591,8 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await waitFor(() => {
       expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledWith(
         { bundle: BUNDLE, identity: IDENTITY },
-        expect.objectContaining({ theme: "dark" })
+        expect.objectContaining({ theme: "dark" }),
+        undefined // no _viewPreferences section in this test's file content
       );
     });
   });
