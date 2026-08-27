@@ -1317,14 +1317,9 @@ async function handleJiraProxy(
   sessionId: string,
   setCookie: string | undefined
 ): Promise<Response> {
-  if (!env.JIRA_CLIENT_ID) {
-    log("warn", "jira_proxy_missing_client_id", {}, request);
-    return new Response(JSON.stringify({ error: "jira_not_configured", message: "JIRA_CLIENT_ID is not set — add it to .dev.vars (local) or Worker secrets (production)" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", ...SECURITY_HEADERS },
-    });
-  }
-
+  // No JIRA_CLIENT_ID check: this proxy serves API-token mode, which authenticates
+  // to Atlassian with basic auth (email + the unsealed API token) and never uses
+  // the OAuth client id. Requiring it would wrongly block token-only deployments.
   if (request.method !== "POST") {
     return errorResponse("method_not_allowed", 405);
   }

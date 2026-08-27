@@ -527,9 +527,12 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
     vi.restoreAllMocks();
   });
 
-  // ── 404 when unconfigured ─────────────────────────────────────────────────
+  // ── API-token proxy does not require JIRA_CLIENT_ID ───────────────────────
 
-  it("returns 503 when JIRA_CLIENT_ID is not configured", async () => {
+  it("works without JIRA_CLIENT_ID — API-token proxying uses basic auth, not the OAuth client id", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], total: 0, maxResults: 10, startAt: 0 }), { status: 200 })
+    );
     const req = makeJiraProxyRequest({
       endpoint: "search",
       cloudId: VALID_CLOUD_ID,
@@ -538,9 +541,7 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
       params: { jql: "assignee = currentUser()", maxResults: 10 },
     });
     const res = await worker.fetch(req, makeEnv({ JIRA_CLIENT_ID: undefined }));
-    expect(res.status).toBe(503);
-    const json = await res.json() as Record<string, unknown>;
-    expect(json["error"]).toBe("jira_not_configured");
+    expect(res.status).toBe(200);
   });
 
   // ── Endpoint allowlist ────────────────────────────────────────────────────
