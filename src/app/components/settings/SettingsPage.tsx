@@ -287,7 +287,7 @@ export default function SettingsPage() {
     // re-fired behind the modal), and this guard closes the gap for any other
     // trigger path.
     if (exportCode() !== null) return;
-    const payload = buildExportPayload(config);
+    const payload = buildExportPayload(config, viewState);
     if (!includeCredentials()) {
       triggerDownload(JSON.stringify(payload, null, 2));
       return;

@@ -18,6 +18,7 @@ import { z } from "zod";
 import { ConfigSchema } from "../../shared/schemas";
 import type { Config } from "../../shared/schemas";
 import { preParseConfigFixups, postParseConfigFixups, config, setConfig } from "../stores/config";
+import type { ViewState, TrackedItem, IgnoredItem } from "../stores/view";
 import {
   token,
   jiraAuth,
@@ -47,14 +48,103 @@ export const EXPORT_DENYLIST: Record<string, readonly string[]> = {
 export const EXPORT_VERSION = 1;
 
 /**
- * Builds the plaintext export payload from the live config store.
- *
- * Deep-clones via a JSON round-trip — `config` is a SolidJS store proxy, so a
- * raw spread would leave nested objects proxied (matching the clone pattern in
- * `initConfigPersistence()`, src/app/stores/config.ts) — then deletes each
- * denylisted nested path and stamps `_exportVersion`.
+ * Top-level ViewState keys included in an export's `_viewPreferences` section.
+ * Deliberately a curated allowlist, NOT the full ViewState — three top-level
+ * keys are excluded on purpose:
+ *   - `lastActiveTab`, `globalSort`: transient session state, not a durable
+ *     preference worth restoring on another device.
+ *   - `globalFilter`: a free-typed org/repo search string. Even though it's
+ *     not secret, it's arbitrary user-typed text with no bound on content, so
+ *     it's excluded from the plaintext export on privacy-scrub grounds.
+ * `satisfies readonly (keyof ViewState)[]` is a compile-time guard: if a key
+ * here is ever renamed/removed from ViewStateSchema, this fails to typecheck.
+ * The runtime schema-drift guard test in settings-transfer.test.ts is the
+ * complementary check — it fails when ViewStateSchema gains or loses a
+ * TOP-LEVEL key, forcing a conscious include/exclude decision here.
  */
-export function buildExportPayload(config: Config): Record<string, unknown> {
+export const EXPORTED_VIEW_PREF_KEYS = [
+  "jiraCustomOrder",
+  "expandedRepos",
+  "lockedRepos",
+  "tabFilters",
+  "customTabFilters",
+  "dependencyExpandedGroups",
+  "showPrRuns",
+  "hideDepDashboard",
+  "ignoredItems",
+  "trackedItems",
+] as const satisfies readonly (keyof ViewState)[];
+
+/**
+ * `trackedItems` entry fields included in the export. An ALLOWLIST, not a
+ * denylist — `title`, `htmlUrl`, and `jiraStatus` are content/PII-adjacent
+ * fields that must never leave the browser in plaintext, and an allowlist
+ * excludes them (and any future field) by default until a conscious decision
+ * adds it here, whereas a denylist would leak every new field automatically.
+ */
+const TRACKED_ITEM_EXPORT_KEEP_LIST = [
+  "id",
+  "number",
+  "type",
+  "source",
+  "repoFullName",
+  "jiraKey",
+  "jiraProjectKey",
+  "addedAt",
+] as const satisfies readonly (keyof TrackedItem)[];
+
+/** Same allowlist rationale as TRACKED_ITEM_EXPORT_KEEP_LIST — `title` excluded. */
+const IGNORED_ITEM_EXPORT_KEEP_LIST = [
+  "id",
+  "type",
+  "repo",
+  "ignoredAt",
+] as const satisfies readonly (keyof IgnoredItem)[];
+
+/** Reconstructs `obj` from ONLY the given keys (allowlist), dropping everything else. */
+function pickAllowedFields<T extends object, K extends keyof T>(obj: T, keys: readonly K[]): Pick<T, K> {
+  const out = {} as Pick<T, K>;
+  for (const key of keys) {
+    if (key in obj) out[key] = obj[key];
+  }
+  return out;
+}
+
+/**
+ * Builds the `_viewPreferences` export section from the live view-state store.
+ * Deep-clones via a JSON round-trip (same reason as `buildExportPayload`'s
+ * config handling — `viewState` is a SolidJS store proxy), keeps only
+ * `EXPORTED_VIEW_PREF_KEYS`, then rebuilds every `ignoredItems`/`trackedItems`
+ * entry from its allowlist so content/PII-adjacent fields never reach the
+ * export regardless of what else is on the live entry.
+ */
+function buildViewPreferencesSection(viewState: ViewState): Record<string, unknown> {
+  const snapshot = JSON.parse(JSON.stringify(viewState)) as ViewState;
+  const section: Record<string, unknown> = {};
+  for (const key of EXPORTED_VIEW_PREF_KEYS) {
+    section[key] = snapshot[key];
+  }
+  section.ignoredItems = snapshot.ignoredItems.map((item) =>
+    pickAllowedFields(item, IGNORED_ITEM_EXPORT_KEEP_LIST)
+  );
+  section.trackedItems = snapshot.trackedItems.map((item) =>
+    pickAllowedFields(item, TRACKED_ITEM_EXPORT_KEEP_LIST)
+  );
+  return section;
+}
+
+/**
+ * Builds the plaintext export payload from the live config + view-state
+ * stores.
+ *
+ * Deep-clones `config` via a JSON round-trip — it's a SolidJS store proxy, so
+ * a raw spread would leave nested objects proxied (matching the clone pattern
+ * in `initConfigPersistence()`, src/app/stores/config.ts) — then deletes each
+ * denylisted nested path, attaches the curated `_viewPreferences` section
+ * (plaintext — it never carries secrets, so it does NOT go through the
+ * encrypted-credentials envelope), and stamps `_exportVersion`.
+ */
+export function buildExportPayload(config: Config, viewState: ViewState): Record<string, unknown> {
   const snapshot = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
   for (const [parentKey, childKeys] of Object.entries(EXPORT_DENYLIST)) {
     const parent = snapshot[parentKey];
@@ -64,7 +154,11 @@ export function buildExportPayload(config: Config): Record<string, unknown> {
       }
     }
   }
-  return { ...snapshot, _exportVersion: EXPORT_VERSION };
+  return {
+    ...snapshot,
+    _exportVersion: EXPORT_VERSION,
+    _viewPreferences: buildViewPreferencesSection(viewState),
+  };
 }
 
 // ── Import ──────────────────────────────────────────────────────────

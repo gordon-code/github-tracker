@@ -15,6 +15,7 @@ import { ConfigSchema, JiraConfigSchema } from "../../src/shared/schemas";
 import {
   EXPORT_VERSION,
   EXPORT_DENYLIST,
+  EXPORTED_VIEW_PREF_KEYS,
   MAX_IMPORT_BYTES,
   buildExportPayload,
   parseImportFile,
@@ -47,7 +48,14 @@ import {
   initConfigPersistence,
 } from "../../src/app/stores/config";
 import * as configStore from "../../src/app/stores/config";
-import { viewState, updateViewState } from "../../src/app/stores/view";
+import {
+  viewState,
+  updateViewState,
+  resetViewState,
+  ViewStateSchema,
+  TrackedItemSchema,
+  IgnoredItemSchema,
+} from "../../src/app/stores/view";
 import { createRoot } from "solid-js";
 
 // ── Schema-drift guard update workflow ────────────────────────────────────────
@@ -100,6 +108,46 @@ const EXPECTED_JIRA_KEYS = [
   "siteUrl",
 ];
 
+// Same workflow as EXPECTED_CONFIG_KEYS/EXPECTED_JIRA_KEYS above, for the
+// _viewPreferences export section. A top-level ViewStateSchema key change
+// forces a decision: add it to EXPORTED_VIEW_PREF_KEYS (durable, non-transient,
+// non-privacy-sensitive) or leave it excluded like lastActiveTab/globalSort/
+// globalFilter. A TrackedItemSchema/IgnoredItemSchema field change forces the
+// same decision for the per-entry keep-lists (TRACKED_ITEM_EXPORT_KEEP_LIST /
+// IGNORED_ITEM_EXPORT_KEEP_LIST in settings-transfer.ts) — an allowlist, so an
+// added field is excluded by default until consciously added.
+const EXPECTED_VIEW_STATE_KEYS = [
+  "customTabFilters",
+  "dependencyExpandedGroups",
+  "expandedRepos",
+  "globalFilter",
+  "globalSort",
+  "hideDepDashboard",
+  "ignoredItems",
+  "jiraCustomOrder",
+  "lastActiveTab",
+  "lockedRepos",
+  "showPrRuns",
+  "tabFilters",
+  "trackedItems",
+];
+
+const EXPECTED_TRACKED_ITEM_KEYS = [
+  "addedAt",
+  "htmlUrl",
+  "id",
+  "jiraKey",
+  "jiraProjectKey",
+  "jiraStatus",
+  "number",
+  "repoFullName",
+  "source",
+  "title",
+  "type",
+];
+
+const EXPECTED_IGNORED_ITEM_KEYS = ["id", "ignoredAt", "repo", "title", "type"];
+
 function diffKeys(actual: string[], expected: string[]): { added: string[]; removed: string[] } {
   const expectedSet = new Set(expected);
   const actualSet = new Set(actual);
@@ -138,6 +186,42 @@ describe("settings-transfer — schema-drift guard", () => {
         "whether any ADDED Jira field must also be denylisted."
     ).toBe(true);
   });
+
+  it("ViewStateSchema top-level shape matches the _viewPreferences allowlist snapshot", () => {
+    const actual = Object.keys(ViewStateSchema.shape).sort();
+    const { added, removed } = diffKeys(actual, EXPECTED_VIEW_STATE_KEYS);
+    expect(
+      added.length === 0 && removed.length === 0,
+      `ViewStateSchema top-level keys changed (added: [${added.join(", ")}], removed: [${removed.join(", ")}]). ` +
+        "Before updating EXPECTED_VIEW_STATE_KEYS, decide whether an ADDED key belongs in " +
+        "EXPORTED_VIEW_PREF_KEYS (src/app/lib/settings-transfer.ts) — durable, non-transient, " +
+        "non-privacy-sensitive view state — or should stay excluded like lastActiveTab/globalSort/globalFilter."
+    ).toBe(true);
+  });
+
+  it("TrackedItemSchema shape matches the trackedItems export keep-list snapshot", () => {
+    const actual = Object.keys(TrackedItemSchema.shape).sort();
+    const { added, removed } = diffKeys(actual, EXPECTED_TRACKED_ITEM_KEYS);
+    expect(
+      added.length === 0 && removed.length === 0,
+      `TrackedItemSchema keys changed (added: [${added.join(", ")}], removed: [${removed.join(", ")}]). ` +
+        "Before updating EXPECTED_TRACKED_ITEM_KEYS, decide whether an ADDED field is reference-only " +
+        "(safe to add to TRACKED_ITEM_EXPORT_KEEP_LIST in settings-transfer.ts) or content/PII-adjacent " +
+        "(must stay excluded, like title/htmlUrl/jiraStatus)."
+    ).toBe(true);
+  });
+
+  it("IgnoredItemSchema shape matches the ignoredItems export keep-list snapshot", () => {
+    const actual = Object.keys(IgnoredItemSchema.shape).sort();
+    const { added, removed } = diffKeys(actual, EXPECTED_IGNORED_ITEM_KEYS);
+    expect(
+      added.length === 0 && removed.length === 0,
+      `IgnoredItemSchema keys changed (added: [${added.join(", ")}], removed: [${removed.join(", ")}]). ` +
+        "Before updating EXPECTED_IGNORED_ITEM_KEYS, decide whether an ADDED field is reference-only " +
+        "(safe to add to IGNORED_ITEM_EXPORT_KEEP_LIST in settings-transfer.ts) or content (must stay " +
+        "excluded, like title)."
+    ).toBe(true);
+  });
 });
 
 describe("buildExportPayload", () => {
@@ -147,7 +231,7 @@ describe("buildExportPayload", () => {
     });
     expect(cfg.jira.email).toBe("secret@example.com");
 
-    const out = buildExportPayload(cfg);
+    const out = buildExportPayload(cfg, viewState);
     const jira = out.jira as Record<string, unknown>;
     expect(jira).toBeDefined();
     expect("email" in jira).toBe(false);
@@ -159,7 +243,7 @@ describe("buildExportPayload", () => {
   });
 
   it("stamps the export version", () => {
-    const out = buildExportPayload(ConfigSchema.parse({}));
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
     expect(out._exportVersion).toBe(EXPORT_VERSION);
     expect(out._exportVersion).toBe(1);
   });
@@ -169,16 +253,102 @@ describe("buildExportPayload", () => {
     // in SettingsPage.tsx's pre-refactor object literal — their presence is the
     // assertion that actually distinguishes a schema-driven rewrite from a
     // leftover manual literal.
-    const out = buildExportPayload(ConfigSchema.parse({}));
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
     expect(Object.prototype.hasOwnProperty.call(out, "onboardingComplete")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayEnabled")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayPort")).toBe(true);
   });
 });
 
+// ── Task 2: curated, privacy-scrubbed view preferences ────────────────────────
+
+describe("buildExportPayload — _viewPreferences", () => {
+  // viewState is a module-level singleton shared across this whole test file —
+  // reset it before AND after so these tests neither inherit nor leak state.
+  beforeEach(() => resetViewState());
+  afterEach(() => resetViewState());
+
+  it("includes _viewPreferences with EXACTLY the curated top-level key set", () => {
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const prefs = out._viewPreferences as Record<string, unknown>;
+    expect(prefs).toBeDefined();
+    expect(Object.keys(prefs).sort()).toEqual([...EXPORTED_VIEW_PREF_KEYS].sort());
+  });
+
+  it("excludes the transient/privacy keys: lastActiveTab, globalSort, globalFilter", () => {
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const prefs = out._viewPreferences as Record<string, unknown>;
+    expect("lastActiveTab" in prefs).toBe(false);
+    expect("globalSort" in prefs).toBe(false);
+    expect("globalFilter" in prefs).toBe(false);
+  });
+
+  it("carries a non-item durable preference through unmodified (jiraCustomOrder)", () => {
+    updateViewState({ jiraCustomOrder: ["PROJ-1", "PROJ-2"] });
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const prefs = out._viewPreferences as Record<string, unknown>;
+    expect(prefs.jiraCustomOrder).toEqual(["PROJ-1", "PROJ-2"]);
+  });
+
+  it("scrubs ignoredItems entries to the reference-field allowlist — no title", () => {
+    updateViewState({
+      ignoredItems: [
+        { id: 1, type: "issue", repo: "org/repo", title: "Secret issue title", ignoredAt: 1000 },
+      ],
+    });
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const prefs = out._viewPreferences as Record<string, unknown>;
+    const entries = prefs.ignoredItems as Record<string, unknown>[];
+    expect(entries).toHaveLength(1);
+    expect(Object.keys(entries[0]).sort()).toEqual(["id", "ignoredAt", "repo", "type"]);
+    expect("title" in entries[0]).toBe(false);
+    expect(entries[0]).toMatchObject({ id: 1, type: "issue", repo: "org/repo", ignoredAt: 1000 });
+  });
+
+  it("scrubs trackedItems entries to the reference-field allowlist — no title, htmlUrl, or jiraStatus", () => {
+    updateViewState({
+      trackedItems: [
+        {
+          id: 2,
+          number: 42,
+          type: "issue",
+          source: "github",
+          repoFullName: "org/repo",
+          title: "Secret issue title",
+          addedAt: 2000,
+          htmlUrl: "https://github.com/org/repo/issues/42",
+        },
+        {
+          id: 3,
+          type: "jiraIssue",
+          source: "jira",
+          repoFullName: "",
+          title: "Secret jira summary",
+          addedAt: 3000,
+          jiraKey: "PROJ-123",
+          jiraProjectKey: "PROJ",
+          jiraStatus: "In Progress",
+        },
+      ],
+    });
+    const out = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const prefs = out._viewPreferences as Record<string, unknown>;
+    const entries = prefs.trackedItems as Record<string, unknown>[];
+    expect(entries).toHaveLength(2);
+
+    for (const entry of entries) {
+      expect("title" in entry).toBe(false);
+      expect("htmlUrl" in entry).toBe(false);
+      expect("jiraStatus" in entry).toBe(false);
+    }
+    expect(entries[0]).toMatchObject({ id: 2, number: 42, type: "issue", source: "github", repoFullName: "org/repo", addedAt: 2000 });
+    expect(entries[1]).toMatchObject({ id: 3, type: "jiraIssue", source: "jira", jiraKey: "PROJ-123", jiraProjectKey: "PROJ", addedAt: 3000 });
+  });
+});
+
 describe("parseImportFile", () => {
   it("parses a valid export payload produced by buildExportPayload", () => {
-    const payload = buildExportPayload(ConfigSchema.parse({ theme: "dark", itemsPerPage: 50 }));
+    const payload = buildExportPayload(ConfigSchema.parse({ theme: "dark", itemsPerPage: 50 }), viewState);
     const result = parseImportFile(JSON.stringify(payload));
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -252,7 +422,7 @@ describe("parseImportFile", () => {
     expect(parseImportFile(JSON.stringify({ _exportVersion: 1, theme: "dark" })).ok).toBe(true);
     expect(parseImportFile(JSON.stringify({ theme: "dark" })).ok).toBe(true);
     // A round-tripped real export (stamped v1 by buildExportPayload) also parses.
-    expect(parseImportFile(JSON.stringify(buildExportPayload(ConfigSchema.parse({})))).ok).toBe(true);
+    expect(parseImportFile(JSON.stringify(buildExportPayload(ConfigSchema.parse({}), viewState))).ok).toBe(true);
   });
 });
 

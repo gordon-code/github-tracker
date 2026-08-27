@@ -28,6 +28,14 @@ export const TrackedItemSchema = z.object({
 
 export type TrackedItem = z.infer<typeof TrackedItemSchema>;
 
+export const IgnoredItemSchema = z.object({
+  id: z.coerce.number(),
+  type: z.enum(["issue", "pullRequest", "workflowRun"]),
+  repo: z.string(),
+  title: z.string(),
+  ignoredAt: z.number(),
+});
+
 export const IssueFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
   role: z.enum(["all", "author", "assignee"]).default("all"),
@@ -83,15 +91,7 @@ export const ViewStateSchema = z.object({
     direction: z.enum(["asc", "desc"]),
   }).default({ field: "updatedAt", direction: "desc" }),
   ignoredItems: z
-    .array(
-      z.object({
-        id: z.coerce.number(),
-        type: z.enum(["issue", "pullRequest", "workflowRun"]),
-        repo: z.string(),
-        title: z.string(),
-        ignoredAt: z.number(),
-      })
-    )
+    .array(IgnoredItemSchema)
     .max(IGNORED_ITEMS_CAP)
     .default([]),
   globalFilter: z
