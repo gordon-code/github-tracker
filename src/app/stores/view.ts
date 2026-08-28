@@ -226,6 +226,24 @@ function coerceStrippedItemsArray(raw: unknown): unknown {
 }
 
 /**
+ * Validates a single top-level ViewState field in isolation, via
+ * `ViewStateSchema.pick({ [key]: true }).safeParse({ [key]: value })`.
+ * Shared by `applyImportedViewState` (import path) and `readOnDiskState`
+ * (cross-tab merge-on-write path) below — both need the same "validate one
+ * field against the live schema, independent of every other field" behavior
+ * so one malformed/version-skewed field can't reject the rest. Every
+ * ViewStateSchema field carries its own `.default(...)`, so a successful
+ * parse never yields `undefined` for `key` — `undefined` here unambiguously
+ * means validation failed.
+ */
+function validateViewStateField<K extends keyof ViewState>(key: K, value: unknown): ViewState[K] | undefined {
+  const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
+    [key]: value,
+  });
+  return result.success ? ((result.data as Record<string, unknown>)[key] as ViewState[K]) : undefined;
+}
+
+/**
  * Applies an imported `_viewPreferences` section (from a settings-export file)
  * onto the live view-state store. TOTAL and non-throwing by design — `raw` is
  * completely untrusted input (a hand-edited or malformed export file), so this
@@ -272,11 +290,9 @@ export function applyImportedViewState(raw: unknown): void {
         key === "ignoredItems" || key === "trackedItems"
           ? coerceStrippedItemsArray(rawObj[key])
           : rawObj[key];
-      const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
-        [key]: value,
-      });
-      if (result.success) {
-        patch[key] = (result.data as Record<string, unknown>)[key];
+      const validated = validateViewStateField(key, value);
+      if (validated !== undefined) {
+        patch[key] = validated;
       }
     }
     if (Object.keys(patch).length === 0) return;
@@ -826,8 +842,8 @@ export function initViewPersistence(): void {
       const filtered: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
         if (!VIEW_STATE_KEYS.has(key)) continue;
-        const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({ [key]: value });
-        if (result.success) filtered[key] = (result.data as Record<string, unknown>)[key];
+        const validated = validateViewStateField(key as keyof ViewState, value);
+        if (validated !== undefined) filtered[key] = validated;
       }
       return filtered;
     } catch {

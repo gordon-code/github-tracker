@@ -548,7 +548,7 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_abc");
   });
 
-  it("fires /user fetch on token replacement and updates user() on success", async () => {
+  it("fires /user fetch on token replacement, but reloads instead of adopting the identity when this tab has no confirmable prior identity (user() null)", async () => {
     const userData = { login: "replaceduser", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "Replaced" };
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -556,7 +556,10 @@ describe("cross-tab auth sync", () => {
       json: () => Promise.resolve(userData),
     });
     vi.stubGlobal("fetch", fetchMock);
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
 
+    // Token-only auth, deliberately no user() set — mirrors a tab with no
+    // confirmable prior identity (e.g. post-expireToken()).
     mod.setAuth({ access_token: "ghs_abc" });
 
     window.dispatchEvent(new StorageEvent("storage", {
@@ -578,7 +581,12 @@ describe("cross-tab auth sync", () => {
         }),
       })
     );
-    expect(mod.user()?.login).toBe("replaceduser");
+    // With no confirmable prior identity, the fetched identity is NOT
+    // adopted in place — this tab reloads instead so it re-initializes
+    // cleanly rather than risk rendering a different identity against
+    // whatever config/view it's still holding.
+    expect(reloadSpy).toHaveBeenCalledOnce();
+    expect(mod.user()).toBeNull();
   });
 
   it("user preserved when /user fetch fails after token replacement", async () => {
@@ -654,6 +662,42 @@ describe("cross-tab auth sync", () => {
     // Config/view are untouched by a same-identity rotation (no reset triggered).
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+
+  it("Gap B (bleed): reloads instead of adopting a DIFFERENT identity when this tab's user() is null after expireToken() (prior identity's config/view retained)", async () => {
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
+
+    // Authenticate as X and seed non-default config/view for that identity.
+    mod.setAuthFromPat("ghp_x", { login: "userx", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "User X" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+
+    // This tab's token becomes invalid (e.g. revoked/expired). expireToken()
+    // clears user() to null but deliberately PRESERVES config/view so the
+    // same user can silently re-auth.
+    mod.expireToken();
+    expect(mod.user()).toBeNull();
+
+    // A DIFFERENT identity (Y) signs in via another tab.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "usery", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "User Y" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghp_y",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Bleed prevented: with previousLogin unconfirmable (user() was null),
+    // the fix reloads rather than quietly adopting identity Y while this tab
+    // still holds identity X's config/view in memory/localStorage.
+    expect(reloadSpy).toHaveBeenCalledOnce();
+    expect(mod.user()).toBeNull();
   });
 
   it("does not call expireToken when no token is set in memory", () => {
