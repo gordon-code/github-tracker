@@ -18,7 +18,7 @@ import { z } from "zod";
 import { ConfigSchema } from "../../shared/schemas";
 import type { Config } from "../../shared/schemas";
 import { preParseConfigFixups, postParseConfigFixups, config, setConfig } from "../stores/config";
-import { EXPORTED_VIEW_PREF_KEYS, applyImportedViewState } from "../stores/view";
+import { EXPORTED_VIEW_PREF_KEYS, applyImportedViewState, resetViewState } from "../stores/view";
 import type { ViewState, TrackedItem, IgnoredItem } from "../stores/view";
 import {
   token,
@@ -93,14 +93,16 @@ function pickAllowedFields<T extends object, K extends keyof T>(obj: T, keys: re
  * Builds the `_viewPreferences` export section from the live view-state store.
  * Deep-clones via a JSON round-trip (same reason as `buildExportPayload`'s
  * config handling — `viewState` is a SolidJS store proxy), keeps only
- * `EXPORTED_VIEW_PREF_KEYS`, then rebuilds every `ignoredItems`/`trackedItems`
- * entry from its allowlist so content/PII-adjacent fields never reach the
- * export regardless of what else is on the live entry.
+ * `EXPORTED_VIEW_PREF_KEYS` — `ignoredItems`/`trackedItems` are skipped in
+ * this generic copy and rebuilt below from their allowlists instead, so
+ * content/PII-adjacent fields never reach the export regardless of what else
+ * is on the live entry.
  */
 function buildViewPreferencesSection(viewState: ViewState): Record<string, unknown> {
   const snapshot = JSON.parse(JSON.stringify(viewState)) as ViewState;
   const section: Record<string, unknown> = {};
   for (const key of EXPORTED_VIEW_PREF_KEYS) {
+    if (key === "ignoredItems" || key === "trackedItems") continue;
     section[key] = snapshot[key];
   }
   section.ignoredItems = snapshot.ignoredItems.map((item) =>
@@ -643,9 +645,15 @@ export async function resolveImportedCredentials(
  *
  *   (a0) pre-auth (user() === null, the Login-page path): `await
  *        clearIdentityData()` FIRST so a prior identity's IndexedDB cache + poll
- *        state can't leak into the just-imported identity. On the Settings page
- *        user() is non-null, so this is skipped and setAuthFromCredential's own
- *        identity-switch reset handles isolation.
+ *        state can't leak into the just-imported identity, THEN `resetViewState()`
+ *        — setAuthFromCredential's identity-switch reset is INERT here (its
+ *        `previousLogin` check needs a non-null `user()`), and `setConfig`/
+ *        `applyImportedViewState` below only wholesale-replace config and overlay
+ *        the CURATED view-preference keys respectively, so without this a prior
+ *        expired-token session's transient view keys (globalFilter/lastActiveTab/
+ *        globalSort) would otherwise survive the import. On the Settings page
+ *        user() is non-null, so this whole branch is skipped and
+ *        setAuthFromCredential's own identity-switch reset handles isolation.
  *   (a)  `setAuthFromCredential(token, identity)` — establishes the GitHub
  *        session (auth-method-agnostic; runs the identity-switch reset cascade
  *        when the login differs).
@@ -670,6 +678,7 @@ export async function commitImportedSettings(
   // callbacks fully complete before the new identity/config are established.
   if (user() === null) {
     await clearIdentityData();
+    resetViewState();
   }
 
   // (a) establish the GitHub credential (used for BOTH pat and oauth methods).

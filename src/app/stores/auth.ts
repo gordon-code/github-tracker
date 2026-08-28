@@ -396,6 +396,22 @@ onAuthCleared(() => {
 
 let _crossTabFetchGen = 0;
 
+/**
+ * Cross-tab identity-switch reload seam, extracted as a mutable object method
+ * (not a bare exported function) purely for testability: the storage listener
+ * below always calls through `crossTabReload.reloadForIdentitySwitch()`, so
+ * `vi.spyOn(crossTabReload, "reloadForIdentitySwitch")` from a test intercepts
+ * it — a plain exported function wouldn't be, since the listener's internal
+ * call captures a direct reference to it rather than reading it back off the
+ * module's exports object. This also sidesteps happy-dom's
+ * `window.location.reload` not being reliably spyable directly.
+ */
+export const crossTabReload = {
+  reloadForIdentitySwitch(): void {
+    window.location.reload();
+  },
+};
+
 // Cross-tab auth sync: if another tab clears the token, this tab should also clear.
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
 // Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
@@ -408,6 +424,9 @@ if (typeof window !== "undefined") {
       expireToken();
       window.location.replace("/login");
     } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
+      // Captured BEFORE the token/user update below, so the /user fetch result
+      // can be compared against who THIS tab thought was signed in.
+      const previousLogin = user()?.login;
       _setToken(e.newValue);
       const gen = ++_crossTabFetchGen;
       const newToken = e.newValue;
@@ -417,6 +436,24 @@ if (typeof window !== "undefined") {
         .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
         .then((data) => {
           if (data && _token() === newToken && _crossTabFetchGen === gen) {
+            const isIdentitySwitch =
+              previousLogin !== undefined && previousLogin.toLowerCase() !== data.login.toLowerCase();
+            if (isIdentitySwitch) {
+              // A different GitHub identity signed in via another tab (e.g.
+              // Settings > Replace token in that tab) — that tab has already
+              // reset config/view, cleared the shared IndexedDB cache, and
+              // written the new identity's token/config/view to localStorage.
+              // This (passive) tab has NOT run any of that, so simply calling
+              // setUser() here would leave it authenticated as the new identity
+              // while still rendering the previous identity's config/view/cached
+              // data. Reload instead so it re-initializes cleanly from what the
+              // active tab already persisted.
+              crossTabReload.reloadForIdentitySwitch();
+              return;
+            }
+            // Same-identity token rotation (or first sign-in observed by a
+            // passive tab) — adopt the refreshed user data in place, same as
+            // before. Must NOT reset config/view here.
             setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
           }
         })

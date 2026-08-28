@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { z } from "zod";
 
 // Mock cache so auth's identity-clear path never touches IndexedDB; the pre-auth
 // ordering test controls clearCache's timing directly via this mock.
@@ -55,6 +56,7 @@ import {
   ViewStateSchema,
   TrackedItemSchema,
   IgnoredItemSchema,
+  applyImportedViewState,
 } from "../../src/app/stores/view";
 import { createRoot } from "solid-js";
 
@@ -514,6 +516,59 @@ describe("generateOneTimeCode / decodeOneTimeCode", () => {
     expect(() => decodeOneTimeCode(valid + "0")).toThrow(
       "One-time code is not in the expected format."
     );
+  });
+});
+
+// Known-answer vectors for the Crockford codec. The round-trip test above
+// cross-checks decodeOneTimeCode against a SECOND encoder (crockfordEncode)
+// that implements the identical algorithm — a divergence guard, catching the
+// two implementations disagreeing, but NOT a true anchor: if both encode and
+// decode independently flipped the same bit-packing detail (shift direction,
+// alphabet index order, etc.) the round-trip test would still pass. These two
+// vectors are literal, hand-computed expected values for both directions
+// (decode a known string -> known bytes, AND encode known bytes -> known
+// string), verified against the documented bit-packing: 16 bytes -> a 128-bit
+// big-endian integer -> left-shift 2 bits (128 -> 130 bits, 26 * 5) -> 26
+// base32 digits emitted MSB-first from alphabet "0123456789ABCDEFGHJKMNPQRSTVWXYZ".
+describe("generateOneTimeCode / decodeOneTimeCode — known-answer vectors", () => {
+  it("KAV-1: all-zero 16 bytes <-> \"0000-0000-0000-0000-0000-0000-00\"", () => {
+    // All-zero input -> value 0 -> <<2 is still 0 -> every one of the 26
+    // 5-bit groups is 0b00000 -> alphabet[0] = '0', 26 times.
+    const zeroBytes = new Uint8Array(16);
+    const code = "0000-0000-0000-0000-0000-0000-00";
+
+    // Decode direction: a hand-picked string decodes to the hand-picked bytes.
+    expect(Array.from(decodeOneTimeCode(code))).toEqual(Array.from(zeroBytes));
+
+    // Encode+format direction: generateOneTimeCode's only entropy source is
+    // crypto.getRandomValues, so pinning it to the known vector anchors the
+    // encode + dash-formatting path without needing the private encoder.
+    vi.spyOn(crypto, "getRandomValues").mockImplementation(((arr: Uint8Array) => {
+      arr.set(zeroBytes);
+      return arr;
+    }) as typeof crypto.getRandomValues);
+    expect(generateOneTimeCode()).toBe(code);
+  });
+
+  it("KAV-2: all-0xFF 16 bytes <-> \"ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZW\" (non-trivial vector)", () => {
+    // Hand derivation: 16 bytes of 0xFF is a 128-bit integer of all 1s.
+    // <<2 (multiply by 4) produces a 130-bit integer: the top 128 bits stay
+    // 1, and two 0 bits are appended at the LSB end. Splitting into 26
+    // groups of 5 bits MSB-first: the first 25 groups (125 bits) fall
+    // entirely within the all-1s region, so each is 0b11111 = 31 = 'Z'
+    // (the alphabet's last character). The 26th (final) group covers the
+    // remaining 5 bits: the last three original 1-bits followed by the two
+    // appended 0-bits = 0b11100 = 28 = 'W'.
+    const ffBytes = new Uint8Array(16).fill(0xff);
+    const code = "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZW";
+
+    expect(Array.from(decodeOneTimeCode(code))).toEqual(Array.from(ffBytes));
+
+    vi.spyOn(crypto, "getRandomValues").mockImplementation(((arr: Uint8Array) => {
+      arr.set(ffBytes);
+      return arr;
+    }) as typeof crypto.getRandomValues);
+    expect(generateOneTimeCode()).toBe(code);
   });
 });
 
@@ -1129,6 +1184,32 @@ describe("commitImportedSettings", () => {
     expect(order).toEqual(["auth", "config"]); // established only after the await
   });
 
+  it("Gap A: pre-auth import resets transient view keys that setAuthFromCredential's (inert) identity-switch cascade would otherwise leave stale", async () => {
+    // Seed a prior session's transient view state, as if a token expired on this
+    // browser while these were set — NOT part of the curated export/import set,
+    // so setConfig/applyImportedViewState alone would never touch them.
+    updateViewState({
+      lastActiveTab: "actions",
+      globalSort: { field: "title", direction: "asc" },
+      globalFilter: { org: "prior-org", repo: "prior-repo" },
+    });
+
+    vi.spyOn(authStore, "user").mockReturnValue(null); // pre-auth (Login-page import path)
+
+    await commitImportedSettings(
+      { bundle: { github: { token: "ghp_x", method: "pat" }, jira: null }, identity },
+      ConfigSchema.parse({}),
+      { jiraCustomOrder: ["NEW-1"] } // a curated key, to prove it's still applied post-reset
+    );
+
+    // Transient/non-curated keys reset to defaults — no bleed from the prior session.
+    expect(viewState.lastActiveTab).toBe("issues");
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
+    expect(viewState.globalFilter).toEqual({ org: null, repo: null });
+    // The curated key from the import is still applied AFTER the reset.
+    expect(viewState.jiraCustomOrder).toEqual(["NEW-1"]);
+  });
+
   it("identity-switch integration: REAL cascade replaces config/view/jira and persists imported config", async () => {
     vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn());
@@ -1358,6 +1439,103 @@ describe("commitImportedSettings — view preferences round-trip", () => {
     expect(viewState.lastActiveTab).toBe("issues");
     expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
     expect(viewState.globalFilter).toEqual({ org: null, repo: null });
+  });
+});
+
+// ── STRUCT-I-001 counterpart: import-side stripped-item backfill guard ────────
+//
+// buildExportPayload strips ignoredItems/trackedItems down to
+// TRACKED_ITEM_EXPORT_KEEP_LIST / IGNORED_ITEM_EXPORT_KEEP_LIST (allowlists,
+// enforced by the schema-drift guard tests at the top of this file). The
+// IMPORT side (applyImportedViewState -> coerceStrippedItemEntry, in
+// src/app/stores/view.ts) only hardcodes backfilling ONE field: a missing
+// `title` defaults to `""`. If a schema ever gains a new REQUIRED field that
+// also gets left off the export keep-list, the stripped entry re-validates as
+// invalid on import and the whole item is silently dropped (per-key
+// safeParse in applyImportedViewState skips the whole array on one bad
+// element). This test derives, for both item schemas, which required fields
+// are actually stripped by the current keep-lists, then proves a
+// stripped-then-reimported entry survives — so it fails loudly the moment a
+// newly-required field is stripped without an accompanying coerce fix.
+describe("import-side stripped-item backfill guard (STRUCT-I-001 counterpart)", () => {
+  beforeEach(() => resetViewState());
+  afterEach(() => resetViewState());
+
+  /** Fields a schema requires — i.e. omitting them (passing `undefined`) fails validation. Optional/`.default()` fields pass `undefined` and are excluded. */
+  function requiredKeys(shape: Record<string, z.ZodTypeAny>): string[] {
+    return Object.keys(shape).filter((key) => !shape[key].safeParse(undefined).success);
+  }
+
+  it("TrackedItemSchema: every stripped-and-required field is backfilled on import (coerceStrippedItemEntry)", () => {
+    // A full item populating every TrackedItemSchema field, so exporting it
+    // reveals exactly which fields the CURRENT keep-list actually keeps.
+    updateViewState({
+      trackedItems: [
+        {
+          id: 1,
+          number: 42,
+          type: "issue",
+          source: "github",
+          repoFullName: "org/repo",
+          title: "Secret title",
+          addedAt: 1000,
+          jiraKey: "PROJ-1",
+          jiraProjectKey: "PROJ",
+          jiraStatus: "In Progress",
+          htmlUrl: "https://github.com/org/repo/issues/1",
+        },
+      ],
+    });
+    const exported = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const strippedEntries = (exported._viewPreferences as Record<string, unknown>)
+      .trackedItems as Record<string, unknown>[];
+    const kept = Object.keys(strippedEntries[0]);
+
+    const required = requiredKeys(TrackedItemSchema.shape);
+    const strippedRequired = required.filter((key) => !kept.includes(key));
+    // Sanity: the guard is only meaningful if the current keep-list actually
+    // strips at least one required field (it does — `title`).
+    expect(strippedRequired.length).toBeGreaterThan(0);
+
+    resetViewState();
+    applyImportedViewState({ trackedItems: strippedEntries });
+    const restored = viewState.trackedItems[0] as Record<string, unknown> | undefined;
+
+    expect(
+      restored !== undefined && TrackedItemSchema.safeParse(restored).success,
+      `TrackedItemSchema field(s) [${strippedRequired.join(", ")}] are required, stripped by ` +
+        "TRACKED_ITEM_EXPORT_KEEP_LIST (src/app/lib/settings-transfer.ts), but NOT backfilled by " +
+        "coerceStrippedItemEntry (src/app/stores/view.ts) — the stripped import fails schema " +
+        "validation and the whole item is silently dropped. Extend coerceStrippedItemEntry to " +
+        "backfill the new field (or add it to the keep-list if it isn't actually PII/content)."
+    ).toBe(true);
+  });
+
+  it("IgnoredItemSchema: every stripped-and-required field is backfilled on import (coerceStrippedItemEntry)", () => {
+    updateViewState({
+      ignoredItems: [{ id: 1, type: "issue", repo: "org/repo", title: "Secret title", ignoredAt: 1000 }],
+    });
+    const exported = buildExportPayload(ConfigSchema.parse({}), viewState);
+    const strippedEntries = (exported._viewPreferences as Record<string, unknown>)
+      .ignoredItems as Record<string, unknown>[];
+    const kept = Object.keys(strippedEntries[0]);
+
+    const required = requiredKeys(IgnoredItemSchema.shape);
+    const strippedRequired = required.filter((key) => !kept.includes(key));
+    expect(strippedRequired.length).toBeGreaterThan(0);
+
+    resetViewState();
+    applyImportedViewState({ ignoredItems: strippedEntries });
+    const restored = viewState.ignoredItems[0] as Record<string, unknown> | undefined;
+
+    expect(
+      restored !== undefined && IgnoredItemSchema.safeParse(restored).success,
+      `IgnoredItemSchema field(s) [${strippedRequired.join(", ")}] are required, stripped by ` +
+        "IGNORED_ITEM_EXPORT_KEEP_LIST (src/app/lib/settings-transfer.ts), but NOT backfilled by " +
+        "coerceStrippedItemEntry (src/app/stores/view.ts) — the stripped import fails schema " +
+        "validation and the whole item is silently dropped. Extend coerceStrippedItemEntry to " +
+        "backfill the new field (or add it to the keep-list if it isn't actually content)."
+    ).toBe(true);
   });
 });
 

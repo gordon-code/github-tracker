@@ -577,6 +577,61 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_replacement");
   });
 
+  it("Gap B: reloads the tab when the cross-tab token belongs to a DIFFERENT identity (not just a token rotation)", async () => {
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "newidentity", avatar_url: "https://avatars.githubusercontent.com/u/9", name: "New Identity" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mod.setAuthFromPat("ghs_old", { login: "olduser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Old" });
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_new_identity_token",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(reloadSpy).toHaveBeenCalledOnce();
+    // setUser is deliberately NOT called for an identity switch — the tab
+    // reloads instead, so user() is left as whatever it was before (a real
+    // reload would replace the whole page with the new identity's state).
+    expect(mod.user()?.login).toBe("olduser");
+    // Token IS still updated synchronously regardless (unchanged pre-fetch behavior).
+    expect(mod.token()).toBe("ghs_new_identity_token");
+  });
+
+  it("Gap B: does NOT reload on a same-identity token rotation (case-insensitive login match) and leaves config/view untouched", async () => {
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "SAMEUSER", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Same User" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mod.setAuthFromPat("ghs_old", { login: "sameuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Same User" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_rotated",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(reloadSpy).not.toHaveBeenCalled();
+    // Rotation still adopts the refreshed user data, same as before this fix.
+    expect(mod.user()?.login).toBe("SAMEUSER");
+    // Config/view are untouched by a same-identity rotation (no reset triggered).
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+
   it("does not call expireToken when no token is set in memory", () => {
     // No setAuth call — token signal is null, guard `_token()` prevents action
     localStorageMock.removeItem("github-tracker:auth-token");
