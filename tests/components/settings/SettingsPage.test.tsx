@@ -1684,6 +1684,27 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     screen.getByRole("button", { name: /continue without credentials/i });
   });
 
+  it("an invalid (non-expired) unseal shows the single-use terminal message, distinct from 'expired'", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "invalid" });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() =>
+      screen.getByText(
+        "Couldn't restore credentials — this file may already have been used (single-use), or the code/file don't match. Re-export to try again."
+      )
+    );
+    expect(screen.queryByText(/expired/i)).toBeNull();
+    // The code input is gone — the single-use bundle is spent, only the fallback remains.
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    screen.getByRole("button", { name: /continue without credentials/i });
+  });
+
   it("R-101: a turnstile failure keeps the code input (retryable) and re-unseals on retry", async () => {
     // A client-side Turnstile failure happens BEFORE any request, so the nonce is
     // never consumed — this is retryable, NOT the terminal expired/invalid screen.

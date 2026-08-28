@@ -619,6 +619,28 @@ describe("LoginPage — Import from backup", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
+  it("an invalid (non-expired) unseal shows the single-use terminal message, distinct from 'expired'", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "invalid" });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Couldn't restore credentials — this file may already have been used (single-use), or the code/file don't match. Re-export to try again."
+      )
+    );
+    expect(screen.getByRole("alert").textContent).not.toMatch(/expired/i);
+    expect(screen.queryByLabelText("One-time code")).toBeNull(); // terminal — no retry
+    screen.getByRole("button", { name: "Back to sign in" });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it("a revoked GitHub credential surfaces the distinct revoked message and keeps the code prompt", async () => {
     mockValidCredsFile();
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });

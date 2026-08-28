@@ -6,7 +6,8 @@ import type { CredentialBundle, CredentialsSection } from "./settings-transfer";
 import { unsealCredentialBundle } from "./proxy";
 
 const READ_ERROR_MESSAGE = "Could not read that file — choose a valid settings export.";
-const DECRYPT_FAILED_MESSAGE = "Couldn't decrypt credentials — check the code and file match.";
+const DECRYPT_FAILED_MESSAGE =
+  "Couldn't restore credentials — this file may already have been used (single-use), or the code/file don't match. Re-export to try again.";
 
 export interface ResolvedCredential {
   bundle: CredentialBundle;
