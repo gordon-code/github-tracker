@@ -54,6 +54,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
 - [Settings Reference](#settings-reference)
 - [Exporting and Importing Settings](#exporting-and-importing-settings)
   - [Exporting](#exporting)
+  - [View Preferences Are Included Too](#view-preferences-are-included-too)
   - [Including Encrypted Credentials](#including-encrypted-credentials)
   - [Importing on the Settings Page](#importing-on-the-settings-page)
   - [Importing on the Login Page](#importing-on-the-login-page)
@@ -702,7 +703,7 @@ Settings are saved automatically to `localStorage` and persist across sessions. 
 
 ### View State Settings
 
-These are UI preferences that persist across sessions but are not included in the exported config file.
+These are UI preferences that persist across sessions in your browser. Most of them also travel with an exported settings file — see [View Preferences Are Included Too](#view-preferences-are-included-too) for exactly what's included and what isn't.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -722,17 +723,38 @@ You can export your configuration to a JSON file and import it back later — on
 
 ### Exporting
 
-Go to **Settings > Data > Export** and click **Export**. This downloads `github-tracker-settings.json` containing your full configuration — repositories, organizations, tracked users, tabs, refresh interval, notification preferences, Jira display settings, and everything else on the Settings page.
+Go to **Settings > Data > Export** and click **Export**. A dialog opens with two choices:
 
-A plaintext export contains **no credentials**. Your Atlassian email is also omitted (it is personally identifiable and not needed to restore the configuration). Importing a plaintext export restores your settings but does not sign you in — you still authenticate normally.
+- **Export config only** — downloads `github-tracker-settings.json` immediately: your full configuration (repositories, organizations, tracked users, tabs, refresh interval, notification preferences, Jira display settings, and everything else on the Settings page) plus your view preferences (below), with no credentials.
+- **Export with encrypted credentials** — see [Including Encrypted Credentials](#including-encrypted-credentials).
+
+A plaintext export (config only) contains **no credentials**. Your Atlassian email is also omitted (it is personally identifiable and not needed to restore the configuration). Importing a plaintext export restores your settings but does not sign you in — you still authenticate normally.
+
+### View Preferences Are Included Too
+
+Every export — plaintext or with credentials — also carries a curated set of view preferences. On import, these are restored automatically alongside your configuration, for whichever GitHub identity that import establishes:
+
+- Jira custom sort order
+- Expand/collapse state and pinned/locked repos, per tab
+- Tab filters (including per-tab username filters) and custom tab filter values
+- Dependency-group expansion state
+- The Show PR Runs and Hide Dependency Dashboard toggles
+- Your Ignored Items and Tracked Items lists
+
+A few things are deliberately left out:
+
+- Issue/PR **titles and URLs**, and a tracked Jira issue's **status** (e.g. "In Progress"), are never included. On the target machine, tracked GitHub issues/PRs pick up their real title again automatically once the app has fetched their repo's data; tracked Jira issues show a blank title and status, and Ignored items show a blank title, until you interact with them again (re-track or re-ignore) — tracking and ignoring still work either way, since both are keyed by a stable identifier (item ID or Jira key), not the title.
+- What DOES travel for those lists — repo names, issue/PR numbers, Jira keys — is plaintext in the export file, the same as the rest of your configuration. So are your saved filter values (per-tab username filters, custom tab filter text).
+- The **org/repo filter** at the top of the dashboard is not included — it's transient and resets on a new browser or session anyway.
+- View preferences travel in the **plaintext** part of the export, never inside the encrypted credentials section — there's nothing secret in them.
 
 ### Including Encrypted Credentials
 
-To migrate a full session (or set up an incognito test session) without re-authenticating, check **Include encrypted credentials for migration** before clicking **Export**. The export then also bundles your GitHub token and — if connected — your Jira credentials, encrypted so they can travel in the file safely.
+To migrate a full session (or set up an incognito test session) without re-authenticating, choose **Export with encrypted credentials** in the export dialog. Right above that choice, the dialog shows a warning: *"This is a one-time transfer, not a durable backup — the encrypted credentials can be imported once and expire in 30 days."* The export then also bundles your GitHub token and — if connected — your Jira credentials, encrypted so they can travel in the file safely.
 
 When you export with credentials:
 
-1. A **one-time code** is generated and shown in a dialog. **This code is displayed only once.** Copy it and save it **separately from the export file** (for example, in a password manager) — you need *both* the file and the code to restore credentials.
+1. A **one-time code** is generated and shown in a dialog — 26 characters, shown in dashed groups for readability (`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX`). **This code is displayed only once.** Copy it and save it **separately from the export file** (for example, in a password manager) — you need *both* the file and the code to restore credentials, and it cannot be shown again or recovered later. When retyping it, case doesn't matter, and the letters I, L, and O are read as 1, 1, and 0 respectively, so a common misreading of the code still works.
 2. The file downloads only *after* you acknowledge the code dialog. If you dismiss the dialog without acknowledging, nothing is downloaded.
 
 The code never leaves your browser and is never written into the export file. The credentials inside the file are encrypted with it, so the file alone cannot reveal them.
@@ -761,7 +783,7 @@ The encrypted-credentials portion of an export can be **decrypted only once — 
 - the GitHub token turning out to be revoked or expired,
 - reloading the page or closing the tab.
 
-If any of these happen, the plaintext configuration still imports fine, but the credentials can no longer be restored from that file — **re-export to get a fresh, single-use file** for another migration, test session, or retry.
+If any of these happen, you'll see a message like *"Couldn't restore credentials — this file may already have been used (single-use), or the code/file don't match. Re-export to try again."* The plaintext configuration still imports fine, but the credentials can no longer be restored from that file — **re-export to get a fresh, single-use file** for another migration, test session, or retry.
 
 Entering a wrong code is **not** one of these. Your one-time code is never sent to the server — it's checked locally against the result of that first submission — so a typo is safely retryable in the same session: just retype it and submit again, as long as you have not already declined the confirmation, reloaded the page, or closed the tab.
 
