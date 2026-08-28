@@ -775,6 +775,8 @@ Before signing in, click **Import from backup** on the Login page and choose an 
 - A file **without** encrypted credentials cannot sign you in. You are told to sign in normally first, then use Import on the Settings page to restore your configuration.
 - A file **with** encrypted credentials prompts for the one-time code and then signs you in automatically. If this browser already has settings from prior use (you have completed onboarding or selected any repos/orgs), an identity confirmation is shown first. A genuinely fresh browser or incognito window skips the confirmation and goes straight to the dashboard.
 
+If you have this app open in other browser tabs, importing credentials for a different GitHub identity reloads those tabs automatically so they reflect the new identity — any unsaved in-tab state there (such as a partially typed filter) is lost.
+
 ### The One-Time Code Is Single-Use
 
 The encrypted-credentials portion of an export can be **decrypted only once — the moment you first submit the one-time code**, not once per successful import. That first submission is irreversible for that file. This means any of the following, *after* the first code submission, permanently consumes the credentials portion:
