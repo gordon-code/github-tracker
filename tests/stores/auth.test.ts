@@ -464,9 +464,33 @@ describe("cross-tab auth sync", () => {
     localStorageMock.clear();
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
+    // Safe default fetch stub for every test in this describe block. auth.ts
+    // registers its "storage" listener as a module-level side effect, and
+    // `vi.resetModules()` + re-import (every beforeEach, in EVERY describe in
+    // this file) creates a fresh module instance with its OWN closed-over
+    // token/user signals — but the underlying happy-dom `window` is shared for
+    // the whole test FILE, and nothing ever calls `removeEventListener`, so
+    // every one of those listeners stays attached for the rest of the file's
+    // run. A LATER test's `dispatchEvent(new StorageEvent(...))` therefore
+    // also re-fires every EARLIER test's now-stale listener whenever that
+    // stale listener's frozen `_token()` differs from the dispatched value —
+    // which is nearly always, since each stale instance is frozen at whatever
+    // token ITS OWN test last set. Without a fetch stub always active, one of
+    // those stale listeners can fall through to a REAL, un-awaited network
+    // call to api.github.com that's still in-flight when the file tears down,
+    // which happy-dom then aborts — throwing unhandled AbortError/
+    // ERR_INVALID_STATE errors that make the whole run flaky. Individual
+    // tests below override this with their own `vi.stubGlobal("fetch", ...)`
+    // when they care about the specific response.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: () => Promise.resolve({}) }));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Flush pending microtasks BEFORE restoring globals, so every listener
+    // triggered by this test's dispatch (fresh AND stale — see beforeEach)
+    // fully settles against the still-active mock rather than racing
+    // `vi.unstubAllGlobals()` below and falling through to the real fetch.
+    await new Promise((r) => setTimeout(r, 50));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
