@@ -8,6 +8,19 @@ const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
 export const LOCKED_REPOS_CAP = 50;
 export const JIRA_CUSTOM_ORDER_CAP = 500;
+// customTabFilters/expandedRepos are Records, not arrays — Zod v4's z.record()
+// has no built-in .max(), so these are enforced via .refine() below instead.
+// Outer keys are tab IDs (built-ins + customTabs, itself capped at 10 in
+// shared/schemas.ts), generously capped well above any realistic tab count.
+const CUSTOM_TAB_FILTERS_TABS_CAP = 50;
+// Inner keys are filter field names for a single tab's baseType — every
+// *FiltersSchema above has well under 10 fields.
+const CUSTOM_TAB_FILTERS_FIELDS_CAP = 50;
+const EXPANDED_REPOS_TABS_CAP = 50;
+// Inner keys are repoFullName — unlike lockedRepos (a deliberately small
+// pinned subset), this tracks expand/collapse state for every repo in a tab,
+// so it needs headroom well above LOCKED_REPOS_CAP.
+const EXPANDED_REPOS_REPOS_CAP = 1000;
 export const JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH = 50;
 export const JIRA_CUSTOM_ORDER_SCOPE = "assigned" as const;
 export const JIRA_CUSTOM_SORT_FIELD = "custom" as const;
@@ -118,11 +131,22 @@ export const ViewStateSchema = z.object({
   customTabFilters: z.record(
     z.string(),
     z.record(z.string(), z.string())
-  ).default({}),
+      .refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_FIELDS_CAP, {
+        message: `Too many filter fields for a single tab (max ${CUSTOM_TAB_FILTERS_FIELDS_CAP})`,
+      })
+  ).refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_TABS_CAP, {
+    message: `Too many tabs with saved filters (max ${CUSTOM_TAB_FILTERS_TABS_CAP})`,
+  }).default({}),
   expandedRepos: z.record(
     z.string(),
-    z.record(z.string(), z.boolean()).default({})
-  ).default({
+    z.record(z.string(), z.boolean())
+      .refine((v) => Object.keys(v).length <= EXPANDED_REPOS_REPOS_CAP, {
+        message: `Too many expanded repos for a single tab (max ${EXPANDED_REPOS_REPOS_CAP})`,
+      })
+      .default({})
+  ).refine((v) => Object.keys(v).length <= EXPANDED_REPOS_TABS_CAP, {
+    message: `Too many tabs with expanded-repo state (max ${EXPANDED_REPOS_TABS_CAP})`,
+  }).default({
     issues: {},
     pullRequests: {},
     actions: {},
@@ -231,30 +255,39 @@ function coerceStrippedItemsArray(raw: unknown): unknown {
  * whole-call). Called ONLY from the settings-import paths — identity-scoped,
  * always AFTER the importing GitHub identity is established (never a
  * standalone/independent trigger).
+ *
+ * Wrapped in a try/catch as belt-and-suspenders: this function is already
+ * total/no-throw for realistic input, but the call site runs AFTER identity
+ * and config are already committed, so a future change here must never be
+ * able to throw past that point.
  */
 export function applyImportedViewState(raw: unknown): void {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return;
-  const rawObj = raw as Record<string, unknown>;
-  const patch: Partial<Record<keyof ViewState, unknown>> = {};
-  for (const key of EXPORTED_VIEW_PREF_KEYS) {
-    if (!(key in rawObj)) continue;
-    const value =
-      key === "ignoredItems" || key === "trackedItems"
-        ? coerceStrippedItemsArray(rawObj[key])
-        : rawObj[key];
-    const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
-      [key]: value,
-    });
-    if (result.success) {
-      patch[key] = (result.data as Record<string, unknown>)[key];
+  try {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return;
+    const rawObj = raw as Record<string, unknown>;
+    const patch: Partial<Record<keyof ViewState, unknown>> = {};
+    for (const key of EXPORTED_VIEW_PREF_KEYS) {
+      if (!(key in rawObj)) continue;
+      const value =
+        key === "ignoredItems" || key === "trackedItems"
+          ? coerceStrippedItemsArray(rawObj[key])
+          : rawObj[key];
+      const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
+        [key]: value,
+      });
+      if (result.success) {
+        patch[key] = (result.data as Record<string, unknown>)[key];
+      }
     }
+    if (Object.keys(patch).length === 0) return;
+    setViewState(
+      produce((draft) => {
+        Object.assign(draft, patch);
+      })
+    );
+  } catch {
+    // Silent no-op, matching this function's documented silent-skip semantics.
   }
-  if (Object.keys(patch).length === 0) return;
-  setViewState(
-    produce((draft) => {
-      Object.assign(draft, patch);
-    })
-  );
 }
 
 export function migrateLockedRepos(raw: unknown): unknown {

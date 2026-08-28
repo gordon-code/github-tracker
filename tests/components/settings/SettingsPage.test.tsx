@@ -501,6 +501,9 @@ describe("SettingsPage — Data: Export settings", () => {
     expect(capturedBlob).toBeDefined();
     const parsed = JSON.parse(await capturedBlob!.text()) as Record<string, unknown>;
     expect("_credentials" in parsed).toBe(false);
+    // The view-prefs migration (buildViewPreferencesSection) runs regardless of
+    // whether credentials are included — locks that in at the UI entry point.
+    expect("_viewPreferences" in parsed).toBe(true);
   });
 
   it("Cancel in the choice dialog downloads nothing", async () => {
@@ -1600,6 +1603,70 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
     await Promise.resolve();
     expect(buildSpy).toHaveBeenCalledTimes(1);
     screen.getByText(CODE); // the original code is still the one shown
+  });
+
+  it("CR-001/UI-001: the choice dialog cannot be dismissed mid-seal, but the code modal opens normally once the seal resolves", async () => {
+    let resolveSeal!: (v: { sealed: string; salt: string; oneTimeCode: string }) => void;
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockReturnValue(
+      new Promise((r) => { resolveSeal = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+
+    // Seal in flight (exporting() === true): every dismissal control is disabled.
+    await waitFor(() => screen.getByRole("button", { name: "Preparing..." }));
+    const preparingBtn = screen.getByRole("button", { name: "Preparing..." });
+    expect(preparingBtn.getAttribute("aria-busy")).toBe("true");
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    const configOnlyBtn = screen.getByRole("button", { name: "Export config only" }) as HTMLButtonElement;
+    expect(cancelBtn.disabled).toBe(true);
+    expect(configOnlyBtn.disabled).toBe(true);
+
+    // Defense-in-depth: forcing a click past the disabled attribute still
+    // hits the handler's own `if (!exporting())` guard (the same condition
+    // that gates the dialog's onOpenChange for Escape/overlay-click), so the
+    // dialog stays open and no code modal appears while the seal is pending.
+    cancelBtn.disabled = false;
+    fireEvent.click(cancelBtn);
+    screen.getByText("Choose what to include in the exported file."); // still open
+    expect(screen.queryByText(/shown only once/i)).toBeNull();
+
+    // The guard is scoped to the in-flight window only — once the seal
+    // resolves, the one-time-code modal opens exactly as the unblocked flow
+    // would.
+    resolveSeal({ sealed: "SEALED", salt: "SALT", oneTimeCode: CODE });
+    await waitFor(() => screen.getByText(/shown only once/i));
+    screen.getByText(CODE);
+  });
+
+  it("post-await guard: resolving the seal after the component unmounts does not throw or leave a stray code modal", async () => {
+    // Exercises the `if (!showExportChoice()) return` guard in
+    // handleExportWithCredentials: the choice dialog can't be dismissed
+    // through the UI while a seal is in flight (see the test above), but the
+    // whole page can still be torn down out from under the pending await
+    // (e.g. navigating away from Settings) — this proves that doesn't throw
+    // or pop a stray one-time-code modal into the (now-gone) document.
+    let resolveSeal!: (v: { sealed: string; salt: string; oneTimeCode: string }) => void;
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockReturnValue(
+      new Promise((r) => { resolveSeal = r; })
+    );
+
+    const user = userEvent.setup();
+    const { unmount } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+    await waitFor(() => screen.getByRole("button", { name: "Preparing..." }));
+
+    unmount();
+
+    expect(() => resolveSeal({ sealed: "SEALED", salt: "SALT", oneTimeCode: CODE })).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.body.textContent).not.toContain(CODE);
+    expect(document.body.textContent ?? "").not.toMatch(/shown only once/i);
   });
 });
 

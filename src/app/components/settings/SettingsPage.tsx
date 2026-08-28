@@ -306,6 +306,12 @@ export default function SettingsPage() {
       // with it, THEN seals the ciphertext (encrypt-then-seal). No secret is
       // logged here.
       const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
+      // Defense-in-depth: the choice dialog's onOpenChange/buttons already block
+      // dismissal while exporting() is true, so this should be unreachable — but
+      // if the dialog was somehow closed out from under this await, discard the
+      // freshly-minted single-use code instead of popping it after the user
+      // backed out.
+      if (!showExportChoice()) return;
       pendingExportJson = JSON.stringify({ ...payload, _credentials: { sealed, salt } }, null, 2);
       setCodeCopied(false);
       // Close the choice dialog, then open the code modal — only one of the
@@ -1786,10 +1792,14 @@ export default function SettingsPage() {
 
         {/* Export-choice dialog: config only vs. with encrypted credentials.
             On success the "with credentials" path closes this dialog and opens
-            the one-time-code modal below — only one of the two is ever open. */}
+            the one-time-code modal below — only one of the two is ever open.
+            While a seal is in flight (exporting()), dismissal is blocked — both
+            via onOpenChange (Escape/overlay click) and by disabling the other
+            buttons — so a cancel-during-seal can't pop the one-time-code modal
+            after the user has already backed out. */}
         <Dialog
           open={showExportChoice()}
-          onOpenChange={setShowExportChoice}
+          onOpenChange={(isOpen) => { if (!isOpen && !exporting()) setShowExportChoice(false); }}
           modal
         >
           <Dialog.Portal>
@@ -1802,12 +1812,13 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleExportConfigOnly}
+                disabled={exporting()}
                 class="btn btn-sm btn-outline w-full justify-start"
               >
                 Export config only
               </button>
               <div class="flex flex-col gap-2">
-                <p class="text-xs text-warning">
+                <p id="export-credentials-warning" class="text-xs text-warning">
                   This is a one-time transfer, not a durable backup — the encrypted
                   credentials can be imported once and expire in 30 days.
                 </p>
@@ -1816,6 +1827,7 @@ export default function SettingsPage() {
                   onClick={() => void handleExportWithCredentials()}
                   disabled={exporting()}
                   aria-busy={exporting()}
+                  aria-describedby="export-credentials-warning"
                   class="btn btn-sm btn-primary w-full justify-start"
                 >
                   {exporting() ? "Preparing..." : "Export with encrypted credentials"}
@@ -1824,7 +1836,8 @@ export default function SettingsPage() {
               <div class="flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setShowExportChoice(false)}
+                  onClick={() => { if (!exporting()) setShowExportChoice(false); }}
+                  disabled={exporting()}
                   class="btn btn-sm btn-ghost"
                 >
                   Cancel
