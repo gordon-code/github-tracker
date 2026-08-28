@@ -461,11 +461,24 @@ describe("SettingsPage — Data: Clear cache", () => {
 });
 
 describe("SettingsPage — Data: Export settings", () => {
-  it("clicking Export triggers download", async () => {
-    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake-url");
+  it("clicking Export opens the choice dialog", async () => {
+    renderSettings();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    screen.getByText("Choose what to include in the exported file.");
+    screen.getByRole("button", { name: "Export config only" });
+    screen.getByRole("button", { name: "Export with encrypted credentials" });
+  });
+
+  it("choosing 'Export config only' downloads immediately with no _credentials section", async () => {
+    let capturedBlob: Blob | undefined;
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      capturedBlob = blob as Blob;
+      return "blob:fake-url";
+    });
     const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
-    // Spy on anchor click
     const clickSpy = vi.fn();
     const origCreate = document.createElement.bind(document);
     vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
@@ -477,13 +490,28 @@ describe("SettingsPage — Data: Export settings", () => {
     });
 
     renderSettings();
-    const exportBtn = screen.getByText("Export");
     const user = userEvent.setup();
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
 
     expect(createObjectURLSpy).toHaveBeenCalledOnce();
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(revokeObjectURLSpy).toHaveBeenCalledOnce();
+
+    expect(capturedBlob).toBeDefined();
+    const parsed = JSON.parse(await capturedBlob!.text()) as Record<string, unknown>;
+    expect("_credentials" in parsed).toBe(false);
+  });
+
+  it("Cancel in the choice dialog downloads nothing", async () => {
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake-url");
+
+    renderSettings();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(createObjectURLSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1115,8 +1143,8 @@ describe("SettingsPage — enableTracking toggle", () => {
   it("includes enableTracking in exported settings JSON", async () => {
     updateConfig({ enableTracking: true });
     renderSettings();
-    const exportBtn = screen.getByRole("button", { name: /export/i });
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
     const blobParts: BlobPart[] = [];
     const originalBlob = globalThis.Blob;
     globalThis.Blob = class MockBlob extends originalBlob {
@@ -1125,7 +1153,7 @@ describe("SettingsPage — enableTracking toggle", () => {
         if (parts) blobParts.push(...parts);
       }
     } as typeof Blob;
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
     expect(json.enableTracking).toBe(true);
@@ -1252,8 +1280,8 @@ describe("SettingsPage — monitor toggle wiring", () => {
     renderSettings();
 
     // Trigger export
-    const exportBtn = screen.getByRole("button", { name: /export/i });
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
     const blobParts: BlobPart[] = [];
     const originalBlob = globalThis.Blob;
     globalThis.Blob = class MockBlob extends originalBlob {
@@ -1263,7 +1291,7 @@ describe("SettingsPage — monitor toggle wiring", () => {
       }
     } as typeof Blob;
 
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
 
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
@@ -1451,7 +1479,17 @@ describe("Dependencies settings section", () => {
 describe("SettingsPage — Data: Export with encrypted credentials", () => {
   const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
 
-  it("checking the box + export shows the one-time-code modal and defers download until acknowledged", async () => {
+  it("shows the single-use warning in the choice dialog before the credentials action", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    screen.getByText(
+      "This is a one-time transfer, not a durable backup — the encrypted credentials can be imported once and expire in 30 days."
+    );
+  });
+
+  it("choosing 'Export with encrypted credentials' shows the one-time-code modal and defers download until acknowledged", async () => {
     vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
       sealed: "SEALED",
       salt: "SALT",
@@ -1469,8 +1507,8 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
 
     const user = userEvent.setup();
     renderSettings();
-    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
     await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
 
     await waitFor(() => screen.getByText(/shown only once/i));
     // Modal shows the generated code; download NOT yet triggered.
@@ -1483,22 +1521,22 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
     expect(clickSpy).toHaveBeenCalledOnce();
   });
 
-  it("a seal failure pushes a warning, leaves the checkbox checked, and never downloads", async () => {
+  it("a seal failure pushes a warning, leaves the choice dialog open, and never downloads", async () => {
     const { pushNotification } = await import("../../../src/app/lib/errors");
     vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockRejectedValue(new Error("seal failed"));
     const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
 
     const user = userEvent.setup();
     renderSettings();
-    const checkbox = screen.getByRole<HTMLInputElement>("checkbox", { name: /include encrypted credentials/i });
-    await user.click(checkbox);
     await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
 
     await waitFor(() => {
       expect(pushNotification).toHaveBeenCalledWith("settings-export", expect.any(String), "warning");
     });
     expect(createObjSpy).not.toHaveBeenCalled();
-    expect(checkbox.checked).toBe(true);
+    // The choice dialog stays open so the user can retry without reopening it.
+    screen.getByRole("button", { name: "Export with encrypted credentials" });
   });
 
   it("dismissing the code modal (Cancel) downloads nothing and leaves no residual state", async () => {
@@ -1516,8 +1554,8 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
 
     const user = userEvent.setup();
     renderSettings();
-    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
     await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
     await waitFor(() => screen.getByText(/shown only once/i));
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -1531,6 +1569,7 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
     // fireEvent (not userEvent): the dismissed Kobalte modal lingers its
     // pointer-events:none on <body> in happy-dom, blocking a userEvent click.
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
     await waitFor(() => expect(settingsTransfer.buildEncryptedCredentialsSection).toHaveBeenCalledTimes(2));
   });
 
@@ -1540,15 +1579,22 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
     });
     const user = userEvent.setup();
     renderSettings();
-    await user.click(screen.getByRole("checkbox", { name: /include encrypted credentials/i }));
+    // Captured BEFORE any dialog opens — once the code modal is open, the rest
+    // of the page (including this button) is legitimately aria-hidden, so a
+    // fresh getByRole query for it would correctly fail to find it. Reusing
+    // this reference below dispatches directly on the node, bypassing that
+    // (accurate) accessibility-tree filtering, the same way the real Kobalte
+    // focus trap bypasses it for an actual re-click.
     const exportBtn = screen.getByRole("button", { name: "Export" });
     await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
     await waitFor(() => screen.getByText(/shown only once/i));
     expect(buildSpy).toHaveBeenCalledTimes(1);
 
     // The Kobalte Dialog traps + restores focus so the Export button can't be
-    // re-fired behind the modal; the re-entry guard closes the gap for any other
-    // trigger path. Re-fire the handler directly and assert no new code is minted.
+    // re-fired behind the modal; the re-entry guard on handleOpenExportChoice
+    // closes the gap for any other trigger path. Re-fire the Export button
+    // directly and assert the choice dialog doesn't even reopen.
     fireEvent.click(exportBtn);
     await Promise.resolve();
     await Promise.resolve();

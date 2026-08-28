@@ -260,10 +260,12 @@ export default function SettingsPage() {
   }
 
   // ── Export settings ────────────────────────────────────────────────────────
-  // includeCredentials opts into an encrypted-credentials section. On
-  // success the one-time code is shown in a modal and the file download is
-  // DEFERRED until the user acknowledges — the code is shown only once.
-  const [includeCredentials, setIncludeCredentials] = createSignal(false);
+  // The Export button opens a choice dialog (config only vs. with encrypted
+  // credentials). Choosing "with credentials" runs the seal flow and, on
+  // success, the one-time code is shown in a SEPARATE modal — the file
+  // download is DEFERRED until the user acknowledges that modal, since the
+  // code is shown only once.
+  const [showExportChoice, setShowExportChoice] = createSignal(false);
   const [exporting, setExporting] = createSignal(false);
   const [exportCode, setExportCode] = createSignal<string | null>(null);
   const [codeCopied, setCodeCopied] = createSignal(false);
@@ -279,31 +281,41 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleExportSettings() {
-    if (exporting()) return;
-    // Re-entry guard: while the one-time-code modal is open a fresh export would
-    // mint a NEW code + a new seal call while the old code is still displayed.
-    // The Kobalte Dialog traps + restores focus (so the Export button can't be
-    // re-fired behind the modal), and this guard closes the gap for any other
-    // trigger path.
+  function handleOpenExportChoice() {
+    // Re-entry guard: while the one-time-code modal is open, reopening the
+    // export-choice dialog would let a second export mint a NEW code while
+    // the old one is still displayed. The Kobalte Dialog traps + restores
+    // focus (so the Export button can't be re-fired behind the modal), and
+    // this guard closes the gap for any other trigger path.
     if (exportCode() !== null) return;
+    setShowExportChoice(true);
+  }
+
+  function handleExportConfigOnly() {
     const payload = buildExportPayload(config, viewState);
-    if (!includeCredentials()) {
-      triggerDownload(JSON.stringify(payload, null, 2));
-      return;
-    }
+    triggerDownload(JSON.stringify(payload, null, 2));
+    setShowExportChoice(false);
+  }
+
+  async function handleExportWithCredentials() {
+    if (exporting()) return; // re-entry guard: exactly one seal in flight
     setExporting(true);
     try {
+      const payload = buildExportPayload(config, viewState);
       // buildEncryptedCredentialsSection generates the code, encrypts the bundle
       // with it, THEN seals the ciphertext (encrypt-then-seal). No secret is
       // logged here.
       const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
       pendingExportJson = JSON.stringify({ ...payload, _credentials: { sealed, salt } }, null, 2);
       setCodeCopied(false);
+      // Close the choice dialog, then open the code modal — only one of the
+      // two export dialogs is ever visible at a time.
+      setShowExportChoice(false);
       setExportCode(oneTimeCode); // opens the modal; download deferred to ack
     } catch {
       // Turnstile rejection / SealError / oversized pre-check — leave the
-      // checkbox checked so the user can retry; do NOT download anything.
+      // export-choice dialog open so the user can retry; do NOT download
+      // anything.
       pushNotification(
         "settings-export",
         "Couldn't prepare encrypted credentials for export — please try again.",
@@ -1650,27 +1662,13 @@ export default function SettingsPage() {
             label="Export settings"
             description="Download your configuration as a JSON file"
           >
-            <div class="flex flex-col items-end gap-2">
-              <label class="flex items-center gap-2 text-xs text-base-content/70 cursor-pointer">
-                <input
-                  type="checkbox"
-                  class="checkbox checkbox-xs"
-                  aria-label="Include encrypted credentials for migration"
-                  checked={includeCredentials()}
-                  onChange={(e) => setIncludeCredentials(e.currentTarget.checked)}
-                />
-                Include encrypted credentials for migration
-              </label>
-              <button
-                type="button"
-                onClick={() => void handleExportSettings()}
-                disabled={exporting()}
-                aria-busy={exporting()}
-                class="btn btn-sm btn-outline"
-              >
-                {exporting() ? "Preparing..." : "Export"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleOpenExportChoice}
+              class="btn btn-sm btn-outline"
+            >
+              Export
+            </button>
           </SettingRow>
 
           {/* Import settings */}
@@ -1785,6 +1783,56 @@ export default function SettingsPage() {
             saveWithFeedback({ dependencies: { ...config.dependencies, excludedOrgs: orgs, excludedRepos: repos } })
           }
         />
+
+        {/* Export-choice dialog: config only vs. with encrypted credentials.
+            On success the "with credentials" path closes this dialog and opens
+            the one-time-code modal below — only one of the two is ever open. */}
+        <Dialog
+          open={showExportChoice()}
+          onOpenChange={setShowExportChoice}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
+              <Dialog.Title class="text-lg font-semibold">Export settings</Dialog.Title>
+              <Dialog.Description class="text-sm text-base-content/70">
+                Choose what to include in the exported file.
+              </Dialog.Description>
+              <button
+                type="button"
+                onClick={handleExportConfigOnly}
+                class="btn btn-sm btn-outline w-full justify-start"
+              >
+                Export config only
+              </button>
+              <div class="flex flex-col gap-2">
+                <p class="text-xs text-warning">
+                  This is a one-time transfer, not a durable backup — the encrypted
+                  credentials can be imported once and expire in 30 days.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleExportWithCredentials()}
+                  disabled={exporting()}
+                  aria-busy={exporting()}
+                  class="btn btn-sm btn-primary w-full justify-start"
+                >
+                  {exporting() ? "Preparing..." : "Export with encrypted credentials"}
+                </button>
+              </div>
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowExportChoice(false)}
+                  class="btn btn-sm btn-ghost"
+                >
+                  Cancel
+                </button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
 
         {/* One-time-code modal (encrypted export). Download is deferred until ack.
             Kobalte Dialog provides the focus trap + focus restoration that keeps
