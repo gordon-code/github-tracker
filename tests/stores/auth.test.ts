@@ -465,32 +465,25 @@ describe("cross-tab auth sync", () => {
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
     // Safe default fetch stub for every test in this describe block. auth.ts
-    // registers its "storage" listener as a module-level side effect, and
-    // `vi.resetModules()` + re-import (every beforeEach, in EVERY describe in
-    // this file) creates a fresh module instance with its OWN closed-over
-    // token/user signals — but the underlying happy-dom `window` is shared for
-    // the whole test FILE, and nothing ever calls `removeEventListener`, so
-    // every one of those listeners stays attached for the rest of the file's
-    // run. A LATER test's `dispatchEvent(new StorageEvent(...))` therefore
-    // also re-fires every EARLIER test's now-stale listener whenever that
-    // stale listener's frozen `_token()` differs from the dispatched value —
-    // which is nearly always, since each stale instance is frozen at whatever
-    // token ITS OWN test last set. Without a fetch stub always active, one of
-    // those stale listeners can fall through to a REAL, un-awaited network
-    // call to api.github.com that's still in-flight when the file tears down,
-    // which happy-dom then aborts — throwing unhandled AbortError/
-    // ERR_INVALID_STATE errors that make the whole run flaky. Individual
+    // registers its "storage" listener as a module-level side effect; the
+    // afterEach below detaches it via `_resetAuthStorageListenerForTests()`, so
+    // within this describe each `vi.resetModules()` + re-import swaps the listener
+    // rather than piling new ones onto the shared happy-dom `window`. The stub still guards the
+    // current test's own listener: its cross-tab branch fires an un-awaited
+    // `/user` fetch that, without a stub, would hit the real network and abort
+    // on teardown (throwing unhandled AbortError/ERR_INVALID_STATE). Individual
     // tests below override this with their own `vi.stubGlobal("fetch", ...)`
     // when they care about the specific response.
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: () => Promise.resolve({}) }));
   });
 
   afterEach(async () => {
-    // Flush pending microtasks BEFORE restoring globals, so every listener
-    // triggered by this test's dispatch (fresh AND stale — see beforeEach)
-    // fully settles against the still-active mock rather than racing
-    // `vi.unstubAllGlobals()` below and falling through to the real fetch.
+    // Flush pending microtasks BEFORE restoring globals, so the /user fetch
+    // this test's storage listener kicked off fully settles against the
+    // still-active mock rather than racing `vi.unstubAllGlobals()` below and
+    // falling through to the real fetch.
     await new Promise((r) => setTimeout(r, 50));
+    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -609,7 +602,7 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_replacement");
   });
 
-  it("Gap B: reloads the tab when the cross-tab token belongs to a DIFFERENT identity (not just a token rotation)", async () => {
+  it("reloads the tab when the cross-tab token belongs to a DIFFERENT identity (not just a token rotation)", async () => {
     const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -636,7 +629,7 @@ describe("cross-tab auth sync", () => {
     expect(mod.token()).toBe("ghs_new_identity_token");
   });
 
-  it("Gap B: does NOT reload on a same-identity token rotation (case-insensitive login match) and leaves config/view untouched", async () => {
+  it("does NOT reload on a same-identity token rotation (case-insensitive login match) and leaves config/view untouched", async () => {
     const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -664,7 +657,7 @@ describe("cross-tab auth sync", () => {
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
   });
 
-  it("Gap B (bleed): reloads instead of adopting a DIFFERENT identity when this tab's user() is null after expireToken() (prior identity's config/view retained)", async () => {
+  it("reloads instead of adopting a DIFFERENT identity when this tab's user() is null after expireToken() (prior identity's config/view retained)", async () => {
     const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
 
     // Authenticate as X and seed non-default config/view for that identity.
@@ -1194,6 +1187,10 @@ describe("cross-tab Jira auth sync", () => {
   });
 
   afterEach(() => {
+    // Detach this test's module-scope "storage" listener so re-imports don't
+    // accumulate listeners on the shared window (same reason as the GitHub
+    // cross-tab describe above).
+    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

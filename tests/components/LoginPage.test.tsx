@@ -360,7 +360,7 @@ describe("LoginPage — PAT form validation", () => {
   });
 });
 
-// ── Import from backup (Task 7) ───────────────────────────────────────────────
+// ── Import from backup ────────────────────────────────────────────────────────
 
 describe("LoginPage — Import from backup", () => {
   const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
@@ -733,9 +733,9 @@ describe("LoginPage — Import from backup", () => {
     expect(clearOrder).toBeLessThan(cfgOrder);
   });
 
-  // ── STRUCT-C-001: generation guard + in-flight close lock ───────────────────
+  // ── generation guard + in-flight close lock ─────────────────────────────────
 
-  it("STRUCT-C-001: a Cancel during resolve discards the stale continuation — no auto-login/navigation as the abandoned identity", async () => {
+  it("a Cancel during resolve discards the stale continuation — no auto-login/navigation as the abandoned identity", async () => {
     mockValidCredsFile();
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
     // Defer the resolve so the flow can be abandoned while it is pending.
@@ -767,7 +767,7 @@ describe("LoginPage — Import from backup", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it("STRUCT-C-001: Cancel is disabled while the unseal is in flight", async () => {
+  it("Cancel is disabled while the unseal is in flight", async () => {
     mockValidCredsFile();
     let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
     vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(new Promise((r) => { resolveUnseal = r; }));

@@ -416,72 +416,86 @@ export const crossTabReload = {
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
 // Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
 // holding an already-invalidated token would fail on its next Jira request.
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e: StorageEvent) => {
-    if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
-      // Re-check: a rapid sign-out/sign-in may have already replaced the token
-      if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
-      expireToken();
-      window.location.replace("/login");
-    } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
-      // Captured BEFORE the token/user update below, so the /user fetch result
-      // can be compared against who THIS tab thought was signed in.
-      const previousLogin = user()?.login;
-      _setToken(e.newValue);
-      const gen = ++_crossTabFetchGen;
-      const newToken = e.newValue;
-      fetch("https://api.github.com/user", {
-        headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
-      })
-        .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
-        .then((data) => {
-          if (data && _token() === newToken && _crossTabFetchGen === gen) {
-            // Only a CONFIRMED same-user rotation (a known previous login that
-            // case-insensitively matches the fetched identity) skips the
-            // reload. previousLogin is undefined whenever this tab's user()
-            // was already null — notably after expireToken(), which clears
-            // user() but deliberately PRESERVES config/view so the same user
-            // can silently re-auth. In that state we can't assume continuity:
-            // this tab may still be holding a prior identity's config/view in
-            // memory/localStorage even though user() reads null, so treating
-            // an unconfirmed prior identity as "safe" would let a genuinely
-            // different identity render using that stale data (a
-            // cross-identity bleed). When in doubt, reload.
-            const isSameUserRotation =
-              previousLogin !== undefined && previousLogin.toLowerCase() === data.login.toLowerCase();
-            if (isSameUserRotation) {
-              // Same-identity token rotation — adopt the refreshed user data
-              // in place, same as before. Must NOT reset config/view here.
-              setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
-            } else {
-              // A different GitHub identity signed in via another tab (e.g.
-              // Settings > Replace token in that tab), OR this tab has no
-              // confirmable prior identity — the active tab has already
-              // reset config/view, cleared the shared IndexedDB cache, and
-              // written the new identity's token/config/view to localStorage.
-              // This (passive) tab has NOT run any of that, so simply calling
-              // setUser() here could leave it authenticated as the new identity
-              // while still rendering a previous identity's config/view/cached
-              // data. Reload instead so it re-initializes cleanly from what the
-              // active tab already persisted.
-              crossTabReload.reloadForIdentitySwitch();
-            }
+function handleAuthStorage(e: StorageEvent): void {
+  if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
+    // Re-check: a rapid sign-out/sign-in may have already replaced the token
+    if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
+    expireToken();
+    window.location.replace("/login");
+  } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
+    // Captured BEFORE the token/user update below, so the /user fetch result
+    // can be compared against who THIS tab thought was signed in.
+    const previousLogin = user()?.login;
+    _setToken(e.newValue);
+    const gen = ++_crossTabFetchGen;
+    const newToken = e.newValue;
+    fetch("https://api.github.com/user", {
+      headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+    })
+      .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
+      .then((data) => {
+        if (data && _token() === newToken && _crossTabFetchGen === gen) {
+          // Only a CONFIRMED same-user rotation (a known previous login that
+          // case-insensitively matches the fetched identity) skips the
+          // reload. previousLogin is undefined whenever this tab's user()
+          // was already null — notably after expireToken(), which clears
+          // user() but deliberately PRESERVES config/view so the same user
+          // can silently re-auth. In that state we can't assume continuity:
+          // this tab may still be holding a prior identity's config/view in
+          // memory/localStorage even though user() reads null, so treating
+          // an unconfirmed prior identity as "safe" would let a genuinely
+          // different identity render using that stale data (a
+          // cross-identity bleed). When in doubt, reload.
+          const isSameUserRotation =
+            previousLogin !== undefined && previousLogin.toLowerCase() === data.login.toLowerCase();
+          if (isSameUserRotation) {
+            // Same-identity token rotation — adopt the refreshed user data
+            // in place, same as before. Must NOT reset config/view here.
+            setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
+          } else {
+            // A different GitHub identity signed in via another tab (e.g.
+            // Settings > Replace token in that tab), OR this tab has no
+            // confirmable prior identity — the active tab has already
+            // reset config/view, cleared the shared IndexedDB cache, and
+            // written the new identity's token/config/view to localStorage.
+            // This (passive) tab has NOT run any of that, so simply calling
+            // setUser() here could leave it authenticated as the new identity
+            // while still rendering a previous identity's config/view/cached
+            // data. Reload instead so it re-initializes cleanly from what the
+            // active tab already persisted.
+            crossTabReload.reloadForIdentitySwitch();
           }
-        })
-        .catch(() => {});
-    }
-    if (e.key === JIRA_AUTH_STORAGE_KEY) {
-      try {
-        const raw = e.newValue;
-        if (!raw) {
-          _setJiraAuth(null);
-          return;
         }
-        const parsed = JiraAuthStateSchema.safeParse(JSON.parse(raw) as unknown);
-        _setJiraAuth(parsed.success ? parsed.data : null);
-      } catch {
+      })
+      .catch(() => {});
+  }
+  if (e.key === JIRA_AUTH_STORAGE_KEY) {
+    try {
+      const raw = e.newValue;
+      if (!raw) {
         _setJiraAuth(null);
+        return;
       }
+      const parsed = JiraAuthStateSchema.safeParse(JSON.parse(raw) as unknown);
+      _setJiraAuth(parsed.success ? parsed.data : null);
+    } catch {
+      _setJiraAuth(null);
     }
-  });
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", handleAuthStorage);
+}
+
+/**
+ * Test-only: detaches the module-scope `storage` listener registered above.
+ * Suites re-import this module via `vi.resetModules()`, which attaches a fresh
+ * listener to the shared window on each import; calling this in teardown removes
+ * the current instance's listener so they don't accumulate across tests.
+ */
+export function _resetAuthStorageListenerForTests(): void {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("storage", handleAuthStorage);
+  }
 }

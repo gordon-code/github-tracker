@@ -262,7 +262,7 @@ describe("buildExportPayload", () => {
   });
 });
 
-// ── Task 2: curated, privacy-scrubbed view preferences ────────────────────────
+// ── curated, privacy-scrubbed view preferences ────────────────────────────────
 
 describe("buildExportPayload — _viewPreferences", () => {
   // viewState is a module-level singleton shared across this whole test file —
@@ -414,13 +414,13 @@ describe("parseImportFile", () => {
     }
   });
 
-  it("STRUCT-I-001: rejects a file stamped with a NEWER export version, with a clear message", () => {
+  it("rejects a file stamped with a NEWER export version, with a clear message", () => {
     const result = parseImportFile(JSON.stringify({ _exportVersion: 2, theme: "dark" }));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors[0]).toMatch(/newer version/i);
   });
 
-  it("STRUCT-I-001: accepts version 1 and a missing _exportVersion (treated as v1)", () => {
+  it("accepts version 1 and a missing _exportVersion (treated as v1)", () => {
     expect(parseImportFile(JSON.stringify({ _exportVersion: 1, theme: "dark" })).ok).toBe(true);
     expect(parseImportFile(JSON.stringify({ theme: "dark" })).ok).toBe(true);
     // A round-tripped real export (stamped v1 by buildExportPayload) also parses.
@@ -428,7 +428,7 @@ describe("parseImportFile", () => {
   });
 });
 
-// ── Task 4: client-side envelope encryption ──────────────────────────────────
+// ── client-side envelope encryption ──────────────────────────────────────────
 
 // Mirrors src/app/lib/settings-transfer.ts's Crockford alphabet (excludes I, L, O, U).
 const CODE_DISPLAY_RE = /^([0-9A-HJKMNP-TV-Z]{4}-){5}[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{2}$/;
@@ -624,7 +624,7 @@ describe("encryptWithCode / decryptWithCode", () => {
   });
 });
 
-// ── Task 5: assemble credential bundle ────────────────────────────────────────
+// ── assemble credential bundle ────────────────────────────────────────────────
 
 describe("assembleCredentialBundle / CredentialBundleSchema", () => {
   beforeEach(() => {
@@ -691,7 +691,7 @@ describe("assembleCredentialBundle / CredentialBundleSchema", () => {
   });
 });
 
-// ── Task 5/6: proxy credential seal/unseal helpers ────────────────────────────
+// ── proxy credential seal/unseal helpers ──────────────────────────────────────
 
 /**
  * Installs a Turnstile mock (captures render opts) + a document.createElement
@@ -724,7 +724,7 @@ function installTurnstileHarness(): Array<Record<string, unknown>> {
   return renderOpts;
 }
 
-describe("proxy — sealCredentialBundle / unsealCredentialBundle (Task 5/6)", () => {
+describe("proxy — sealCredentialBundle / unsealCredentialBundle", () => {
   let renderOpts: Array<Record<string, unknown>>;
 
   beforeEach(() => {
@@ -818,7 +818,7 @@ describe("proxy — sealCredentialBundle / unsealCredentialBundle (Task 5/6)", (
   });
 });
 
-// ── Task 5: buildEncryptedCredentialsSection (encrypt-then-seal) ───────────────
+// ── buildEncryptedCredentialsSection (encrypt-then-seal) ───────────────────────
 
 describe("buildEncryptedCredentialsSection", () => {
   beforeEach(() => {
@@ -901,7 +901,7 @@ describe("buildEncryptedCredentialsSection", () => {
   });
 });
 
-// ── Task 6: resolveImportedCredentials ────────────────────────────────────────
+// ── resolveImportedCredentials ────────────────────────────────────────────────
 
 describe("resolveImportedCredentials", () => {
   const bundle: CredentialBundle = { github: { token: "ghp_valid_token", method: "pat" }, jira: null };
@@ -1022,7 +1022,7 @@ describe("resolveImportedCredentials", () => {
   });
 });
 
-// ── Task 6: commitImportedSettings ────────────────────────────────────────────
+// ── commitImportedSettings ────────────────────────────────────────────────────
 
 describe("commitImportedSettings", () => {
   const identity = { login: "newuser", avatar_url: "https://avatars/new", name: "New User" };
@@ -1184,7 +1184,7 @@ describe("commitImportedSettings", () => {
     expect(order).toEqual(["auth", "config"]); // established only after the await
   });
 
-  it("Gap A: pre-auth import resets transient view keys that setAuthFromCredential's (inert) identity-switch cascade would otherwise leave stale", async () => {
+  it("pre-auth import resets transient view keys that setAuthFromCredential's (inert) identity-switch cascade would otherwise leave stale", async () => {
     // Seed a prior session's transient view state, as if a token expired on this
     // browser while these were set — NOT part of the curated export/import set,
     // so setConfig/applyImportedViewState alone would never touch them.
@@ -1259,7 +1259,7 @@ describe("commitImportedSettings", () => {
     dispose();
   });
 
-  it("STRUCT-I-002: a non-positive expires_in yields a sane future expiresAt (default 3600s), not past/NaN", async () => {
+  it("a non-positive expires_in yields a sane future expiresAt (default 3600s), not past/NaN", async () => {
     vi.spyOn(authStore, "user").mockReturnValue(identity);
     vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
     vi.spyOn(configStore, "setConfig").mockImplementation(() => {});
@@ -1284,7 +1284,7 @@ describe("commitImportedSettings", () => {
     expect(Number.isNaN(state.expiresAt)).toBe(false);
   });
 
-  it("STRUCT-I-003: aligns the imported config's jira.authMethod with the tamper-proof bundle authMethod", async () => {
+  it("aligns the imported config's jira.authMethod with the tamper-proof bundle authMethod", async () => {
     vi.spyOn(authStore, "user").mockReturnValue(identity);
     vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
     vi.spyOn(authStore, "setJiraAuth").mockImplementation(() => {});
@@ -1352,7 +1352,7 @@ describe("commitImportedSettings", () => {
   });
 });
 
-// ── Task 3: full export -> import round-trip for view preferences ─────────────
+// ── full export -> import round-trip for view preferences ─────────────────────
 
 describe("commitImportedSettings — view preferences round-trip", () => {
   const identity = { login: "newuser", avatar_url: "https://avatars/new", name: "New User" };
@@ -1442,7 +1442,7 @@ describe("commitImportedSettings — view preferences round-trip", () => {
   });
 });
 
-// ── STRUCT-I-001 counterpart: import-side stripped-item backfill guard ────────
+// ── import-side stripped-item backfill guard ──────────────────────────────────
 //
 // buildExportPayload strips ignoredItems/trackedItems down to
 // TRACKED_ITEM_EXPORT_KEEP_LIST / IGNORED_ITEM_EXPORT_KEEP_LIST (allowlists,
@@ -1457,7 +1457,7 @@ describe("commitImportedSettings — view preferences round-trip", () => {
 // are actually stripped by the current keep-lists, then proves a
 // stripped-then-reimported entry survives — so it fails loudly the moment a
 // newly-required field is stripped without an accompanying coerce fix.
-describe("import-side stripped-item backfill guard (STRUCT-I-001 counterpart)", () => {
+describe("import-side stripped-item backfill guard", () => {
   beforeEach(() => resetViewState());
   afterEach(() => resetViewState());
 
@@ -1539,7 +1539,7 @@ describe("import-side stripped-item backfill guard (STRUCT-I-001 counterpart)", 
   });
 });
 
-// ── Task 7: hasExistingLocalConfig (Login-page confirmation-skip detector) ─────
+// ── hasExistingLocalConfig (Login-page confirmation-skip detector) ─────────────
 
 describe("hasExistingLocalConfig", () => {
   it("returns false for a default/empty config (fresh browser / incognito)", () => {

@@ -1510,7 +1510,7 @@ describe("loadViewState — cap-guard integration", () => {
   });
 });
 
-// ── Task 3: import + apply curated view preferences ───────────────────────────
+// ── import + apply curated view preferences ───────────────────────────────────
 
 describe("applyImportedViewState", () => {
   beforeEach(() => {

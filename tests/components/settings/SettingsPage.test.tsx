@@ -1477,7 +1477,7 @@ describe("Dependencies settings section", () => {
   });
 });
 
-// ── Export with encrypted credentials (Task 5) ────────────────────────────────
+// ── Export with encrypted credentials ─────────────────────────────────────────
 
 describe("SettingsPage — Data: Export with encrypted credentials", () => {
   const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
@@ -1670,7 +1670,7 @@ describe("SettingsPage — Data: Export with encrypted credentials", () => {
   });
 });
 
-// ── Import with encrypted credentials (Task 6) ────────────────────────────────
+// ── Import with encrypted credentials ─────────────────────────────────────────
 
 describe("SettingsPage — Data: Import with encrypted credentials", () => {
   const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
@@ -1904,7 +1904,7 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     expect(config.theme).toBe("dark");
   });
 
-  it("STRUCT-C-001: Cancel and 'continue without credentials' are disabled while the unseal is in flight", async () => {
+  it("Cancel and 'continue without credentials' are disabled while the unseal is in flight", async () => {
     let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
     vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(new Promise((r) => { resolveUnseal = r; }));
     vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
@@ -1927,7 +1927,7 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await waitFor(() => screen.getByText(/sign you in as/i));
   });
 
-  it("STRUCT-C-001: a Cancel-then-reselect during resolve discards the stale continuation (no wrong-identity dialog)", async () => {
+  it("a Cancel-then-reselect during resolve discards the stale continuation (no wrong-identity dialog)", async () => {
     // Unseal resolves immediately; resolve is deferred so the test can cancel and
     // reselect a different file while file X's resolve is still pending.
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER-X" });

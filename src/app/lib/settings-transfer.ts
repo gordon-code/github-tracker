@@ -156,12 +156,13 @@ export type ParseImportResult =
 
 /**
  * Single entry point for importing a settings file, shared by SettingsPage and
- * (in a later task) LoginPage. Runs: byte-size guard → JSON parse → pre-parse
- * fixups → full `ConfigSchema.safeParse()` (NOT `.partial()`) → post-parse
- * fixups. Mirrors `loadConfig()`'s validation pattern.
+ * LoginPage. Runs: byte-size guard → JSON parse → pre-parse fixups → full
+ * `ConfigSchema.safeParse()` (NOT `.partial()`) → post-parse fixups. Mirrors
+ * `loadConfig()`'s validation pattern.
  *
- * `rawJson` is the parsed-but-unvalidated object, retained so a later task can
- * inspect it for a `_credentials` section without re-parsing the text.
+ * `rawJson` is the parsed-but-unvalidated object, retained so callers can
+ * inspect it for `_credentials`/`_viewPreferences` sections without re-parsing
+ * the text.
  */
 export function parseImportFile(rawText: string): ParseImportResult {
   // (a) Byte-size guard — measure UTF-8 bytes, NOT rawText.length (UTF-16 code
@@ -212,7 +213,7 @@ export function parseImportFile(rawText: string): ParseImportResult {
   // (e) post-parse migrations (stale-defaultTab cleanup)
   const config = postParseConfigFixups(result.data);
 
-  // (f) success — rawJson is the parsed original (for later _credentials inspection)
+  // (f) success — rawJson is the parsed original, retained for _credentials/_viewPreferences inspection
   return { ok: true, config, rawJson };
 }
 
