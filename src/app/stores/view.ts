@@ -8,6 +8,19 @@ const IGNORED_ITEMS_CAP = 500;
 const TRACKED_ITEMS_CAP = 200;
 export const LOCKED_REPOS_CAP = 50;
 export const JIRA_CUSTOM_ORDER_CAP = 500;
+// customTabFilters/expandedRepos are Records, not arrays — Zod v4's z.record()
+// has no built-in .max(), so these are enforced via .refine() below instead.
+// Outer keys are tab IDs (built-ins + customTabs, itself capped at 10 in
+// shared/schemas.ts), generously capped well above any realistic tab count.
+const CUSTOM_TAB_FILTERS_TABS_CAP = 50;
+// Inner keys are filter field names for a single tab's baseType — every
+// *FiltersSchema above has well under 10 fields.
+const CUSTOM_TAB_FILTERS_FIELDS_CAP = 50;
+const EXPANDED_REPOS_TABS_CAP = 50;
+// Inner keys are repoFullName — unlike lockedRepos (a deliberately small
+// pinned subset), this tracks expand/collapse state for every repo in a tab,
+// so it needs headroom well above LOCKED_REPOS_CAP.
+const EXPANDED_REPOS_REPOS_CAP = 1000;
 export const JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH = 50;
 export const JIRA_CUSTOM_ORDER_SCOPE = "assigned" as const;
 export const JIRA_CUSTOM_SORT_FIELD = "custom" as const;
@@ -27,6 +40,14 @@ export const TrackedItemSchema = z.object({
 });
 
 export type TrackedItem = z.infer<typeof TrackedItemSchema>;
+
+export const IgnoredItemSchema = z.object({
+  id: z.coerce.number(),
+  type: z.enum(["issue", "pullRequest", "workflowRun"]),
+  repo: z.string(),
+  title: z.string(),
+  ignoredAt: z.number(),
+});
 
 export const IssueFiltersSchema = z.object({
   scope: z.enum(["involves_me", "all"]).default("involves_me"),
@@ -83,15 +104,7 @@ export const ViewStateSchema = z.object({
     direction: z.enum(["asc", "desc"]),
   }).default({ field: "updatedAt", direction: "desc" }),
   ignoredItems: z
-    .array(
-      z.object({
-        id: z.coerce.number(),
-        type: z.enum(["issue", "pullRequest", "workflowRun"]),
-        repo: z.string(),
-        title: z.string(),
-        ignoredAt: z.number(),
-      })
-    )
+    .array(IgnoredItemSchema)
     .max(IGNORED_ITEMS_CAP)
     .default([]),
   globalFilter: z
@@ -118,11 +131,22 @@ export const ViewStateSchema = z.object({
   customTabFilters: z.record(
     z.string(),
     z.record(z.string(), z.string())
-  ).default({}),
+      .refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_FIELDS_CAP, {
+        message: `Too many filter fields for a single tab (max ${CUSTOM_TAB_FILTERS_FIELDS_CAP})`,
+      })
+  ).refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_TABS_CAP, {
+    message: `Too many tabs with saved filters (max ${CUSTOM_TAB_FILTERS_TABS_CAP})`,
+  }).default({}),
   expandedRepos: z.record(
     z.string(),
-    z.record(z.string(), z.boolean()).default({})
-  ).default({
+    z.record(z.string(), z.boolean())
+      .refine((v) => Object.keys(v).length <= EXPANDED_REPOS_REPOS_CAP, {
+        message: `Too many expanded repos for a single tab (max ${EXPANDED_REPOS_REPOS_CAP})`,
+      })
+      .default({})
+  ).refine((v) => Object.keys(v).length <= EXPANDED_REPOS_TABS_CAP, {
+    message: `Too many tabs with expanded-repo state (max ${EXPANDED_REPOS_TABS_CAP})`,
+  }).default({
     issues: {},
     pullRequests: {},
     actions: {},
@@ -145,6 +169,147 @@ export type IgnoredItem = ViewState["ignoredItems"][number];
 
 const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"] as const;
 const VIEW_STATE_KEYS = new Set(Object.keys(ViewStateSchema.shape));
+
+/**
+ * Top-level ViewState keys included in a settings export's `_viewPreferences`
+ * section (see `buildExportPayload`/`buildViewPreferencesSection` in
+ * src/app/lib/settings-transfer.ts) and restored by `applyImportedViewState`
+ * below. Lives here (not in settings-transfer.ts) so this module never needs a
+ * runtime import from settings-transfer.ts — settings-transfer.ts already
+ * transitively depends on this module (via stores/config.ts and stores/auth.ts),
+ * so the reverse edge would be a circular import; settings-transfer.ts re-exports
+ * this const for external consumers instead.
+ *
+ * Deliberately a curated allowlist, NOT the full ViewState — three top-level
+ * keys are excluded on purpose:
+ *   - `lastActiveTab`, `globalSort`: transient session state, not a durable
+ *     preference worth restoring on another device.
+ *   - `globalFilter`: a free-typed org/repo search string. Even though it's
+ *     not secret, it's arbitrary user-typed text with no bound on content, so
+ *     it's excluded from the plaintext export on privacy-scrub grounds.
+ * `satisfies readonly (keyof ViewState)[]` is a compile-time guard: if a key
+ * here is ever renamed/removed from ViewStateSchema, this fails to typecheck.
+ * The runtime schema-drift guard test in settings-transfer.test.ts is the
+ * complementary check — it fails when ViewStateSchema gains or loses a
+ * TOP-LEVEL key, forcing a conscious include/exclude decision here.
+ */
+export const EXPORTED_VIEW_PREF_KEYS = [
+  "jiraCustomOrder",
+  "expandedRepos",
+  "lockedRepos",
+  "tabFilters",
+  "customTabFilters",
+  "dependencyExpandedGroups",
+  "showPrRuns",
+  "hideDepDashboard",
+  "ignoredItems",
+  "trackedItems",
+] as const satisfies readonly (keyof ViewState)[];
+
+/**
+ * `ignoredItems`/`trackedItems` are exported WITHOUT their content fields
+ * (`title`, and for trackedItems also `htmlUrl`/`jiraStatus`) — see the
+ * TRACKED_ITEM_EXPORT_KEEP_LIST / IGNORED_ITEM_EXPORT_KEEP_LIST allowlists in
+ * settings-transfer.ts. Both TrackedItemSchema and IgnoredItemSchema require
+ * `title`, so re-validating a stripped entry as-is would reject it outright.
+ * This coerces a MISSING `title` to `""` before validation — defensive: only
+ * touches a plain object that's actually missing the key; anything else
+ * (wrong type, not an object at all) is passed through unchanged for Zod to
+ * reject on its own terms. Accepted UX tradeoff (not a bug): TrackedTab
+ * re-hydrates the real title from live data on next fetch; the Ignored Items
+ * management list shows a blank title until that item is re-encountered.
+ */
+function coerceStrippedItemEntry(raw: unknown): unknown {
+  if (raw !== null && typeof raw === "object" && !Array.isArray(raw) && !("title" in raw)) {
+    return { ...raw, title: "" };
+  }
+  return raw;
+}
+
+function coerceStrippedItemsArray(raw: unknown): unknown {
+  return Array.isArray(raw) ? raw.map(coerceStrippedItemEntry) : raw;
+}
+
+/**
+ * Validates a single top-level ViewState field in isolation, via
+ * `ViewStateSchema.pick({ [key]: true }).safeParse({ [key]: value })`.
+ * Shared by `applyImportedViewState` (import path) and `readOnDiskState`
+ * (cross-tab merge-on-write path) below — both need the same "validate one
+ * field against the live schema, independent of every other field" behavior
+ * so one malformed/version-skewed field can't reject the rest. Every
+ * ViewStateSchema field carries its own `.default(...)`, so a successful
+ * parse never yields `undefined` for `key` — `undefined` here unambiguously
+ * means validation failed.
+ */
+function validateViewStateField<K extends keyof ViewState>(key: K, value: unknown): ViewState[K] | undefined {
+  const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
+    [key]: value,
+  });
+  return result.success ? ((result.data as Record<string, unknown>)[key] as ViewState[K]) : undefined;
+}
+
+/**
+ * Applies an imported `_viewPreferences` section (from a settings-export file)
+ * onto the live view-state store. TOTAL and non-throwing by design — `raw` is
+ * completely untrusted input (a hand-edited or malformed export file), so this
+ * NEVER throws: wholly-malformed input (not a plain object — `null`, an
+ * array, a primitive) is a silent no-op.
+ *
+ * Validates PER-KEY: each of EXPORTED_VIEW_PREF_KEYS is safeParse'd
+ * independently against ViewStateSchema's own field validation (via
+ * `.pick()`, mirroring `readOnDiskState`'s per-field validation above) and
+ * only applied if it passes. One invalid/malformed key is skipped WITHOUT
+ * dropping every other valid key — a version-skewed or hand-edited export
+ * file degrades gracefully instead of failing the whole import.
+ *
+ * Only ever overlays EXPORTED_VIEW_PREF_KEYS — `lastActiveTab`, `globalSort`,
+ * and `globalFilter` are NEVER touched here, mirroring the export side's
+ * exclusion of those transient/privacy-scrubbed fields.
+ *
+ * Silent on invalid input (no notification) — unlike `updateViewState`, which
+ * is user-triggered and warns on rejection. This runs as part of a file
+ * import the user already confirmed; a per-field validation failure here is
+ * an export/import version-skew concern, not something actionable mid-import.
+ *
+ * Deliberately a DISTINCT function from `updateViewState`, not folded into
+ * it: different semantics (`raw: unknown` vs `Partial<ViewState>`, stripped-
+ * entry title coercion, a FIXED allowlist rather than whatever keys the
+ * caller passes, and silent-skip-per-key rather than warn-and-reject-the-
+ * whole-call). Called ONLY from the settings-import paths — identity-scoped,
+ * always AFTER the importing GitHub identity is established (never a
+ * standalone/independent trigger).
+ *
+ * Wrapped in a try/catch as belt-and-suspenders: this function is already
+ * total/no-throw for realistic input, but the call site runs AFTER identity
+ * and config are already committed, so a future change here must never be
+ * able to throw past that point.
+ */
+export function applyImportedViewState(raw: unknown): void {
+  try {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return;
+    const rawObj = raw as Record<string, unknown>;
+    const patch: Partial<Record<keyof ViewState, unknown>> = {};
+    for (const key of EXPORTED_VIEW_PREF_KEYS) {
+      if (!(key in rawObj)) continue;
+      const value =
+        key === "ignoredItems" || key === "trackedItems"
+          ? coerceStrippedItemsArray(rawObj[key])
+          : rawObj[key];
+      const validated = validateViewStateField(key, value);
+      if (validated !== undefined) {
+        patch[key] = validated;
+      }
+    }
+    if (Object.keys(patch).length === 0) return;
+    setViewState(
+      produce((draft) => {
+        Object.assign(draft, patch);
+      })
+    );
+  } catch {
+    // Silent no-op, matching this function's documented silent-skip semantics.
+  }
+}
 
 export function migrateLockedRepos(raw: unknown): unknown {
   if (raw == null) return { issues: [], pullRequests: [], actions: [], jiraAssigned: [] };
@@ -698,8 +863,8 @@ export function initViewPersistence(): void {
       const filtered: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
         if (!VIEW_STATE_KEYS.has(key)) continue;
-        const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({ [key]: value });
-        if (result.success) filtered[key] = (result.data as Record<string, unknown>)[key];
+        const validated = validateViewStateField(key as keyof ViewState, value);
+        if (validated !== undefined) filtered[key] = validated;
       }
       return filtered;
     } catch {

@@ -28,36 +28,61 @@ export function resolveTheme(theme: ThemeId): string {
   return prefersDark ? AUTO_DARK_THEME : AUTO_LIGHT_THEME;
 }
 
+/**
+ * Migrations applied to RAW (unvalidated) config data BEFORE
+ * `ConfigSchema.safeParse()`. BOTH fixups here MUST run pre-parse — the split
+ * relative to `safeParse` is load-bearing:
+ *  - Invalid-`theme` reset: a bad `theme` value would otherwise fail the whole
+ *    parse for an otherwise-valid config; salvaging it to `"auto"` first lets
+ *    the rest of the record survive validation.
+ *  - Tracked-user `[bot]`-suffix stripping: `VALID_TRACKED_LOGIN` rejects a
+ *    doubled `"renovate[bot][bot]"` suffix, so a post-parse fixup would never
+ *    run for that input (the record would already be rejected). Stripping the
+ *    suffix pre-parse is the only way to self-heal it.
+ * Shared by `loadConfig()` and `parseImportFile()` (src/app/lib/settings-transfer.ts).
+ */
+export function preParseConfigFixups(raw: unknown): unknown {
+  if (raw && typeof raw === "object" && "theme" in raw) {
+    if (!THEME_OPTIONS.includes((raw as Record<string, unknown>).theme as typeof THEME_OPTIONS[number])) {
+      (raw as Record<string, unknown>).theme = "auto";
+    }
+  }
+  // Migrate tracked user logins: strip [bot] suffix from stored logins.
+  // handleTrackBot now stores base names only, but pre-migration data may
+  // have "renovate[bot]" which causes a doubled "renovate[bot][bot]" variant.
+  if (raw && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).trackedUsers)) {
+    const users = (raw as Record<string, unknown>).trackedUsers as { login?: string }[];
+    for (const u of users) {
+      if (typeof u.login === "string" && /\[bot\]$/i.test(u.login)) {
+        u.login = u.login.replace(/\[bot\]$/i, "");
+      }
+    }
+  }
+  return raw;
+}
+
+/**
+ * Migration applied to a validated Config AFTER `ConfigSchema.safeParse()`.
+ * Only the stale-`defaultTab` cleanup belongs here — it needs the parsed
+ * `customTabs` array to check against.
+ * Shared by `loadConfig()` and `parseImportFile()` (src/app/lib/settings-transfer.ts).
+ */
+export function postParseConfigFixups(config: Config): Config {
+  const validTabIds = new Set<string>([...BUILTIN_TAB_IDS, ...config.customTabs.map((t) => t.id)]);
+  if (!validTabIds.has(config.defaultTab)) {
+    return { ...config, defaultTab: "issues" };
+  }
+  return config;
+}
+
 export function loadConfig(): Config {
   try {
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (raw === null) return ConfigSchema.parse({});
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object" && "theme" in parsed) {
-      if (!THEME_OPTIONS.includes((parsed as Record<string, unknown>).theme as typeof THEME_OPTIONS[number])) {
-        (parsed as Record<string, unknown>).theme = "auto";
-      }
-    }
-    // Migrate tracked user logins: strip [bot] suffix from stored logins.
-    // handleTrackBot now stores base names only, but pre-migration data may
-    // have "renovate[bot]" which causes a doubled "renovate[bot][bot]" variant.
-    if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).trackedUsers)) {
-      const users = (parsed as Record<string, unknown>).trackedUsers as { login?: string }[];
-      for (const u of users) {
-        if (typeof u.login === "string" && /\[bot\]$/i.test(u.login)) {
-          u.login = u.login.replace(/\[bot\]$/i, "");
-        }
-      }
-    }
+    const parsed = preParseConfigFixups(JSON.parse(raw) as unknown);
     const result = ConfigSchema.safeParse(parsed);
     if (result.success) {
-      const data = result.data;
-      // Clean up stale defaultTab pointing to a deleted custom tab
-      const validTabIds = new Set<string>([...BUILTIN_TAB_IDS, ...data.customTabs.map((t) => t.id)]);
-      if (!validTabIds.has(data.defaultTab)) {
-        return { ...data, defaultTab: "issues" };
-      }
-      return data;
+      return postParseConfigFixups(result.data);
     }
     return ConfigSchema.parse({});
   } catch {

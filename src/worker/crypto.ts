@@ -163,6 +163,102 @@ export async function unsealTokenWithRotation(
   return null;
 }
 
+// ── Expiry-aware credential-bundle sealing ─────────────────────────────────
+// Additive helpers used ONLY by the "credential-export-bundle" purpose. They
+// wrap the plaintext with a server-clock timestamp (for expiry) and a
+// content-fingerprint nonce (for single-use enforcement) before delegating to
+// the existing sealToken/unsealToken primitives. Do NOT modify
+// sealToken/unsealToken/unsealTokenWithRotation — the existing Jira sealing
+// paths must remain untouched. crypto.ts stays a pure, KV-free module: the
+// nonce is surfaced but never checked/consumed here (only index.ts has KV).
+
+/** 30 days — a credential-export bundle expires this long after it is sealed. */
+export const CREDENTIAL_BUNDLE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Seals a plaintext inside a {createdAt, nonce, payload} wrapper.
+ *
+ * The nonce is a DETERMINISTIC SHA-256 fingerprint of the plaintext (base64url),
+ * NOT a fresh per-call random value — re-sealing the exact same plaintext later
+ * reproduces the identical nonce, which the unseal endpoint relies on to detect
+ * an unseal-then-reseal attempt to renew a bundle's expiry.
+ *
+ * `key` must already be derived by the caller (matching how sealToken is invoked
+ * at the existing call sites).
+ */
+export async function sealWithExpiry(
+  plaintext: string,
+  key: CryptoKey
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(plaintext)
+  );
+  const nonce = toBase64Url(new Uint8Array(digest));
+  const wrapped = JSON.stringify({ createdAt: Date.now(), nonce, payload: plaintext });
+  return sealToken(wrapped, key);
+}
+
+/**
+ * Unseals a token produced by sealWithExpiry, trying current+next keys during
+ * rotation (via unsealTokenWithRotation — same raw-secret-string signature).
+ *
+ * Returns the wrapper's payload, its content-fingerprint nonce, and its seal
+ * timestamp on success (so the caller can consume the nonce AND derive a KV TTL
+ * bounded by the bundle's remaining lifetime). Returns { reason: "expired" } if
+ * the wrapper is older than maxAgeMs, or a single generic { reason: "invalid" }
+ * for EVERY other failure (bad version, wrong key, corrupted ciphertext,
+ * malformed wrapper JSON) — no further distinction, per the security decision.
+ *
+ * Does NOT check or consume the nonce — that is the caller's responsibility
+ * (only index.ts has KV access).
+ */
+export async function unsealWithExpiry(
+  sealed: string,
+  currentKeySecret: string,
+  nextKeySecret: string | undefined,
+  salt: string,
+  info: string,
+  maxAgeMs: number
+): Promise<
+  | { ok: true; payload: string; nonce: string; createdAt: number }
+  | { ok: false; reason: "expired" | "invalid" }
+> {
+  const wrapped = await unsealTokenWithRotation(
+    sealed,
+    currentKeySecret,
+    nextKeySecret,
+    salt,
+    info
+  );
+  if (wrapped === null) return { ok: false, reason: "invalid" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(wrapped);
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return { ok: false, reason: "invalid" };
+  }
+  const { createdAt, nonce, payload } = parsed as Record<string, unknown>;
+  if (
+    typeof createdAt !== "number" ||
+    typeof nonce !== "string" ||
+    typeof payload !== "string"
+  ) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (Date.now() - createdAt > maxAgeMs) {
+    return { ok: false, reason: "expired" };
+  }
+
+  return { ok: true, payload, nonce, createdAt };
+}
+
 // ── HMAC session signing ───────────────────────────────────────────────────
 
 /**
