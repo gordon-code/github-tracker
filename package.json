@@ -2,7 +2,7 @@
   "name": "github-tracker",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@11.22.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -34,15 +34,15 @@
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "7.0.0",
-    "@cloudflare/vite-plugin": "1.51.2",
-    "@cloudflare/vitest-pool-workers": "0.21.0",
+    "@cloudflare/vite-plugin": "1.52.1",
+    "@cloudflare/vitest-pool-workers": "0.21.3",
     "@fast-check/vitest": "0.4.1",
     "@playwright/test": "1.62.1",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
-    "@testing-library/user-event": "14.6.3",
+    "@testing-library/user-event": "14.6.4",
     "@types/node": "26.2.0",
-    "daisyui": "5.7.16",
+    "daisyui": "5.7.17",
     "fake-indexeddb": "6.2.5",
     "happy-dom": "20.11.2",
     "tailwindcss": "4.3.3",
@@ -50,6 +50,6 @@
     "vite": "8.2.1",
     "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.10",
-    "wrangler": "4.120.1"
+    "wrangler": "4.123.0"
   }
 }
