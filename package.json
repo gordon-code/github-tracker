@@ -25,31 +25,31 @@
     "@octokit/plugin-paginate-rest": "15.0.0",
     "@octokit/plugin-retry": "8.1.1",
     "@octokit/plugin-throttling": "11.0.5",
-    "@sentry/cloudflare": "10.70.0",
-    "@sentry/solid": "10.70.0",
+    "@sentry/cloudflare": "10.72.0",
+    "@sentry/solid": "10.72.0",
     "@solidjs/router": "1.0.0",
     "idb": "8.0.3",
-    "solid-js": "1.9.14",
-    "zod": "4.4.3"
+    "solid-js": "1.9.15",
+    "zod": "4.5.2"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "7.0.0",
-    "@cloudflare/vite-plugin": "1.52.1",
-    "@cloudflare/vitest-pool-workers": "0.21.3",
+    "@cloudflare/vite-plugin": "1.54.2",
+    "@cloudflare/vitest-pool-workers": "0.22.0",
     "@fast-check/vitest": "0.4.1",
     "@playwright/test": "1.62.1",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
-    "@testing-library/user-event": "14.6.4",
-    "@types/node": "26.2.0",
-    "daisyui": "5.7.17",
+    "@testing-library/user-event": "14.6.6",
+    "@types/node": "26.4.0",
+    "daisyui": "5.7.22",
     "fake-indexeddb": "6.2.5",
-    "happy-dom": "20.11.2",
+    "happy-dom": "20.11.15",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.1",
+    "vite": "8.2.2",
     "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.10",
-    "wrangler": "4.123.0"
+    "wrangler": "4.127.1"
   }
 }
