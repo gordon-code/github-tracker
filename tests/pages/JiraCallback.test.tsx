@@ -327,6 +327,22 @@ describe("JiraCallback", () => {
     expect(headers["cf-turnstile-response"]).toBe("test-turnstile-tok");
   });
 
+  it("acquires the Turnstile token with action 'jira-token' (not the old inherited 'seal' default)", async () => {
+    setupValidState();
+    setWindowSearch({ code: "jira-code", state: "valid-jira-state" });
+    mockSuccessfulExchange();
+    vi.mocked(JiraClient.getAccessibleResources).mockResolvedValue([makeResource()]);
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(vi.mocked(proxyLib.acquireTurnstileToken)).toHaveBeenCalledWith(
+        expect.any(String),
+        "jira-token"
+      );
+    });
+  });
+
   // ── Multi-site picker ─────────────────────────────────────────────────────
 
   it("shows site picker when multiple Jira sites returned", async () => {
