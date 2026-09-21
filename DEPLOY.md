@@ -26,6 +26,7 @@ routing.
 - Multi-user tracking, upstream repo discovery, monitor-all mode
 - Repo pinning/reordering, themes, ignore system
 - IndexedDB caching + ETag optimization
+- Plaintext settings export and import (client-side only)
 - MCP server (separate Node.js process, independent of Worker)
 
 **What does NOT work without a backend:**
@@ -41,6 +42,10 @@ routing.
   404 console errors on static hosts. Optionally remove the `report-uri` and
   `report-to` directives if the noise is unwanted.
 - **Jira token sealing** (planned) — requires server-side encryption
+- **Encrypted-credentials export/import** — the credential seal/unseal endpoints
+  (`/api/proxy/seal`, `/api/proxy/unseal`) run only on the Worker. Plaintext settings
+  export and import still work on static-only deploys; only the optional
+  encrypted-credentials bundle needs the backend.
 
 **Security note:** The `public/_headers` file sets Content-Security-Policy and other
 security headers. Ensure your static host serves these headers — Cloudflare Pages,
@@ -64,6 +69,7 @@ PAT instead), and Turnstile is only used by the planned Jira integration.
 2. **Update `wrangler.toml`** — Change `pattern = "gh.gordoncode.dev"` to your domain
 3. **Set GitHub Actions secrets and variables** — See sections below
 4. **Set Cloudflare Worker secrets** — See "Cloudflare Worker Secrets" section below. **Critical:** `ALLOWED_ORIGIN` must exactly match your deployment URL (e.g., `https://your-domain.example.com`). An incorrect value causes all API requests to fail with CORS errors.
+5. **Provision the credential-nonce KV namespace** — See "Cloudflare KV Namespaces" section below. Required for the encrypted-credential import feature; skipping it makes every encrypted-credential import fail with a 503 (plaintext-config import still works).
 
 **Verify configuration:** Run `pnpm validate:deploy` locally to check that all required
 Cloudflare Worker secrets are set. In CI, the deploy workflow runs
@@ -150,13 +156,44 @@ wrangler secret put ALLOWED_ORIGIN
 - `GITHUB_CLIENT_SECRET`: the Client Secret from your GitHub OAuth App
 - `ALLOWED_ORIGIN`: `https://YOUR-DOMAIN` (e.g. `https://gh.gordoncode.dev`)
 
+## Cloudflare KV Namespaces
+
+The encrypted-credential import feature (`/api/proxy/unseal`) requires a KV namespace
+bound as `CREDENTIAL_NONCE_KV`. It backs single-use consumption of credential-bundle
+nonces, blocking an unseal-then-reseal renewal of a bundle's 30-day expiry. It holds only
+opaque nonce values (never plaintext, ciphertext, or tokens), with a TTL bounded by each
+bundle's own expiry window.
+
+Create the production and preview namespaces:
+
+```sh
+wrangler kv namespace create CREDENTIAL_NONCE_KV
+wrangler kv namespace create CREDENTIAL_NONCE_KV --preview
+```
+
+Each command prints an ID. Add the returned `id` and `preview_id` to the
+`[[kv_namespaces]]` block in `wrangler.toml`, replacing the upstream placeholder values:
+
+```toml
+[[kv_namespaces]]
+binding = "CREDENTIAL_NONCE_KV"
+id = "<your-production-id>"
+preview_id = "<your-preview-id>"
+```
+
+`pnpm validate:deploy` does **not** check KV bindings — it validates Worker secrets and
+build-time env vars only — so provision this manually. If the binding is missing or
+misconfigured, every encrypted-credential import fails closed with a **503**; the
+plaintext-configuration import path is unaffected and still works.
+
 ## Worker API Endpoints
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/oauth/token` | POST | Exchange OAuth authorization code for permanent access token. |
 | `/api/health` | GET | Health check. Returns `OK`. |
-| `/api/proxy/seal` | POST | Encrypt an API token for client-side storage. Requires Turnstile + session. |
+| `/api/proxy/seal` | POST | Encrypt (seal) an API token or credential-export bundle for client-side storage. Requires Turnstile + session. |
+| `/api/proxy/unseal` | POST | Decrypt (unseal) an encrypted credential-export bundle during import. Reachable pre-authentication (Login-page import). Requires Turnstile + the `CREDENTIAL_NONCE_KV` binding (single-use nonce enforcement). |
 
 ### Token Storage Security
 

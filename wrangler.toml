@@ -32,6 +32,14 @@ namespace_id = "1001"
 limit = 10
 period = 10
 
+# Single-use nonce store for /api/proxy/unseal — blocks unseal-then-reseal expiry
+# renewal of a credential-export bundle. Holds only opaque nonce values (never
+# plaintext, ciphertext, or tokens), TTL bounded by the bundle's own expiry window.
+[[kv_namespaces]]
+binding = "CREDENTIAL_NONCE_KV"
+id = "6eb3cac2fc7b416f870e7c28f39aa63f"
+preview_id = "783627e2f20d48e8b9853bc2d2368f6a"
+
 [observability]
 enabled = true
 head_sampling_rate = 1
