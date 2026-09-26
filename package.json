@@ -20,36 +20,36 @@
     "validate:deploy": "bash scripts/validate-deploy.sh"
   },
   "dependencies": {
-    "@kobalte/core": "0.13.13",
-    "@octokit/core": "7.0.7",
+    "@kobalte/core": "0.13.14",
+    "@octokit/core": "7.0.8",
     "@octokit/plugin-paginate-rest": "15.0.0",
     "@octokit/plugin-retry": "8.1.1",
     "@octokit/plugin-throttling": "11.0.5",
-    "@sentry/cloudflare": "10.70.0",
-    "@sentry/solid": "10.70.0",
+    "@sentry/cloudflare": "10.74.0",
+    "@sentry/solid": "10.74.0",
     "@solidjs/router": "1.0.0",
     "idb": "8.0.3",
-    "solid-js": "1.9.14",
-    "zod": "4.4.3"
+    "solid-js": "1.9.15",
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "7.0.0",
-    "@cloudflare/vite-plugin": "1.52.1",
-    "@cloudflare/vitest-pool-workers": "0.21.3",
-    "@fast-check/vitest": "0.4.1",
-    "@playwright/test": "1.62.1",
+    "@cloudflare/vite-plugin": "1.54.8",
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@fast-check/vitest": "0.5.0",
+    "@playwright/test": "1.63.0",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
-    "@testing-library/user-event": "14.6.4",
-    "@types/node": "26.2.0",
-    "daisyui": "5.7.17",
+    "@testing-library/user-event": "14.6.7",
+    "@types/node": "26.5.1",
+    "daisyui": "5.7.37",
     "fake-indexeddb": "6.2.5",
-    "happy-dom": "20.11.2",
+    "happy-dom": "20.14.5",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.1",
+    "vite": "8.3.0",
     "vite-plugin-solid": "2.11.14",
     "vitest": "4.1.11",
-    "wrangler": "4.123.0"
+    "wrangler": "4.131.1"
   }
 }
