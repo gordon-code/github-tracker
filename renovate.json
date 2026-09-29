@@ -2,5 +2,16 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Managed by khepri-deps/renovate — global config provides weekly Monday schedule, 14-day release cooldown, and vulnerability alert bypass."
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["vitest", "@fast-check/vitest"],
+      "matchPackagePatterns": ["^@vitest/"],
+      "allowedVersions": "<5.0.0"
+    },
+    {
+      "matchPackageNames": ["@amiceli/vitest-cucumber"],
+      "allowedVersions": "<8.0.0"
+    }
   ]
 }
