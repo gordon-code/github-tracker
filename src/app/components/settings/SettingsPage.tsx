@@ -1,11 +1,18 @@
 import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
 import { Select } from "@kobalte/core/select";
+import { Dialog } from "@kobalte/core/dialog";
 import * as Sentry from "@sentry/solid";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
-import type { JiraCustomField } from "../../../shared/schemas";
-import { viewState, updateViewState, setTabFilter } from "../../stores/view";
+import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import type { Config, JiraCustomField } from "../../../shared/schemas";
+import {
+  buildExportPayload,
+  buildEncryptedCredentialsSection,
+  commitImportedSettings,
+} from "../../lib/settings-transfer";
+import { createCredentialImport } from "../../lib/use-credential-import";
+import { viewState, updateViewState, setTabFilter, applyImportedViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
 import { isValidPatFormat } from "../../lib/pat";
@@ -139,6 +146,18 @@ export default function SettingsPage() {
   const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
   const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
 
+  // These local editor copies are captured once at mount. An in-place import
+  // (handleConfirmImport / handleConfirmCredImport / handleContinueWithoutCredentials)
+  // replaces config wholesale via setConfig without a reload, so they must be
+  // resynced afterward — otherwise the next org/repo edit would save the stale,
+  // pre-import selection and silently discard the imported repos/orgs.
+  // setConfig is synchronous, so config already reflects the import here.
+  function resyncLocalEditors() {
+    setLocalOrgs(config.selectedOrgs);
+    setLocalRepos(config.selectedRepos);
+    setLocalUpstream(config.upstreamRepos);
+  }
+
   const monitoredRepoNames = createMemo(() =>
     config.monitoredRepos.map(r => r.fullName).join(", ")
   );
@@ -240,50 +259,187 @@ export default function SettingsPage() {
     }
   }
 
-  function handleExportSettings() {
-    const data = JSON.stringify(
-      {
-        selectedOrgs: config.selectedOrgs,
-        selectedRepos: config.selectedRepos,
-        upstreamRepos: config.upstreamRepos,
-        monitoredRepos: config.monitoredRepos,
-        trackedUsers: config.trackedUsers,
-        refreshInterval: config.refreshInterval,
-        hotPollInterval: config.hotPollInterval,
-        maxWorkflowsPerRepo: config.maxWorkflowsPerRepo,
-        maxRunsPerWorkflow: config.maxRunsPerWorkflow,
-        notifications: config.notifications,
-        theme: config.theme,
-        viewDensity: config.viewDensity,
-        itemsPerPage: config.itemsPerPage,
-        defaultTab: config.defaultTab,
-        rememberLastTab: config.rememberLastTab,
-        enableTracking: config.enableTracking,
-        enableActions: config.enableActions,
-        customTabs: config.customTabs,
-        // Non-secret jira config fields only — no tokens, sealed blobs, or email
-        jira: {
-          enabled: config.jira?.enabled ?? false,
-          authMethod: config.jira?.authMethod ?? "oauth",
-          issueKeyDetection: config.jira?.issueKeyDetection ?? true,
-          cloudId: config.jira?.cloudId,
-          siteName: config.jira?.siteName,
-          siteUrl: config.jira?.siteUrl,
-          customFields: config.jira?.customFields ?? [],
-          customScopes: config.jira?.customScopes ?? [],
-        },
-        dependencies: config.dependencies,
-      },
-      null,
-      2
-    );
-    const blob = new Blob([data], { type: "application/json" });
+  // ── Export settings ────────────────────────────────────────────────────────
+  // The Export button opens a choice dialog (config only vs. with encrypted
+  // credentials). Choosing "with credentials" runs the seal flow and, on
+  // success, the one-time code is shown in a SEPARATE modal — the file
+  // download is DEFERRED until the user acknowledges that modal, since the
+  // code is shown only once.
+  const [showExportChoice, setShowExportChoice] = createSignal(false);
+  const [exporting, setExporting] = createSignal(false);
+  const [exportCode, setExportCode] = createSignal<string | null>(null);
+  const [codeCopied, setCodeCopied] = createSignal(false);
+  let pendingExportJson: string | null = null;
+
+  function triggerDownload(jsonText: string) {
+    const blob = new Blob([jsonText], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "github-tracker-settings.json";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleOpenExportChoice() {
+    // Re-entry guard: while the one-time-code modal is open, reopening the
+    // export-choice dialog would let a second export mint a NEW code while
+    // the old one is still displayed. The Kobalte Dialog traps + restores
+    // focus (so the Export button can't be re-fired behind the modal), and
+    // this guard closes the gap for any other trigger path.
+    if (exportCode() !== null) return;
+    setShowExportChoice(true);
+  }
+
+  function handleExportConfigOnly() {
+    const payload = buildExportPayload(config, viewState);
+    triggerDownload(JSON.stringify(payload, null, 2));
+    setShowExportChoice(false);
+  }
+
+  async function handleExportWithCredentials() {
+    if (exporting()) return; // re-entry guard: exactly one seal in flight
+    setExporting(true);
+    try {
+      const payload = buildExportPayload(config, viewState);
+      // buildEncryptedCredentialsSection generates the code, encrypts the bundle
+      // with it, THEN seals the ciphertext (encrypt-then-seal). No secret is
+      // logged here.
+      const { sealed, salt, oneTimeCode } = await buildEncryptedCredentialsSection();
+      // Defense-in-depth: the choice dialog's onOpenChange/buttons already block
+      // dismissal while exporting() is true, so this should be unreachable — but
+      // if the dialog was somehow closed out from under this await, discard the
+      // freshly-minted single-use code instead of popping it after the user
+      // backed out.
+      if (!showExportChoice()) return;
+      pendingExportJson = JSON.stringify({ ...payload, _credentials: { sealed, salt } }, null, 2);
+      setCodeCopied(false);
+      // Close the choice dialog, then open the code modal — only one of the
+      // two export dialogs is ever visible at a time.
+      setShowExportChoice(false);
+      setExportCode(oneTimeCode); // opens the modal; download deferred to ack
+    } catch {
+      // Turnstile rejection / SealError / oversized pre-check — leave the
+      // export-choice dialog open so the user can retry; do NOT download
+      // anything.
+      pushNotification(
+        "settings-export",
+        "Couldn't prepare encrypted credentials for export — please try again.",
+        "warning"
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleCopyExportCode() {
+    const code = exportCode();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+    } catch {
+      // clipboard unavailable — user can still select/copy the shown code
+    }
+  }
+
+  function handleAcknowledgeExportCode() {
+    if (pendingExportJson) {
+      triggerDownload(pendingExportJson);
+      pendingExportJson = null;
+    }
+    setExportCode(null);
+    setCodeCopied(false);
+  }
+
+  function handleDismissExportCode() {
+    // Dismiss without downloading. The sealed blob held in memory is inert
+    // ciphertext without the code; nothing needs cleanup.
+    pendingExportJson = null;
+    setExportCode(null);
+    setCodeCopied(false);
+  }
+
+  // ── Import settings (plaintext) ────────────────────────────────────────────
+  // pendingImport holds the parsed-and-validated Config (+ the file's raw,
+  // as-yet-unvalidated _viewPreferences section, if any) awaiting confirmation;
+  // non-null doubles as the two-click confirm state (mirrors confirmReset).
+  const [pendingImport, setPendingImport] = createSignal<{ config: Config; viewPreferences: unknown } | null>(null);
+  let importInputRef: HTMLInputElement | undefined;
+
+  // ── Import settings (encrypted credentials) ───────────────────────────────
+  // credentialImport.credImport() is set when the selected file has a valid
+  // _credentials section. On success it always shows the identity-confirm
+  // step below (unlike the Login page, which can skip it on a fresh session).
+  const [committing, setCommitting] = createSignal(false);
+  const credentialImport = createCredentialImport({
+    expiredMessage:
+      "This export's credentials have expired — re-export from a machine where you're still signed in, or import the settings without credentials.",
+    onReadError: (message) => pushNotification("settings-import", message, "warning"),
+    onParseError: (message) => pushNotification("settings-import", message, "warning"),
+    onNoCredentials: (importedConfig, viewPreferences) => setPendingImport({ config: importedConfig, viewPreferences }),
+    onResolved: (bundle, identity) => credentialImport.setResolvedCred({ bundle, identity }),
+  });
+
+  async function handleImportFileSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Allow re-selecting the same file (change won't fire otherwise).
+    try { input.value = ""; } catch { /* ignore if unsupported */ }
+    if (!file) return;
+    await credentialImport.handleFileSelected(file);
+  }
+
+  function handleConfirmImport() {
+    const pending = pendingImport();
+    if (!pending) return;
+    // Wholesale replace — parseImportFile returns a fully-parsed Config (every
+    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
+    setConfig(pending.config);
+    // Identity is already established on this page (Settings is post-auth) —
+    // applyImportedViewState is total/no-throw, so this is safe even when the
+    // file carries no _viewPreferences section at all.
+    applyImportedViewState(pending.viewPreferences);
+    resyncLocalEditors();
+    setPendingImport(null);
+    pushNotification("settings-import", "Settings imported", "info");
+  }
+
+  function handleCancelImport() {
+    setPendingImport(null);
+  }
+
+  async function handleConfirmCredImport() {
+    if (committing()) return; // re-entry guard: exactly one commit
+    const cred = credentialImport.credImport();
+    const rc = credentialImport.resolvedCred();
+    if (!cred || !rc) return;
+    setCommitting(true);
+    try {
+      await commitImportedSettings(rc, cred.config, cred.viewPreferences);
+      resyncLocalEditors();
+      credentialImport.reset();
+      pushNotification("settings-import", "Settings and credentials imported", "info");
+    } catch {
+      pushNotification("settings-import", "Something went wrong finishing the import — please try again.", "warning");
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  function handleContinueWithoutCredentials() {
+    const cred = credentialImport.credImport();
+    if (!cred) return;
+    const { config: cfg, viewPreferences } = cred;
+    credentialImport.reset();
+    // Route the plaintext-only path through the SAME two-click confirm the
+    // plaintext import uses (pendingImport), so both wholesale-replace paths
+    // confirm consistently. handleConfirmImport applies it + resyncs the editors.
+    setPendingImport({ config: cfg, viewPreferences });
+  }
+
+  function handleCancelCredImport() {
+    credentialImport.reset();
   }
 
   function handleResetAll() {
@@ -1514,11 +1670,58 @@ export default function SettingsPage() {
           >
             <button
               type="button"
-              onClick={handleExportSettings}
+              onClick={handleOpenExportChoice}
               class="btn btn-sm btn-outline"
             >
               Export
             </button>
+          </SettingRow>
+
+          {/* Import settings */}
+          <SettingRow
+            label="Import settings"
+            description="Replace your configuration from a previously exported JSON file"
+          >
+            <Show
+              when={pendingImport()}
+              fallback={
+                <Show when={!credentialImport.credImport()}>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    class="hidden"
+                    aria-label="Import settings file"
+                    onChange={(e) => void handleImportFileSelected(e)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => importInputRef?.click()}
+                    class="btn btn-sm btn-outline"
+                  >
+                    Import
+                  </button>
+                </Show>
+              }
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-base-content/60">This will replace your current settings — continue?</span>
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  class="btn btn-warning btn-xs"
+                >
+                  Yes, import
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelImport}
+                  class="btn btn-ghost btn-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            </Show>
           </SettingRow>
 
           {/* Reset all */}
@@ -1586,6 +1789,224 @@ export default function SettingsPage() {
             saveWithFeedback({ dependencies: { ...config.dependencies, excludedOrgs: orgs, excludedRepos: repos } })
           }
         />
+
+        {/* Export-choice dialog: config only vs. with encrypted credentials.
+            On success the "with credentials" path closes this dialog and opens
+            the one-time-code modal below — only one of the two is ever open.
+            While a seal is in flight (exporting()), dismissal is blocked — both
+            via onOpenChange (Escape/overlay click) and by disabling the other
+            buttons — so a cancel-during-seal can't pop the one-time-code modal
+            after the user has already backed out. */}
+        <Dialog
+          open={showExportChoice()}
+          onOpenChange={(isOpen) => { if (!isOpen && !exporting()) setShowExportChoice(false); }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
+              <Dialog.Title class="text-lg font-semibold">Export settings</Dialog.Title>
+              <Dialog.Description class="text-sm text-base-content/70">
+                Choose what to include in the exported file.
+              </Dialog.Description>
+              <button
+                type="button"
+                onClick={handleExportConfigOnly}
+                disabled={exporting()}
+                class="btn btn-sm btn-outline w-full justify-start"
+              >
+                Export config only
+              </button>
+              <div class="flex flex-col gap-2">
+                <p id="export-credentials-warning" class="text-xs text-warning">
+                  This is a one-time transfer, not a durable backup — the encrypted
+                  credentials can be imported once and expire in 30 days.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleExportWithCredentials()}
+                  disabled={exporting()}
+                  aria-busy={exporting()}
+                  aria-describedby="export-credentials-warning"
+                  class="btn btn-sm btn-primary w-full justify-start"
+                >
+                  {exporting() ? "Preparing..." : "Export with encrypted credentials"}
+                </button>
+              </div>
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => { if (!exporting()) setShowExportChoice(false); }}
+                  disabled={exporting()}
+                  class="btn btn-sm btn-ghost"
+                >
+                  Cancel
+                </button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
+
+        {/* One-time-code modal (encrypted export). Download is deferred until ack.
+            Kobalte Dialog provides the focus trap + focus restoration that keeps
+            the Export button from being re-fired behind the open modal. */}
+        <Dialog
+          open={exportCode() !== null}
+          onOpenChange={(isOpen) => { if (!isOpen) handleDismissExportCode(); }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
+              <Dialog.Title class="text-lg font-semibold">Save your one-time code</Dialog.Title>
+              <Dialog.Description class="text-sm text-base-content/70">
+                Save this code separately from the export file — you'll need both to restore
+                credentials, and it's shown only once.
+              </Dialog.Description>
+              <Show when={exportCode()}>
+                {(code) => (
+                  <div class="flex items-center gap-2">
+                    <code class="flex-1 select-all rounded bg-base-200 px-3 py-2 font-mono text-sm break-all">
+                      {code()}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyExportCode()}
+                      class="btn btn-sm btn-outline"
+                    >
+                      {codeCopied() ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </Show>
+              <div class="flex justify-end gap-2">
+                <button type="button" onClick={handleDismissExportCode} class="btn btn-sm btn-ghost">
+                  Cancel
+                </button>
+                <button type="button" onClick={handleAcknowledgeExportCode} class="btn btn-sm btn-primary">
+                  I've saved my code — download
+                </button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
+
+        {/* Encrypted-credentials import dialog: one-time-code entry → identity confirm.
+            Kobalte Dialog adds focus trap / Escape / scroll-lock / focus restore.
+            While a network unseal is in flight the close controls are disabled so
+            the single-use nonce can't be abandoned mid-flight. */}
+        <Dialog
+          open={credentialImport.credImport() !== null}
+          onOpenChange={(isOpen) => { if (!isOpen && !credentialImport.unsealInFlight() && !committing()) handleCancelCredImport(); }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 bg-black/50 z-50" />
+            <Dialog.Content class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-base-100 rounded-xl shadow-xl z-[51] p-6 flex flex-col gap-4">
+              <Show
+                when={credentialImport.resolvedCred()}
+                fallback={
+                  <Show
+                    when={!credentialImport.terminalError()}
+                    fallback={
+                      <>
+                        <Dialog.Title class="text-lg font-semibold">Credentials unavailable</Dialog.Title>
+                        <p role="alert" class="text-sm text-error">{credentialImport.terminalError()}</p>
+                        <div class="flex justify-end gap-2">
+                          <button type="button" onClick={handleCancelCredImport} class="btn btn-sm btn-ghost">
+                            Cancel
+                          </button>
+                          <button type="button" onClick={handleContinueWithoutCredentials} class="btn btn-sm btn-primary">
+                            Continue without credentials
+                          </button>
+                        </div>
+                      </>
+                    }
+                  >
+                    <Dialog.Title class="text-lg font-semibold">Restore encrypted credentials</Dialog.Title>
+                    <p class="text-sm text-base-content/70">
+                      Enter the one-time code shown when this file was exported.
+                    </p>
+                    <form onSubmit={(e) => { e.preventDefault(); void credentialImport.handleCodeSubmit(); }}>
+                      <div class="flex items-center gap-2">
+                        <input
+                          type={credentialImport.showCode() ? "text" : "password"}
+                          class="input input-sm w-full font-mono"
+                          aria-label="One-time code"
+                          autocomplete="off"
+                          placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX"
+                          value={credentialImport.codeInput()}
+                          onInput={(e) => credentialImport.setCodeInput(e.currentTarget.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => credentialImport.setShowCode((v) => !v)}
+                          class="btn btn-sm btn-ghost"
+                          aria-pressed={credentialImport.showCode()}
+                        >
+                          {credentialImport.showCode() ? "Hide" : "Show"}
+                        </button>
+                      </div>
+                      <Show when={credentialImport.error()}>
+                        <p role="alert" class="text-error text-xs mt-2">{credentialImport.error()}</p>
+                      </Show>
+                      <div class="flex justify-end gap-2 mt-4">
+                        <button type="button" onClick={handleCancelCredImport} disabled={credentialImport.unsealInFlight()} class="btn btn-sm btn-ghost">
+                          Cancel
+                        </button>
+                        <button type="button" onClick={handleContinueWithoutCredentials} disabled={credentialImport.unsealInFlight()} class="btn btn-sm btn-outline">
+                          Continue without credentials
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={credentialImport.unsealInFlight()}
+                          aria-busy={credentialImport.unsealInFlight()}
+                          class="btn btn-sm btn-primary"
+                        >
+                          {credentialImport.unsealInFlight() ? "Checking..." : "Submit"}
+                        </button>
+                      </div>
+                    </form>
+                  </Show>
+                }
+              >
+                {(rc) => (
+                  <>
+                    <Dialog.Title class="text-lg font-semibold">Confirm identity</Dialog.Title>
+                    <div class="flex items-center gap-3">
+                      <img
+                        src={rc().identity.avatar_url}
+                        alt=""
+                        class="h-10 w-10 rounded-full"
+                      />
+                      <p class="text-sm">
+                        This will sign you in as <strong>@{rc().identity.login}</strong> and replace
+                        your current settings — continue?
+                      </p>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                      <button type="button" onClick={handleCancelCredImport} disabled={committing()} class="btn btn-sm btn-ghost">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={handleContinueWithoutCredentials} disabled={committing()} class="btn btn-sm btn-outline">
+                        Continue without credentials
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleConfirmCredImport()}
+                        disabled={committing()}
+                        aria-busy={committing()}
+                        class="btn btn-sm btn-primary"
+                      >
+                        {committing() ? "Importing..." : "Continue"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Show>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog>
 
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">

@@ -27,12 +27,31 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearJiraAuth: vi.fn(),
   setJiraAuth: vi.fn(),
   setAuthFromPat: vi.fn(),
+  setAuthFromCredential: vi.fn(),
+  clearIdentityData: vi.fn().mockResolvedValue(undefined),
   jiraAuth: () => null,
   isJiraAuthenticated: () => false,
   ensureJiraTokenValid: vi.fn(),
   token: vi.fn(() => "fake-token"),
-  user: () => ({ login: "testuser", name: "Test User" }),
+  user: () => ({ login: "testuser", avatar_url: "https://avatars/test", name: "Test User" }),
   onAuthCleared: vi.fn(),
+}));
+
+// Partial mock: keep the real buildExportPayload/parseImportFile/CredentialsSectionSchema
+// (used by the plaintext export/import paths), stub the credential-flow functions.
+vi.mock("../../../src/app/lib/settings-transfer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/app/lib/settings-transfer")>();
+  return {
+    ...actual,
+    buildEncryptedCredentialsSection: vi.fn(),
+    resolveImportedCredentials: vi.fn(),
+    commitImportedSettings: vi.fn(),
+  };
+});
+
+vi.mock("../../../src/app/lib/proxy", () => ({
+  sealApiToken: vi.fn(),
+  unsealCredentialBundle: vi.fn(),
 }));
 
 vi.mock("@sentry/solid", () => ({
@@ -75,6 +94,8 @@ import { updateConfig, config } from "../../../src/app/stores/config";
 import { viewState, updateViewState } from "../../../src/app/stores/view";
 import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
+import * as settingsTransfer from "../../../src/app/lib/settings-transfer";
+import * as proxyLib from "../../../src/app/lib/proxy";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -440,11 +461,24 @@ describe("SettingsPage — Data: Clear cache", () => {
 });
 
 describe("SettingsPage — Data: Export settings", () => {
-  it("clicking Export triggers download", async () => {
-    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake-url");
+  it("clicking Export opens the choice dialog", async () => {
+    renderSettings();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    screen.getByText("Choose what to include in the exported file.");
+    screen.getByRole("button", { name: "Export config only" });
+    screen.getByRole("button", { name: "Export with encrypted credentials" });
+  });
+
+  it("choosing 'Export config only' downloads immediately with no _credentials section", async () => {
+    let capturedBlob: Blob | undefined;
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      capturedBlob = blob as Blob;
+      return "blob:fake-url";
+    });
     const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
-    // Spy on anchor click
     const clickSpy = vi.fn();
     const origCreate = document.createElement.bind(document);
     vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
@@ -456,13 +490,123 @@ describe("SettingsPage — Data: Export settings", () => {
     });
 
     renderSettings();
-    const exportBtn = screen.getByText("Export");
     const user = userEvent.setup();
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
 
     expect(createObjectURLSpy).toHaveBeenCalledOnce();
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(revokeObjectURLSpy).toHaveBeenCalledOnce();
+
+    expect(capturedBlob).toBeDefined();
+    const parsed = JSON.parse(await capturedBlob!.text()) as Record<string, unknown>;
+    expect("_credentials" in parsed).toBe(false);
+    // The view-prefs migration (buildViewPreferencesSection) runs regardless of
+    // whether credentials are included — locks that in at the UI entry point.
+    expect("_viewPreferences" in parsed).toBe(true);
+  });
+
+  it("Cancel in the choice dialog downloads nothing", async () => {
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake-url");
+
+    renderSettings();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(createObjectURLSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("SettingsPage — Data: Import settings", () => {
+  function selectImportFile(content: string, name = "settings.json") {
+    const input = screen.getByLabelText(/import settings file/i);
+    const file = new File([content], name, { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+    return file;
+  }
+
+  it("selecting a valid file shows the confirmation step without mutating the config store", async () => {
+    updateConfig({ theme: "light", itemsPerPage: 25 });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark", itemsPerPage: 50 }));
+    await waitFor(() => screen.getByText(/replace your current settings/i));
+    // Confirmation shown, but nothing applied yet
+    screen.getByRole("button", { name: "Yes, import" });
+    expect(config.theme).toBe("light");
+    expect(config.itemsPerPage).toBe(25);
+  });
+
+  it("confirming the import replaces config store fields", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light", itemsPerPage: 25 });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark", itemsPerPage: 50 }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark");
+    expect(config.itemsPerPage).toBe(50);
+    // Confirmation dismissed, Import button restored
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    screen.getByRole("button", { name: "Import" });
+  });
+
+  it("canceling the confirmation resets the confirm-state and leaves the config store untouched", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark" }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    screen.getByRole("button", { name: "Import" });
+    expect(config.theme).toBe("light");
+  });
+
+  it("selecting a malformed file pushes a warning, shows no confirmation, leaves config unchanged", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectImportFile("this is not json {{{");
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/import failed/i),
+        "warning"
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    expect(config.theme).toBe("light");
+  });
+
+  it("an unreadable file (File.text rejects) is treated identically to a parse failure", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    updateConfig({ theme: "light" });
+    renderSettings();
+    // A read rejection never reaches parseImportFile — distinct code path.
+    vi.spyOn(File.prototype, "text").mockRejectedValueOnce(new Error("unreadable"));
+    selectImportFile("irrelevant");
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/could not read/i),
+        "warning"
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+    expect(config.theme).toBe("light");
+  });
+
+  it("wholesale-replaces config: a pre-set selectedRepos clears when absent from the imported file", async () => {
+    const user = userEvent.setup();
+    updateConfig({ selectedRepos: [{ owner: "o", name: "r", fullName: "o/r" }] });
+    renderSettings();
+    selectImportFile(JSON.stringify({ theme: "dark" })); // no selectedRepos in the imported file
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    // Proves setConfig (wholesale) not updateConfig (partial merge): the prior field is gone.
+    expect(config.selectedRepos).toEqual([]);
+    expect(config.theme).toBe("dark");
   });
 });
 
@@ -1002,8 +1146,8 @@ describe("SettingsPage — enableTracking toggle", () => {
   it("includes enableTracking in exported settings JSON", async () => {
     updateConfig({ enableTracking: true });
     renderSettings();
-    const exportBtn = screen.getByRole("button", { name: /export/i });
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
     const blobParts: BlobPart[] = [];
     const originalBlob = globalThis.Blob;
     globalThis.Blob = class MockBlob extends originalBlob {
@@ -1012,7 +1156,7 @@ describe("SettingsPage — enableTracking toggle", () => {
         if (parts) blobParts.push(...parts);
       }
     } as typeof Blob;
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
     expect(json.enableTracking).toBe(true);
@@ -1139,8 +1283,8 @@ describe("SettingsPage — monitor toggle wiring", () => {
     renderSettings();
 
     // Trigger export
-    const exportBtn = screen.getByRole("button", { name: /export/i });
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Export" }));
     const blobParts: BlobPart[] = [];
     const originalBlob = globalThis.Blob;
     globalThis.Blob = class MockBlob extends originalBlob {
@@ -1150,7 +1294,7 @@ describe("SettingsPage — monitor toggle wiring", () => {
       }
     } as typeof Blob;
 
-    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export config only" }));
 
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
@@ -1330,5 +1474,565 @@ describe("Dependencies settings section", () => {
     expect(config.dependencies.excludedRepos).toEqual([
       { owner: "org1", name: "repo1", fullName: "org1/repo1" },
     ]);
+  });
+});
+
+// ── Export with encrypted credentials ─────────────────────────────────────────
+
+describe("SettingsPage — Data: Export with encrypted credentials", () => {
+  const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
+
+  it("shows the single-use warning in the choice dialog before the credentials action", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    screen.getByText(
+      "This is a one-time transfer, not a durable backup — the encrypted credentials can be imported once and expire in 30 days."
+    );
+  });
+
+  it("choosing 'Export with encrypted credentials' shows the one-time-code modal and defers download until acknowledged", async () => {
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED",
+      salt: "SALT",
+      oneTimeCode: CODE,
+    });
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi.fn();
+    const origCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = origCreate(tag);
+      if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(clickSpy);
+      return el;
+    });
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+
+    await waitFor(() => screen.getByText(/shown only once/i));
+    // Modal shows the generated code; download NOT yet triggered.
+    screen.getByText(CODE);
+    expect(createObjSpy).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /saved my code/i }));
+    expect(createObjSpy).toHaveBeenCalledOnce();
+    expect(clickSpy).toHaveBeenCalledOnce();
+  });
+
+  it("a seal failure pushes a warning, leaves the choice dialog open, and never downloads", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockRejectedValue(new Error("seal failed"));
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith("settings-export", expect.any(String), "warning");
+    });
+    expect(createObjSpy).not.toHaveBeenCalled();
+    // The choice dialog stays open so the user can retry without reopening it.
+    screen.getByRole("button", { name: "Export with encrypted credentials" });
+  });
+
+  it("dismissing the code modal (Cancel) downloads nothing and leaves no residual state", async () => {
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED", salt: "SALT", oneTimeCode: CODE,
+    });
+    const createObjSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    const clickSpy = vi.fn();
+    const origCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      const el = origCreate(tag);
+      if (tag === "a") vi.spyOn(el as HTMLAnchorElement, "click").mockImplementation(clickSpy);
+      return el;
+    });
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+    await waitFor(() => screen.getByText(/shown only once/i));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    // No file was downloaded on dismiss. (Kobalte's exit Presence lingers the
+    // modal content in happy-dom, so this asserts the download behavior rather
+    // than the modal's DOM removal.)
+    expect(createObjSpy).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    // No residual pending download: a fresh export cleanly re-runs the seal flow
+    // (proving handleDismissExportCode cleared exportCode + pendingExportJson).
+    // fireEvent (not userEvent): the dismissed Kobalte modal lingers its
+    // pointer-events:none on <body> in happy-dom, blocking a userEvent click.
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+    await waitFor(() => expect(settingsTransfer.buildEncryptedCredentialsSection).toHaveBeenCalledTimes(2));
+  });
+
+  it("a second export while the code modal is open does NOT mint a new code / re-run the seal flow", async () => {
+    const buildSpy = vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockResolvedValue({
+      sealed: "SEALED", salt: "SALT", oneTimeCode: CODE,
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    // Captured BEFORE any dialog opens — once the code modal is open, the rest
+    // of the page (including this button) is legitimately aria-hidden, so a
+    // fresh getByRole query for it would correctly fail to find it. Reusing
+    // this reference below dispatches directly on the node, bypassing that
+    // (accurate) accessibility-tree filtering, the same way the real Kobalte
+    // focus trap bypasses it for an actual re-click.
+    const exportBtn = screen.getByRole("button", { name: "Export" });
+    await user.click(exportBtn);
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+    await waitFor(() => screen.getByText(/shown only once/i));
+    expect(buildSpy).toHaveBeenCalledTimes(1);
+
+    // The Kobalte Dialog traps + restores focus so the Export button can't be
+    // re-fired behind the modal; the re-entry guard on handleOpenExportChoice
+    // closes the gap for any other trigger path. Re-fire the Export button
+    // directly and assert the choice dialog doesn't even reopen.
+    fireEvent.click(exportBtn);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(buildSpy).toHaveBeenCalledTimes(1);
+    screen.getByText(CODE); // the original code is still the one shown
+  });
+
+  it("CR-001/UI-001: the choice dialog cannot be dismissed mid-seal, but the code modal opens normally once the seal resolves", async () => {
+    let resolveSeal!: (v: { sealed: string; salt: string; oneTimeCode: string }) => void;
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockReturnValue(
+      new Promise((r) => { resolveSeal = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+
+    // Seal in flight (exporting() === true): every dismissal control is disabled.
+    await waitFor(() => screen.getByRole("button", { name: "Preparing..." }));
+    const preparingBtn = screen.getByRole("button", { name: "Preparing..." });
+    expect(preparingBtn.getAttribute("aria-busy")).toBe("true");
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    const configOnlyBtn = screen.getByRole("button", { name: "Export config only" }) as HTMLButtonElement;
+    expect(cancelBtn.disabled).toBe(true);
+    expect(configOnlyBtn.disabled).toBe(true);
+
+    // Defense-in-depth: forcing a click past the disabled attribute still
+    // hits the handler's own `if (!exporting())` guard (the same condition
+    // that gates the dialog's onOpenChange for Escape/overlay-click), so the
+    // dialog stays open and no code modal appears while the seal is pending.
+    cancelBtn.disabled = false;
+    fireEvent.click(cancelBtn);
+    screen.getByText("Choose what to include in the exported file."); // still open
+    expect(screen.queryByText(/shown only once/i)).toBeNull();
+
+    // The guard is scoped to the in-flight window only — once the seal
+    // resolves, the one-time-code modal opens exactly as the unblocked flow
+    // would.
+    resolveSeal({ sealed: "SEALED", salt: "SALT", oneTimeCode: CODE });
+    await waitFor(() => screen.getByText(/shown only once/i));
+    screen.getByText(CODE);
+  });
+
+  it("post-await guard: resolving the seal after the component unmounts does not throw or leave a stray code modal", async () => {
+    // Exercises the `if (!showExportChoice()) return` guard in
+    // handleExportWithCredentials: the choice dialog can't be dismissed
+    // through the UI while a seal is in flight (see the test above), but the
+    // whole page can still be torn down out from under the pending await
+    // (e.g. navigating away from Settings) — this proves that doesn't throw
+    // or pop a stray one-time-code modal into the (now-gone) document.
+    let resolveSeal!: (v: { sealed: string; salt: string; oneTimeCode: string }) => void;
+    vi.mocked(settingsTransfer.buildEncryptedCredentialsSection).mockReturnValue(
+      new Promise((r) => { resolveSeal = r; })
+    );
+
+    const user = userEvent.setup();
+    const { unmount } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    await user.click(screen.getByRole("button", { name: "Export with encrypted credentials" }));
+    await waitFor(() => screen.getByRole("button", { name: "Preparing..." }));
+
+    unmount();
+
+    expect(() => resolveSeal({ sealed: "SEALED", salt: "SALT", oneTimeCode: CODE })).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.body.textContent).not.toContain(CODE);
+    expect(document.body.textContent ?? "").not.toMatch(/shown only once/i);
+  });
+});
+
+// ── Import with encrypted credentials ─────────────────────────────────────────
+
+describe("SettingsPage — Data: Import with encrypted credentials", () => {
+  const CODE = "1111-2222-3333-4444-5555-6666-77"; // 26-char Crockford base32, dashed
+  const IDENTITY = { login: "octo", avatar_url: "https://avatars/octo", name: "Octo" };
+  const BUNDLE = { github: { token: "ghp_x", method: "pat" as const }, jira: null };
+
+  function selectCredFile(extra: Record<string, unknown> = {}) {
+    const input = screen.getByLabelText(/import settings file/i);
+    const content = JSON.stringify({ theme: "dark", ...extra, _credentials: { sealed: "S", salt: "SA" } });
+    const file = new File([content], "settings.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+  }
+
+  it("valid _credentials + correct code: unseals once, shows identity confirm, confirm commits", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+    screen.getByText(/@octo/);
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => {
+      expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledWith(
+        { bundle: BUNDLE, identity: IDENTITY },
+        expect.objectContaining({ theme: "dark" }),
+        undefined // no _viewPreferences section in this test's file content
+      );
+    });
+  });
+
+  it("wrong code then correct code: retries on cached ciphertext, unseals only ONCE total", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials)
+      .mockResolvedValueOnce({ ok: false, error: "Couldn't decrypt credentials — check the code and file match." })
+      .mockResolvedValueOnce({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+
+    const codeField = screen.getByLabelText(/one-time code/i);
+    await user.type(codeField, "wrong-code");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/check the code and file match/i));
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+
+    await user.clear(codeField);
+    await user.type(codeField, CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it("expired unseal shows the distinct expired message with no code-retry prompt", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "expired" });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => screen.getByText(/expired/i));
+    // The code input is gone — the single-use bundle is spent, only the fallback remains.
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    screen.getByRole("button", { name: /continue without credentials/i });
+  });
+
+  it("an invalid (non-expired) unseal shows the single-use terminal message, distinct from 'expired'", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "invalid" });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() =>
+      screen.getByText(
+        "Couldn't restore credentials — this file may already have been used (single-use), or the code/file don't match. Re-export to try again."
+      )
+    );
+    expect(screen.queryByText(/expired/i)).toBeNull();
+    // The code input is gone — the single-use bundle is spent, only the fallback remains.
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    screen.getByRole("button", { name: /continue without credentials/i });
+  });
+
+  it("R-101: a turnstile failure keeps the code input (retryable) and re-unseals on retry", async () => {
+    // A client-side Turnstile failure happens BEFORE any request, so the nonce is
+    // never consumed — this is retryable, NOT the terminal expired/invalid screen.
+    vi.mocked(proxyLib.unsealCredentialBundle)
+      .mockResolvedValueOnce({ ok: false, reason: "turnstile" })
+      .mockResolvedValueOnce({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // Retryable inline error; code input + Submit still present (non-terminal).
+    await waitFor(() => screen.getByText(/verification failed/i));
+    screen.getByLabelText(/one-time code/i);
+    screen.getByRole("button", { name: "Submit" });
+
+    // Retry re-attempts the unseal (nonce never consumed) → success → confirm.
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(2);
+  });
+
+  it("concurrent double-submit calls unsealCredentialBundle EXACTLY once (in-flight guard)", async () => {
+    let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(
+      new Promise((r) => { resolveUnseal = r; })
+    );
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    const codeField = screen.getByLabelText(/one-time code/i) as HTMLInputElement;
+    fireEvent.input(codeField, { target: { value: CODE } });
+    const form = codeField.closest("form")!;
+    // Two submits fired before the first unseal resolves — guard must dedupe.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    resolveUnseal({ ok: true, ciphertext: "CIPHER" });
+
+    await waitFor(() => {
+      expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("pr-test-2: concurrent double-click on Continue calls commitImportedSettings EXACTLY once (in-flight guard)", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    let resolveCommit!: (v: { jiraRestored: boolean }) => void;
+    vi.mocked(settingsTransfer.commitImportedSettings).mockReturnValue(
+      new Promise((r) => { resolveCommit = r; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    const continueBtn = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    fireEvent.click(continueBtn);
+    // Force a second dispatch past the (already-applied) disabled attribute to
+    // exercise the in-function re-entry guard directly.
+    continueBtn.disabled = false;
+    fireEvent.click(continueBtn);
+    resolveCommit({ jiraRestored: true });
+
+    await waitFor(() => {
+      expect(settingsTransfer.commitImportedSettings).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("'continue without credentials' routes through the shared two-click confirm, then applies plaintext config (no unseal)", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.click(screen.getByRole("button", { name: /continue without credentials/i }));
+
+    // UI-003: the SAME plaintext two-click confirm the plaintext-import path uses
+    // appears (inline in the Import row) — nothing applied until it's confirmed.
+    // (The Kobalte dialog's exit Presence doesn't unmount synchronously in
+    // happy-dom, so this asserts behavior rather than the code input's removal —
+    // matching the CustomTabModal/NotificationDrawer test convention.)
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("light");
+
+    // fireEvent (not userEvent): the just-closed Kobalte modal lingers its
+    // pointer-events:none on <body> in happy-dom, which would block a userEvent
+    // pointer interaction with this now-inline confirm button.
+    fireEvent.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark"); // plaintext config applied on confirm
+    expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
+  });
+
+  it("declining (Cancel) leaves the session and config untouched", async () => {
+    const user = userEvent.setup();
+    updateConfig({ theme: "light" });
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Config + session untouched, no unseal attempted, and no identity-confirm or
+    // plaintext-confirm was triggered. (Kobalte's exit Presence lingers the code
+    // input in happy-dom, so this asserts behavior rather than DOM removal.)
+    expect(config.theme).toBe("light");
+    expect(proxyLib.unsealCredentialBundle).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yes, import" })).toBeNull();
+  });
+
+  it("a null _credentials falls through to the plaintext import path (no code prompt)", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const input = screen.getByLabelText(/import settings file/i);
+    const file = new File([JSON.stringify({ theme: "dark", _credentials: null })], "s.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+    // No code prompt; the plaintext two-click confirm appears instead.
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    expect(screen.queryByLabelText(/one-time code/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(config.theme).toBe("dark");
+  });
+
+  it("Cancel and 'continue without credentials' are disabled while the unseal is in flight", async () => {
+    let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
+    vi.mocked(proxyLib.unsealCredentialBundle).mockReturnValue(new Promise((r) => { resolveUnseal = r; }));
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // Unseal in flight — the single-use nonce must not be abandonable mid-flight.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+    );
+    expect((screen.getByRole("button", { name: /continue without credentials/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Checking..." }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveUnseal({ ok: true, ciphertext: "CIPHER" });
+    await waitFor(() => screen.getByText(/sign you in as/i));
+  });
+
+  it("a Cancel-then-reselect during resolve discards the stale continuation (no wrong-identity dialog)", async () => {
+    // Unseal resolves immediately; resolve is deferred so the test can cancel and
+    // reselect a different file while file X's resolve is still pending.
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER-X" });
+    let finishResolveX!: (v: { ok: true; bundle: typeof BUNDLE; identity: typeof IDENTITY }) => void;
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
+      new Promise((r) => { finishResolveX = r as never; })
+    );
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile(); // file X
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    // X's unseal done (unsealInFlight false), X's resolve in flight — Cancel enabled.
+    await waitFor(() => expect(proxyLib.unsealCredentialBundle).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Cancel" })); // abandons file X (gen++)
+
+    // Reselect a different file Y.
+    selectCredFile({ theme: "light" });
+    await waitFor(() => screen.getByLabelText(/one-time code/i)); // Y's code form
+
+    // X's stale resolve now completes — the generation guard must discard it.
+    finishResolveX({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // No identity-confirm dialog appears for the abandoned file's identity, and
+    // no commit happens; the freshly-selected file's code form is still shown.
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+    screen.getByLabelText(/one-time code/i);
+  });
+
+  it("a retryable network unseal keeps the code input available (not terminal)", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "network" });
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/network problem/i));
+    // Non-terminal: the code input + Submit stay available (no terminal screen).
+    screen.getByLabelText(/one-time code/i);
+    screen.getByRole("button", { name: "Submit" });
+  });
+
+  it("a rate-limited unseal keeps the code input available with a retryable message", async () => {
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: false, reason: "rate-limited" });
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/too many attempts/i));
+    screen.getByLabelText(/one-time code/i);
+  });
+
+  it("a commit failure during cred import pushes a warning (handleConfirmCredImport catch branch)", async () => {
+    const { pushNotification } = await import("../../../src/app/lib/errors");
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.commitImportedSettings).mockRejectedValue(new Error("commit boom"));
+
+    const user = userEvent.setup();
+    renderSettings();
+    selectCredFile();
+    await waitFor(() => screen.getByLabelText(/one-time code/i));
+    await user.type(screen.getByLabelText(/one-time code/i), CODE);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(pushNotification).toHaveBeenCalledWith(
+        "settings-import",
+        expect.stringMatching(/something went wrong/i),
+        "warning"
+      );
+    });
+  });
+
+  it("CR-001: after import, the Repositories editor reflects the imported repos (local copies resynced)", async () => {
+    const user = userEvent.setup();
+    updateConfig({ selectedRepos: [], upstreamRepos: [] });
+    renderSettings();
+    const input = screen.getByLabelText(/import settings file/i);
+    const imported = JSON.stringify({
+      selectedRepos: [
+        { owner: "acme", name: "api", fullName: "acme/api" },
+        { owner: "acme", name: "web", fullName: "acme/web" },
+      ],
+    });
+    fireEvent.change(input, { target: { files: [new File([imported], "s.json", { type: "application/json" })] } });
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+
+    expect(config.selectedRepos).toHaveLength(2);
+    // The Repositories summary is driven by the localRepos editor copy; without
+    // the post-import resync it would still read the stale (empty) pre-import set.
+    await waitFor(() => screen.getByText(/2 selected/i));
   });
 });

@@ -190,14 +190,14 @@ describe("acquireTurnstileToken", () => {
   });
 
   it("throws immediately when siteKey is empty", async () => {
-    await expect(mod.acquireTurnstileToken("")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("", "seal")).rejects.toThrow(
       "VITE_TURNSTILE_SITE_KEY not configured",
     );
   });
 
   it("throws immediately when siteKey is undefined-like empty", async () => {
     await expect(
-      mod.acquireTurnstileToken("" as string),
+      mod.acquireTurnstileToken("" as string, "seal"),
     ).rejects.toThrow("VITE_TURNSTILE_SITE_KEY not configured");
   });
 
@@ -240,7 +240,7 @@ describe("acquireTurnstileToken", () => {
       return realHeadAppend(node);
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     // Allow the loadTurnstileScript + render to complete
     await Promise.resolve();
@@ -274,7 +274,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -300,7 +300,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -326,7 +326,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
 
     await Promise.resolve();
     await Promise.resolve();
@@ -355,7 +355,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("test-site-key", "seal")).rejects.toThrow(
       "Invalid sitekey",
     );
   });
@@ -370,7 +370,7 @@ describe("acquireTurnstileToken", () => {
       return node;
     });
 
-    await expect(mod.acquireTurnstileToken("test-site-key")).rejects.toThrow(
+    await expect(mod.acquireTurnstileToken("test-site-key", "seal")).rejects.toThrow(
       "Failed to load Turnstile script",
     );
   });
@@ -411,7 +411,7 @@ describe("acquireTurnstileToken — 30-second outer timeout", () => {
       return node;
     });
 
-    const tokenPromise = mod.acquireTurnstileToken("test-site-key");
+    const tokenPromise = mod.acquireTurnstileToken("test-site-key", "seal");
     // Prevent unhandled rejection during timer advancement
     void tokenPromise.catch(() => {});
 
@@ -458,10 +458,10 @@ describe("acquireTurnstileToken — script reuse", () => {
       return node;
     });
 
-    const token1 = await mod.acquireTurnstileToken("test-site-key");
+    const token1 = await mod.acquireTurnstileToken("test-site-key", "seal");
     expect(token1).toBe("reuse-token");
 
-    const token2 = await mod.acquireTurnstileToken("test-site-key");
+    const token2 = await mod.acquireTurnstileToken("test-site-key", "seal");
     expect(token2).toBe("reuse-token");
 
     const scriptAppends = appendSpy.mock.calls.filter(
@@ -640,5 +640,163 @@ describe("sealApiToken", () => {
     await expect(freshMod.sealApiToken("raw-token", "jira-api-token")).rejects.toThrow(
       "VITE_TURNSTILE_SITE_KEY not configured",
     );
+  });
+});
+
+// ── unsealCredentialBundle — R-101 turnstile retryability ─────────────────────
+// A CLIENT-side Turnstile-acquisition failure happens BEFORE any request reaches
+// the server, so the bundle's single-use nonce is never consumed and the whole
+// unseal is safely retryable. It MUST map to a distinct { reason: "turnstile" },
+// never the terminal { reason: "invalid" } (which callers treat as a burned
+// bundle).
+
+describe("unsealCredentialBundle — turnstile failure (R-101)", () => {
+  let mod: typeof import("../../../src/app/lib/proxy");
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "test-site-key");
+    mod = await loadModule();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("maps a client-side Turnstile acquisition failure to { ok:false, reason:'turnstile' } without sending a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Force acquireTurnstileToken to reject before any request: fire the script's
+    // onerror (proxy.ts rejects loadTurnstileScript with "Failed to load ...").
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onerror: (() => void) | null }).onerror?.();
+        return node;
+      }
+      return node;
+    });
+
+    const res = await mod.unsealCredentialBundle("SEALED-BLOB");
+    expect(res).toEqual({ ok: false, reason: "turnstile" });
+    // No unseal request was ever sent → the server nonce was not consumed.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("is retryable after a turnstile failure — repeated attempts never send a request (nonce never consumed)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onerror: (() => void) | null }).onerror?.();
+        return node;
+      }
+      return node;
+    });
+
+    const first = await mod.unsealCredentialBundle("SEALED-BLOB");
+    const second = await mod.unsealCredentialBundle("SEALED-BLOB");
+    expect(first).toEqual({ ok: false, reason: "turnstile" });
+    expect(second).toEqual({ ok: false, reason: "turnstile" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── unsealCredentialBundle — retryable non-consuming failures (SEC-001/API-001) ──
+// Failures that fire BEFORE the server reaches the single-use nonce leave the
+// bundle valid and must map to a DISTINCT retryable reason, never the terminal
+// { reason: "invalid" } that callers treat as a burned bundle.
+
+describe("unsealCredentialBundle — retryable non-consuming failures (SEC-001/API-001)", () => {
+  let mod: typeof import("../../../src/app/lib/proxy");
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "test-site-key");
+    mod = await loadModule();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  // Turnstile succeeds (script onload + execute resolves a token) so the request
+  // reaches fetch, where each test varies the outcome.
+  function setupSuccessfulTurnstile() {
+    const mockTurnstile = makeMockTurnstile();
+    vi.stubGlobal("window", { ...window, turnstile: mockTurnstile });
+    vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
+      const el = node as HTMLScriptElement;
+      if (el.tagName === "SCRIPT") {
+        (el as unknown as { onload: (() => void) | null }).onload?.();
+        return node;
+      }
+      return node;
+    });
+    mockTurnstile.execute.mockImplementation(() => {
+      mockTurnstile._resolveToken("ts-token");
+    });
+  }
+
+  it("maps a thrown proxyFetch to { ok:false, reason:'network' } — retryable, nonce not consumed", async () => {
+    setupSuccessfulTurnstile();
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+    // A request was attempted but threw before any server response → no nonce burned.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a 429 response to { ok:false, reason:'rate-limited' } — retryable (pre-gate, pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "rate-limited" });
+  });
+
+  it("maps a 403 turnstile_failed to { ok:false, reason:'network' } — retryable (pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "turnstile_failed" }), { status: 403 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("maps a 503 internal_error to { ok:false, reason:'network' } — retryable (pre-nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "internal_error" }), { status: 503 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "network" });
+  });
+
+  it("keeps a genuine 401 { error:'invalid' } TERMINAL (bad blob / consumed nonce)", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid" }), { status: 401 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("still distinguishes { error:'expired' } (terminal) from the retryable reasons", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "expired" }), { status: 401 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: false, reason: "expired" });
+  });
+
+  it("maps a 200 { payload } to { ok:true, ciphertext }", async () => {
+    setupSuccessfulTurnstile();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ payload: "INNER" }), { status: 200 }),
+    ));
+    expect(await mod.unsealCredentialBundle("SEALED")).toEqual({ ok: true, ciphertext: "INNER" });
   });
 });

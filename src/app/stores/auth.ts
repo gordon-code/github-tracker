@@ -213,23 +213,54 @@ export function setAuthFromPat(token: string, userData: GitHubUser): void {
     resetViewState();
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     localStorage.removeItem(VIEW_STORAGE_KEY);
-    // Clear IndexedDB cache to prevent data leakage between identities.
-    clearCache().catch((err) => {
-      console.warn("[auth] Cache clear failed during identity switch:", err);
-      Sentry.captureException(err, { tags: { source: "auth-identity-switch-cache-clear" } });
-    });
-    // Clear per-user in-memory + cached state (poll data, notifications,
-    // toast dedup, dashboard cache) the same way a real logout does, BEFORE
-    // adopting the new identity below, so the incoming identity doesn't
-    // inherit the outgoing one's data.
-    for (const cb of _onClearCallbacks) {
-      try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity switch:", e); }
-    }
+    // Clear IndexedDB cache + per-identity in-memory state. Fire-and-forget
+    // here (preserving this synchronous path's long-standing non-blocking
+    // behavior — the callback loop still runs synchronously because it precedes
+    // the awaited cache clear inside clearIdentityData). The pre-auth Login-page
+    // import path calls `await clearIdentityData()` directly when it needs a
+    // real ordering guarantee before establishing a new identity.
+    void clearIdentityData();
   }
 
   setAuth({ access_token: token });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat" });
+}
+
+/**
+ * One-line self-documenting alias: an imported credential (PAT or OAuth) is
+ * established via the same identity-agnostic mechanics as a PAT replacement
+ * (store token, store user, detect identity switch, reset per-identity state).
+ * The alias makes that agnosticism visible at the import call site without a
+ * reader tracing into `setAuthFromPat`.
+ */
+export const setAuthFromCredential = setAuthFromPat;
+
+/**
+ * Clears per-identity data: the `onAuthCleared` callback loop (poll data,
+ * notifications, toast dedup, dashboard cache, Jira signal) AND the IndexedDB
+ * dashboard cache. The callbacks run synchronously first, so a fire-and-forget
+ * `void clearIdentityData()` preserves `setAuthFromPat`'s historical synchronous
+ * callback behavior; the IndexedDB `clearCache()` is AWAITED (not
+ * fire-and-forget) so a caller doing `await clearIdentityData()` gets a real
+ * ordering guarantee — required by the pre-auth Login-page import path, where
+ * `setAuthFromPat`'s own cache-clear is inert (`isIdentitySwitch` needs `user()`
+ * non-null) and `expireToken()` never clears IndexedDB.
+ */
+export async function clearIdentityData(): Promise<void> {
+  // Synchronous per-identity resets first (matches the ordering the identity-
+  // switch branch has always had: callbacks complete before the awaited work).
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity data clear:", e); }
+  }
+  // IndexedDB cache clear — AWAITED so callers can sequence work strictly after
+  // it (prevents a new identity rendering the previous identity's cached data).
+  try {
+    await clearCache();
+  } catch (err) {
+    console.warn("[auth] Cache clear failed during identity data clear:", err);
+    Sentry.captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
+  }
 }
 
 const _onClearCallbacks: (() => void)[] = [];
@@ -365,44 +396,106 @@ onAuthCleared(() => {
 
 let _crossTabFetchGen = 0;
 
+/**
+ * Cross-tab identity-switch reload seam, extracted as a mutable object method
+ * (not a bare exported function) purely for testability: the storage listener
+ * below always calls through `crossTabReload.reloadForIdentitySwitch()`, so
+ * `vi.spyOn(crossTabReload, "reloadForIdentitySwitch")` from a test intercepts
+ * it — a plain exported function wouldn't be, since the listener's internal
+ * call captures a direct reference to it rather than reading it back off the
+ * module's exports object. This also sidesteps happy-dom's
+ * `window.location.reload` not being reliably spyable directly.
+ */
+export const crossTabReload = {
+  reloadForIdentitySwitch(): void {
+    window.location.reload();
+  },
+};
+
 // Cross-tab auth sync: if another tab clears the token, this tab should also clear.
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
 // Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
 // holding an already-invalidated token would fail on its next Jira request.
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e: StorageEvent) => {
-    if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
-      // Re-check: a rapid sign-out/sign-in may have already replaced the token
-      if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
-      expireToken();
-      window.location.replace("/login");
-    } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
-      _setToken(e.newValue);
-      const gen = ++_crossTabFetchGen;
-      const newToken = e.newValue;
-      fetch("https://api.github.com/user", {
-        headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
-      })
-        .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
-        .then((data) => {
-          if (data && _token() === newToken && _crossTabFetchGen === gen) {
+function handleAuthStorage(e: StorageEvent): void {
+  if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
+    // Re-check: a rapid sign-out/sign-in may have already replaced the token
+    if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
+    expireToken();
+    window.location.replace("/login");
+  } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
+    // Captured BEFORE the token/user update below, so the /user fetch result
+    // can be compared against who THIS tab thought was signed in.
+    const previousLogin = user()?.login;
+    _setToken(e.newValue);
+    const gen = ++_crossTabFetchGen;
+    const newToken = e.newValue;
+    fetch("https://api.github.com/user", {
+      headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+    })
+      .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
+      .then((data) => {
+        if (data && _token() === newToken && _crossTabFetchGen === gen) {
+          // Only a CONFIRMED same-user rotation (a known previous login that
+          // case-insensitively matches the fetched identity) skips the
+          // reload. previousLogin is undefined whenever this tab's user()
+          // was already null — notably after expireToken(), which clears
+          // user() but deliberately PRESERVES config/view so the same user
+          // can silently re-auth. In that state we can't assume continuity:
+          // this tab may still be holding a prior identity's config/view in
+          // memory/localStorage even though user() reads null, so treating
+          // an unconfirmed prior identity as "safe" would let a genuinely
+          // different identity render using that stale data (a
+          // cross-identity bleed). When in doubt, reload.
+          const isSameUserRotation =
+            previousLogin !== undefined && previousLogin.toLowerCase() === data.login.toLowerCase();
+          if (isSameUserRotation) {
+            // Same-identity token rotation — adopt the refreshed user data
+            // in place, same as before. Must NOT reset config/view here.
             setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
+          } else {
+            // A different GitHub identity signed in via another tab (e.g.
+            // Settings > Replace token in that tab), OR this tab has no
+            // confirmable prior identity — the active tab has already
+            // reset config/view, cleared the shared IndexedDB cache, and
+            // written the new identity's token/config/view to localStorage.
+            // This (passive) tab has NOT run any of that, so simply calling
+            // setUser() here could leave it authenticated as the new identity
+            // while still rendering a previous identity's config/view/cached
+            // data. Reload instead so it re-initializes cleanly from what the
+            // active tab already persisted.
+            crossTabReload.reloadForIdentitySwitch();
           }
-        })
-        .catch(() => {});
-    }
-    if (e.key === JIRA_AUTH_STORAGE_KEY) {
-      try {
-        const raw = e.newValue;
-        if (!raw) {
-          _setJiraAuth(null);
-          return;
         }
-        const parsed = JiraAuthStateSchema.safeParse(JSON.parse(raw) as unknown);
-        _setJiraAuth(parsed.success ? parsed.data : null);
-      } catch {
+      })
+      .catch(() => {});
+  }
+  if (e.key === JIRA_AUTH_STORAGE_KEY) {
+    try {
+      const raw = e.newValue;
+      if (!raw) {
         _setJiraAuth(null);
+        return;
       }
+      const parsed = JiraAuthStateSchema.safeParse(JSON.parse(raw) as unknown);
+      _setJiraAuth(parsed.success ? parsed.data : null);
+    } catch {
+      _setJiraAuth(null);
     }
-  });
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", handleAuthStorage);
+}
+
+/**
+ * Test-only: detaches the module-scope `storage` listener registered above.
+ * Suites re-import this module via `vi.resetModules()`, which attaches a fresh
+ * listener to the shared window on each import; calling this in teardown removes
+ * the current instance's listener so they don't accumulate across tests.
+ */
+export function _resetAuthStorageListenerForTests(): void {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("storage", handleAuthStorage);
+  }
 }

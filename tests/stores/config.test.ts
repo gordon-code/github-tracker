@@ -3,6 +3,7 @@ import {
   ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
   CustomTabSchema, updateJiraCustomFields, updateJiraCustomScopes,
+  preParseConfigFixups, postParseConfigFixups,
 } from "../../src/app/stores/config";
 import type { CustomTab } from "../../src/app/stores/config";
 import { clearJiraAuth, clearJiraConfigFull } from "../../src/app/stores/auth";
@@ -312,6 +313,86 @@ describe("loadConfig", () => {
     );
     const cfg = loadConfig();
     expect(cfg.defaultTab).toBe("my-tab");
+  });
+});
+
+// ── Extracted config migration fixups (preParseConfigFixups / postParseConfigFixups) ──
+// These functions are the reusable migration logic shared by loadConfig() and
+// settings-transfer.ts's parseImportFile(). The pre-parse/post-parse split
+// relative to ConfigSchema.safeParse() is load-bearing (see their doc comments).
+describe("preParseConfigFixups", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+  });
+
+  it("salvages an invalid theme in place while leaving valid fields untouched", () => {
+    const raw = preParseConfigFixups({ theme: "nope", refreshInterval: 120 }) as Record<string, unknown>;
+    expect(raw.theme).toBe("auto");
+    expect(raw.refreshInterval).toBe(120);
+  });
+
+  it("strips a doubled [bot] suffix from tracked user logins", () => {
+    const raw = preParseConfigFixups({
+      trackedUsers: [{ login: "renovate[bot][bot]" }],
+    }) as { trackedUsers: { login: string }[] };
+    expect(raw.trackedUsers[0].login).toBe("renovate[bot]");
+  });
+
+  it("via loadConfig(): an invalid theme is salvaged (not a total fallback), other fields survive", () => {
+    // "all other fields valid" — only theme is invalid. refreshInterval:120 (a
+    // non-default) surviving proves the salvage path, not a wholesale fallback to
+    // ConfigSchema defaults (which would yield refreshInterval:300).
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ theme: "invalid-value", refreshInterval: 120 }));
+    const cfg = loadConfig();
+    expect(cfg.theme).toBe("auto");
+    expect(cfg.refreshInterval).toBe(120);
+  });
+
+  it("via loadConfig(): a RAW doubled [bot][bot] login is stripped to a single [bot] and survives parse", () => {
+    // Constructed as RAW pre-parse input: a doubled suffix cannot pass safeParse
+    // on its own (VALID_TRACKED_LOGIN allows only ONE optional [bot]), so this
+    // record would be rejected entirely if the fixup were misplaced post-parse.
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        trackedUsers: [
+          { login: "renovate[bot][bot]", avatarUrl: "https://avatars.githubusercontent.com/u/1", name: null },
+        ],
+      })
+    );
+    const cfg = loadConfig();
+    expect(cfg.trackedUsers).toHaveLength(1);
+    expect(cfg.trackedUsers[0].login).toBe("renovate[bot]");
+  });
+});
+
+describe("postParseConfigFixups", () => {
+  it("resets a defaultTab referencing a deleted custom tab to the schema default", () => {
+    // ConfigSchema itself does NOT reject a defaultTab that names a nonexistent
+    // tab (it's just a string), so this fixup must run post-parse.
+    const parsed = ConfigSchema.parse({
+      defaultTab: "deleted-tab-id",
+      customTabs: [
+        { id: "other-tab", name: "Other", baseType: "issues", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+      ],
+    });
+    expect(parsed.defaultTab).toBe("deleted-tab-id");
+    expect(postParseConfigFixups(parsed).defaultTab).toBe("issues");
+  });
+
+  it("preserves a defaultTab that references an existing custom tab", () => {
+    const parsed = ConfigSchema.parse({
+      defaultTab: "keep-tab",
+      customTabs: [
+        { id: "keep-tab", name: "Keep", baseType: "issues", orgScope: [], repoScope: [], filterPreset: {}, exclusive: false },
+      ],
+    });
+    expect(postParseConfigFixups(parsed).defaultTab).toBe("keep-tab");
+  });
+
+  it("preserves a built-in defaultTab", () => {
+    const parsed = ConfigSchema.parse({ defaultTab: "pullRequests" });
+    expect(postParseConfigFixups(parsed).defaultTab).toBe("pullRequests");
   });
 });
 
