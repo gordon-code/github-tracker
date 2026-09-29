@@ -5,8 +5,7 @@
   ],
   "packageRules": [
     {
-      "matchPackageNames": ["vitest", "@fast-check/vitest"],
-      "matchPackagePatterns": ["^@vitest/"],
+      "matchPackageNames": ["vitest", "@fast-check/vitest", "/^@vitest//"],
       "allowedVersions": "<5.0.0"
     },
     {
