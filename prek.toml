@@ -5,7 +5,7 @@ repo = "builtin"
 hooks = [
   { id = "check-json", priority = 0 },
   { id = "check-toml", priority = 0 },
-  { id = "check-yaml", priority = 0 },
+  { id = "check-yaml", priority = 0, args = ["--multi"] },
   { id = "end-of-file-fixer", priority = 0 },
   { id = "trailing-whitespace", priority = 0 },
 ]
