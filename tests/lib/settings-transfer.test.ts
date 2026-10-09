@@ -121,6 +121,7 @@ const EXPECTED_JIRA_KEYS = [
 const EXPECTED_VIEW_STATE_KEYS = [
   "customTabFilters",
   "dependencyExpandedGroups",
+  "expandDefault",
   "expandedRepos",
   "globalFilter",
   "globalSort",
