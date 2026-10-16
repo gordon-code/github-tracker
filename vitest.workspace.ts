@@ -1,5 +1,5 @@
 import { defineConfig, defineProject } from "vitest/config";
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 
