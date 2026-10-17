@@ -44,6 +44,14 @@ vi.mock("../../src/app/stores/auth", () => ({
 vi.mock("../../src/app/services/jira-client", () => ({
   JiraClient: vi.fn(),
   JiraProxyClient: vi.fn(),
+  JiraApiError: class JiraApiError extends Error {
+    status: number;
+    constructor(status: number, _body: unknown, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
+  DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
 }));
 
 vi.mock("../../src/app/services/jira-keys", () => ({
@@ -3090,5 +3098,257 @@ describe("DashboardPage — abandonedDepsMap and dashboardIssueUrls on auth clea
     await waitFor(() => {
       expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
     });
+  });
+});
+
+// ── Jira expiration UX & reactive re-auth recovery ──────────────────────────
+
+describe("DashboardPage — Jira expiration UX and reactive re-authentication", () => {
+  it("calls clearJiraAuth and pushes notification with JIRA_SETTINGS_ACTION when fetchJiraAssigned encounters JiraApiError(401)", async () => {
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const mockClearJiraAuth = vi.fn();
+    const mockPushNotification = vi.fn();
+
+    vi.doMock("../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: mockClearJiraAuth,
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+    }));
+
+    class MockJiraApiError extends Error {
+      status: number;
+      constructor(status: number, _body: unknown, message: string) {
+        super(message);
+        this.status = status;
+      }
+    }
+
+    const mockSearchJql = vi.fn().mockRejectedValue(new MockJiraApiError(401, null, "Unauthorized"));
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+
+    vi.doMock("../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: vi.fn(),
+      JiraApiError: MockJiraApiError,
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../src/app/lib/errors", () => ({
+      getErrors: vi.fn().mockReturnValue([]),
+      getNotifications: vi.fn().mockReturnValue([]),
+      getUnreadCount: vi.fn().mockReturnValue(0),
+      markAllAsRead: vi.fn(),
+      dismissError: vi.fn(),
+      dismissNotificationBySource: vi.fn(),
+      pushError: vi.fn(),
+      pushNotification: mockPushNotification,
+      clearErrors: vi.fn(),
+      clearNotifications: vi.fn(),
+      addMutedSource: vi.fn(),
+      isMuted: vi.fn(() => false),
+      clearMutedSources: vi.fn(),
+    }));
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [], pullRequests: [], workflowRuns: [], errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          void fetchAll().catch(() => {});
+          return { isRefreshing: () => false, lastRefreshAt: () => null, manualRefresh: vi.fn(), destroy: vi.fn() };
+        }
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    const freshConfig = await import("../../src/app/stores/config");
+    const freshDash = await import("../../src/app/components/dashboard/DashboardPage");
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({
+      enabled: true,
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      authMethod: "oauth",
+    });
+
+    render(() => <freshDash.default />);
+
+    await waitFor(() => {
+      expect(mockClearJiraAuth).toHaveBeenCalledTimes(1);
+    });
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "jira",
+      "Jira session expired — please reconnect in Settings",
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
+  });
+
+  it("shows Jira Assigned tab with Expired badge when config.jira.enabled is true and isJiraAuthenticated() is false", () => {
+    configStore.updateJiraConfig({
+      enabled: true,
+      authMethod: "token",
+      cloudId: "cloud-123",
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+    });
+    vi.mocked(authStore.isJiraAuthenticated).mockReturnValue(false);
+    vi.mocked(authStore.jiraAuth).mockReturnValue(null);
+
+    render(() => <DashboardPage />);
+
+    const jiraTab = screen.getByRole("tab", { name: /Jira Assigned/i });
+    expect(jiraTab).toBeDefined();
+    expect(screen.getByText("Expired")).toBeDefined();
+    expect(screen.getByText("Expired").className).toContain("badge-warning");
+  });
+
+  it("reactively triggers fetchJiraAssigned and detectAndLookupJiraKeys when isJiraAuthenticated transitions from false to true", async () => {
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const [authedSig, setAuthedSig] = createSignal(false);
+    const [jiraAuthSig, setJiraAuthSig] = createSignal<{
+      cloudId: string;
+      accessToken: string;
+      sealedRefreshToken: string;
+      expiresAt: number;
+      siteUrl: string;
+      siteName: string;
+      email?: string;
+    } | null>(null);
+
+    vi.doMock("../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: () => jiraAuthSig(),
+      isJiraAuthenticated: () => authedSig(),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: vi.fn(),
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+    }));
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+    const MockJiraProxyClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+
+    vi.doMock("../../src/app/services/jira-client", () => ({
+      JiraClient: vi.fn(),
+      JiraProxyClient: MockJiraProxyClient,
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    const mockDetectAndLookupJiraKeys = vi.fn().mockResolvedValue(new Map());
+    vi.doMock("../../src/app/services/jira-keys", () => ({
+      detectAndLookupJiraKeys: mockDetectAndLookupJiraKeys,
+      clearJiraKeyCache: vi.fn(),
+    }));
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [makeIssue({ title: "Fix PROJ-42 bug" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          void fetchAll().catch(() => {});
+          return { isRefreshing: () => false, lastRefreshAt: () => null, manualRefresh: vi.fn(), destroy: vi.fn() };
+        }
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    const freshConfig = await import("../../src/app/stores/config");
+    const freshDash = await import("../../src/app/components/dashboard/DashboardPage");
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({
+      enabled: true,
+      authMethod: "token",
+      cloudId: "cloud-123",
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      email: "user@example.com",
+      issueKeyDetection: true,
+    });
+
+    render(() => <freshDash.default />);
+
+    // Wait for initial GitHub poll to populate dashboardData.issues and lastRefreshedAt
+    await waitFor(() => {
+      expect(screen.getByText("Expired")).toBeDefined();
+    });
+    expect(mockSearchJql).not.toHaveBeenCalled();
+    expect(mockDetectAndLookupJiraKeys).not.toHaveBeenCalled();
+
+    // Transition Jira auth from false -> true
+    setJiraAuthSig({
+      cloudId: "cloud-123",
+      accessToken: "sealed-tok",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      email: "user@example.com",
+    });
+    setAuthedSig(true);
+
+    await waitFor(() => {
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(mockDetectAndLookupJiraKeys).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText("Expired")).toBeNull();
   });
 });
