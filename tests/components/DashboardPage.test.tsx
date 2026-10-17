@@ -3211,6 +3211,106 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
     );
   });
 
+  it("silently returns without pushing a duplicate unexpected-error notification when fetchJiraAssigned catches 'Jira auth cleared during token refresh'", async () => {
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const mockClearJiraAuth = vi.fn();
+    const mockPushNotification = vi.fn();
+
+    vi.doMock("../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: mockClearJiraAuth,
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+    }));
+
+    const mockSearchJql = vi.fn().mockRejectedValue(new Error("Jira auth cleared during token refresh"));
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+
+    vi.doMock("../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: vi.fn(),
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../src/app/lib/errors", () => ({
+      getErrors: vi.fn().mockReturnValue([]),
+      getNotifications: vi.fn().mockReturnValue([]),
+      getUnreadCount: vi.fn().mockReturnValue(0),
+      markAllAsRead: vi.fn(),
+      dismissError: vi.fn(),
+      dismissNotificationBySource: vi.fn(),
+      pushError: vi.fn(),
+      pushNotification: mockPushNotification,
+      clearErrors: vi.fn(),
+      clearNotifications: vi.fn(),
+      addMutedSource: vi.fn(),
+      isMuted: vi.fn(() => false),
+      clearMutedSources: vi.fn(),
+    }));
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [], pullRequests: [], workflowRuns: [], errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          void fetchAll().catch(() => {});
+          return { isRefreshing: () => false, lastRefreshAt: () => null, manualRefresh: vi.fn(), destroy: vi.fn() };
+        }
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    const freshConfig = await import("../../src/app/stores/config");
+    const freshDash = await import("../../src/app/components/dashboard/DashboardPage");
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({
+      enabled: true,
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      authMethod: "oauth",
+    });
+
+    render(() => <freshDash.default />);
+
+    await waitFor(() => {
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+    });
+    expect(mockPushNotification).not.toHaveBeenCalled();
+    expect(mockClearJiraAuth).not.toHaveBeenCalled();
+  });
+
   it("shows Jira Assigned tab with Expired badge when config.jira.enabled is true and isJiraAuthenticated() is false", () => {
     configStore.updateJiraConfig({
       enabled: true,

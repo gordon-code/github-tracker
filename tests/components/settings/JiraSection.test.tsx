@@ -175,7 +175,13 @@ vi.mock("../../../src/app/services/jira-keys", () => ({
   clearJiraKeyCache: vi.fn(),
 }));
 
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+}));
+
 // Component imports after all mocks
+import * as Sentry from "@sentry/solid";
 import SettingsPage, { staleJiraScopeReset } from "../../../src/app/components/settings/SettingsPage";
 import { viewState, setTabFilter } from "../../../src/app/stores/view";
 import { pushNotification, dismissNotificationBySource } from "../../../src/app/lib/errors";
@@ -811,13 +817,21 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
     expect(document.getElementById("replace-jira-token-panel")).toBeNull();
   });
 
-  it("shows inline error and does not call setJiraAuth when /api/jira/proxy returns 401", async () => {
+  it("shows inline error and does not call setJiraAuth when /api/jira/proxy returns 401 or non-401/403 status", async () => {
     mockSealApiToken.mockResolvedValue("sealed-bad-token");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: "unauthorized" }),
-    }));
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "unauthorized" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "internal" }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
 
     renderSettings();
 
@@ -839,6 +853,113 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
     });
     expect(mockSetJiraAuth).not.toHaveBeenCalled();
     expect(document.getElementById("replace-jira-token-panel")).not.toBeNull();
+
+    // Non-401/403 status branch (e.g. 500)
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Jira returned 500 — try again later.")).toBeTruthy();
+    });
+    expect(mockSetJiraAuth).not.toHaveBeenCalled();
+  });
+
+  it("validates empty email/token and invalid stored siteUrl before making network calls", async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderSettings();
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn);
+
+    // 1. Empty token input (email pre-filled, token blank)
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Email and API token are both required.")).toBeTruthy();
+    });
+    expect(mockSealApiToken).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    // 2. Empty email input with non-empty token
+    fireEvent.input(screen.getByLabelText("Atlassian account email"), { target: { value: "   " } });
+    fireEvent.input(screen.getByLabelText("New Atlassian API token"), { target: { value: "some-token" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Email and API token are both required.")).toBeTruthy();
+    });
+    expect(mockSealApiToken).not.toHaveBeenCalled();
+
+    // 3. Invalid stored siteUrl
+    mockJiraAuth.mockReturnValue(null);
+    mockConfig.jira.siteUrl = "https://evil.example.com";
+    fireEvent.input(screen.getByLabelText("Atlassian account email"), { target: { value: "valid@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => {
+      expect(
+        screen.getByText("Stored Jira site URL is missing or invalid — please disconnect and reconnect.")
+      ).toBeTruthy();
+    });
+    expect(mockSealApiToken).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("captures non-abort errors with Sentry and shows connection failed error, while ignoring AbortError and post-cancel continuations", async () => {
+    // 1. Non-abort rejection (e.g. sealApiToken or network error) reports to Sentry and shows error
+    const networkErr = new Error("seal network failure");
+    mockSealApiToken.mockRejectedValueOnce(networkErr);
+
+    renderSettings();
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn);
+
+    fireEvent.input(screen.getByLabelText("New Atlassian API token"), {
+      target: { value: "token-attempt-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Connection failed — please try again.")).toBeTruthy();
+    });
+    expect(Sentry.captureException).toHaveBeenCalledWith(networkErr, {
+      tags: { source: "jira-token-replace" },
+    });
+
+    // 2. AbortError is silently ignored without Sentry capture or error display
+    vi.mocked(Sentry.captureException).mockClear();
+    mockSealApiToken.mockResolvedValueOnce("sealed-tok");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"))
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: /^Replace token$/i }) as HTMLButtonElement).disabled
+      ).toBe(false);
+    });
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    // 3. Cancel while proxy fetch is in-flight prevents setJiraAuth when fetch later resolves
+    let resolveProxy!: (v: unknown) => void;
+    mockSealApiToken.mockResolvedValueOnce("sealed-tok-2");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockReturnValueOnce(new Promise((r) => { resolveProxy = r; }))
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+    await waitFor(() => expect(mockSealApiToken).toHaveBeenCalledTimes(3));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+
+    resolveProxy({
+      ok: true,
+      status: 200,
+      json: async () => ({ issues: [], total: 0, maxResults: 1, startAt: 0 }),
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockSetJiraAuth).not.toHaveBeenCalled();
   });
 
   it("auto-opens #replace-jira-token-panel and focuses New Atlassian API token input when window.location.hash is '#jira' on mount", async () => {
@@ -853,6 +974,42 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
       const tokenInput = screen.getByLabelText("New Atlassian API token");
       expect(document.activeElement).toBe(tokenInput);
     });
+  });
+
+  it("opens #replace-jira-token-panel on window hashchange to '#jira' when already mounted, and removes listener on unmount", async () => {
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const { unmount } = renderSettings();
+
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+
+    window.location.hash = "#jira";
+    window.dispatchEvent(new Event("hashchange"));
+
+    await waitFor(() => {
+      expect(document.getElementById("replace-jira-token-panel")).not.toBeNull();
+      const tokenInput = screen.getByLabelText("New Atlassian API token");
+      expect(document.activeElement).toBe(tokenInput);
+    });
+
+    unmount();
+    expect(removeSpy).toHaveBeenCalledWith("hashchange", expect.any(Function));
+  });
+
+  it("does NOT auto-open #replace-jira-token-panel on '#jira' deep-link when authMethod is 'oauth'", async () => {
+    mockConfig.jira.authMethod = "oauth";
+    window.location.hash = "#jira";
+
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("My Jira Site")).toBeTruthy();
+    });
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+
+    // Also verify hashchange while mounted with OAuth does not open the panel
+    window.dispatchEvent(new Event("hashchange"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
   });
 
   it("discovers cloudId via /api/jira/tenant-info when stored cloudId is missing during token replacement, and shows error if tenant-info fails", async () => {
