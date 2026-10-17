@@ -854,4 +854,105 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
       expect(document.activeElement).toBe(tokenInput);
     });
   });
+
+  it("discovers cloudId via /api/jira/tenant-info when stored cloudId is missing during token replacement, and shows error if tenant-info fails", async () => {
+    mockIsJiraAuthenticated.mockReturnValue(false);
+    mockJiraAuth.mockReturnValue(null);
+    mockConfig.jira.cloudId = "";
+    mockSealApiToken.mockResolvedValue("sealed-fallback-token");
+
+    // 1. Failure case: /api/jira/tenant-info returns 502
+    const mockFetchFail = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "bad gateway" }),
+    });
+    vi.stubGlobal("fetch", mockFetchFail);
+
+    const { unmount } = renderSettings();
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn);
+
+    fireEvent.input(screen.getByLabelText("New Atlassian API token"), {
+      target: { value: "fallback-token-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not look up your Jira site — try again later.")).toBeTruthy();
+    });
+    expect(mockSetJiraAuth).not.toHaveBeenCalled();
+    unmount();
+
+    // 2. Success case: /api/jira/tenant-info returns valid cloudId, followed by /api/jira/proxy 200
+    const mockFetchOk = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ cloudId: "discovered-cloud-999" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ issues: [], total: 0, maxResults: 1, startAt: 0 }),
+      });
+    vi.stubGlobal("fetch", mockFetchOk);
+
+    renderSettings();
+    const replaceBtn2 = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn2);
+
+    fireEvent.input(screen.getByLabelText("New Atlassian API token"), {
+      target: { value: "fallback-token-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+
+    await waitFor(() => {
+      expect(mockSetJiraAuth).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cloudId: "discovered-cloud-999",
+          accessToken: "sealed-fallback-token",
+        })
+      );
+    });
+    expect(mockFetchOk).toHaveBeenCalledTimes(2);
+    expect(mockFetchOk).toHaveBeenNthCalledWith(
+      1,
+      "/api/jira/tenant-info",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ siteUrl: "https://mysite.atlassian.net" }),
+      })
+    );
+  });
+
+  it("calls clearJiraAuth and pushes notification with JIRA_SETTINGS_ACTION when jiraClient.getFields() returns 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "unauthorized" }),
+      })
+    );
+
+    renderSettings();
+
+    const configureFieldsBtn = await waitFor(() =>
+      screen.getByRole("button", { name: /Configure fields/i })
+    );
+    fireEvent.click(configureFieldsBtn);
+
+    await waitFor(() => {
+      expect(mockClearJiraAuth).toHaveBeenCalledTimes(1);
+    });
+    expect(pushNotification).toHaveBeenCalledWith(
+      "jira",
+      "Jira session expired — please reconnect in Settings",
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
+  });
 });
