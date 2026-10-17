@@ -6,6 +6,7 @@ import {
   clearNotifications,
   dismissError,
   addMutedSource,
+  isSafeInternalHref,
 } from "../../lib/errors";
 import { relativeTime } from "../../lib/format";
 import { severityConfig } from "./ToastContainer";
@@ -104,6 +105,16 @@ export default function NotificationDrawer(props: NotificationDrawerProps) {
                                 (will retry)
                               </span>
                             )}
+                            <Show when={notif.action && isSafeInternalHref(notif.action.href)}>
+                              {" "}
+                              <a
+                                href={notif.action!.href}
+                                onClick={() => props.onClose()}
+                                class="link link-primary font-medium ml-1"
+                              >
+                                {notif.action!.label}
+                              </a>
+                            </Show>
                           </p>
                           <p class="text-xs text-base-content/50 mt-0.5">
                             {relativeTime(new Date(notif.timestamp).toISOString())}

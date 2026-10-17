@@ -194,4 +194,22 @@ describe("NotificationDrawer", () => {
     const descEl = document.getElementById(descId!);
     expect(descEl?.textContent).toContain("Recent system notifications and errors");
   });
+
+  it("renders action link in drawer item and calls onClose when clicked", () => {
+    pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning", false, {
+      label: "Open Jira settings",
+      href: "/settings#jira",
+    });
+    const { onClose } = renderDrawer(true);
+    vi.advanceTimersByTime(0);
+
+    const item = screen.getByRole("listitem");
+    const link = item.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("/settings#jira");
+    expect(link?.textContent).toBe("Open Jira settings");
+
+    fireEvent.click(link!);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
