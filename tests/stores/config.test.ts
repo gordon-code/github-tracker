@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
-  CustomTabSchema, updateJiraCustomFields, updateJiraCustomScopes,
+  CustomTabSchema, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes,
   preParseConfigFixups, postParseConfigFixups,
 } from "../../src/app/stores/config";
 import type { CustomTab } from "../../src/app/stores/config";
@@ -1539,13 +1539,29 @@ describe("clearJiraAuth — preserves customFields and customScopes", () => {
     });
   });
 
-  it("resets enabled, cloudId, siteUrl but keeps custom fields", () => {
+  it("preserves enabled, authMethod, cloudId, siteUrl, siteName, email, expandIssueDetails, customFields, and customScopes across clearJiraAuth", () => {
     createRoot((dispose) => {
+      updateJiraConfig({
+        enabled: true,
+        authMethod: "token",
+        cloudId: "cloud-123",
+        siteUrl: "https://acme.atlassian.net",
+        siteName: "Acme",
+        email: "dev@acme.com",
+        expandIssueDetails: true,
+      });
       updateJiraCustomFields([{ id: "customfield_10001", name: "Story Points" }]);
+      updateJiraCustomScopes([{ id: "customfield_10002", name: "Assignee" }]);
       clearJiraAuth();
-      expect(config.jira.enabled).toBe(false);
-      expect(config.jira.cloudId).toBeUndefined();
+      expect(config.jira.enabled).toBe(true);
+      expect(config.jira.authMethod).toBe("token");
+      expect(config.jira.cloudId).toBe("cloud-123");
+      expect(config.jira.siteUrl).toBe("https://acme.atlassian.net");
+      expect(config.jira.siteName).toBe("Acme");
+      expect(config.jira.email).toBe("dev@acme.com");
+      expect(config.jira.expandIssueDetails).toBe(true);
       expect(config.jira.customFields).toHaveLength(1);
+      expect(config.jira.customScopes).toHaveLength(1);
       dispose();
     });
   });

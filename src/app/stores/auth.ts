@@ -6,7 +6,7 @@ import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config"
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 import { pushNotification } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
-import type { JiraAuthState } from "../../shared/jira-types";
+import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
@@ -95,15 +95,24 @@ export function setJiraAuth(state: JiraAuthState): void {
 }
 
 export function clearJiraAuth(): void {
+  const prev = _jiraAuth();
   localStorage.removeItem(JIRA_AUTH_STORAGE_KEY);
   _setJiraAuth(null);
-  updateConfig({
-    jira: JiraConfigSchema.parse({
-      issueKeyDetection: config.jira.issueKeyDetection,
-      customFields: config.jira.customFields,
-      customScopes: config.jira.customScopes,
-    }),
-  });
+  if (
+    config.jira?.enabled &&
+    prev &&
+    (!config.jira.cloudId || config.jira.cloudId === prev.cloudId)
+  ) {
+    updateConfig({
+      jira: {
+        ...config.jira,
+        cloudId: config.jira.cloudId ?? prev.cloudId,
+        siteUrl: config.jira.siteUrl ?? prev.siteUrl,
+        siteName: config.jira.siteName ?? prev.siteName,
+        ...(prev.email && !config.jira.email ? { email: prev.email } : {}),
+      },
+    });
+  }
   clearJiraKeyCache();
 }
 
@@ -150,7 +159,7 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
       if (resp.status === 401) {
         // Refresh token expired or revoked
         clearJiraAuth();
-        pushNotification("jira:refresh", "Jira session expired — please reconnect in Settings.", "warning");
+        pushNotification("jira:refresh", "Jira session expired — please reconnect in Settings.", "warning", false, JIRA_SETTINGS_ACTION);
         return false;
       }
 

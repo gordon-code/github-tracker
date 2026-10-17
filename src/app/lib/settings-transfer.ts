@@ -25,10 +25,13 @@ import {
   jiraAuth,
   user,
   setJiraAuth,
+  clearJiraAuth,
+  isJiraAuthenticated,
   setAuthFromCredential,
   clearIdentityData,
 } from "../stores/auth";
 import type { GitHubUser, JiraAuthState } from "../stores/auth";
+import { JIRA_SETTINGS_ACTION } from "../../shared/jira-types";
 import { pushNotification } from "./errors";
 import { proxyFetch, sealCredentialBundle } from "./proxy";
 
@@ -693,14 +696,44 @@ export async function commitImportedSettings(
   // JiraAuthState we actually restore below — otherwise a hand-edited
   // config.jira.authMethod could make Jira silently never work.
   const jira = resolved.bundle.jira;
+  if (
+    jira !== null ||
+    !importedConfig.jira?.enabled ||
+    !importedConfig.jira.cloudId ||
+    jiraAuth()?.cloudId !== importedConfig.jira.cloudId
+  ) {
+    clearJiraAuth();
+  }
   if (jira !== null && importedConfig.jira) {
-    importedConfig.jira = { ...importedConfig.jira, authMethod: jira.authMethod };
+    importedConfig.jira = {
+      ...importedConfig.jira,
+      authMethod: jira.authMethod,
+      cloudId: jira.cloudId,
+      siteUrl: jira.siteUrl,
+      siteName: jira.siteName,
+      ...(jira.authMethod === "token" && jira.email ? { email: jira.email } : {}),
+    };
   }
   setConfig(importedConfig);
   applyImportedViewState(viewPreferences);
 
+  const failJiraRestore = (): { jiraRestored: false } => {
+    clearJiraAuth();
+    pushNotification(
+      "settings-import-jira",
+      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
+      "warning",
+      false,
+      JIRA_SETTINGS_ACTION
+    );
+    return { jiraRestored: false };
+  };
+
   // (c) restore Jira.
   if (jira === null) {
+    if (importedConfig.jira?.enabled && !isJiraAuthenticated()) {
+      return failJiraRestore();
+    }
     return { jiraRestored: true };
   }
 
@@ -730,21 +763,11 @@ export async function commitImportedSettings(
       body: JSON.stringify({ sealed_refresh_token: jira.sealedRefreshToken }),
     });
   } catch {
-    pushNotification(
-      "settings-import-jira",
-      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
-      "warning"
-    );
-    return { jiraRestored: false };
+    return failJiraRestore();
   }
 
   if (!resp.ok) {
-    pushNotification(
-      "settings-import-jira",
-      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
-      "warning"
-    );
-    return { jiraRestored: false };
+    return failJiraRestore();
   }
 
   let data: { access_token: string; sealed_refresh_token: string; expires_in: number };
@@ -758,12 +781,7 @@ export async function commitImportedSettings(
     // A malformed (but 200) refresh body degrades gracefully like the failures
     // above — GitHub identity/config are already committed, so throwing here
     // would abort a half-applied import instead of returning jiraRestored:false.
-    pushNotification(
-      "settings-import-jira",
-      "Your Jira connection couldn't be restored — please reconnect it in Settings.",
-      "warning"
-    );
-    return { jiraRestored: false };
+    return failJiraRestore();
   }
   // Clamp expires_in defensively, matching ensureJiraTokenValid's
   // handling of the same endpoint's contract — a non-positive/absent value would

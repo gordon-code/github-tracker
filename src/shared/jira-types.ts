@@ -102,3 +102,8 @@ export interface JiraAuthState {
   siteName: string;
   email?: string;
 }
+
+export const JIRA_SETTINGS_ACTION = {
+  label: "Open Jira settings",
+  href: "/settings#jira",
+} as const;
