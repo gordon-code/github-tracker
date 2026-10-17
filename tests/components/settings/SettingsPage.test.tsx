@@ -80,6 +80,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 vi.mock("../../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
 }));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────

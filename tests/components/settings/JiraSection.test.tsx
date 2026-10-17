@@ -35,6 +35,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   getUnreadCount: vi.fn(() => 0),
   markAllAsRead: vi.fn(),
   dismissError: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
 }));
 
 const mockClearJiraAuth = vi.fn();
@@ -80,7 +81,18 @@ let mockConfig = {
   mcpRelayPort: 9876,
   authMethod: "oauth" as const,
   onboardingComplete: true,
-  jira: { enabled: false, authMethod: "oauth" as const, issueKeyDetection: true } as { enabled: boolean; authMethod: "oauth" | "token"; issueKeyDetection: boolean; cloudId?: string; siteUrl?: string; siteName?: string; email?: string },
+  jira: { enabled: false, authMethod: "oauth" as const, issueKeyDetection: true } as {
+    enabled: boolean;
+    authMethod: "oauth" | "token";
+    issueKeyDetection: boolean;
+    expandIssueDetails?: boolean;
+    cloudId?: string;
+    siteUrl?: string;
+    siteName?: string;
+    email?: string;
+    customFields?: Array<{ id: string; name: string }>;
+    customScopes?: Array<{ id: string; name: string }>;
+  },
 };
 
 vi.mock("../../../src/app/stores/config", () => ({
@@ -166,6 +178,8 @@ vi.mock("../../../src/app/services/jira-keys", () => ({
 // Component imports after all mocks
 import SettingsPage, { staleJiraScopeReset } from "../../../src/app/components/settings/SettingsPage";
 import { viewState, setTabFilter } from "../../../src/app/stores/view";
+import { pushNotification, dismissNotificationBySource } from "../../../src/app/lib/errors";
+import { clearJiraKeyCache } from "../../../src/app/services/jira-keys";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -581,5 +595,263 @@ describe("staleJiraScopeReset (BUG-008)", () => {
     expect(
       staleJiraScopeReset("customfield_10001", [{ id: "customfield_9999", name: "Other" }])
     ).toBe("assigned");
+  });
+});
+
+describe("SettingsPage Jira section — preserved settings when expired", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setEnv("VITE_JIRA_CLIENT_ID", "valid-client-id");
+    mockIsJiraAuthenticated.mockReturnValue(false);
+    mockJiraAuth.mockReturnValue(null);
+    mockConfig = {
+      ...mockConfig,
+      jira: {
+        enabled: true,
+        authMethod: "token",
+        issueKeyDetection: true,
+        expandIssueDetails: true,
+        cloudId: "cloud-123",
+        siteUrl: "https://preserved.atlassian.net",
+        siteName: "Preserved Site",
+        email: "stored@example.com",
+        customFields: [{ id: "customfield_10001", name: "Story Points" }],
+        customScopes: [{ id: "customfield_10002", name: "Squad" }],
+      },
+    };
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("shows expired banner, preserved site/fields/scopes/toggles, and disables Configure fields and Configure filter scopes buttons", async () => {
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("jira-settings-expired-banner")).toBeTruthy();
+    });
+
+    expect(screen.getByText("Preserved Site")).toBeTruthy();
+    expect(screen.getByText("https://preserved.atlassian.net")).toBeTruthy();
+    expect(screen.getByText("Story Points")).toBeTruthy();
+    expect(screen.getByText("Squad")).toBeTruthy();
+    expect(screen.getByLabelText(/Issue key detection/i)).toBeTruthy();
+    expect(screen.getByText("Expand issue details")).toBeTruthy();
+
+    const configureFieldsBtn = screen.getByRole("button", { name: /Configure fields/i }) as HTMLButtonElement;
+    const configureScopesBtn = screen.getByRole("button", { name: /Configure filter scopes/i }) as HTMLButtonElement;
+    expect(configureFieldsBtn.disabled).toBe(true);
+    expect(configureScopesBtn.disabled).toBe(true);
+  });
+
+  it("shows Reconnect button in expired banner when authMethod is oauth", async () => {
+    mockConfig = {
+      ...mockConfig,
+      jira: {
+        ...mockConfig.jira,
+        enabled: true,
+        authMethod: "oauth",
+      },
+    };
+
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("jira-settings-expired-banner")).toBeTruthy();
+    });
+
+    const reconnectBtn = screen.getByRole("button", { name: /^Reconnect$/i });
+    expect(reconnectBtn).toBeTruthy();
+  });
+});
+
+describe("SettingsPage Jira section — Replace API token flow & deep-linking", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.location.hash = "";
+    setEnv("VITE_JIRA_CLIENT_ID", "valid-client-id");
+    mockIsJiraAuthenticated.mockReturnValue(true);
+    mockJiraAuth.mockReturnValue({
+      accessToken: "sealed-old-token",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "cloud-valid-123",
+      siteUrl: "https://mysite.atlassian.net",
+      siteName: "My Jira Site",
+      email: "initial@example.com",
+    });
+    mockConfig = {
+      ...mockConfig,
+      jira: {
+        enabled: true,
+        authMethod: "token",
+        issueKeyDetection: true,
+        cloudId: "cloud-valid-123",
+        siteUrl: "https://mysite.atlassian.net",
+        siteName: "My Jira Site",
+        email: "initial@example.com",
+      },
+    };
+  });
+
+  afterEach(() => {
+    window.location.hash = "";
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("shows Replace button on Auth method row when connected and when expired, opens #replace-jira-token-panel with pre-filled email, and Cancel closes and clears", async () => {
+    const { unmount } = renderSettings();
+
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    expect(replaceBtn.getAttribute("aria-controls")).toBe("replace-jira-token-panel");
+
+    fireEvent.click(replaceBtn);
+
+    const panel = document.getElementById("replace-jira-token-panel");
+    expect(panel).not.toBeNull();
+
+    const emailInput = screen.getByLabelText("Atlassian account email") as HTMLInputElement;
+    const tokenInput = screen.getByLabelText("New Atlassian API token") as HTMLInputElement;
+    expect(emailInput.value).toBe("initial@example.com");
+    expect(tokenInput.value).toBe("");
+
+    fireEvent.input(tokenInput, { target: { value: "temp-token" } });
+    expect(tokenInput.value).toBe("temp-token");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+
+    // Re-open to verify token input was cleared
+    fireEvent.click(replaceBtn);
+    expect((screen.getByLabelText("New Atlassian API token") as HTMLInputElement).value).toBe("");
+    unmount();
+
+    // Also verify Replace button is present when expired (isJiraAuthenticated() = false)
+    mockIsJiraAuthenticated.mockReturnValue(false);
+    mockJiraAuth.mockReturnValue(null);
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Replace$/i })).toBeTruthy();
+    });
+  });
+
+  it("submitting edited email and valid new token seals token, validates via /api/jira/proxy without tenant-info, updates auth & config, dismisses notifications, and closes panel", async () => {
+    mockSealApiToken.mockResolvedValue("sealed-new-token");
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ issues: [], total: 0, maxResults: 1, startAt: 0 }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderSettings();
+
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn);
+
+    const emailInput = screen.getByLabelText("Atlassian account email") as HTMLInputElement;
+    const tokenInput = screen.getByLabelText("New Atlassian API token") as HTMLInputElement;
+
+    fireEvent.input(emailInput, { target: { value: "rotated@example.com" } });
+    fireEvent.input(tokenInput, { target: { value: "new-atlassian-token-456" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+
+    await waitFor(() => {
+      expect(mockSealApiToken).toHaveBeenCalledWith("new-atlassian-token-456", "jira-api-token");
+      expect(clearJiraKeyCache).toHaveBeenCalled();
+    });
+
+    // Must NOT call /api/jira/tenant-info when cloudId is already valid
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/jira/proxy",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          endpoint: "search",
+          cloudId: "cloud-valid-123",
+          email: "rotated@example.com",
+          sealed: "sealed-new-token",
+          params: { jql: "assignee = currentUser() AND statusCategory != Done", maxResults: 1 },
+        }),
+      })
+    );
+
+    expect(mockSetJiraAuth).toHaveBeenCalledWith({
+      accessToken: "sealed-new-token",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "cloud-valid-123",
+      siteUrl: "https://mysite.atlassian.net",
+      siteName: "My Jira Site",
+      email: "rotated@example.com",
+    });
+    expect(mockUpdateJiraConfig).toHaveBeenCalledWith({
+      enabled: true,
+      cloudId: "cloud-valid-123",
+      email: "rotated@example.com",
+      authMethod: "token",
+      siteUrl: "https://mysite.atlassian.net",
+      siteName: "My Jira Site",
+    });
+    expect(dismissNotificationBySource).toHaveBeenCalledWith("jira");
+    expect(dismissNotificationBySource).toHaveBeenCalledWith("jira:refresh");
+    expect(dismissNotificationBySource).toHaveBeenCalledWith("settings-import-jira");
+    expect(pushNotification).toHaveBeenCalledWith(
+      "jira-replace",
+      "Jira API token replaced successfully",
+      "info"
+    );
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+  });
+
+  it("shows inline error and does not call setJiraAuth when /api/jira/proxy returns 401", async () => {
+    mockSealApiToken.mockResolvedValue("sealed-bad-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "unauthorized" }),
+    }));
+
+    renderSettings();
+
+    const replaceBtn = await waitFor(() => screen.getByRole("button", { name: /^Replace$/i }));
+    fireEvent.click(replaceBtn);
+
+    fireEvent.input(screen.getByLabelText("New Atlassian API token"), {
+      target: { value: "bad-token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("API token or email is invalid — check your credentials and try again.")
+      ).toBeTruthy();
+      expect(
+        (screen.getByRole("button", { name: /^Replace token$/i }) as HTMLButtonElement).disabled
+      ).toBe(false);
+    });
+    expect(mockSetJiraAuth).not.toHaveBeenCalled();
+    expect(document.getElementById("replace-jira-token-panel")).not.toBeNull();
+  });
+
+  it("auto-opens #replace-jira-token-panel and focuses New Atlassian API token input when window.location.hash is '#jira' on mount", async () => {
+    mockIsJiraAuthenticated.mockReturnValue(false);
+    mockJiraAuth.mockReturnValue(null);
+    window.location.hash = "#jira";
+
+    renderSettings();
+
+    await waitFor(() => {
+      expect(document.getElementById("replace-jira-token-panel")).not.toBeNull();
+      const tokenInput = screen.getByLabelText("New Atlassian API token");
+      expect(document.activeElement).toBe(tokenInput);
+    });
   });
 });
