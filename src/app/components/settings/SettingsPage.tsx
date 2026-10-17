@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, For, onCleanup, onMount } from "solid-js";
+import { createSignal, createMemo, createEffect, Show, For, onCleanup, onMount } from "solid-js";
 import { Select } from "@kobalte/core/select";
 import { Dialog } from "@kobalte/core/dialog";
 import * as Sentry from "@sentry/solid";
@@ -13,11 +13,11 @@ import {
 } from "../../lib/settings-transfer";
 import { createCredentialImport } from "../../lib/use-credential-import";
 import { viewState, updateViewState, setTabFilter, applyImportedViewState } from "../../stores/view";
-import { clearAuth, jiraAuth, setJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
+import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
 import { isValidPatFormat } from "../../lib/pat";
 import { clearCache } from "../../stores/cache";
-import { pushNotification } from "../../lib/errors";
+import { pushNotification, dismissNotificationBySource } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
@@ -37,11 +37,16 @@ import CustomTabsSection from "./CustomTabsSection";
 import DependencyExclusionModal from "./DependencyExclusionModal";
 import { InfoTooltip } from "../shared/Tooltip";
 import { createJiraClient } from "../../lib/jira-utils";
+import { clearJiraKeyCache } from "../../services/jira-keys";
+import { JIRA_SETTINGS_ACTION } from "../../../shared/jira-types";
+import type { IJiraClient } from "../../services/jira-client";
 import JiraFieldPicker from "./JiraFieldPicker";
 import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
+const VALID_JIRA_SITE_URL_RE = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/i;
+const VALID_JIRA_CLOUD_ID_RE = /^[a-zA-Z0-9-]+$/;
 
 interface NumberSelectOption {
   value: number;
@@ -393,6 +398,13 @@ export default function SettingsPage() {
   function handleConfirmImport() {
     const pending = pendingImport();
     if (!pending) return;
+    if (
+      !pending.config.jira?.enabled ||
+      !pending.config.jira.cloudId ||
+      jiraAuth()?.cloudId !== pending.config.jira.cloudId
+    ) {
+      clearJiraAuth();
+    }
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
     // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
     setConfig(pending.config);
@@ -526,7 +538,88 @@ export default function SettingsPage() {
   const [showScopePicker, setShowScopePicker] = createSignal(false);
   const [showDependencyExclusionModal, setShowDependencyExclusionModal] = createSignal(false);
 
-  const jiraClient = createMemo(() => createJiraClient(config.jira?.authMethod));
+  // Replace Jira API token panel
+  const [showReplaceJiraToken, setShowReplaceJiraToken] = createSignal(false);
+  const [replaceJiraEmail, setReplaceJiraEmail] = createSignal("");
+  const [replaceJiraTokenInput, setReplaceJiraTokenInput] = createSignal("");
+  const [replaceJiraError, setReplaceJiraError] = createSignal<string | null>(null);
+  const [replaceJiraSubmitting, setReplaceJiraSubmitting] = createSignal(false);
+  let replaceJiraTokenInputRef: HTMLInputElement | undefined;
+  let replaceJiraButtonRef: HTMLButtonElement | undefined;
+  let replaceJiraAbortCtrl: AbortController | undefined;
+
+  function openReplaceJiraTokenPanel(focusInput = true) {
+    setReplaceJiraEmail(jiraAuth()?.email ?? config.jira?.email ?? "");
+    setReplaceJiraTokenInput("");
+    setReplaceJiraError(null);
+    setShowReplaceJiraToken(true);
+    if (focusInput) {
+      setTimeout(() => replaceJiraTokenInputRef?.focus(), 0);
+    }
+  }
+
+  function closeReplaceJiraTokenPanel(restoreFocus = false) {
+    replaceJiraAbortCtrl?.abort();
+    setShowReplaceJiraToken(false);
+    setReplaceJiraTokenInput("");
+    setReplaceJiraError(null);
+    if (restoreFocus) replaceJiraButtonRef?.focus();
+  }
+
+  function handleJiraDeepLink() {
+    if (typeof window === "undefined" || window.location.hash !== "#jira") return;
+    const shouldOpenReplace =
+      config.jira?.authMethod === "token" && (isJiraAuthenticated() || Boolean(config.jira?.enabled));
+    if (shouldOpenReplace) {
+      openReplaceJiraTokenPanel(false);
+    }
+    setTimeout(() => {
+      document.getElementById("jira")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      if (shouldOpenReplace) {
+        replaceJiraTokenInputRef?.focus({ preventScroll: true });
+      }
+    }, 0);
+  }
+
+  onMount(() => {
+    handleJiraDeepLink();
+    window.addEventListener("hashchange", handleJiraDeepLink);
+  });
+
+  onCleanup(() => {
+    replaceJiraAbortCtrl?.abort();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("hashchange", handleJiraDeepLink);
+    }
+  });
+
+  createEffect(() => {
+    if (!isJiraAuthenticated()) {
+      setShowFieldPicker(false);
+      setShowScopePicker(false);
+    }
+  });
+
+  const jiraClient = createMemo<IJiraClient | null>(() => {
+    const base = createJiraClient(config.jira?.authMethod);
+    if (!base) return null;
+    return {
+      getIssue: (key, fields) => base.getIssue(key, fields),
+      searchJql: (jql, opts) => base.searchJql(jql, opts),
+      bulkFetch: (keys, fields) => base.bulkFetch(keys, fields),
+      getFields: async () => {
+        try {
+          return await base.getFields();
+        } catch (err) {
+          if ((err as { status?: number })?.status === 401) {
+            clearJiraAuth();
+            pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning", false, JIRA_SETTINGS_ACTION);
+          }
+          throw err;
+        }
+      },
+    };
+  });
 
   const jiraApiSiteUrl = () => {
     const sub = jiraApiSubdomain().trim();
@@ -613,7 +706,107 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleReplaceJiraToken() {
+    if (replaceJiraSubmitting()) return;
+    const email = replaceJiraEmail().trim();
+    const newToken = replaceJiraTokenInput().trim();
+    if (!email || !newToken) {
+      setReplaceJiraError("Email and API token are both required.");
+      return;
+    }
+    const siteUrl = (jiraAuth()?.siteUrl ?? config.jira?.siteUrl ?? "").replace(/\/+$/, "");
+    if (!VALID_JIRA_SITE_URL_RE.test(siteUrl)) {
+      setReplaceJiraError("Stored Jira site URL is missing or invalid — please disconnect and reconnect.");
+      return;
+    }
+    let cloudId = jiraAuth()?.cloudId ?? config.jira?.cloudId ?? "";
+    replaceJiraAbortCtrl = new AbortController();
+    setReplaceJiraSubmitting(true);
+    setReplaceJiraError(null);
+    try {
+      if (!cloudId || !VALID_JIRA_CLOUD_ID_RE.test(cloudId)) {
+        const tenantResp = await fetch("/api/jira/tenant-info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
+          body: JSON.stringify({ siteUrl }),
+          signal: replaceJiraAbortCtrl.signal,
+        });
+        if (!showReplaceJiraToken()) return;
+        if (!tenantResp.ok) {
+          setReplaceJiraError("Could not look up your Jira site — try again later.");
+          return;
+        }
+        const tenantData = (await tenantResp.json()) as { cloudId?: string };
+        cloudId = tenantData.cloudId ?? "";
+        if (!cloudId || !VALID_JIRA_CLOUD_ID_RE.test(cloudId)) {
+          setReplaceJiraError("Could not look up your Jira site — try again later.");
+          return;
+        }
+      }
+
+      const sealedToken = await sealApiToken(newToken, "jira-api-token");
+      if (!showReplaceJiraToken()) return;
+
+      const resp = await fetch("/api/jira/proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
+        signal: replaceJiraAbortCtrl.signal,
+        body: JSON.stringify({
+          endpoint: "search",
+          cloudId,
+          email,
+          sealed: sealedToken,
+          params: { jql: "assignee = currentUser() AND statusCategory != Done", maxResults: 1 },
+        }),
+      });
+      if (!showReplaceJiraToken()) return;
+      if (!resp.ok) {
+        setReplaceJiraError(
+          resp.status === 401 || resp.status === 403
+            ? "API token or email is invalid — check your credentials and try again."
+            : `Jira returned ${resp.status} — try again later.`
+        );
+        return;
+      }
+
+      let siteName = jiraAuth()?.siteName ?? config.jira?.siteName ?? "";
+      if (!siteName) {
+        try {
+          siteName = new URL(siteUrl).hostname.split(".")[0];
+        } catch {
+          siteName = cloudId;
+        }
+      }
+
+      clearJiraKeyCache();
+      setJiraAuth({
+        accessToken: sealedToken,
+        sealedRefreshToken: "",
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        cloudId,
+        siteUrl,
+        siteName,
+        email,
+      });
+      updateJiraConfig({ enabled: true, cloudId, email, authMethod: "token", siteUrl, siteName });
+      dismissNotificationBySource("jira");
+      dismissNotificationBySource("jira:refresh");
+      dismissNotificationBySource("settings-import-jira");
+      closeReplaceJiraTokenPanel(true);
+      pushNotification("jira-replace", "Jira API token replaced successfully", "info");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      Sentry.captureException(err, { tags: { source: "jira-token-replace" } });
+      setReplaceJiraError("Connection failed — please try again.");
+    } finally {
+      setReplaceJiraSubmitting(false);
+    }
+  }
+
   function handleJiraDisconnect() {
+    closeReplaceJiraTokenPanel(false);
+    setShowFieldPicker(false);
+    setShowScopePicker(false);
     clearJiraConfigFull();
     // DefaultTab guard: reset to issues if pointing at Jira tab
     if (config.defaultTab === "jiraAssigned") {
@@ -1274,7 +1467,7 @@ export default function SettingsPage() {
         {/* Section 11: Jira Cloud Integration */}
         <Section id="jira" title="Jira Cloud Integration">
             <Show
-              when={isJiraAuthenticated()}
+              when={isJiraAuthenticated() || config.jira?.enabled}
               fallback={
                 <div class="flex flex-col gap-3 px-4 py-3">
                   <Show
@@ -1372,18 +1565,116 @@ export default function SettingsPage() {
                 </div>
               }
             >
+              <Show when={!isJiraAuthenticated()}>
+                <div role="alert" data-testid="jira-settings-expired-banner" class="mx-4 mt-3 alert alert-warning text-xs flex items-center justify-between gap-2">
+                  <span>
+                    {config.jira?.authMethod === "token"
+                      ? "Your Jira API token has expired or is invalid. Replace your token below to resume syncing — all your Jira settings are preserved."
+                      : "Your Jira OAuth session has expired. Reconnect below to resume syncing — all your Jira settings are preserved."}
+                  </span>
+                  <Show when={config.jira?.authMethod !== "token" && jiraEnabled}>
+                    <button
+                      type="button"
+                      onClick={handleJiraOAuthConnect}
+                      class="btn btn-xs btn-neutral shrink-0"
+                    >
+                      Reconnect
+                    </button>
+                  </Show>
+                </div>
+              </Show>
               <SettingRow
                 label="Connected site"
-                description={jiraAuth()?.siteUrl ?? ""}
+                description={jiraAuth()?.siteUrl ?? config.jira?.siteUrl ?? ""}
               >
-                <span class="text-sm font-medium">{jiraAuth()?.siteName ?? ""}</span>
+                <span class="text-sm font-medium">{jiraAuth()?.siteName ?? config.jira?.siteName ?? ""}</span>
               </SettingRow>
               <SettingRow
                 label="Auth method"
                 description="How this Jira integration authenticates"
               >
-                <span class="text-sm">{config.jira?.authMethod === "token" ? "API Token" : "OAuth"}</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">{config.jira?.authMethod === "token" ? "API Token" : "OAuth"}</span>
+                  <Show when={config.jira?.authMethod === "token"}>
+                    <button
+                      ref={replaceJiraButtonRef}
+                      type="button"
+                      onClick={() => {
+                        if (!showReplaceJiraToken()) {
+                          openReplaceJiraTokenPanel();
+                        } else {
+                          closeReplaceJiraTokenPanel(false);
+                        }
+                      }}
+                      class="btn btn-xs btn-outline"
+                      aria-expanded={showReplaceJiraToken()}
+                      aria-controls="replace-jira-token-panel"
+                    >
+                      Replace
+                    </button>
+                  </Show>
+                </div>
               </SettingRow>
+              <Show when={showReplaceJiraToken()}>
+                <div id="replace-jira-token-panel" class="px-4 py-3 border-b border-base-300 flex flex-col gap-2">
+                  <p class="text-xs text-base-content/60">
+                    Generate a new token at{" "}
+                    <a
+                      href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="link link-primary"
+                    >
+                      Atlassian API tokens
+                    </a>{" "}
+                    (use <strong>Create API token</strong>, not "with scopes").
+                  </p>
+                  <form onSubmit={(e) => { e.preventDefault(); void handleReplaceJiraToken(); }}>
+                    <div class="flex flex-col gap-2">
+                      <input
+                        type="email"
+                        placeholder="your@email.com"
+                        class="input input-sm w-full"
+                        aria-label="Atlassian account email"
+                        value={replaceJiraEmail()}
+                        onInput={(e) => setReplaceJiraEmail(e.currentTarget.value)}
+                      />
+                      <input
+                        ref={replaceJiraTokenInputRef}
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="New Atlassian API token"
+                        class={`input input-sm w-full${replaceJiraError() ? " input-error" : ""}`}
+                        aria-label="New Atlassian API token"
+                        aria-invalid={!!replaceJiraError()}
+                        aria-describedby={replaceJiraError() ? "replace-jira-token-error" : undefined}
+                        value={replaceJiraTokenInput()}
+                        onInput={(e) => setReplaceJiraTokenInput(e.currentTarget.value)}
+                      />
+                      <Show when={replaceJiraError()}>
+                        <p id="replace-jira-token-error" role="alert" class="text-error text-xs">{replaceJiraError()}</p>
+                      </Show>
+                      <div class="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={replaceJiraSubmitting()}
+                          aria-busy={replaceJiraSubmitting()}
+                          class="btn btn-sm btn-primary"
+                        >
+                          {replaceJiraSubmitting() ? "Validating..." : "Replace token"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => closeReplaceJiraTokenPanel(true)}
+                          class="btn btn-sm btn-ghost"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </Show>
               <SettingRow
                 label="Issue key detection"
                 description="Detect Jira issue keys in GitHub issue and PR titles"
@@ -1420,6 +1711,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   class="btn btn-sm btn-outline"
+                  disabled={!isJiraAuthenticated()}
                   onClick={() => {
                     setShowFieldPicker((v) => !v);
                     setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);
@@ -1450,6 +1742,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   class="btn btn-sm btn-outline"
+                  disabled={!isJiraAuthenticated()}
                   onClick={() => {
                     setShowScopePicker((v) => !v);
                     setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);

@@ -24,6 +24,7 @@ interface JiraAssignedTabProps {
   issues: JiraIssue[];
   loading: boolean;
   siteUrl: string;
+  expired?: boolean;
 }
 
 const BUILTIN_SCOPE_OPTIONS = [
@@ -698,7 +699,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
       </Show>
 
       {/* Jira project groups + locked stubs, or flat custom-ordered list */}
-      <Show when={isCustomMode() ? customPageItems().length > 0 : pageGroups().length > 0}>
+      <Show when={!props.expired && (isCustomMode() ? customPageItems().length > 0 : pageGroups().length > 0)}>
         <Show
           when={isCustomMode()}
           fallback={
@@ -770,8 +771,21 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
         </Show>
       </Show>
 
+      <Show when={props.expired}>
+        <div class="flex flex-col items-center justify-center gap-3 py-16 text-center px-4" data-testid="jira-expired-state">
+          <div class="alert alert-warning max-w-md flex flex-col sm:flex-row items-center gap-3">
+            <span class="text-sm">
+              Your Jira session or API token has expired. Your Jira settings and custom order are preserved.
+            </span>
+            <a href="/settings#jira" class="btn btn-sm btn-neutral shrink-0">
+              Open Jira settings
+            </a>
+          </div>
+        </div>
+      </Show>
+
       {/* Empty state — shown when no actual items, whether or not locked stubs appear above */}
-      <Show when={!props.loading && filtered().length === 0}>
+      <Show when={!props.expired && !props.loading && filtered().length === 0}>
         <div class="flex flex-col items-center justify-center gap-2 py-16 text-base-content/50">
           <svg
             class="h-10 w-10 opacity-40"

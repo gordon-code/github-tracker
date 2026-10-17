@@ -1,7 +1,8 @@
-import { createEffect, createSignal, For, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import {
   getNotifications,
   isMuted,
+  isSafeInternalHref,
   type AppNotification,
   type NotificationSeverity,
 } from "../../lib/errors";
@@ -291,6 +292,16 @@ export default function ToastContainer() {
                 {item.notification.retryable && (
                   <span class="ml-1 opacity-75">(will retry)</span>
                 )}
+                <Show when={item.notification.action && isSafeInternalHref(item.notification.action.href)}>
+                  {" "}
+                  <a
+                    href={item.notification.action!.href}
+                    onClick={() => dismissToast(item.notification.id)}
+                    class="underline font-medium hover:opacity-80 ml-1"
+                  >
+                    {item.notification.action!.label}
+                  </a>
+                </Show>
               </span>
               <button
                 type="button"

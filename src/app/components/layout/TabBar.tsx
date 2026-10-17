@@ -13,6 +13,7 @@ interface TabBarProps {
   enableTracking?: boolean;
   enableActions?: boolean;
   enableJira?: boolean;
+  jiraExpired?: boolean;
   enableDependencies?: boolean;
   customTabs?: Array<{ id: string; name: string; isUnscoped?: boolean }>;
   onAddTab?: () => void;
@@ -65,8 +66,17 @@ export default function TabBar(props: TabBarProps) {
               <Show when={props.enableJira}>
                 <Tabs.Trigger value="jiraAssigned" class="tab compact:tab-sm data-[selected]:tab-active">
                   Jira Assigned
-                  <Show when={props.counts?.jiraAssigned !== undefined}>
-                    <span class="badge badge-sm badge-neutral ml-1">{props.counts?.jiraAssigned}</span>
+                  <Show
+                    when={!props.jiraExpired}
+                    fallback={
+                      <Tooltip content="Jira session expired — click to reconnect in Settings">
+                        <span class="badge badge-sm badge-warning ml-1">Expired</span>
+                      </Tooltip>
+                    }
+                  >
+                    <Show when={props.counts?.jiraAssigned !== undefined}>
+                      <span class="badge badge-sm badge-neutral ml-1">{props.counts?.jiraAssigned}</span>
+                    </Show>
                   </Show>
                 </Tabs.Trigger>
               </Show>

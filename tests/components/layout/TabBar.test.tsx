@@ -455,4 +455,40 @@ describe("TabBar", () => {
     await user.click(depTab);
     expect(onTabChange).toHaveBeenCalledWith("dependencies");
   });
+
+  // ── Jira Assigned tab & jiraExpired badge ────────────────────────────────────
+
+  it("displays Expired badge (badge-warning) instead of numeric count when enableJira={true} and jiraExpired={true}", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar
+        activeTab="issues"
+        onTabChange={onTabChange}
+        enableJira={true}
+        jiraExpired={true}
+        counts={{ jiraAssigned: 9 }}
+      />
+    ));
+    const jiraTab = screen.getByRole("tab", { name: /Jira Assigned/i });
+    expect(jiraTab).toBeDefined();
+    const expiredBadge = screen.getByText("Expired");
+    expect(expiredBadge.className).toContain("badge-warning");
+    expect(screen.queryByText("9")).toBeNull();
+  });
+
+  it("renders numeric count badge normally when enableJira={true} and jiraExpired={false}", () => {
+    const onTabChange = vi.fn();
+    render(() => (
+      <TabBar
+        activeTab="issues"
+        onTabChange={onTabChange}
+        enableJira={true}
+        jiraExpired={false}
+        counts={{ jiraAssigned: 9 }}
+      />
+    ));
+    expect(screen.getByRole("tab", { name: /Jira Assigned/i })).toBeDefined();
+    expect(screen.getByText("9")).toBeDefined();
+    expect(screen.queryByText("Expired")).toBeNull();
+  });
 });

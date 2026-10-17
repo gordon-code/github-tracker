@@ -566,6 +566,8 @@ Use this method if OAuth is unavailable (e.g., your organization does not allow 
 
 The integration label shows "API Token" and displays the connected site name and URL.
 
+To rotate or replace your API token at any time — or after a token expires — without disconnecting: go to **Settings > Jira Cloud Integration > Auth method** and click **Replace**. Your stored Atlassian email is pre-filled (and can be edited if needed) while your connected site, custom fields, custom scopes, issue key detection setting, and custom issue order remain preserved. Paste the new API token and click **Replace token** — the new token is validated against Jira and encrypted before replacing the old one.
+
 ### Issue Key Detection
 
 When issue key detection is enabled, the app scans GitHub issue and PR titles (and PR branch names) for Jira issue key patterns (e.g., `PROJ-123`, `TEAM-42`) after each full data refresh. Matched keys are looked up in Jira and displayed as inline badges on the GitHub item rows showing the issue key, status, and a color indicating status category (blue = new, yellow = in progress, green = done).
@@ -590,7 +592,7 @@ When Jira is connected, a **Jira** tab appears in the tab bar. It shows all open
 
 **Polling:** Jira issues refresh after each full GitHub poll cycle. There is no hot poll for Jira — issues update every 5 minutes.
 
-If your Jira token expires (OAuth refresh tokens expire after 90 days of inactivity), a notification prompts you to reconnect in Settings.
+If your Jira OAuth session or API token expires, the **Jira Assigned** tab remains visible with an **Expired** warning badge while preserving your connected site, custom fields, custom scopes, issue key detection setting, and custom sort order. Both the warning toast and the notification drawer include a clickable **Open Jira settings** link (also shown inside the expired tab callout) that jumps directly to **Settings > Jira Cloud Integration** — and automatically opens the token replacement form for API token users.
 
 ### Configuring Custom Fields
 
@@ -644,7 +646,7 @@ Local development uses `.dev.vars` (see `.dev.vars.example`). The Jira Cloud Int
 ### Troubleshooting Jira
 
 **"Reconnect in Settings" notification appears.**
-Your OAuth refresh token has expired (90-day inactivity limit) or was revoked. Go to Settings and click **Connect with Jira** to re-authenticate.
+Your OAuth refresh token has expired (90-day inactivity limit) or your API token expired or was revoked. Your Jira settings (connected site, custom fields, custom scopes, issue key detection, and custom sort order) remain preserved while the **Jira Assigned** tab displays an **Expired** badge. Click **Open Jira settings** in the toast notification, notification drawer, or expired tab callout to jump straight to **Settings > Jira Cloud Integration** — then click **Reconnect** (for OAuth) or use the inline **Replace** / **Replace token** form (for API tokens, which opens automatically) to re-authenticate.
 
 **OAuth button not visible in Settings.**
 `VITE_JIRA_CLIENT_ID` is not set or contains an invalid value. Check your `.env` file or deployment configuration. The API token method is always available regardless of this variable.

@@ -1,7 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { IJiraClient } from "../../src/app/services/jira-client";
 import { JiraApiError } from "../../src/app/services/jira-client";
-import type { JiraIssue, JiraBulkFetchResult } from "../../src/shared/jira-types";
+import { JIRA_SETTINGS_ACTION, type JiraIssue, type JiraBulkFetchResult } from "../../src/shared/jira-types";
+
+const mockClearJiraAuth = vi.fn();
+const mockPushNotification = vi.fn();
+
+vi.mock("../../src/app/stores/auth", () => ({
+  clearJiraAuth: (...args: unknown[]) => mockClearJiraAuth(...args),
+}));
+
+vi.mock("../../src/app/lib/errors", () => ({
+  pushNotification: (...args: unknown[]) => mockPushNotification(...args),
+}));
 
 // ── Module under test (imported after mock setup) ─────────────────────────────
 // We import after each reset so the module-level cache is fresh.
@@ -47,9 +58,14 @@ function makeClient(overrides: Partial<IJiraClient> = {}): IJiraClient {
 describe("lookupKeys", () => {
   let lookupKeys: (typeof import("../../src/app/services/jira-keys"))["lookupKeys"];
   let clearJiraKeyCache: (typeof import("../../src/app/services/jira-keys"))["clearJiraKeyCache"];
+  let FreshJiraApiError: typeof JiraApiError;
 
   beforeEach(async () => {
     vi.resetModules();
+    mockClearJiraAuth.mockClear();
+    mockPushNotification.mockClear();
+    const clientMod = await import("../../src/app/services/jira-client");
+    FreshJiraApiError = clientMod.JiraApiError;
     const mod = await import("../../src/app/services/jira-keys");
     lookupKeys = mod.lookupKeys;
     clearJiraKeyCache = mod.clearJiraKeyCache;
@@ -113,15 +129,55 @@ describe("lookupKeys", () => {
     expect(result.get("UNKN-1")).toBeNull();
   });
 
-  it("caches null for all keys in batch on JiraApiError", async () => {
+  it("caches null for all keys in batch on non-401 JiraApiError", async () => {
     const client = makeClient({
-      bulkFetch: vi.fn().mockRejectedValue(new JiraApiError(403, null, "Forbidden")),
+      bulkFetch: vi.fn().mockRejectedValue(new FreshJiraApiError(403, null, "Forbidden")),
     });
 
     const result = await lookupKeys(["PROJ-1", "PROJ-2"], client);
 
     expect(result.get("PROJ-1")).toBeNull();
     expect(result.get("PROJ-2")).toBeNull();
+    expect(mockClearJiraAuth).not.toHaveBeenCalled();
+  });
+
+  it("calls clearJiraAuth, pushes notification with JIRA_SETTINGS_ACTION, returns empty Map, and does not cache null on JiraApiError(401)", async () => {
+    const expiredClient = makeClient({
+      bulkFetch: vi.fn().mockRejectedValue(new FreshJiraApiError(401, null, "Unauthorized")),
+    });
+
+    const result = await lookupKeys(["PROJ-1", "PROJ-2"], expiredClient);
+
+    expect(mockClearJiraAuth).toHaveBeenCalledTimes(1);
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "jira",
+      "Jira session expired — please reconnect in Settings",
+      "warning",
+      false,
+      JIRA_SETTINGS_ACTION
+    );
+    expect(result.size).toBe(0);
+
+    // Keys were NOT cached as null — a subsequent call with a working client fetches them fresh
+    const issue1 = makeIssue("PROJ-1");
+    const workingClient = makeClient({
+      bulkFetch: vi.fn().mockResolvedValue(makeBulkResult([issue1])),
+    });
+    const retryResult = await lookupKeys(["PROJ-1"], workingClient);
+    expect(workingClient.bulkFetch).toHaveBeenCalledWith(["PROJ-1"]);
+    expect(retryResult.get("PROJ-1")).toEqual(issue1);
+  });
+
+  it("returns empty Map without calling getIssue when bulkFetch rejects with 'Jira auth cleared during token refresh'", async () => {
+    const client = makeClient({
+      bulkFetch: vi.fn().mockRejectedValue(new Error("Jira auth cleared during token refresh")),
+      getIssue: vi.fn(),
+    });
+
+    const result = await lookupKeys(["PROJ-1", "PROJ-2"], client);
+
+    expect(result.size).toBe(0);
+    expect(client.getIssue).not.toHaveBeenCalled();
   });
 
   it("falls back to getIssue per-key on CORS/network error (non-JiraApiError)", async () => {
@@ -164,6 +220,8 @@ describe("clearJiraKeyCache", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    mockClearJiraAuth.mockClear();
+    mockPushNotification.mockClear();
     const mod = await import("../../src/app/services/jira-keys");
     lookupKeys = mod.lookupKeys;
     clearJiraKeyCache = mod.clearJiraKeyCache;
@@ -268,6 +326,8 @@ describe("cache cap at 500", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    mockClearJiraAuth.mockClear();
+    mockPushNotification.mockClear();
     const mod = await import("../../src/app/services/jira-keys");
     lookupKeys = mod.lookupKeys;
     clearJiraKeyCache = mod.clearJiraKeyCache;

@@ -873,14 +873,69 @@ describe("clearJiraAuth", () => {
     expect(mod.isJiraAuthenticated()).toBe(false);
   });
 
-  it("resets config.jira.enabled to false", () => {
+  it("preserves all config.jira fields across clearJiraAuth", () => {
+    configMod.updateJiraConfig({
+      enabled: true,
+      authMethod: "token",
+      cloudId: "c1",
+      siteUrl: "https://x.atlassian.net",
+      siteName: "X",
+      email: "user@example.com",
+      issueKeyDetection: false,
+      expandIssueDetails: true,
+      customFields: [{ id: "customfield_10001", name: "Story Points" }],
+      customScopes: [{ id: "customfield_10002", name: "Team" }],
+    });
+    mod.setJiraAuth({
+      accessToken: "tok",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "c1",
+      siteUrl: "https://x.atlassian.net",
+      siteName: "X",
+      email: "user@example.com",
+    });
+
     mod.clearJiraAuth();
-    expect(configMod.config.jira?.enabled).toBe(false);
+
+    expect(configMod.config.jira?.enabled).toBe(true);
+    expect(configMod.config.jira?.authMethod).toBe("token");
+    expect(configMod.config.jira?.cloudId).toBe("c1");
+    expect(configMod.config.jira?.siteUrl).toBe("https://x.atlassian.net");
+    expect(configMod.config.jira?.siteName).toBe("X");
+    expect(configMod.config.jira?.email).toBe("user@example.com");
+    expect(configMod.config.jira?.issueKeyDetection).toBe(false);
+    expect(configMod.config.jira?.expandIssueDetails).toBe(true);
+    expect(configMod.config.jira?.customFields).toEqual([
+      { id: "customfield_10001", name: "Story Points" },
+    ]);
+    expect(configMod.config.jira?.customScopes).toEqual([
+      { id: "customfield_10002", name: "Team" },
+    ]);
   });
 
-  it("resets config.jira.authMethod to oauth default", () => {
+  it("backfills missing cloudId, siteUrl, siteName, and email from jiraAuth when config.jira.enabled is true", () => {
+    configMod.updateJiraConfig({
+      enabled: true,
+      authMethod: "token",
+    });
+    mod.setJiraAuth({
+      accessToken: "tok",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "backfilled-cloud",
+      siteUrl: "https://backfilled.atlassian.net",
+      siteName: "Backfilled",
+      email: "backfilled@example.com",
+    });
+
     mod.clearJiraAuth();
-    expect(configMod.config.jira?.authMethod).toBe("oauth");
+
+    expect(configMod.config.jira?.enabled).toBe(true);
+    expect(configMod.config.jira?.cloudId).toBe("backfilled-cloud");
+    expect(configMod.config.jira?.siteUrl).toBe("https://backfilled.atlassian.net");
+    expect(configMod.config.jira?.siteName).toBe("Backfilled");
+    expect(configMod.config.jira?.email).toBe("backfilled@example.com");
   });
 });
 
@@ -1065,7 +1120,8 @@ describe("ensureJiraTokenValid", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("failed refresh (401) clears Jira auth", async () => {
+  it("failed refresh (401) clears Jira auth and pushes notification with JIRA_SETTINGS_ACTION", async () => {
+    mockPushNotification.mockClear();
     setExpiredOAuthJiraAuth();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
       ok: false,
@@ -1076,6 +1132,13 @@ describe("ensureJiraTokenValid", () => {
     expect(result).toBe(false);
     expect(mod.jiraAuth()).toBeNull();
     expect(mod.isJiraAuthenticated()).toBe(false);
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "jira:refresh",
+      "Jira session expired — please reconnect in Settings.",
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
   });
 
   it("network error preserves tokens and returns false", async () => {
