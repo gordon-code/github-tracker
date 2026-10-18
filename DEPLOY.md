@@ -232,7 +232,7 @@ The self-signed certificate from `--local-protocol https` must be accepted in th
 
 The `global_fetch_strictly_public` compatibility flag (which blocks Worker subrequests to private/internal IPs) has **no effect** in local `wrangler dev` — workerd ignores it. No local dev workaround is needed for this flag.
 
-The `nodejs_als` compatibility flag is required by `@sentry/cloudflare` for `AsyncLocalStorage` (request context propagation). It is declared in `wrangler.toml` and is active in both production and local dev.
+The `nodejs_compat` compatibility flag is required by `@sentry/cloudflare` (for `AsyncLocalStorage`, `diagnostics_channel`, and `module`). It is declared in `wrangler.toml` and is active in both production and local dev.
 
 ## Deploy Manually
 

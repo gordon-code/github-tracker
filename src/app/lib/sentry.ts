@@ -101,10 +101,15 @@ export function initSentry(): void {
     environment: import.meta.env.MODE,
 
     // ── Privacy: absolute minimum data ──────────────────────────
-    sendDefaultPii: false,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+    },
 
     // ── Disable performance tracing (tracesSampleRate omitted = undefined = no spans) ───
-    profilesSampleRate: 0,
+    profileSessionSampleRate: 0,
 
     // ── Only capture errors from our own code ───────────────────
     allowUrls: [new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[/\\?#])`)],
