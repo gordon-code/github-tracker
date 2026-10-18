@@ -651,6 +651,20 @@ describe("SettingsPage Jira section — preserved settings when expired", () => 
     const configureScopesBtn = screen.getByRole("button", { name: /Configure filter scopes/i }) as HTMLButtonElement;
     expect(configureFieldsBtn.disabled).toBe(true);
     expect(configureScopesBtn.disabled).toBe(true);
+
+    // Replace button on Auth method row uses warning highlight style when expired
+    const replaceBtn = screen.getByRole("button", { name: /^Replace$/i });
+    expect(replaceBtn.className).toContain("btn-warning");
+
+    // Expired banner also renders a direct "Replace token" CTA button while the panel is closed
+    const banner = screen.getByTestId("jira-settings-expired-banner");
+    const bannerReplaceBtn = banner.querySelector("button");
+    expect(bannerReplaceBtn?.textContent).toBe("Replace token");
+    fireEvent.click(bannerReplaceBtn!);
+
+    const panel = document.getElementById("replace-jira-token-panel");
+    expect(panel).not.toBeNull();
+    expect(panel?.className).toContain("ring-warning");
   });
 
   it("shows Reconnect button in expired banner when authMethod is oauth", async () => {
@@ -962,15 +976,22 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
     expect(mockSetJiraAuth).not.toHaveBeenCalled();
   });
 
-  it("auto-opens #replace-jira-token-panel and focuses New Atlassian API token input when window.location.hash is '#jira' on mount", async () => {
+  it("auto-opens #replace-jira-token-panel, applies highlight pulse, and focuses New Atlassian API token input when window.location.hash is '#jira' on mount (or settles on microtask after mount)", async () => {
     mockIsJiraAuthenticated.mockReturnValue(false);
     mockJiraAuth.mockReturnValue(null);
-    window.location.hash = "#jira";
+    // Simulate @solidjs/router committing history.pushState('#jira') in a microtask right after onMount
+    window.location.hash = "";
 
     renderSettings();
+    queueMicrotask(() => {
+      window.location.hash = "#jira";
+    });
 
     await waitFor(() => {
-      expect(document.getElementById("replace-jira-token-panel")).not.toBeNull();
+      const panel = document.getElementById("replace-jira-token-panel");
+      expect(panel).not.toBeNull();
+      expect(panel?.className).toContain("animate-reorder-highlight");
+      expect(panel?.className).toContain("ring-warning");
       const tokenInput = screen.getByLabelText("New Atlassian API token");
       expect(document.activeElement).toBe(tokenInput);
     });

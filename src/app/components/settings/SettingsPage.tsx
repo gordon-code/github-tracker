@@ -540,6 +540,7 @@ export default function SettingsPage() {
 
   // Replace Jira API token panel
   const [showReplaceJiraToken, setShowReplaceJiraToken] = createSignal(false);
+  const [highlightReplaceJiraToken, setHighlightReplaceJiraToken] = createSignal(false);
   const [replaceJiraEmail, setReplaceJiraEmail] = createSignal("");
   const [replaceJiraTokenInput, setReplaceJiraTokenInput] = createSignal("");
   const [replaceJiraError, setReplaceJiraError] = createSignal<string | null>(null);
@@ -547,12 +548,27 @@ export default function SettingsPage() {
   let replaceJiraTokenInputRef: HTMLInputElement | undefined;
   let replaceJiraButtonRef: HTMLButtonElement | undefined;
   let replaceJiraAbortCtrl: AbortController | undefined;
+  let replaceJiraHighlightTimer: ReturnType<typeof setTimeout> | undefined;
+  let replaceJiraDeepLinkTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function openReplaceJiraTokenPanel(focusInput = true) {
-    setReplaceJiraEmail(jiraAuth()?.email ?? config.jira?.email ?? "");
-    setReplaceJiraTokenInput("");
-    setReplaceJiraError(null);
-    setShowReplaceJiraToken(true);
+  function triggerReplaceJiraHighlight() {
+    clearTimeout(replaceJiraHighlightTimer);
+    setHighlightReplaceJiraToken(true);
+    replaceJiraHighlightTimer = setTimeout(() => {
+      setHighlightReplaceJiraToken(false);
+    }, 1500);
+  }
+
+  function openReplaceJiraTokenPanel(focusInput = true, pulse = false) {
+    if (!showReplaceJiraToken()) {
+      setReplaceJiraEmail(jiraAuth()?.email ?? config.jira?.email ?? "");
+      setReplaceJiraTokenInput("");
+      setReplaceJiraError(null);
+      setShowReplaceJiraToken(true);
+    }
+    if (pulse) {
+      triggerReplaceJiraHighlight();
+    }
     if (focusInput) {
       setTimeout(() => replaceJiraTokenInputRef?.focus(), 0);
     }
@@ -560,6 +576,8 @@ export default function SettingsPage() {
 
   function closeReplaceJiraTokenPanel(restoreFocus = false) {
     replaceJiraAbortCtrl?.abort();
+    clearTimeout(replaceJiraHighlightTimer);
+    setHighlightReplaceJiraToken(false);
     setShowReplaceJiraToken(false);
     setReplaceJiraTokenInput("");
     setReplaceJiraError(null);
@@ -571,7 +589,7 @@ export default function SettingsPage() {
     const shouldOpenReplace =
       config.jira?.authMethod === "token" && (isJiraAuthenticated() || Boolean(config.jira?.enabled));
     if (shouldOpenReplace) {
-      openReplaceJiraTokenPanel(false);
+      openReplaceJiraTokenPanel(false, true);
     }
     setTimeout(() => {
       document.getElementById("jira")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -581,15 +599,31 @@ export default function SettingsPage() {
     }, 0);
   }
 
+  function handleJiraDeepLinkClick(e: MouseEvent) {
+    const target = e.target as Element | null;
+    if (target?.closest?.('a[href="/settings#jira"]')) {
+      clearTimeout(replaceJiraDeepLinkTimer);
+      replaceJiraDeepLinkTimer = setTimeout(handleJiraDeepLink, 0);
+    }
+  }
+
   onMount(() => {
     handleJiraDeepLink();
+    // @solidjs/router commits window.history.pushState in a .finally() microtask
+    // after mounting the route component on SPA link clicks (<a href="/settings#jira">),
+    // so re-check on the next macrotask once window.location.hash has settled.
+    replaceJiraDeepLinkTimer = setTimeout(handleJiraDeepLink, 0);
     window.addEventListener("hashchange", handleJiraDeepLink);
+    document.addEventListener("click", handleJiraDeepLinkClick);
   });
 
   onCleanup(() => {
     replaceJiraAbortCtrl?.abort();
+    clearTimeout(replaceJiraHighlightTimer);
+    clearTimeout(replaceJiraDeepLinkTimer);
     if (typeof window !== "undefined") {
       window.removeEventListener("hashchange", handleJiraDeepLink);
+      document.removeEventListener("click", handleJiraDeepLinkClick);
     }
   });
 
@@ -1572,6 +1606,15 @@ export default function SettingsPage() {
                       ? "Your Jira API token has expired or is invalid. Replace your token below to resume syncing — all your Jira settings are preserved."
                       : "Your Jira OAuth session has expired. Reconnect below to resume syncing — all your Jira settings are preserved."}
                   </span>
+                  <Show when={config.jira?.authMethod === "token" && !showReplaceJiraToken()}>
+                    <button
+                      type="button"
+                      onClick={() => openReplaceJiraTokenPanel(true, true)}
+                      class="btn btn-xs btn-neutral shrink-0"
+                    >
+                      Replace token
+                    </button>
+                  </Show>
                   <Show when={config.jira?.authMethod !== "token" && jiraEnabled}>
                     <button
                       type="button"
@@ -1601,12 +1644,12 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => {
                         if (!showReplaceJiraToken()) {
-                          openReplaceJiraTokenPanel();
+                          openReplaceJiraTokenPanel(true, true);
                         } else {
                           closeReplaceJiraTokenPanel(false);
                         }
                       }}
-                      class="btn btn-xs btn-outline"
+                      class={isJiraAuthenticated() ? "btn btn-xs btn-outline" : "btn btn-xs btn-warning"}
                       aria-expanded={showReplaceJiraToken()}
                       aria-controls="replace-jira-token-panel"
                     >
@@ -1616,14 +1659,26 @@ export default function SettingsPage() {
                 </div>
               </SettingRow>
               <Show when={showReplaceJiraToken()}>
-                <div id="replace-jira-token-panel" class="px-4 py-3 border-b border-base-300 flex flex-col gap-2">
-                  <p class="text-xs text-base-content/60">
+                <div
+                  id="replace-jira-token-panel"
+                  class={`mx-4 my-3 p-4 rounded-lg border-2 shadow-sm flex flex-col gap-2.5 transition-shadow ${
+                    isJiraAuthenticated()
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-warning/60 bg-warning/10"
+                  }${highlightReplaceJiraToken() ? " animate-reorder-highlight ring-2 ring-warning" : ""}`}
+                >
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-base-content">
+                      Replace Jira API Token
+                    </span>
+                  </div>
+                  <p class="text-xs text-base-content/70">
                     Generate a new token at{" "}
                     <a
                       href="https://id.atlassian.com/manage-profile/security/api-tokens"
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="link link-primary"
+                      class="link link-primary font-medium"
                     >
                       Atlassian API tokens
                     </a>{" "}
