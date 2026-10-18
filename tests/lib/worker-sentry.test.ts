@@ -197,7 +197,12 @@ describe("getWorkerSentryOptions", () => {
 
   it("disables PII and tracing", () => {
     const opts = getWorkerSentryOptions({});
-    expect(opts.sendDefaultPii).toBe(false);
+    expect(opts.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+    });
     // tracesSampleRate is omitted so hasSpansEnabled() returns false (0 != null is true, undefined != null is false)
     expect(opts.tracesSampleRate).toBeUndefined();
   });

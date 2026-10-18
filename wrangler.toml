@@ -3,8 +3,8 @@ main = "src/worker/index.ts"
 compatibility_date = "2026-03-01"
 compatibility_flags = [
   "global_fetch_strictly_public",
-  # nodejs_als: required by @sentry/cloudflare for AsyncLocalStorage (request context propagation)
-  "nodejs_als",
+  # nodejs_compat: required by @sentry/cloudflare v11 (AsyncLocalStorage, diagnostics_channel, module)
+  "nodejs_compat",
 ]
 workers_dev = false
 
