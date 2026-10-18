@@ -68,6 +68,12 @@ describe("scrubUrl", () => {
     expect(scrubUrl("token gho_def456")).toBe("token gho_[REDACTED]");
     expect(scrubUrl("token github_pat_abc123")).toBe("token github_pat_[REDACTED]");
   });
+
+  it("strips Atlassian API token prefix (ATATT...)", () => {
+    expect(scrubUrl("Error: token ATATT3xFfGF0abc123_def-456= exposed")).toBe(
+      "Error: token ATATT[REDACTED] exposed",
+    );
+  });
 });
 
 describe("beforeSendHandler", () => {

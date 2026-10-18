@@ -16,6 +16,7 @@ import {
   addMutedSource,
   isMuted,
   clearMutedSources,
+  isSafeInternalHref,
 } from "../../src/app/lib/errors";
 import { createRoot } from "solid-js";
 
@@ -184,6 +185,70 @@ describe("pushNotification", () => {
       // Oldest (source-0) should be dropped, newest (source-50) should be present
       expect(notifs.find((n) => n.source === "source-0")).toBeUndefined();
       expect(notifs.find((n) => n.source === "source-50")).toBeDefined();
+      dispose();
+    });
+  });
+
+  it("stores a valid internal action on the notification", () => {
+    createRoot((dispose) => {
+      const action = { label: "Open Jira settings", href: "/settings#jira" };
+      pushNotification("jira", "Jira session expired", "warning", false, action);
+      const notifs = getNotifications();
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0].action).toEqual(action);
+      dispose();
+    });
+  });
+
+  it("drops unsafe action.href values", () => {
+    createRoot((dispose) => {
+      const unsafeHrefs = [
+        "javascript:alert(1)",
+        "//evil.com",
+        "https://evil.com",
+        "/\\evil.com",
+      ];
+      for (const [idx, href] of unsafeHrefs.entries()) {
+        expect(isSafeInternalHref(href)).toBe(false);
+        pushNotification(`src-${idx}`, "Msg", "warning", false, {
+          label: "Bad link",
+          href,
+        });
+      }
+      const notifs = getNotifications();
+      expect(notifs).toHaveLength(unsafeHrefs.length);
+      for (const notif of notifs) {
+        expect(notif.action).toBeUndefined();
+      }
+      expect(isSafeInternalHref("/settings#jira")).toBe(true);
+      dispose();
+    });
+  });
+
+  it("updates action when a same-source notification changes message or action, and is a no-op when both match", () => {
+    createRoot((dispose) => {
+      const action1 = { label: "Open Jira settings", href: "/settings#jira" };
+      pushNotification("jira", "Expired", "warning", false, action1);
+      markAllAsRead();
+      const ts1 = getNotifications()[0].timestamp;
+
+      // Same message + same action => no-op
+      pushNotification("jira", "Expired", "warning", false, action1);
+      expect(getNotifications()[0].read).toBe(true);
+      expect(getNotifications()[0].timestamp).toBe(ts1);
+
+      // Same message + different action => updates action and resets read
+      const action2 = { label: "Reconnect Jira", href: "/settings" };
+      pushNotification("jira", "Expired", "warning", false, action2);
+      expect(getNotifications()[0].action).toEqual(action2);
+      expect(getNotifications()[0].read).toBe(false);
+
+      // Different message + no action => clears action
+      markAllAsRead();
+      pushNotification("jira", "New message without action", "warning");
+      expect(getNotifications()[0].message).toBe("New message without action");
+      expect(getNotifications()[0].action).toBeUndefined();
+      expect(getNotifications()[0].read).toBe(false);
       dispose();
     });
   });

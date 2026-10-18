@@ -1,7 +1,9 @@
 import type { IJiraClient } from "./jira-client";
 import { JiraApiError } from "./jira-client";
-import type { JiraIssue } from "../../shared/jira-types";
+import { JIRA_SETTINGS_ACTION, type JiraIssue } from "../../shared/jira-types";
 import { extractJiraKeys } from "../../shared/validation";
+import { clearJiraAuth } from "../stores/auth";
+import { pushNotification } from "../lib/errors";
 
 // Plain Map — not a module-level SolidJS signal (avoids cross-test pollution)
 let _jiraKeyCache = new Map<string, JiraIssue | null>();
@@ -53,12 +55,20 @@ export async function lookupKeys(
       }
     } catch (err) {
       if (err instanceof JiraApiError) {
+        if (err.status === 401) {
+          clearJiraAuth();
+          pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning", false, JIRA_SETTINGS_ACTION);
+          return new Map<string, JiraIssue | null>();
+        }
         // Cache null for all keys in the failed batch — don't throw, return partial map
         evictToFit(uncached.length);
         for (const key of uncached) {
           _jiraKeyCache.set(key, null);
         }
       } else {
+        if (err instanceof Error && err.message === "Jira auth cleared during token refresh") {
+          return new Map<string, JiraIssue | null>();
+        }
         // Network error — fall back to concurrent individual getIssue calls
         // (CORS for POST to api.atlassian.com with OAuth Bearer is verified working)
         const results = await Promise.allSettled(

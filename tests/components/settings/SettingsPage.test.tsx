@@ -29,7 +29,7 @@ vi.mock("../../../src/app/stores/auth", () => ({
   setAuthFromPat: vi.fn(),
   setAuthFromCredential: vi.fn(),
   clearIdentityData: vi.fn().mockResolvedValue(undefined),
-  jiraAuth: () => null,
+  jiraAuth: vi.fn(() => null),
   isJiraAuthenticated: () => false,
   ensureJiraTokenValid: vi.fn(),
   token: vi.fn(() => "fake-token"),
@@ -80,6 +80,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 vi.mock("../../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
 }));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ import SettingsPage from "../../../src/app/components/settings/SettingsPage";
 import * as authStore from "../../../src/app/stores/auth";
 import * as cacheStore from "../../../src/app/stores/cache";
 import * as apiModule from "../../../src/app/services/api";
-import { updateConfig, config } from "../../../src/app/stores/config";
+import { updateConfig, resetConfig, config } from "../../../src/app/stores/config";
 import { viewState, updateViewState } from "../../../src/app/stores/view";
 import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
@@ -134,10 +135,12 @@ beforeEach(() => {
   setupMatchMedia();
   vi.clearAllMocks();
 
-  // Restore isSafeGitHubUrl mock (vi.restoreAllMocks strips factory implementations)
+  // Restore factory implementations stripped by vi.restoreAllMocks in afterEach
   vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(true);
+  vi.mocked(authStore.jiraAuth).mockReturnValue(null);
 
   // Reset config to defaults
+  resetConfig();
   updateConfig({
     refreshInterval: 300,
     maxWorkflowsPerRepo: 5,
@@ -607,6 +610,63 @@ describe("SettingsPage — Data: Import settings", () => {
     // Proves setConfig (wholesale) not updateConfig (partial merge): the prior field is gone.
     expect(config.selectedRepos).toEqual([]);
     expect(config.theme).toBe("dark");
+  });
+
+  it("evicts jiraAuth on plaintext import when jira is disabled, cloudId is missing, or cloudId mismatches", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authStore.jiraAuth).mockReturnValue({
+      accessToken: "tok",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "cloud-current",
+      siteUrl: "https://current.atlassian.net",
+      siteName: "current",
+    });
+
+    renderSettings();
+
+    // 1. Imported config has jira disabled (default when omitted)
+    selectImportFile(JSON.stringify({ theme: "dark" }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(authStore.clearJiraAuth).toHaveBeenCalledTimes(1);
+
+    // 2. Imported config has jira.enabled = true but missing cloudId
+    selectImportFile(JSON.stringify({ jira: { enabled: true, authMethod: "token" } }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(authStore.clearJiraAuth).toHaveBeenCalledTimes(2);
+
+    // 3. Imported config has jira.enabled = true but different cloudId
+    selectImportFile(JSON.stringify({ jira: { enabled: true, authMethod: "token", cloudId: "cloud-other" } }));
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+    expect(authStore.clearJiraAuth).toHaveBeenCalledTimes(3);
+  });
+
+  it("preserves jiraAuth on plaintext import when jira is enabled and cloudId matches active jiraAuth", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authStore.jiraAuth).mockReturnValue({
+      accessToken: "tok",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "cloud-same",
+      siteUrl: "https://same.atlassian.net",
+      siteName: "same",
+    });
+
+    renderSettings();
+    selectImportFile(
+      JSON.stringify({
+        theme: "dark",
+        jira: { enabled: true, authMethod: "token", cloudId: "cloud-same" },
+      })
+    );
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+
+    expect(authStore.clearJiraAuth).not.toHaveBeenCalled();
+    expect(config.jira.cloudId).toBe("cloud-same");
   });
 });
 

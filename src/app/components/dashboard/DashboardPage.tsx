@@ -32,7 +32,7 @@ import {
 import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
 import { JiraApiError } from "../../services/jira-client";
 import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
-import type { JiraIssue } from "../../../shared/jira-types";
+import { JIRA_SETTINGS_ACTION, type JiraIssue } from "../../../shared/jira-types";
 import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
@@ -538,7 +538,7 @@ export default function DashboardPage() {
       if (err instanceof JiraApiError) {
         if (err.status === 401) {
           clearJiraAuth();
-          pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning");
+          pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning", false, JIRA_SETTINGS_ACTION);
         } else if (err.status === 400 && !["assigned", "reported", "watching"].includes(scope)) {
           const scopeName = config.jira?.customScopes?.find((s) => s.id === scope)?.name ?? scope;
           pushNotification("jira", `Custom scope '${scopeName}' is not supported by your Jira instance. Remove it in Settings.`, "warning");
@@ -549,6 +549,7 @@ export default function DashboardPage() {
           pushNotification("jira", "Jira fetch failed — will retry on next refresh", "warning");
         }
       } else {
+        if (err instanceof Error && err.message === "Jira auth cleared during token refresh") return;
         pushNotification("jira", "Jira: unexpected error — will retry on next refresh", "warning");
       }
     } finally {
@@ -1094,7 +1095,7 @@ export default function DashboardPage() {
         isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: builtinFilter })
       ).length } : {}),
       ...(config.enableTracking ? { tracked: viewState.trackedItems.length } : {}),
-      ...(config.jira?.enabled ? (() => {
+      ...(config.jira?.enabled && isJiraAuthenticated() ? (() => {
         const f = viewState.tabFilters.jiraAssigned;
         return { jiraAssigned: jiraIssues().filter((issue) => {
           if (f?.statusCategory !== "all" && issue.fields.status.statusCategory.key !== f?.statusCategory) return false;
@@ -1137,9 +1138,11 @@ export default function DashboardPage() {
     return `${issueTitles}|||${prTitles}`;
   });
 
-  // Jira key detection runs only when titles change — NOT on every lastRefreshedAt tick.
+  const jiraAuthed = createMemo(() => isJiraAuthenticated());
+
+  // Jira key detection runs only when titles change (or Jira auth transitions false -> true) — NOT on every lastRefreshedAt tick.
   // Guards: jira enabled+detection, authenticated, client ready, and titles actually changed.
-  createEffect(on(titleFingerprint, () => {
+  createEffect(on([titleFingerprint, jiraAuthed], () => {
     if (import.meta.env.DEV) console.info("[jira] key detection guard:", { enabled: config.jira?.enabled, detection: config.jira?.issueKeyDetection, auth: isJiraAuthenticated(), client: !!jiraClient(), refreshed: !!dashboardData.lastRefreshedAt });
     if (!config.jira?.enabled || !config.jira?.issueKeyDetection) return;
     if (!isJiraAuthenticated()) return;
@@ -1155,6 +1158,17 @@ export default function DashboardPage() {
       setJiraKeyMap(map);
     }).catch(handleJiraError);
   }));
+
+  // Re-fetch Jira assigned issues when Jira auth transitions false -> true
+  createEffect(on(
+    jiraAuthed,
+    (authed) => {
+      if (authed && config.jira?.enabled) {
+        fetchJiraAssigned().catch(handleJiraError);
+      }
+    },
+    { defer: true }
+  ));
 
   // Jira assigned issues poll: fires after each GitHub full refresh cycle
   createEffect(on(
@@ -1344,6 +1358,7 @@ export default function DashboardPage() {
               enableTracking={config.enableTracking}
               enableActions={config.enableActions}
               enableJira={!!config.jira?.enabled}
+              jiraExpired={Boolean(config.jira?.enabled && !isJiraAuthenticated())}
               enableDependencies={enableDependencies()}
               customTabs={config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ id: t.id, name: t.name, isUnscoped: isTabUnscoped(t) }))}
               onAddTab={() => setShowCustomTabModal(true)}
@@ -1436,6 +1451,7 @@ export default function DashboardPage() {
                   issues={jiraIssues()}
                   loading={jiraLoading()}
                   siteUrl={config.jira?.siteUrl ?? ""}
+                  expired={!isJiraAuthenticated()}
                 />
               </Match>
               <Match when={activeTab() === "actions" && config.enableActions}>

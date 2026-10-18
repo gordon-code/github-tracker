@@ -422,4 +422,28 @@ describe("ToastContainer", () => {
 
     expect(sessionStorage.getItem(TOASTED_MESSAGES_KEY)).toBeNull();
   });
+
+  it("renders a clickable action link when notification has a valid action and dismisses the toast on click", () => {
+    render(() => <ToastContainer />);
+    pushNotification("jira", "Jira session expired — please reconnect in Settings", "warning", false, {
+      label: "Open Jira settings",
+      href: "/settings#jira",
+    });
+    const alert = screen.getByRole("alert");
+    const link = alert.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("/settings#jira");
+    expect(link?.textContent).toBe("Open Jira settings");
+
+    fireEvent.click(link!);
+    vi.advanceTimersByTime(300);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("renders no action link when notification has no action", () => {
+    render(() => <ToastContainer />);
+    pushNotification("api", "Plain error", "error");
+    const alert = screen.getByRole("alert");
+    expect(alert.querySelector("a")).toBeNull();
+  });
 });

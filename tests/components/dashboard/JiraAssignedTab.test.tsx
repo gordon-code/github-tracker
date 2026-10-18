@@ -1088,4 +1088,26 @@ describe("JiraAssignedTab", () => {
       expect(clearTimeoutSpy).toHaveBeenCalled();
     });
   });
+
+  describe("expired prop", () => {
+    it("renders data-testid='jira-expired-state' with '/settings#jira' link and suppresses normal empty state and issue list when expired={true}", () => {
+      const issues = [makeIssue("PROJ-1")];
+      render(() => (
+        <JiraAssignedTab issues={issues} loading={false} siteUrl={SITE_URL} expired={true} />
+      ));
+
+      const expiredState = screen.getByTestId("jira-expired-state");
+      expect(expiredState).toBeDefined();
+      expect(expiredState.textContent).toContain(
+        "Your Jira session or API token has expired. Your Jira settings and custom order are preserved."
+      );
+      const link = expiredState.querySelector("a");
+      expect(link).not.toBeNull();
+      expect(link?.getAttribute("href")).toBe("/settings#jira");
+      expect(link?.textContent).toContain("Open Jira settings");
+
+      expect(screen.queryByText(/No Assigned to me Jira issues/i)).toBeNull();
+      expect(screen.queryByText("Summary for PROJ-1")).toBeNull();
+    });
+  });
 });

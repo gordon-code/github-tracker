@@ -1147,6 +1147,7 @@ describe("commitImportedSettings", () => {
     vi.spyOn(authStore, "user").mockReturnValue(identity);
     const authSpy = vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
     const cfgSpy = vi.spyOn(configStore, "setConfig").mockImplementation(() => {});
+    const clearJiraSpy = vi.spyOn(authStore, "clearJiraAuth");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
     const notifySpy = vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
     const res = await commitImportedSettings(
@@ -1160,9 +1161,147 @@ describe("commitImportedSettings", () => {
       ConfigSchema.parse({})
     );
     expect(res.jiraRestored).toBe(false);
-    expect(notifySpy).toHaveBeenCalledWith("settings-import-jira", expect.stringMatching(/reconnect/i), "warning");
+    expect(clearJiraSpy).toHaveBeenCalled();
+    expect(notifySpy).toHaveBeenCalledWith(
+      "settings-import-jira",
+      expect.stringMatching(/reconnect/i),
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
     expect(authSpy).toHaveBeenCalled();
     expect(cfgSpy).toHaveBeenCalled();
+  });
+
+  it("bundle.jira === null with importedConfig.jira.enabled === true and no matching active jiraAuth calls clearJiraAuth, pushes settings-import-jira with JIRA_SETTINGS_ACTION, and returns jiraRestored:false", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
+    const clearJiraSpy = vi.spyOn(authStore, "clearJiraAuth");
+    const notifySpy = vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
+
+    const importedConfig = ConfigSchema.parse({
+      jira: {
+        enabled: true,
+        authMethod: "token",
+        cloudId: "expired-cloud",
+        siteUrl: "https://expired.atlassian.net",
+        siteName: "Expired",
+      },
+    });
+
+    const res = await commitImportedSettings(
+      {
+        bundle: {
+          github: { token: "ghp_x", method: "pat" },
+          jira: null,
+        },
+        identity,
+      },
+      importedConfig
+    );
+
+    expect(res.jiraRestored).toBe(false);
+    expect(clearJiraSpy).toHaveBeenCalled();
+    expect(notifySpy).toHaveBeenCalledWith(
+      "settings-import-jira",
+      expect.stringMatching(/reconnect/i),
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
+  });
+
+  it("bundle.jira === null preserves active jiraAuth when importedConfig.jira.cloudId matches and returns jiraRestored:true without warning", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
+    const activeJira: authStore.JiraAuthState = {
+      accessToken: "active-sealed-token",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "matching-cloud",
+      siteUrl: "https://matching.atlassian.net",
+      siteName: "Matching",
+      email: "user@example.com",
+    };
+    authStore.setJiraAuth(activeJira);
+
+    const clearJiraSpy = vi.spyOn(authStore, "clearJiraAuth");
+    const notifySpy = vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
+
+    const importedConfig = ConfigSchema.parse({
+      jira: {
+        enabled: true,
+        authMethod: "token",
+        cloudId: "matching-cloud",
+        siteUrl: "https://matching.atlassian.net",
+        siteName: "Matching",
+      },
+    });
+
+    const res = await commitImportedSettings(
+      {
+        bundle: {
+          github: { token: "ghp_x", method: "pat" },
+          jira: null,
+        },
+        identity,
+      },
+      importedConfig
+    );
+
+    expect(res.jiraRestored).toBe(true);
+    expect(clearJiraSpy).not.toHaveBeenCalled();
+    expect(notifySpy).not.toHaveBeenCalled();
+    expect(authStore.jiraAuth()).toEqual(activeJira);
+  });
+
+  it("bundle.jira === null evicts active jiraAuth when importedConfig.jira.cloudId mismatches and returns jiraRestored:false with reconnect warning", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+    vi.spyOn(authStore, "setAuthFromCredential").mockImplementation(() => {});
+    authStore.setJiraAuth({
+      accessToken: "other-sealed-token",
+      sealedRefreshToken: "",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      cloudId: "other-cloud",
+      siteUrl: "https://other.atlassian.net",
+      siteName: "Other",
+      email: "user@example.com",
+    });
+
+    const clearJiraSpy = vi.spyOn(authStore, "clearJiraAuth");
+    const notifySpy = vi.spyOn(errorsLib, "pushNotification").mockImplementation(() => {});
+
+    const importedConfig = ConfigSchema.parse({
+      jira: {
+        enabled: true,
+        authMethod: "token",
+        cloudId: "imported-cloud",
+        siteUrl: "https://imported.atlassian.net",
+        siteName: "Imported",
+      },
+    });
+
+    const res = await commitImportedSettings(
+      {
+        bundle: {
+          github: { token: "ghp_x", method: "pat" },
+          jira: null,
+        },
+        identity,
+      },
+      importedConfig
+    );
+
+    expect(res.jiraRestored).toBe(false);
+    expect(clearJiraSpy).toHaveBeenCalled();
+    expect(authStore.jiraAuth()).toBeNull();
+    expect(notifySpy).toHaveBeenCalledWith(
+      "settings-import-jira",
+      expect.stringMatching(/reconnect/i),
+      "warning",
+      false,
+      { label: "Open Jira settings", href: "/settings#jira" }
+    );
   });
 
   it("pre-auth (a0): awaits clearIdentityData (real clearCache) before setAuthFromCredential/setConfig (SD-001)", async () => {
