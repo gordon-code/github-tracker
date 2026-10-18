@@ -34,18 +34,18 @@
     "node": "v25.9.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.31.0",
-    "ws": "8.21.3",
-    "zod": "4.4.3"
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
-    "@octokit/core": "7.0.7",
+    "@octokit/core": "7.0.8",
     "@octokit/plugin-paginate-rest": "15.0.0",
     "@octokit/plugin-retry": "8.1.1",
     "@octokit/plugin-throttling": "11.0.5",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "tsup": "8.5.1",
-    "tsx": "4.23.12",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vitest": "5.0.3"
   }
