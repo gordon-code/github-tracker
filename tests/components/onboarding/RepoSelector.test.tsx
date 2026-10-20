@@ -409,6 +409,197 @@ describe("RepoSelector", () => {
     const perOrgDeselectAll = deselectAllBtns[deselectAllBtns.length - 1] as HTMLButtonElement;
     expect(perOrgDeselectAll.disabled).toBe(true);
   });
+
+  it("renders Fork badge and muted repo name styling for fork repos, and normal styling for non-forks", async () => {
+    const reposWithFork: RepoEntry[] = [
+      { owner: "myorg", name: "source-repo", fullName: "myorg/source-repo", pushedAt: "2026-03-20T10:00:00Z", isFork: false },
+      { owner: "myorg", name: "forked-repo", fullName: "myorg/forked-repo", pushedAt: "2026-03-21T10:00:00Z", isFork: true },
+      { owner: "myorg", name: "omitted-fork-repo", fullName: "myorg/omitted-fork-repo", pushedAt: "2026-03-22T10:00:00Z" },
+    ];
+    vi.mocked(api.fetchRepos).mockResolvedValue(reposWithFork);
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={vi.fn()} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("source-repo");
+      screen.getByText("forked-repo");
+      screen.getByText("omitted-fork-repo");
+    });
+
+    const sourceSpan = screen.getByText("source-repo");
+    const forkedSpan = screen.getByText("forked-repo");
+    const omittedSpan = screen.getByText("omitted-fork-repo");
+
+    expect(sourceSpan.classList.contains("text-base-content")).toBe(true);
+    expect(sourceSpan.classList.contains("text-base-content/60")).toBe(false);
+
+    expect(forkedSpan.classList.contains("text-base-content/60")).toBe(true);
+    expect(forkedSpan.classList.contains("text-base-content")).toBe(false);
+
+    expect(omittedSpan.classList.contains("text-base-content")).toBe(true);
+    expect(omittedSpan.classList.contains("text-base-content/60")).toBe(false);
+
+    const forkBadges = screen.getAllByText("Fork");
+    expect(forkBadges).toHaveLength(1);
+    expect(forkBadges[0].classList.contains("badge-ghost")).toBe(true);
+    expect(forkedSpan.parentElement?.contains(forkBadges[0])).toBe(true);
+  });
+
+  it("strips isFork and pushedAt when toggling a fork repo or clicking Select All", async () => {
+    const user = userEvent.setup();
+    const reposWithFork: RepoEntry[] = [
+      { owner: "myorg", name: "forked-repo", fullName: "myorg/forked-repo", pushedAt: "2026-03-21T10:00:00Z", isFork: true },
+      { owner: "myorg", name: "source-repo", fullName: "myorg/source-repo", pushedAt: "2026-03-20T10:00:00Z", isFork: false },
+    ];
+    vi.mocked(api.fetchRepos).mockResolvedValue(reposWithFork);
+    const onChange = vi.fn();
+
+    render(() => (
+      <RepoSelector selectedOrgs={["myorg"]} selected={[]} onChange={onChange} />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("forked-repo");
+    });
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    const forkCheckbox = checkboxes.find((cb) =>
+      cb.closest("label")?.textContent?.includes("forked-repo")
+    );
+    await user.click(forkCheckbox!);
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const toggledResult = onChange.mock.calls[0][0] as RepoRef[];
+    expect(toggledResult).toEqual([
+      { owner: "myorg", name: "forked-repo", fullName: "myorg/forked-repo" },
+    ]);
+    expect(toggledResult[0]).not.toHaveProperty("isFork");
+    expect(toggledResult[0]).not.toHaveProperty("pushedAt");
+
+    onChange.mockClear();
+    const selectAllBtns = screen.getAllByText("Select All");
+    await user.click(selectAllBtns[0]);
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const selectAllResult = onChange.mock.calls[0][0] as RepoRef[];
+    expect(selectAllResult).toHaveLength(2);
+    for (const r of selectAllResult) {
+      expect(r).not.toHaveProperty("isFork");
+      expect(r).not.toHaveProperty("pushedAt");
+    }
+  });
+
+  it("auto-prunes archived/removed selected repos on load and unmonitors pruned monitored repos", async () => {
+    vi.mocked(api.fetchRepos).mockResolvedValue(myorgRepos);
+    const onChange = vi.fn();
+    const onMonitorToggle = vi.fn();
+    const archivedRepo: RepoRef = {
+      owner: "myorg",
+      name: "archived-repo",
+      fullName: "myorg/archived-repo",
+    };
+    const liveRepo: RepoRef = {
+      owner: "myorg",
+      name: "repo-a",
+      fullName: "myorg/repo-a",
+    };
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[liveRepo, archivedRepo]}
+        onChange={onChange}
+        monitoredRepos={[archivedRepo]}
+        onMonitorToggle={onMonitorToggle}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+      expect(onChange).toHaveBeenCalledWith([liveRepo]);
+    });
+
+    expect(onMonitorToggle).toHaveBeenCalledWith(archivedRepo, false);
+  });
+
+  it("does not prune pre-selected repos for a failed org until Retry succeeds", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.fetchOrgs).mockResolvedValue([
+      { login: "myorg", avatarUrl: "", type: "org" },
+      { login: "beta-org", avatarUrl: "", type: "org" },
+    ]);
+    vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
+      if (org === "myorg") return Promise.resolve(myorgRepos);
+      return Promise.reject(new Error("beta-org network failure"));
+    });
+
+    const onChange = vi.fn();
+    const liveMyorgRepo: RepoRef = { owner: "myorg", name: "repo-a", fullName: "myorg/repo-a" };
+    const staleBetaRepo: RepoRef = { owner: "beta-org", name: "archived-beta", fullName: "beta-org/archived-beta" };
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg", "beta-org"]}
+        selected={[liveMyorgRepo, staleBetaRepo]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-a");
+      screen.getByText(/beta-org network failure/i);
+      screen.getByText("Retry");
+    });
+
+    // Neither myorg/repo-a (present) nor beta-org/archived-beta (org failed) should be pruned
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Now make Retry succeed for beta-org without archived-beta in the returned list
+    const betaLiveRepos: RepoEntry[] = [
+      { owner: "beta-org", name: "live-beta", fullName: "beta-org/live-beta", pushedAt: "2026-03-20T10:00:00Z" },
+    ];
+    vi.mocked(api.fetchRepos).mockResolvedValueOnce(betaLiveRepos);
+
+    await user.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      screen.getByText("live-beta");
+      expect(onChange).toHaveBeenCalledWith([liveMyorgRepo]);
+    });
+  });
+
+  it("does not prune pre-selected repos when an org hits REPO_CAP (1000 repos)", async () => {
+    const cappedRepos: RepoEntry[] = Array.from({ length: 1000 }, (_, i) => ({
+      owner: "myorg",
+      name: `repo-${i}`,
+      fullName: `myorg/repo-${i}`,
+      pushedAt: "2026-03-20T10:00:00Z",
+    }));
+    vi.mocked(api.fetchRepos).mockResolvedValue(cappedRepos);
+
+    const onChange = vi.fn();
+    const olderSelectedRepo: RepoRef = {
+      owner: "myorg",
+      name: "older-repo-1001",
+      fullName: "myorg/older-repo-1001",
+    };
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[olderSelectedRepo]}
+        onChange={onChange}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("repo-0");
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("RepoSelector — upstream discovery", () => {
@@ -727,6 +918,35 @@ describe("RepoSelector — upstream discovery", () => {
     await waitFor(() => {
       screen.getByText(/repository not found/i);
     });
+  });
+
+  it("filters out discovered repos owned by selectedOrgs or currentUser.login while keeping external upstream repos", async () => {
+    const discovered: RepoRef[] = [
+      { owner: "myorg", name: "archived-repo", fullName: "myorg/archived-repo" },
+      { owner: "MyOrg", name: "case-variant-repo", fullName: "MyOrg/case-variant-repo" },
+      { owner: "testuser", name: "archived-personal", fullName: "testuser/archived-personal" },
+      { owner: "external-org", name: "genuine-upstream", fullName: "external-org/genuine-upstream" },
+    ];
+    vi.mocked(api.discoverUpstreamRepos).mockResolvedValue(discovered);
+
+    render(() => (
+      <RepoSelector
+        selectedOrgs={["myorg"]}
+        selected={[]}
+        onChange={vi.fn()}
+        showUpstreamDiscovery={true}
+        upstreamRepos={[]}
+        onUpstreamChange={vi.fn()}
+      />
+    ));
+
+    await waitFor(() => {
+      screen.getByText("external-org/genuine-upstream");
+    });
+
+    expect(screen.queryByText("myorg/archived-repo")).toBeNull();
+    expect(screen.queryByText("MyOrg/case-variant-repo")).toBeNull();
+    expect(screen.queryByText("testuser/archived-personal")).toBeNull();
   });
 });
 

@@ -8,6 +8,7 @@ import {
   For,
 } from "solid-js";
 import { fetchOrgs, fetchRepos, discoverUpstreamRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
+import { REPO_CAP } from "../../../shared/types";
 import { getClient } from "../../services/github";
 import { user } from "../../stores/auth";
 import type { TrackedUser } from "../../stores/config";
@@ -103,9 +104,18 @@ function OrgContent(props: OrgContentProps) {
                         />
                         <div class="min-w-0 flex-1">
                           <div class="flex items-center gap-2">
-                            <span class="min-w-0 truncate text-sm font-medium text-base-content">
+                            <span
+                              class="min-w-0 truncate text-sm font-medium"
+                              classList={{
+                                "text-base-content": !repo().isFork,
+                                "text-base-content/60": Boolean(repo().isFork),
+                              }}
+                            >
                               {repo().name}
                             </span>
+                            <Show when={repo().isFork}>
+                              <span class="badge badge-xs badge-ghost shrink-0">Fork</span>
+                            </Show>
                             <Show when={repo().pushedAt}>
                               <span class="ml-auto shrink-0 text-xs text-base-content/60">
                                 {relativeTime(repo().pushedAt!)}
@@ -279,10 +289,12 @@ export default function RepoSelector(props: RepoSelectorProps) {
               allOrgFullNames.add(repo.fullName);
             }
           });
+          const ownedOrgs = new Set(orgs.map((o) => o.toLowerCase()));
+          ownedOrgs.add(currentUser.login.toLowerCase());
           void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames, props.trackedUsers)
             .then((repos) => {
               if (version !== effectVersion) return;
-              setDiscoveredRepos(repos);
+              setDiscoveredRepos(repos.filter((r) => !ownedOrgs.has(r.owner.toLowerCase())));
               setDiscoveryCapped(repos.length >= 100);
             })
             .catch(() => {
@@ -389,6 +401,54 @@ export default function RepoSelector(props: RepoSelectorProps) {
     });
     frozenOrder = sorted.map((s) => s.org);
     return sorted;
+  });
+
+  // Prune selected repos that belong to a settled, error-free, non-capped org
+  // but are no longer present in that org's fetched repo list (e.g. archived
+  // or deleted). Skip orgs that hit REPO_CAP (1000) so repos beyond the top
+  // 1000 most-recently-pushed are not falsely pruned due to truncation.
+  createEffect(() => {
+    const states = orgStates();
+    if (states.length === 0 || states.some((s) => s.loading)) return;
+
+    const selectedOrgSet = new Set(props.selectedOrgs.map((o) => o.toLowerCase()));
+    if (
+      states.length !== props.selectedOrgs.length ||
+      states.some((s) => !selectedOrgSet.has(s.org.toLowerCase()))
+    ) {
+      return;
+    }
+
+    const successfulOrgs = new Set<string>();
+    const liveRepos = new Set<string>();
+    for (const s of states) {
+      if (s.error === null && s.repos.length < REPO_CAP) {
+        successfulOrgs.add(s.org.toLowerCase());
+        for (const r of s.repos) {
+          liveRepos.add(r.fullName.toLowerCase());
+        }
+      }
+    }
+
+    if (successfulOrgs.size === 0) return;
+
+    const current = untrack(() => props.selected);
+    const pruned = current.filter(
+      (r) => !successfulOrgs.has(r.owner.toLowerCase()) || liveRepos.has(r.fullName.toLowerCase())
+    );
+    if (pruned.length === current.length) return;
+
+    untrack(() => {
+      const removed = current.filter(
+        (r) => successfulOrgs.has(r.owner.toLowerCase()) && !liveRepos.has(r.fullName.toLowerCase())
+      );
+      props.onChange(pruned);
+      for (const r of removed) {
+        if (monitoredSet().has(r.fullName)) {
+          props.onMonitorToggle?.(r, false);
+        }
+      }
+    });
   });
 
   function toRepoRef(entry: RepoEntry): RepoRef {

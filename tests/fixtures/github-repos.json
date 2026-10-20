@@ -10,6 +10,8 @@
       "type": "User"
     },
     "private": false,
+    "fork": false,
+    "archived": false,
     "description": "This your first repo!",
     "default_branch": "main",
     "updated_at": "2011-01-26T19:14:43Z",
@@ -26,6 +28,8 @@
       "type": "User"
     },
     "private": false,
+    "fork": true,
+    "archived": false,
     "description": "This repo is for demonstration purposes only.",
     "default_branch": "main",
     "updated_at": "2014-02-05T14:20:19Z",
@@ -42,9 +46,29 @@
       "type": "Organization"
     },
     "private": true,
+    "fork": false,
+    "archived": false,
     "description": "Internal API service",
     "default_branch": "main",
     "updated_at": "2024-01-15T10:00:00Z",
     "pushed_at": "2024-01-15T09:55:00Z"
+  },
+  {
+    "id": 9876544,
+    "name": "legacy-service",
+    "full_name": "acme-corp/legacy-service",
+    "owner": {
+      "login": "acme-corp",
+      "id": 12345,
+      "avatar_url": "https://avatars.githubusercontent.com/u/12345?v=4",
+      "type": "Organization"
+    },
+    "private": true,
+    "fork": false,
+    "archived": true,
+    "description": "Archived legacy service",
+    "default_branch": "main",
+    "updated_at": "2022-05-10T12:00:00Z",
+    "pushed_at": "2022-05-10T11:55:00Z"
   }
 ]
