@@ -4,9 +4,11 @@ import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP } from "../../shared/validation";
+import { REPO_CAP } from "../../shared/types";
 import type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
 // ── Re-exports from shared/types (backward compat for existing importers) ─────
+export { REPO_CAP };
 export type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ interface RawRepo {
   name: string;
   full_name: string;
   pushed_at: string | null;
+  fork?: boolean;
+  archived?: boolean;
 }
 
 interface RawWorkflowRun {
@@ -1723,7 +1727,6 @@ export async function fetchRepos(
   if (!octokit) throw new Error("No GitHub client available");
 
   const repos: RepoEntry[] = [];
-  const REPO_CAP = 1000;
 
   if (type === "org") {
     for await (const response of octokit.paginate.iterator(`GET /orgs/{org}/repos`, {
@@ -1733,7 +1736,15 @@ export async function fetchRepos(
       direction: "desc" as const,
     })) {
       for (const repo of response.data as RawRepo[]) {
-        repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
+        if (repo.archived) continue;
+        repos.push({
+          owner: repo.owner.login,
+          name: repo.name,
+          fullName: repo.full_name,
+          pushedAt: repo.pushed_at ?? null,
+          isFork: Boolean(repo.fork),
+        });
+        if (repos.length >= REPO_CAP) break;
       }
       if (repos.length >= REPO_CAP) break;
     }
@@ -1745,7 +1756,15 @@ export async function fetchRepos(
       direction: "desc" as const,
     })) {
       for (const repo of response.data as RawRepo[]) {
-        repos.push({ owner: repo.owner.login, name: repo.name, fullName: repo.full_name, pushedAt: repo.pushed_at ?? null });
+        if (repo.archived) continue;
+        repos.push({
+          owner: repo.owner.login,
+          name: repo.name,
+          fullName: repo.full_name,
+          pushedAt: repo.pushed_at ?? null,
+          isFork: Boolean(repo.fork),
+        });
+        if (repos.length >= REPO_CAP) break;
       }
       if (repos.length >= REPO_CAP) break;
     }
@@ -2076,8 +2095,8 @@ export async function discoverUpstreamRepos(
   }
 
   function discoverForUser(login: string) {
-    const issueQ = `is:issue is:open involves:${login}`;
-    const prQ = `is:pr is:open involves:${login}`;
+    const issueQ = `is:issue is:open archived:false involves:${login}`;
+    const prQ = `is:pr is:open archived:false involves:${login}`;
     return Promise.allSettled([
       paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
         octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,

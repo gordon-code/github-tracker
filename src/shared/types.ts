@@ -15,7 +15,10 @@ export interface RepoRef {
 
 export interface RepoEntry extends RepoRef {
   pushedAt: string | null;
+  isFork?: boolean;
 }
+
+export const REPO_CAP = 1000;
 
 export type IssueState = "OPEN" | "CLOSED";
 export type PullRequestState = "OPEN" | "CLOSED" | "MERGED";
