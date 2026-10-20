@@ -3,11 +3,12 @@ import { config } from "../../stores/config";
 import { viewState, untrackItem, moveTrackedItem, untrackJiraItem, moveJiraItem } from "../../stores/view";
 import type { TrackedItem } from "../../stores/view";
 import type { Issue, PullRequest } from "../../services/api";
-import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { canApprovePR, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import ReviewBadge from "../shared/ReviewBadge";
+import AutoMergeBadge from "../shared/AutoMergeBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import { Tooltip } from "../shared/Tooltip";
@@ -76,6 +77,8 @@ export interface TrackedTabProps {
   refreshTick?: number;
   userLogin: string;
   hotPollingPRIds?: ReadonlySet<number>;
+  onApprovePR?: (pr: PullRequest) => void;
+  approvingPRIds?: ReadonlySet<number>;
 }
 
 export default function TrackedTab(props: TrackedTabProps) {
@@ -248,6 +251,9 @@ export default function TrackedTab(props: TrackedTabProps) {
                                   commentCount={commentCount()}
                                   onTrack={() => untrackItem(item.id, item.type as "issue" | "pullRequest")}
                                   isTracked={true}
+                                  onApprove={pr() && props.onApprovePR && canApprovePR(pr()!, props.userLogin) ? () => props.onApprovePR!(pr()!) : undefined}
+                                  isApproving={item.type === "pullRequest" && props.approvingPRIds?.has(item.id)}
+                                  approveAutoMerge={pr()?.autoMergeMethod != null}
                                   isPolling={item.type === "pullRequest" && props.hotPollingPRIds?.has(item.id)}
                                 >
                                   <Show
@@ -274,6 +280,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                                               </Show>
                                               <ReviewBadge decision={prData().reviewDecision} />
                                               <Show when={prData().enriched !== false}>
+                                                <AutoMergeBadge method={prData().autoMergeMethod} />
                                                 <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
                                                 <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
                                                 <Show when={prData().checkStatus === "conflict"}>
@@ -295,6 +302,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                                             <StatusDot status={prData().checkStatus} href={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/checks` : undefined} />
                                             <ReviewBadge decision={prData().reviewDecision} />
                                             <Show when={prData().enriched !== false}>
+                                              <AutoMergeBadge method={prData().autoMergeMethod} compact />
                                               <SizeBadge additions={prData().additions} deletions={prData().deletions} changedFiles={prData().changedFiles} category={sizeCategory()} filesUrl={isSafeGitHubUrl(prData().htmlUrl) ? `${prData().htmlUrl}/files` : undefined} />
                                             </Show>
                                             <Show when={prData().checkStatus === "conflict"}>

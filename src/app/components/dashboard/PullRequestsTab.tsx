@@ -4,7 +4,7 @@ import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
-import { deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { canApprovePR, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -15,6 +15,7 @@ import PaginationControls from "../shared/PaginationControls";
 import { scopeFilterGroup, prFilterGroups, type FilterChipGroupDef } from "../shared/filterTypes";
 import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
+import AutoMergeBadge from "../shared/AutoMergeBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -43,6 +44,8 @@ export interface PullRequestsTabProps {
   filterPreset?: Record<string, string>;
   jiraKeyMap?: () => ReadonlyMap<string, import("../../../shared/jira-types").JiraIssue | null>;
   depPrIds?: ReadonlySet<number>;
+  onApprovePR?: (pr: PullRequest) => void;
+  approvingPRIds?: ReadonlySet<number>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -523,6 +526,9 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 onIgnore={() => handleIgnore(pr)}
                                 onTrack={config.enableTracking ? () => handleTrack(pr) : undefined}
                                 isTracked={config.enableTracking ? trackedPrIds().has(pr.id) : undefined}
+                                onApprove={props.onApprovePR && canApprovePR(pr, props.userLogin) ? () => props.onApprovePR!(pr) : undefined}
+                                isApproving={props.approvingPRIds?.has(pr.id)}
+                                approveAutoMerge={pr.autoMergeMethod != null}
                                 surfacedByBadge={
                                   props.trackedUsers && props.trackedUsers.length > 0
                                     ? <UserAvatarBadge
@@ -543,6 +549,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                       </Show>
                                       <ReviewBadge decision={pr.reviewDecision} />
                                       <Show when={pr.enriched !== false}>
+                                        <AutoMergeBadge method={pr.autoMergeMethod} />
                                         <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
                                         <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
                                         <Show when={pr.checkStatus === "conflict"}>
@@ -576,6 +583,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                     <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
                                     <ReviewBadge decision={pr.reviewDecision} />
                                     <Show when={pr.enriched !== false}>
+                                      <AutoMergeBadge method={pr.autoMergeMethod} compact />
                                       <SizeBadge additions={pr.additions} deletions={pr.deletions} changedFiles={pr.changedFiles} category={prMeta().get(pr.id)?.sizeCategory} filesUrl={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/files` : undefined} />
                                     </Show>
                                     <Show when={pr.checkStatus === "conflict"}>

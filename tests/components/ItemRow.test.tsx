@@ -475,4 +475,102 @@ describe("ItemRow", () => {
     // updatedAt was 30m before MOCK_NOW; after +3h it is 3h30m ago → Math.floor(210/60) = 3 → "3h"
     expect(updated!.textContent).toBe("3h");
   });
+
+  describe("Approve button (two-step inline confirmation)", () => {
+    it("is omitted when onApprove is undefined and rendered when onApprove is provided", () => {
+      const { unmount } = render(() => <ItemRow {...defaultProps} />);
+      expect(screen.queryByLabelText(/Approve #42/i)).toBeNull();
+      unmount();
+
+      render(() => <ItemRow {...defaultProps} onApprove={vi.fn()} />);
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      expect(btn.textContent).toContain("Approve");
+    });
+
+    it("Click 1 transitions from 'Approve' to 'Confirm?' without calling onApprove", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+
+      expect(onApprove).not.toHaveBeenCalled();
+      expect(btn.textContent).toBe("Confirm?");
+      expect(btn.getAttribute("aria-label")).toBe("Confirm approve #42 Fix a bug");
+    });
+
+    it("shows 'Confirm (auto)' and auto-merge aria-label when approveAutoMerge={true}", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} approveAutoMerge={true} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+
+      expect(onApprove).not.toHaveBeenCalled();
+      expect(btn.textContent).toBe("Confirm (auto)");
+      expect(btn.getAttribute("aria-label")).toBe("Confirm approve #42 Fix a bug (auto-merge enabled)");
+    });
+
+    it("auto-resets from 'Confirm?' back to 'Approve' after 4000ms without calling onApprove", () => {
+      vi.useFakeTimers();
+      const onApprove = vi.fn();
+      const { unmount } = render(() => <ItemRow {...defaultProps} onApprove={onApprove} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+
+      vi.advanceTimersByTime(4000);
+      expect(btn.textContent).toContain("Approve");
+      expect(btn.getAttribute("aria-label")).toBe("Approve #42 Fix a bug");
+      expect(onApprove).not.toHaveBeenCalled();
+
+      unmount();
+      vi.useRealTimers();
+    });
+
+    it("resets immediately on Escape keyDown or blur while in 'Confirm?' state", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+
+      fireEvent.keyDown(btn, { key: "Escape" });
+      expect(btn.textContent).toContain("Approve");
+
+      // Re-arm and test blur reset
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+      fireEvent.blur(btn);
+      expect(btn.textContent).toContain("Approve");
+      expect(onApprove).not.toHaveBeenCalled();
+    });
+
+    it("Click 2 while in 'Confirm?' state invokes onApprove once and resets confirmation state", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+
+      fireEvent.click(btn);
+      expect(onApprove).toHaveBeenCalledOnce();
+      expect(btn.textContent).toContain("Approve");
+    });
+
+    it("disables button, shows .loading-spinner, and ignores clicks when isApproving={true}", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} isApproving={true} />);
+
+      const btn = screen.getByLabelText("Approving #42 Fix a bug") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.querySelector(".loading-spinner")).not.toBeNull();
+
+      fireEvent.click(btn);
+      expect(onApprove).not.toHaveBeenCalled();
+    });
+  });
 });

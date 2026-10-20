@@ -1,4 +1,4 @@
-import { createMemo, For, JSX, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, onCleanup, Show } from "solid-js";
 import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
@@ -20,6 +20,12 @@ export interface ItemRowProps {
   onIgnore?: () => void;
   onTrack?: () => void;
   isTracked?: boolean;
+  /** Callback invoked on the second (confirmation) click of the Approve button */
+  onApprove?: () => void;
+  /** True while an approval mutation for this PR is in flight */
+  isApproving?: boolean;
+  /** True when auto-merge is enabled on the PR, adding an auto-merge hint on the Confirm step */
+  approveAutoMerge?: boolean;
   commentCount?: number;
   hideRepo?: boolean;
   hideAuthor?: boolean;
@@ -34,6 +40,57 @@ export interface ItemRowProps {
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = createMemo(() => config.viewDensity === "compact");
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
+
+  const APPROVE_CONFIRM_TIMEOUT_MS = 4_000;
+  const [confirmingApprove, setConfirmingApprove] = createSignal(false);
+  let approveConfirmTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearApproveTimer() {
+    if (approveConfirmTimer !== undefined) {
+      clearTimeout(approveConfirmTimer);
+      approveConfirmTimer = undefined;
+    }
+  }
+
+  function resetApproveConfirm() {
+    clearApproveTimer();
+    setConfirmingApprove(false);
+  }
+
+  createEffect(() => {
+    if (!props.onApprove || props.isApproving) {
+      resetApproveConfirm();
+    }
+  });
+
+  onCleanup(() => {
+    clearApproveTimer();
+  });
+
+  function handleApproveClick(e: MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (props.isApproving || !props.onApprove) return;
+    if (!confirmingApprove()) {
+      setConfirmingApprove(true);
+      clearApproveTimer();
+      approveConfirmTimer = setTimeout(() => {
+        approveConfirmTimer = undefined;
+        setConfirmingApprove(false);
+      }, APPROVE_CONFIRM_TIMEOUT_MS);
+      return;
+    }
+    resetApproveConfirm();
+    props.onApprove();
+  }
+
+  function handleApproveKeyDown(e: KeyboardEvent) {
+    if (e.key === "Escape" && confirmingApprove()) {
+      e.stopPropagation();
+      e.preventDefault();
+      resetApproveConfirm();
+    }
+  }
 
   // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
   const staticDateInfo = createMemo(() => {
@@ -297,6 +354,66 @@ export default function ItemRow(props: ItemRowProps) {
             </Tooltip>
           </Show>
         </div>
+      </Show>
+
+      {/* Approve button — two-step inline confirmation for eligible PRs */}
+      <Show when={props.onApprove !== undefined}>
+        <Tooltip
+          content={
+            props.isApproving
+              ? "Submitting approval..."
+              : confirmingApprove()
+                ? props.approveAutoMerge
+                  ? "Click again to confirm approval (auto-merge enabled)"
+                  : "Click again to confirm approval"
+                : "Approve this pull request"
+          }
+          class="shrink-0 self-center relative z-10"
+        >
+          <button
+            type="button"
+            data-approve-btn
+            disabled={props.isApproving}
+            onClick={handleApproveClick}
+            onKeyDown={handleApproveKeyDown}
+            onBlur={resetApproveConfirm}
+            class={`btn btn-xs shrink-0 self-center transition-opacity ${
+              props.isApproving
+                ? "btn-ghost opacity-100"
+                : confirmingApprove()
+                  ? "btn-warning opacity-100"
+                  : "btn-ghost text-success hover:bg-success/15 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            }`}
+            aria-label={
+              props.isApproving
+                ? `Approving #${props.number} ${props.title}`
+                : confirmingApprove()
+                  ? props.approveAutoMerge
+                    ? `Confirm approve #${props.number} ${props.title} (auto-merge enabled)`
+                    : `Confirm approve #${props.number} ${props.title}`
+                  : `Approve #${props.number} ${props.title}`
+            }
+          >
+            <Show
+              when={!props.isApproving}
+              fallback={<span class="loading loading-spinner loading-xs" aria-hidden="true" />}
+            >
+              <Show
+                when={confirmingApprove()}
+                fallback={
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    <span>Approve</span>
+                  </>
+                }
+              >
+                <span>{props.approveAutoMerge ? "Confirm (auto)" : "Confirm?"}</span>
+              </Show>
+            </Show>
+          </button>
+        </Tooltip>
       </Show>
 
       {/* Pin button — visible on hover, always visible when tracked */}

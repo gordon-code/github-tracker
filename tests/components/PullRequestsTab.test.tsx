@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import PullRequestsTab from "../../src/app/components/dashboard/PullRequestsTab";
@@ -7,7 +7,7 @@ import type { PullRequest } from "../../src/app/services/api";
 import * as viewStore from "../../src/app/stores/view";
 import { setAllExpanded } from "../../src/app/stores/view";
 import { makePullRequest, resetViewStore } from "../helpers/index";
-import { updateConfig, resetConfig } from "../../src/app/stores/config";
+import { setConfig, updateConfig, resetConfig } from "../../src/app/stores/config";
 
 beforeEach(() => {
   resetViewStore();
@@ -662,5 +662,127 @@ describe("PullRequestsTab", () => {
     ));
     const rows = container.querySelectorAll("[role='listitem']");
     expect(rows[0]?.querySelector(".animate-shimmer")).toBeFalsy();
+  });
+
+  describe("auto-merge badge and inline Approve button", () => {
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+    it("renders auto-merge badge in comfortable and compact density when autoMergeMethod is set, and hides when null or unenriched", () => {
+      setAllExpanded("pullRequests", true);
+      const prAuto = makePullRequest({
+        id: 1,
+        number: 1,
+        title: "Auto PR",
+        repoFullName: "org/repo",
+        autoMergeMethod: "SQUASH",
+        enriched: true,
+      });
+      const prUnenriched = makePullRequest({
+        id: 2,
+        number: 2,
+        title: "Unenriched PR",
+        repoFullName: "org/repo",
+        autoMergeMethod: "SQUASH",
+        enriched: false,
+      });
+      const prNoAuto = makePullRequest({
+        id: 3,
+        number: 3,
+        title: "Manual PR",
+        repoFullName: "org/repo",
+        autoMergeMethod: null,
+        enriched: true,
+      });
+
+      const { unmount } = render(() => (
+        <PullRequestsTab pullRequests={[prAuto, prUnenriched, prNoAuto]} userLogin="alice" />
+      ));
+      const badges = screen.getAllByTestId("auto-merge-badge");
+      expect(badges).toHaveLength(1);
+      expect(badges[0].className).toContain("badge-sm");
+      unmount();
+
+      setConfig("viewDensity", "compact");
+      render(() => (
+        <PullRequestsTab pullRequests={[prAuto, prUnenriched, prNoAuto]} userLogin="alice" />
+      ));
+      const compactBadges = screen.getAllByTestId("auto-merge-badge");
+      expect(compactBadges).toHaveLength(1);
+      expect(compactBadges[0].className).toContain("badge-xs");
+    });
+
+    it("shows Approve button only for eligible PRs and invokes onApprovePR(pr) on two-step confirmation", () => {
+      setAllExpanded("pullRequests", true);
+      const onApprovePR = vi.fn();
+
+      const eligiblePR = makePullRequest({
+        id: 10,
+        number: 10,
+        title: "Needs Review PR",
+        repoFullName: "org/repo",
+        userLogin: "bob",
+        nodeId: "PR_kwDOtest0010",
+        headSha: validSha,
+        reviewDecision: "REVIEW_REQUIRED",
+        enriched: true,
+      });
+      const selfPR = makePullRequest({
+        id: 11,
+        number: 11,
+        title: "Self PR",
+        repoFullName: "org/repo",
+        userLogin: "alice",
+        nodeId: "PR_kwDOtest0011",
+        headSha: validSha,
+        reviewDecision: "REVIEW_REQUIRED",
+        enriched: true,
+      });
+      const alreadyApprovedPR = makePullRequest({
+        id: 12,
+        number: 12,
+        title: "Already Approved PR",
+        repoFullName: "org/repo",
+        userLogin: "bob",
+        nodeId: "PR_kwDOtest0012",
+        headSha: validSha,
+        reviewDecision: "REVIEW_REQUIRED",
+        viewerLatestReviewState: "APPROVED",
+        viewerReviewRequested: false,
+        enriched: true,
+      });
+      const draftPR = makePullRequest({
+        id: 13,
+        number: 13,
+        title: "Draft PR",
+        repoFullName: "org/repo",
+        userLogin: "bob",
+        nodeId: "PR_kwDOtest0013",
+        headSha: validSha,
+        draft: true,
+        reviewDecision: "REVIEW_REQUIRED",
+        enriched: true,
+      });
+
+      render(() => (
+        <PullRequestsTab
+          pullRequests={[eligiblePR, selfPR, alreadyApprovedPR, draftPR]}
+          userLogin="alice"
+          onApprovePR={onApprovePR}
+        />
+      ));
+
+      const approveBtn = screen.getByLabelText("Approve #10 Needs Review PR");
+      expect(screen.queryByLabelText(/Approve #11/)).toBeNull();
+      expect(screen.queryByLabelText(/Approve #12/)).toBeNull();
+      expect(screen.queryByLabelText(/Approve #13/)).toBeNull();
+
+      fireEvent.click(approveBtn);
+      expect(onApprovePR).not.toHaveBeenCalled();
+      expect(approveBtn.textContent).toBe("Confirm?");
+
+      fireEvent.click(approveBtn);
+      expect(onApprovePR).toHaveBeenCalledOnce();
+      expect(onApprovePR).toHaveBeenCalledWith(eligiblePR);
+    });
   });
 });
