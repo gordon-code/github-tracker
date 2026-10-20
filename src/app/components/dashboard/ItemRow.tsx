@@ -57,8 +57,19 @@ export default function ItemRow(props: ItemRowProps) {
     setConfirmingApprove(false);
   }
 
+  const isApproving = createMemo(() => Boolean(props.isApproving));
+  const approveAutoMerge = createMemo(() => Boolean(props.approveAutoMerge));
+
   createEffect(
-    on([() => props.onApprove, () => props.approveAutoMerge, () => props.isApproving], resetApproveConfirm, { defer: true }),
+    on(
+      [() => props.onApprove, approveAutoMerge, isApproving],
+      (curr, prev) => {
+        if (!prev || curr.some((v, i) => v !== prev[i])) {
+          resetApproveConfirm();
+        }
+      },
+      { defer: true },
+    ),
   );
 
   onCleanup(() => {
@@ -139,6 +150,33 @@ export default function ItemRow(props: ItemRowProps) {
   const repoShortName = createMemo(() => {
     const slash = props.repo.indexOf("/");
     return slash >= 0 ? props.repo.slice(slash + 1) : props.repo;
+  });
+
+  const approveButtonMeta = createMemo(() => {
+    if (props.isApproving) {
+      return {
+        tooltip: "Submitting approval...",
+        buttonClass: "btn-ghost opacity-100",
+        ariaLabel: `Approving #${props.number} ${props.title}`,
+      };
+    }
+    if (confirmingApprove()) {
+      return {
+        tooltip: props.approveAutoMerge
+          ? "Click again to confirm approval (auto-merge enabled)"
+          : "Click again to confirm approval",
+        buttonClass: "btn-warning opacity-100",
+        ariaLabel: props.approveAutoMerge
+          ? `Confirm approve #${props.number} ${props.title} (auto-merge enabled)`
+          : `Confirm approve #${props.number} ${props.title}`,
+      };
+    }
+    return {
+      tooltip: "Approve this pull request",
+      buttonClass:
+        "btn-ghost text-success hover:bg-success/15 opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+      ariaLabel: `Approve #${props.number} ${props.title}`,
+    };
   });
 
   return (
@@ -357,15 +395,7 @@ export default function ItemRow(props: ItemRowProps) {
       {/* Approve button — two-step inline confirmation for eligible PRs */}
       <Show when={props.onApprove !== undefined}>
         <Tooltip
-          content={
-            props.isApproving
-              ? "Submitting approval..."
-              : confirmingApprove()
-                ? props.approveAutoMerge
-                  ? "Click again to confirm approval (auto-merge enabled)"
-                  : "Click again to confirm approval"
-                : "Approve this pull request"
-          }
+          content={approveButtonMeta().tooltip}
           class="shrink-0 self-center relative z-10"
         >
           <button
@@ -375,22 +405,8 @@ export default function ItemRow(props: ItemRowProps) {
             onClick={handleApproveClick}
             onKeyDown={handleApproveKeyDown}
             onBlur={resetApproveConfirm}
-            class={`btn btn-xs shrink-0 self-center transition-opacity ${
-              props.isApproving
-                ? "btn-ghost opacity-100"
-                : confirmingApprove()
-                  ? "btn-warning opacity-100"
-                  : "btn-ghost text-success hover:bg-success/15 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            }`}
-            aria-label={
-              props.isApproving
-                ? `Approving #${props.number} ${props.title}`
-                : confirmingApprove()
-                  ? props.approveAutoMerge
-                    ? `Confirm approve #${props.number} ${props.title} (auto-merge enabled)`
-                    : `Confirm approve #${props.number} ${props.title}`
-                  : `Approve #${props.number} ${props.title}`
-            }
+            class={`btn btn-xs shrink-0 self-center transition-opacity ${approveButtonMeta().buttonClass}`}
+            aria-label={approveButtonMeta().ariaLabel}
           >
             <Show
               when={!props.isApproving}

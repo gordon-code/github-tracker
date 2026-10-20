@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/core";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
+import { isReadOnlyGraphqlQuery } from "../../src/shared/validation.js";
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
@@ -10,17 +11,6 @@ const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
 type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
 // ── Client factory ───────────────────────────────────────────────────────────
-
-function isReadOnlyGraphqlQuery(query: unknown): boolean {
-  if (typeof query !== "string") return false;
-  // Strip block strings, single-line strings, and # comments in a single left-to-right pass
-  const sanitized = query
-    .replace(/"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, (m) => (m.startsWith("#") ? "" : '""'))
-    .trim();
-  if (!sanitized) return false;
-  if (!/^(?:query\b|\{)/i.test(sanitized)) return false;
-  return !/\b(?:mutation|subscription)\b/i.test(sanitized);
-}
 
 export function createOctokitClient(token: string): GitHubOctokitInstance {
   const client = new GitHubOctokit({

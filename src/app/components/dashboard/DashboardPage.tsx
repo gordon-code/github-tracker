@@ -16,7 +16,7 @@ import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
-import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
+import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
 import {
   createPollCoordinator,
@@ -209,6 +209,54 @@ function applyRecentApprovalGuard(pr: PullRequest, currentLogin: string): void {
   if (loginLower && !pr.reviewerLogins.some((r) => r.toLowerCase() === loginLower)) {
     pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
   }
+}
+
+export function applyHotPollPRUpdates(
+  state: { pullRequests: PullRequest[] },
+  prUpdates: ReadonlyMap<number, HotPRStatusUpdate>,
+  currentLogin = ""
+): Set<number> {
+  const terminalPrIds = new Set<number>();
+  for (const [prId, update] of prUpdates) {
+    const s = update.state;
+    if (s === "CLOSED" || s === "MERGED") terminalPrIds.add(prId);
+  }
+  const loginLower = currentLogin.toLowerCase();
+  for (const pr of state.pullRequests) {
+    const update = prUpdates.get(pr.id);
+    if (!update) continue;
+    pr.state = update.state; // detect closed/merged quickly
+    pr.checkStatus = update.checkStatus;
+    pr.reviewDecision = update.reviewDecision;
+    if (update.headSha) {
+      pr.headSha = update.headSha;
+    }
+    if (update.autoMergeMethod !== undefined) {
+      pr.autoMergeMethod = update.autoMergeMethod;
+    }
+    if (update.viewerLatestReviewState !== undefined) {
+      pr.viewerLatestReviewState = update.viewerLatestReviewState;
+    }
+    if (update.viewerReviewRequested !== undefined) {
+      if (update.viewerReviewRequested) {
+        pr.viewerReviewRequested = true;
+      } else if (update.viewerLatestReviewState === "APPROVED") {
+        pr.viewerReviewRequested = false;
+      }
+    }
+    if (
+      loginLower &&
+      (pr.viewerReviewRequested || pr.viewerLatestReviewState != null) &&
+      !pr.reviewerLogins.some((r) => r.toLowerCase() === loginLower)
+    ) {
+      pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
+    }
+    applyRecentApprovalGuard(pr, currentLogin);
+  }
+  if (terminalPrIds.size > 0) {
+    state.pullRequests = state.pullRequests.filter((pr) => !terminalPrIds.has(pr.id));
+  }
+  return terminalPrIds;
 }
 
 // Skip retrying a dep-PR body fetch that errored/timed out on its last attempt until
@@ -790,46 +838,10 @@ export default function DashboardPage() {
           // If a full refresh completed during the fetch, _hotPollGeneration will have
           // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
           if (fetchGeneration !== getHotPollGeneration()) return; // stale, discard
-          const terminalPrIds = new Set<number>();
-          for (const [prId, update] of prUpdates) {
-            const s = update.state;
-            if (s === "CLOSED" || s === "MERGED") terminalPrIds.add(prId);
-          }
+          let terminalPrIds = new Set<number>();
           setDashboardData(produce((state) => {
             const currentLogin = user()?.login ?? "";
-            const loginLower = currentLogin.toLowerCase();
-            // Apply PR status updates
-            for (const pr of state.pullRequests) {
-              const update = prUpdates.get(pr.id);
-              if (!update) continue;
-              pr.state = update.state; // detect closed/merged quickly
-              pr.checkStatus = update.checkStatus;
-              pr.reviewDecision = update.reviewDecision;
-              if (update.headSha) {
-                pr.headSha = update.headSha;
-              }
-              if (update.autoMergeMethod !== undefined) {
-                pr.autoMergeMethod = update.autoMergeMethod;
-              }
-              if (update.viewerLatestReviewState !== undefined) {
-                pr.viewerLatestReviewState = update.viewerLatestReviewState;
-              }
-              if (update.viewerReviewRequested !== undefined) {
-                if (update.viewerReviewRequested) {
-                  pr.viewerReviewRequested = true;
-                } else if (update.viewerLatestReviewState === "APPROVED") {
-                  pr.viewerReviewRequested = false;
-                }
-              }
-              if (
-                loginLower &&
-                (pr.viewerReviewRequested || pr.viewerLatestReviewState != null) &&
-                !pr.reviewerLogins.some((r) => r.toLowerCase() === loginLower)
-              ) {
-                pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
-              }
-              applyRecentApprovalGuard(pr, currentLogin);
-            }
+            terminalPrIds = applyHotPollPRUpdates(state, prUpdates, currentLogin);
             // Apply workflow run updates
             for (const run of state.workflowRuns) {
               const update = runUpdates.get(run.id);
@@ -838,9 +850,6 @@ export default function DashboardPage() {
               run.conclusion = update.conclusion;
               run.updatedAt = update.updatedAt;
               run.completedAt = update.completedAt;
-            }
-            if (terminalPrIds.size > 0) {
-              state.pullRequests = state.pullRequests.filter((pr) => !terminalPrIds.has(pr.id));
             }
           }));
           if (terminalPrIds.size > 0) {
@@ -1451,6 +1460,9 @@ export default function DashboardPage() {
     if (approvingPRIds().has(pr.id)) return;
     const client = getClient();
     if (!client || !pr.nodeId || !pr.headSha) return;
+    const nodeId = pr.nodeId;
+    const approvedHeadSha = pr.headSha;
+    const priorReviewDecision = pr.reviewDecision;
 
     // Clear any prior notification for this PR so a retry with the same error message
     // is not suppressed by pushNotification's same-message no-op guard.
@@ -1463,14 +1475,14 @@ export default function DashboardPage() {
     });
 
     try {
-      const result = await approvePullRequest(client, pr.nodeId, pr.headSha);
+      const result = await approvePullRequest(client, nodeId, approvedHeadSha);
       if (getClient() !== client) return;
 
       const nextDecision: PullRequest["reviewDecision"] =
-        result.reviewDecision ?? (pr.reviewDecision === "REVIEW_REQUIRED" ? "APPROVED" : pr.reviewDecision);
+        result.reviewDecision ?? (priorReviewDecision === "REVIEW_REQUIRED" ? "APPROVED" : priorReviewDecision);
 
       recentlyApprovedPRs.set(pr.id, {
-        headSha: pr.headSha,
+        headSha: approvedHeadSha,
         reviewDecision: nextDecision,
         approvedAt: Date.now(),
       });
@@ -1487,7 +1499,7 @@ export default function DashboardPage() {
       // even when checkStatus was already "success" prior to approval.
       seedHotSetsFromTargeted({
         issues: [],
-        pullRequests: [{ ...pr, enriched: true, checkStatus: "pending" }],
+        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "pending" }],
         workflowRuns: [],
         errors: [],
       });

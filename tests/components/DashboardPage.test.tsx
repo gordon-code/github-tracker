@@ -740,6 +740,89 @@ describe("DashboardPage — onHotData integration", () => {
     });
   });
 
+  it("updates autoMergeMethod, headSha, viewerReviewRequested, viewerLatestReviewState, and reviewerLogins via real onHotData callback", async () => {
+    const initialSha = "1111111111111111111111111111111111111111";
+    const updatedSha = "2222222222222222222222222222222222222222";
+    const teamRequestedPR = makePullRequest({
+      id: 49,
+      number: 49,
+      title: "Team review PR",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0049",
+      headSha: initialSha,
+      checkStatus: "pending",
+      reviewDecision: null,
+      autoMergeMethod: null,
+      viewerReviewRequested: true,
+      viewerLatestReviewState: null,
+      reviewerLogins: [],
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [teamRequestedPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(capturedOnHotData).not.toBeNull();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    // Hot poll 1: sets autoMergeMethod: "SQUASH", updates headSha, and preserves team viewerReviewRequested: true
+    capturedOnHotData!(
+      new Map([[49, {
+        state: "OPEN" as const,
+        checkStatus: "success" as const,
+        mergeStateStatus: "BLOCKED",
+        reviewDecision: "REVIEW_REQUIRED" as const,
+        headSha: updatedSha,
+        autoMergeMethod: "SQUASH" as const,
+        viewerReviewRequested: false,
+        viewerLatestReviewState: null,
+      }]]),
+      new Map(),
+      0
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auto-merge-badge")).toBeTruthy();
+      expect(screen.getByText("Review needed")).toBeTruthy();
+      expect(screen.getByLabelText("Approve #49 Team review PR")).toBeTruthy();
+    });
+
+    // Hot poll 2: viewer approves -> viewerLatestReviewState: "APPROVED" clears viewerReviewRequested and hides Approve button
+    capturedOnHotData!(
+      new Map([[49, {
+        state: "OPEN" as const,
+        checkStatus: "success" as const,
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED" as const,
+        headSha: updatedSha,
+        autoMergeMethod: "SQUASH" as const,
+        viewerReviewRequested: false,
+        viewerLatestReviewState: "APPROVED" as const,
+      }]]),
+      new Map(),
+      0
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Approved")).toBeTruthy();
+      expect(screen.queryByLabelText("Approve #49 Team review PR")).toBeNull();
+    });
+  });
+
   it("discards stale hot poll updates when generation mismatches", async () => {
     const testPR = makePullRequest({
       id: 43,
@@ -3732,5 +3815,569 @@ describe("DashboardPage — PR approval integration", () => {
       );
     });
     expect(manualRefreshSpy).toHaveBeenCalledOnce();
+  });
+
+  it("preserves approved state across subsequent hot, targeted, and full polls within 60s, and evicts when headSha changes", async () => {
+    const user = userEvent.setup();
+    const newSha = "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3";
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const makeStalePR = (sha = validSha) =>
+      makePullRequest({
+        id: 42,
+        number: 42,
+        title: "Fix race condition",
+        repoFullName: "owner/repo",
+        userLogin: "otheruser",
+        state: "OPEN",
+        draft: false,
+        enriched: true,
+        nodeId: "PR_kwDOtest0042",
+        headSha: sha,
+        reviewDecision: "REVIEW_REQUIRED",
+        checkStatus: "success",
+        viewerReviewRequested: true,
+        viewerLatestReviewState: null,
+        reviewerLogins: [],
+      });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStalePR()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Approved")).toBeTruthy();
+    });
+
+    // 1. Subsequent hot poll with stale review state on the same headSha
+    capturedOnHotData!(
+      new Map([[42, {
+        state: "OPEN",
+        checkStatus: "success",
+        mergeStateStatus: "BLOCKED",
+        reviewDecision: "REVIEW_REQUIRED",
+        headSha: validSha,
+        viewerLatestReviewState: null,
+        viewerReviewRequested: true,
+      }]]),
+      new Map(),
+      0
+    );
+    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
+
+    // 2. Subsequent targeted poll with stale review state on the same headSha
+    capturedOnTargetedData!(
+      { issues: [], pullRequests: [makeStalePR()], workflowRuns: [], errors: [] },
+      ["owner/repo"]
+    );
+    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
+
+    // 3. Subsequent full poll with stale review state on the same headSha
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStalePR()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
+
+    // 4. Subsequent full poll with a new headSha evicts the guard entry
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStalePR(newSha)],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+
+    await waitFor(() => {
+      expect(screen.getByText("Review needed")).toBeTruthy();
+      expect(screen.getByLabelText("Approve #42 Fix race condition")).toBeTruthy();
+    });
+  });
+
+  it("evicts recent approval guard entry after 60-second TTL expires", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const makeStalePR = () =>
+      makePullRequest({
+        id: 42,
+        number: 42,
+        title: "Fix race condition",
+        repoFullName: "owner/repo",
+        userLogin: "otheruser",
+        state: "OPEN",
+        draft: false,
+        enriched: true,
+        nodeId: "PR_kwDOtest0042",
+        headSha: validSha,
+        reviewDecision: "REVIEW_REQUIRED",
+        checkStatus: "success",
+        viewerReviewRequested: true,
+        viewerLatestReviewState: null,
+      });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStalePR()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Approved")).toBeTruthy();
+    });
+
+    // Advance Date.now past the 60_000ms TTL and run a full poll
+    const expiredNow = Date.now() + 60_001;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(expiredNow);
+    try {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [makeStalePR()],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll!();
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText("Review needed")).toBeTruthy();
+      expect(screen.getByLabelText("Approve #42 Fix race condition")).toBeTruthy();
+    });
+  });
+
+  it("does not mark a newly pushed commit Approved if onHotData mutates pr.headSha in place while approvePullRequest is in flight", async () => {
+    const user = userEvent.setup();
+    const newSha = "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
+    let resolveMutation!: (val: unknown) => void;
+    const graphqlMock = vi.fn().mockImplementation(
+      () => new Promise((resolve) => { resolveMutation = resolve; })
+    );
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const openPR = makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "pending",
+      viewerReviewRequested: true,
+      viewerLatestReviewState: null,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [openPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    // Simulate hot poll mutating pr.headSha in place while mutation for validSha is in flight
+    capturedOnHotData!(
+      new Map([[42, {
+        state: "OPEN",
+        checkStatus: "pending",
+        mergeStateStatus: "BLOCKED",
+        reviewDecision: "REVIEW_REQUIRED",
+        headSha: newSha,
+        viewerLatestReviewState: null,
+        viewerReviewRequested: true,
+      }]]),
+      new Map(),
+      0
+    );
+
+    resolveMutation({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith("approve-pr:42", "Approved owner/repo#42", "info");
+    });
+
+    // Because headSha changed to newSha while validSha was being approved, the guard evicts the entry
+    // and leaves the new commit in Review needed state with the Approve button active.
+    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(screen.queryByText("Approved")).toBeNull();
+    expect(screen.getByLabelText("Approve #42 Fix race condition")).toBeTruthy();
+  });
+
+  it("merges Phase 2 enrichment fields, reviewDecision, and recent approval guard when Phase 1 onLightData fires", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const lightPR1 = makePullRequest({
+      id: 101,
+      number: 101,
+      title: "Phase 1 light PR",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      enriched: false,
+      nodeId: "PR_kwDOtest0101",
+      headSha: "",
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: null,
+      autoMergeMethod: null,
+      viewerReviewRequested: false,
+      viewerLatestReviewState: null,
+    });
+    const lightPR2 = makePullRequest({
+      id: 102,
+      number: 102,
+      title: "Approve during Phase 1",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      enriched: true,
+      nodeId: "PR_kwDOtest0102",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "pending",
+      autoMergeMethod: null,
+      viewerReviewRequested: true,
+      viewerLatestReviewState: null,
+    });
+
+    let resolvePhase2!: (data: DashboardData) => void;
+    vi.mocked(pollService.fetchAllData).mockImplementation(async (onLightData) => {
+      onLightData?.({ issues: [], pullRequests: [lightPR1, lightPR2], workflowRuns: [], errors: [] });
+      return new Promise<DashboardData>((resolve) => {
+        resolvePhase2 = resolve;
+      });
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    // Phase 1 is rendered; approve PR #102 before Phase 2 resolves
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #102 Approve during Phase 1"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    // Now resolve Phase 2: PR #101 gets enriched fields + reviewDecision: "CHANGES_REQUESTED",
+    // while PR #102 returns stale reviewDecision: "REVIEW_REQUIRED" that applyRecentApprovalGuard must override
+    const enrichedPR1 = makePullRequest({
+      id: 101,
+      number: 101,
+      title: "Phase 1 light PR",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      enriched: true,
+      nodeId: "PR_kwDOtest0101",
+      headSha: validSha,
+      reviewDecision: "CHANGES_REQUESTED",
+      checkStatus: "success",
+      autoMergeMethod: "SQUASH",
+      viewerReviewRequested: false,
+      viewerLatestReviewState: null,
+    });
+    const staleEnrichedPR2 = makePullRequest({
+      id: 102,
+      number: 102,
+      title: "Approve during Phase 1",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      enriched: true,
+      nodeId: "PR_kwDOtest0102",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+      autoMergeMethod: null,
+      viewerReviewRequested: true,
+      viewerLatestReviewState: null,
+    });
+
+    resolvePhase2({
+      issues: [],
+      pullRequests: [enrichedPR1, staleEnrichedPR2],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auto-merge-badge")).toBeTruthy();
+      expect(screen.getByText("Changes")).toBeTruthy();
+      expect(screen.getByText("Approved")).toBeTruthy();
+      expect(screen.queryByText("Review needed")).toBeNull();
+    });
+  });
+
+  it("treats 403 with rate-limit headers (x-ratelimit-remaining: 0 or retry-after) as a generic error instead of permission denied", async () => {
+    const user = userEvent.setup();
+    const rateLimit403 = Object.assign(new Error("API rate limit exceeded"), {
+      status: 403,
+      response: { headers: { "x-ratelimit-remaining": "0" } },
+    });
+    const retryAfter403 = Object.assign(new Error("Secondary rate limit"), {
+      status: 403,
+      response: { headers: { "retry-after": "60" } },
+    });
+    const graphqlMock = vi.fn()
+      .mockRejectedValueOnce(rateLimit403)
+      .mockRejectedValueOnce(retryAfter403);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 42,
+          number: 42,
+          title: "Fix race condition",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDOtest0042",
+          headSha: validSha,
+          reviewDecision: "REVIEW_REQUIRED",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        "Failed to approve owner/repo#42: API rate limit exceeded",
+        "error"
+      );
+    });
+
+    // Second attempt: 403 with retry-after header
+    const retryBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(retryBtn);
+    await user.click(retryBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        "Failed to approve owner/repo#42: Secondary rate limit",
+        "error"
+      );
+    });
+  });
+
+  it("handles 401 error during PR approval by calling expireToken and redirecting to /login", async () => {
+    const user = userEvent.setup();
+    const unauthorizedErr = Object.assign(new Error("Bad credentials"), { status: 401 });
+    const graphqlMock = vi.fn().mockRejectedValue(unauthorizedErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 42,
+          number: 42,
+          title: "Fix race condition",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDOtest0042",
+          headSha: validSha,
+          reviewDecision: "REVIEW_REQUIRED",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(authStore.expireToken).toHaveBeenCalledOnce();
+      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+    });
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+  });
+
+  it("falls back to priorReviewDecision when mutation returns null reviewDecision (REVIEW_REQUIRED -> APPROVED, CHANGES_REQUESTED preserved)", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: null },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 42,
+          number: 42,
+          title: "PR needing review",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDOtest0042",
+          headSha: validSha,
+          reviewDecision: "REVIEW_REQUIRED",
+        }),
+        makePullRequest({
+          id: 43,
+          number: 43,
+          title: "PR with changes requested",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDOtest0043",
+          headSha: validSha,
+          reviewDecision: "CHANGES_REQUESTED",
+          viewerReviewRequested: true,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    // Approve PR #42 (REVIEW_REQUIRED -> falls back to APPROVED when result.reviewDecision is null)
+    const approveBtn42 = await waitFor(() => screen.getByLabelText("Approve #42 PR needing review"));
+    await user.click(approveBtn42);
+    await user.click(approveBtn42);
+
+    await waitFor(() => {
+      expect(screen.getByText("Approved")).toBeTruthy();
+      expect(screen.queryByLabelText("Approve #42 PR needing review")).toBeNull();
+    });
+
+    // Approve PR #43 (CHANGES_REQUESTED -> preserves CHANGES_REQUESTED when result.reviewDecision is null, while hiding Approve button)
+    const approveBtn43 = await waitFor(() => screen.getByLabelText("Approve #43 PR with changes requested"));
+    await user.click(approveBtn43);
+    await user.click(approveBtn43);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Approve #43 PR with changes requested")).toBeNull();
+    });
+    expect(screen.getByText("Changes")).toBeTruthy();
   });
 });

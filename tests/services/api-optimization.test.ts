@@ -806,4 +806,47 @@ describe("Phase 1 prReviewReq -> Phase 2 mergeEnrichment team review request pre
     expect(pr.viewerReviewRequested).toBe(false);
     expect(pr.reviewerLogins).toContain("testuser");
   });
+
+  it("does not set viewerReviewRequested or inject viewerLogin into reviewerLogins when prReviewReq matches a tracked user (globalUserSearch)", async () => {
+    const lightPR = makeLightPRNode({
+      id: "PR_kwDOteam44",
+      databaseId: 44,
+      reviewDecision: null,
+    });
+    const heavyNode = {
+      ...makeHeavyPRNode(44, "PR_kwDOteam44"),
+      reviewRequests: { nodes: [{ requestedReviewer: { login: "teammate" } }] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      autoMergeRequest: null,
+      viewerLatestReview: null,
+      viewerLatestReviewRequest: null,
+    };
+
+    const octokit = makeTwoPhaseOctokit(
+      async (_query, variables) => {
+        const prRevQ = String((variables as Record<string, unknown> | undefined)?.prRevQ ?? "");
+        const isTrackedUserQuery = prRevQ.includes("review-requested:teammate");
+        return {
+          issues: makeSearchResponse([]),
+          prInvolves: makeSearchResponse([]),
+          prReviewReq: makeSearchResponse(isTrackedUserQuery ? [lightPR] : []),
+          rateLimit,
+        };
+      },
+      [heavyNode],
+    );
+
+    const result = await fetchIssuesAndPullRequests(
+      octokit as unknown as OctokitLike,
+      repos,
+      "TestUser",
+      undefined,
+      [{ login: "teammate", avatarUrl: "https://github.com/teammate.png", name: "Teammate", type: "user" }],
+    );
+    expect(result.pullRequests).toHaveLength(1);
+    const pr = result.pullRequests[0];
+    expect(pr.viewerReviewRequested).toBe(false);
+    expect(pr.reviewerLogins).toEqual(["teammate"]);
+    expect(pr.reviewerLogins).not.toContain("testuser");
+  });
 });

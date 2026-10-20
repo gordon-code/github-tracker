@@ -6,22 +6,17 @@ import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
 import { pushNotification } from "../lib/errors";
-import { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
+import { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery } from "../../shared/validation";
 
-export { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE };
+export { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery };
 
 const NORMALIZED_APPROVE_MUTATION = APPROVE_PR_MUTATION.replace(/\s+/g, " ");
 
 function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown }): boolean {
   if (typeof options.query !== "string") return false;
-  // Strip block strings, single-line strings, and # comments in a single left-to-right pass
-  const sanitized = options.query
-    .replace(/"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, (m) => (m.startsWith("#") ? "" : '""'))
-    .trim();
-  if (!sanitized) return false;
 
   // 1. Allow read-only GraphQL queries (starts with `query` or `{` and has no top-level mutation/subscription)
-  if (/^(?:query\b|\{)/i.test(sanitized) && !/\b(?:mutation|subscription)\b/i.test(sanitized)) {
+  if (isReadOnlyGraphqlQuery(options.query)) {
     return true;
   }
 

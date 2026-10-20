@@ -589,5 +589,28 @@ describe("ItemRow", () => {
       expect(onApproveA).not.toHaveBeenCalled();
       expect(onApproveB).not.toHaveBeenCalled();
     });
+
+    it("keeps 'Confirm?' armed when a shared approvingPRIds signal updates for a different PR", () => {
+      const onApprove = vi.fn();
+      const [approvingSet, setApprovingSet] = createSignal<ReadonlySet<number>>(new Set<number>());
+
+      render(() => (
+        <ItemRow
+          {...defaultProps}
+          onApprove={onApprove}
+          isApproving={approvingSet().has(42)}
+        />
+      ));
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+
+      // Another PR (#99) starts and finishes approving — #42's isApproving remains false
+      setApprovingSet(new Set([99]));
+      expect(btn.textContent).toBe("Confirm?");
+      setApprovingSet(new Set<number>());
+      expect(btn.textContent).toBe("Confirm?");
+    });
   });
 });
