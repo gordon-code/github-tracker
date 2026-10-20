@@ -33,7 +33,7 @@ Open issues where you're the creator, assignee, or mentioned. A scope filter let
 
 ### Pull Requests
 
-Open PRs with CI status dots (green/yellow/red), review decision badges, size badges (XS–XL by lines changed), and draft indicators. A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
+Open PRs with CI status dots (green/yellow/red), review decision badges, a read-only `auto` badge when GitHub auto-merge is enabled (with merge method tooltip), size badges (XS–XL by lines changed), draft indicators, and a two-step inline `Approve` button on PR rows requiring approval. A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
 
 ### Actions
 
@@ -128,8 +128,8 @@ src/
       layout/       # Header, TabBar, FilterBar
       onboarding/   # OnboardingWizard, OrgSelector, RepoSelector
       settings/     # SettingsPage, TrackedUsersSection, ThemePicker, Section, SettingRow
-      shared/       # 19 shared components: FilterInput, FilterChips, StatusDot,
-                    # ReviewBadge, SizeBadge, RoleBadge, SortDropdown, PaginationControls,
+      shared/       # 28 shared components: FilterInput, FilterChips, StatusDot,
+                    # ReviewBadge, AutoMergeBadge, SizeBadge, RoleBadge, SortDropdown, PaginationControls,
                     # LoadingSpinner, SkeletonRows, ToastContainer, NotificationDrawer,
                     # RepoLockControls, UserAvatarBadge, ExpandCollapseButtons,
                     # RepoGitHubLink, ChevronIcon, ExternalLinkIcon, Tooltip/InfoTooltip
@@ -170,7 +170,7 @@ pnpm run screenshot # Capture dashboard screenshot
 
 ## Security
 
-OAuth tokens are stored in `localStorage` under an app-specific key — this is standard for single-user personal dashboards and matches the threat model here. CSP headers block script injection via Cloudflare (`script-src 'self'` with a SHA-256 exception for the dark-mode initialization script only). An Octokit hook blocks all non-GET requests except `POST /graphql` as a read-only guard — the `repo` scope is required for private repo access, but the app never performs writes. OAuth state is generated with `crypto.getRandomValues` and verified on callback. Token validation runs on every page load via `GET /user`; a 401 clears the stored token immediately.
+OAuth tokens are stored in `localStorage` under an app-specific key — this is standard for single-user personal dashboards and matches the threat model here. CSP headers block script injection via Cloudflare (`script-src 'self'` with a SHA-256 exception for the dark-mode initialization script only). An Octokit hook blocks all non-GET REST requests and all GraphQL mutations except the single user-confirmed PR approval mutation (addPullRequestReview with event: APPROVE) — the repo scope is required for private repo access, and all other write operations are rejected client-side. OAuth state is generated with `crypto.getRandomValues` and verified on callback. Token validation runs on every page load via `GET /user`; a 401 clears the stored token immediately.
 
 ## Deployment
 
