@@ -204,6 +204,49 @@ describe("fetchHotPRStatus", () => {
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_node4"]);
     expect(results.get(45)!.checkStatus).toBe("pending");
   });
+
+  it("maps headRefOid (headSha), autoMergeMethod, viewerLatestReviewState, and viewerReviewRequested", async () => {
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        {
+          databaseId: 46,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "REVIEW_REQUIRED",
+          headRefOid: validSha,
+          autoMergeRequest: { mergeMethod: "REBASE" },
+          viewerLatestReview: { state: "APPROVED" },
+          viewerLatestReviewRequest: { id: "RR_kwDOtest46" },
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        },
+        {
+          databaseId: 47,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          autoMergeRequest: null,
+          viewerLatestReview: null,
+          viewerLatestReviewRequest: null,
+          commits: { nodes: [] },
+        },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node5", "PR_node6"]);
+    const u46 = results.get(46)!;
+    expect(u46.headSha).toBe(validSha);
+    expect(u46.autoMergeMethod).toBe("REBASE");
+    expect(u46.viewerLatestReviewState).toBe("APPROVED");
+    expect(u46.viewerReviewRequested).toBe(true);
+
+    const u47 = results.get(47)!;
+    expect(u47.headSha).toBeUndefined();
+    expect(u47.autoMergeMethod).toBeNull();
+    expect(u47.viewerLatestReviewState).toBeNull();
+    expect(u47.viewerReviewRequested).toBe(false);
+  });
 });
 
 describe("fetchWorkflowRunById", () => {

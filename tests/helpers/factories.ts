@@ -50,6 +50,9 @@ export function makePullRequest(overrides: Partial<PullRequest> = {}): PullReque
     labels: [],
     reviewDecision: null,
     totalReviewCount: 0,
+    autoMergeMethod: null,
+    viewerReviewRequested: false,
+    viewerLatestReviewState: null,
     enriched: true,
     ...overrides,
   };

@@ -1,5 +1,5 @@
 // Re-exports from shared/format for backward compat with existing importers.
-export { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount } from "../../shared/format";
+export { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, canApprovePR } from "../../shared/format";
 
 export function stripParenthetical(name: string): string {
   return name.replace(/\s*\(.*\)$/, "");
