@@ -127,6 +127,7 @@ describe("createGitHubClient", () => {
     expect(GITHUB_NODE_ID_RE.test("PR_kwDOtest42")).toBe(true);
     expect(GITHUB_NODE_ID_RE.test("MDExOlB1bGxSZXF1ZXN0NDI=")).toBe(true);
     expect(GIT_SHA_RE.test(validSha)).toBe(true);
+    expect(APPROVE_PR_MUTATION).not.toContain("rateLimit");
     vi.unstubAllGlobals();
   });
 
@@ -803,6 +804,11 @@ describe("hook.wrap — rate limit signal routing", () => {
     // _coreRateLimit must remain at seeded value — GraphQL success must not contaminate it
     const rl = getCoreRateLimit();
     expect(rl!.remaining).toBe(1234);
+
+    // Because the response had no body rateLimit (as on GraphQL mutations), _graphqlRateLimit updates from headers
+    const graphqlRl = getGraphqlRateLimit();
+    expect(graphqlRl).not.toBeNull();
+    expect(graphqlRl!.remaining).toBe(9999);
   });
 
   it("successful REST request updates _coreRateLimit but NOT _graphqlRateLimit", async () => {

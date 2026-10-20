@@ -1418,14 +1418,13 @@ function mergeEnrichment(
       forkInfoMap.set(pr.id, e.headRepository);
     }
 
-    const viewerLatestReviewState = e.viewerLatestReviewState;
     const viewerReviewRequested =
-      viewerLatestReviewState === "APPROVED" && !e.viewerReviewRequested
+      e.viewerLatestReviewState === "APPROVED" && !e.viewerReviewRequested
         ? false
         : Boolean(pr.viewerReviewRequested || e.viewerReviewRequested);
     const reviewerLogins =
       viewerLogin &&
-      (viewerReviewRequested || viewerLatestReviewState !== null) &&
+      (viewerReviewRequested || e.viewerLatestReviewState !== null) &&
       !e.reviewerLogins.includes(viewerLogin)
         ? [...e.reviewerLogins, viewerLogin]
         : e.reviewerLogins;
@@ -1434,9 +1433,7 @@ function mergeEnrichment(
       ...pr,
       ...pickEnrichmentFields(e),
       reviewerLogins,
-      autoMergeMethod: e.autoMergeMethod,
       viewerReviewRequested,
-      viewerLatestReviewState,
       enriched: true,
     };
   });

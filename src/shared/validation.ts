@@ -19,7 +19,6 @@ export const APPROVE_PR_MUTATION = `
         }
       }
     }
-    rateLimit { cost limit remaining resetAt }
   }
 `.trim();
 

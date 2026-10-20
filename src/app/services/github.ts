@@ -96,6 +96,22 @@ export function updateRateLimitFromHeaders(headers: Record<string, string>): voi
   }
 }
 
+function updateGraphqlRateLimitFromHeaders(headers: Record<string, string>): void {
+  const remaining = headers["x-ratelimit-remaining"];
+  const reset = headers["x-ratelimit-reset"];
+  const limit = headers["x-ratelimit-limit"];
+  if (remaining !== undefined && reset !== undefined) {
+    const parsedRemaining = parseInt(remaining, 10);
+    const parsedReset = parseInt(reset, 10);
+    if (!Number.isFinite(parsedReset)) return;
+    _setGraphqlRateLimit({
+      limit: safePositiveNumber(limit !== undefined ? parseInt(limit, 10) : NaN, _graphqlRateLimit()?.limit ?? 5000),
+      remaining: Number.isFinite(parsedRemaining) ? parsedRemaining : 0,
+      resetAt: new Date(parsedReset * 1000),
+    });
+  }
+}
+
 // ── API request tracking callback ────────────────────────────────────────────
 
 export interface ApiRequestInfo {
@@ -209,16 +225,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
       if (errHeaders) {
         try {
           if (isGraphql) {
-            const remaining = errHeaders["x-ratelimit-remaining"];
-            const reset = errHeaders["x-ratelimit-reset"];
-            const limit = errHeaders["x-ratelimit-limit"];
-            if (remaining !== undefined && reset !== undefined) {
-              _setGraphqlRateLimit({
-                limit: safePositiveNumber(limit !== undefined ? parseInt(limit, 10) : NaN, _graphqlRateLimit()?.limit ?? 5000),
-                remaining: Number.isFinite(parseInt(remaining, 10)) ? parseInt(remaining, 10) : 0,
-                resetAt: new Date(parseInt(reset, 10) * 1000),
-              });
-            }
+            updateGraphqlRateLimitFromHeaders(errHeaders);
           } else {
             updateRateLimitFromHeaders(errHeaders);
           }
@@ -231,9 +238,10 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     const headers = (response.headers ?? {}) as Record<string, string>;
     const resetHeader = headers["x-ratelimit-reset"];
     const resetEpochMs = resetHeader ? parseInt(resetHeader, 10) * 1000 : null;
-    const graphqlCost = isGraphql
-      ? (response.data as { data?: { rateLimit?: { cost?: number } } })?.data?.rateLimit?.cost ?? undefined
+    const bodyRateLimit = isGraphql
+      ? (response.data as { data?: { rateLimit?: { cost?: number } } })?.data?.rateLimit
       : undefined;
+    const graphqlCost = bodyRateLimit?.cost ?? undefined;
     const info: ApiRequestInfo = {
       url: options.url, method, status, isGraphql, apiSource, resetEpochMs, graphqlCost,
     };
@@ -241,6 +249,8 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
 
     if (response.headers && !isGraphql) {
       updateRateLimitFromHeaders(response.headers as Record<string, string>);
+    } else if (isGraphql && !bodyRateLimit) {
+      updateGraphqlRateLimitFromHeaders(headers);
     }
 
     return response;

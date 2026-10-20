@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, JSX, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, Show } from "solid-js";
 import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
@@ -57,11 +57,9 @@ export default function ItemRow(props: ItemRowProps) {
     setConfirmingApprove(false);
   }
 
-  createEffect(() => {
-    if (!props.onApprove || props.isApproving) {
-      resetApproveConfirm();
-    }
-  });
+  createEffect(
+    on([() => props.onApprove, () => props.approveAutoMerge, () => props.isApproving], resetApproveConfirm, { defer: true }),
+  );
 
   onCleanup(() => {
     clearApproveTimer();

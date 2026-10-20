@@ -328,9 +328,6 @@ async function pollFetch(): Promise<DashboardData> {
             if (!regressing) {
               Object.assign(pr, pickEnrichmentFields(e));
               pr.reviewDecision = e.reviewDecision;
-              pr.autoMergeMethod = e.autoMergeMethod;
-              pr.viewerReviewRequested = e.viewerReviewRequested;
-              pr.viewerLatestReviewState = e.viewerLatestReviewState;
               pr.enriched = e.enriched;
             }
             pr.nodeId = e.nodeId;
@@ -340,6 +337,7 @@ async function pollFetch(): Promise<DashboardData> {
           }
         } else {
           state.pullRequests = fallbackToPreviousEnrichment(state.pullRequests, data.pullRequests);
+          for (const pr of state.pullRequests) applyRecentApprovalGuard(pr, currentLogin);
         }
       }));
     } else {
@@ -349,6 +347,7 @@ async function pollFetch(): Promise<DashboardData> {
       // DOM updates are synchronous within the setter, so save/restore
       // around it to prevent scroll reset from <For> DOM rebuild.
       const pullRequests = fallbackToPreviousEnrichment(dashboardData.pullRequests, data.pullRequests);
+      for (const pr of pullRequests) applyRecentApprovalGuard(pr, currentLogin);
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
@@ -402,6 +401,25 @@ const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPol
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 const [_eventsCoordinator, _setEventsCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 
+function persistDashboardSnapshot(): void {
+  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
+  // between here and the deferred setTimeout write.
+  const snapshot = {
+    _v: CACHE_VERSION,
+    issues: [...dashboardData.issues],
+    pullRequests: [...dashboardData.pullRequests],
+    workflowRuns: [...dashboardData.workflowRuns],
+    lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+  };
+  setTimeout(() => {
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Non-fatal
+    }
+  }, 0);
+}
+
 // Mutates data.issues[].surfacedBy and data.pullRequests[].surfacedBy in-place before merging.
 function handleTargetedData(data: DashboardData, affectedRepos: string[]): void {
   const affectedSet = new Set(affectedRepos.map(r => r.toLowerCase()));
@@ -414,7 +432,9 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }
   }
   const oldSurfacedByPRs = new Map<number, string[]>();
+  const existingPRById = new Map<number, PullRequest>();
   for (const pr of dashboardData.pullRequests) {
+    existingPRById.set(pr.id, pr);
     if (affectedSet.has(pr.repoFullName.toLowerCase()) && pr.surfacedBy?.length) {
       oldSurfacedByPRs.set(pr.id, pr.surfacedBy);
     }
@@ -427,12 +447,18 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
       item.surfacedBy = [...new Set([...(item.surfacedBy ?? []), ...oldSb])];
     }
   }
+  const currentLogin = user()?.login ?? "";
   for (const pr of data.pullRequests) {
     const oldSb = oldSurfacedByPRs.get(pr.id);
     if (oldSb) {
       pr.surfacedBy = [...new Set([...(pr.surfacedBy ?? []), ...oldSb])];
     }
-    applyRecentApprovalGuard(pr, user()?.login ?? "");
+    const existingPr = existingPRById.get(pr.id);
+    if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
+      Object.assign(pr, pickEnrichmentFields(existingPr));
+      pr.enriched = existingPr.enriched;
+    }
+    applyRecentApprovalGuard(pr, currentLogin);
   }
 
   withScrollLock(() => {
@@ -474,24 +500,7 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
   dispatchNotifications(newItems, config);
 
   seedHotSetsFromTargeted(data);
-
-  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
-  // between here and the deferred setTimeout write.
-  const lastRefreshed = dashboardData.lastRefreshedAt;
-  const snapshot = {
-    _v: CACHE_VERSION,
-    issues: [...dashboardData.issues],
-    pullRequests: [...dashboardData.pullRequests],
-    workflowRuns: [...dashboardData.workflowRuns],
-    lastRefreshedAt: lastRefreshed?.toISOString() ?? null,
-  };
-  setTimeout(() => {
-    try {
-      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Non-fatal
-    }
-  }, 0);
+  persistDashboardSnapshot();
 }
 
 export default function DashboardPage() {
@@ -1469,14 +1478,7 @@ export default function DashboardPage() {
       setDashboardData(
         produce((state) => {
           const target = state.pullRequests.find((item) => item.id === pr.id);
-          if (!target) return;
-          target.viewerLatestReviewState = "APPROVED";
-          target.viewerReviewRequested = false;
-          target.reviewDecision = nextDecision;
-          const loginLower = currentLogin.toLowerCase();
-          if (loginLower && !target.reviewerLogins.some((r) => r.toLowerCase() === loginLower)) {
-            target.reviewerLogins = [...target.reviewerLogins, loginLower];
-          }
+          if (target) applyRecentApprovalGuard(target, currentLogin);
         })
       );
 
@@ -1490,20 +1492,7 @@ export default function DashboardPage() {
         errors: [],
       });
 
-      const snapshot = {
-        _v: CACHE_VERSION,
-        issues: [...dashboardData.issues],
-        pullRequests: [...dashboardData.pullRequests],
-        workflowRuns: [...dashboardData.workflowRuns],
-        lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
-      };
-      setTimeout(() => {
-        try {
-          localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
-        } catch {
-          // Non-fatal
-        }
-      }, 0);
+      persistDashboardSnapshot();
 
       pushNotification(`approve-pr:${pr.id}`, `Approved ${pr.repoFullName}#${pr.number}`, "info");
     } catch (err) {

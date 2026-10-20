@@ -2038,6 +2038,53 @@ describe("DashboardPage — events poll targeted merge", () => {
     expect(vi.mocked(pollService.rebuildHotSets)).not.toHaveBeenCalled();
     expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
   });
+
+  it("preserves prior enrichment in handleTargetedData when targeted PR arrives with enriched: false", async () => {
+    const enrichedPR = makePullRequest({
+      id: 61,
+      repoFullName: "org/repo",
+      enriched: true,
+      autoMergeMethod: "SQUASH",
+      viewerReviewRequested: true,
+      viewerLatestReviewState: "CHANGES_REQUESTED",
+      checkStatus: "success",
+      headSha: "1111111111111111111111111111111111111111",
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [enrichedPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+
+    const unenrichedTargetedPR = makePullRequest({
+      id: 61,
+      repoFullName: "org/repo",
+      enriched: false,
+      autoMergeMethod: null,
+      viewerReviewRequested: false,
+      viewerLatestReviewState: null,
+      checkStatus: null,
+      headSha: "",
+    });
+    const targetedData: DashboardData = {
+      issues: [],
+      pullRequests: [unenrichedTargetedPR],
+      workflowRuns: [],
+      errors: [],
+    };
+    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+
+    expect(unenrichedTargetedPR.enriched).toBe(true);
+    expect(unenrichedTargetedPR.autoMergeMethod).toBe("SQUASH");
+    expect(unenrichedTargetedPR.viewerReviewRequested).toBe(true);
+    expect(unenrichedTargetedPR.viewerLatestReviewState).toBe("CHANGES_REQUESTED");
+    expect(unenrichedTargetedPR.checkStatus).toBe("success");
+    expect(unenrichedTargetedPR.headSha).toBe("1111111111111111111111111111111111111111");
+  });
 });
 
 describe("DashboardPage — dependency pre-exclusivity", () => {

@@ -572,5 +572,22 @@ describe("ItemRow", () => {
       fireEvent.click(btn);
       expect(onApprove).not.toHaveBeenCalled();
     });
+
+    it("resets 'Confirm?' back to 'Approve' when onApprove prop reference changes (e.g. headSha updated on poll)", () => {
+      const onApproveA = vi.fn();
+      const onApproveB = vi.fn();
+      const [approveFn, setApproveFn] = createSignal<() => void>(onApproveA);
+
+      render(() => <ItemRow {...defaultProps} onApprove={approveFn()} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      fireEvent.click(btn);
+      expect(btn.textContent).toBe("Confirm?");
+
+      setApproveFn(() => onApproveB);
+      expect(btn.textContent).toContain("Approve");
+      expect(onApproveA).not.toHaveBeenCalled();
+      expect(onApproveB).not.toHaveBeenCalled();
+    });
   });
 });

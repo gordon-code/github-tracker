@@ -464,9 +464,6 @@ function StatusGroup(props: StatusGroupProps) {
                     <div class="flex items-center gap-1.5 flex-wrap">
                       <Show when={pr.enriched !== false}>
                         <StatusDot status={pr.checkStatus} />
-                      </Show>
-
-                      <Show when={pr.enriched !== false}>
                         <ReviewBadge decision={pr.reviewDecision} />
                         <AutoMergeBadge method={pr.autoMergeMethod} compact={config.viewDensity === "compact"} />
                       </Show>
