@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, type ApiRequestInfo } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -88,6 +88,126 @@ describe("createGitHubClient", () => {
         owner: "test",
         repo: "test",
         issue_number: 1,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("allows APPROVE_PR_MUTATION with valid PR_ nodeId and 40-hex commitOID", async () => {
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            addPullRequestReview: {
+              pullRequestReview: { state: "APPROVED", pullRequest: { reviewDecision: "APPROVED" } },
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha },
+      })
+    ).resolves.toBeDefined();
+
+    // Also verify legacy Base64 node ID format via client.graphql()
+    await expect(
+      client.graphql(APPROVE_PR_MUTATION, {
+        pullRequestId: "MDExOlB1bGxSZXF1ZXN0NDI=",
+        commitOID: validSha,
+      })
+    ).resolves.toBeDefined();
+
+    expect(GITHUB_NODE_ID_RE.test("PR_kwDOtest42")).toBe(true);
+    expect(GITHUB_NODE_ID_RE.test("MDExOlB1bGxSZXF1ZXN0NDI=")).toBe(true);
+    expect(GIT_SHA_RE.test(validSha)).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("blocks arbitrary, comment-prefixed, and aliased/combined GraphQL mutations", async () => {
+    const client = createGitHubClient("test-token");
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation { mergePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation { closePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation { deleteIssue(input: { issueId: "I_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Comment-prefixed mutation
+    await expect(
+      client.request("POST /graphql", {
+        query: `# addPullRequestReview\nmutation { closePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Combined / aliased mutation smuggling
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation ApprovePullRequest($pullRequestId: ID!, $commitOID: GitObjectID!) {
+          a: addPullRequestReview(input: { pullRequestId: $pullRequestId, commitOID: $commitOID, event: APPROVE }) {
+            pullRequestReview { state }
+          }
+          b: mergePullRequest(input: { pullRequestId: $pullRequestId }) {
+            clientMutationId
+          }
+        }`,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("blocks APPROVE_PR_MUTATION with missing or malformed pullRequestId or commitOID", async () => {
+    const client = createGitHubClient("test-token");
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+    // Missing variables object
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Malformed pullRequestId
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: { pullRequestId: "bad!id", commitOID: validSha },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Missing/non-SHA commitOID
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: "not-a-sha" },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Disallowed event override in variables
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha, event: "REQUEST_CHANGES" },
       })
     ).rejects.toThrow(/Write operation blocked/);
   });
@@ -528,6 +648,21 @@ describe("hook.wrap — request tracking callbacks", () => {
     const client = createGitHubClient("test-token");
     // Write operation — read-only guard throws before any HTTP request
     await expect(client.request("DELETE /repos/{owner}/{repo}", { owner: "a", repo: "b" })).rejects.toThrow("Write operation blocked");
+    expect(cbSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not fire callback when GraphQL mutation guard blocks a mutation", async () => {
+    ensureRegistered();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } })
+    ));
+
+    const client = createGitHubClient("test-token");
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation { mergePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
     expect(cbSpy).not.toHaveBeenCalled();
   });
 

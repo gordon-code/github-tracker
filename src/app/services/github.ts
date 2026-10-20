@@ -6,6 +6,46 @@ import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
 import { pushNotification } from "../lib/errors";
+import { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
+
+export { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE };
+
+const NORMALIZED_APPROVE_MUTATION = APPROVE_PR_MUTATION.replace(/\s+/g, " ");
+
+function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown }): boolean {
+  if (typeof options.query !== "string") return false;
+  // Strip block strings, single-line strings, and # comments in a single left-to-right pass
+  const sanitized = options.query
+    .replace(/"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, (m) => (m.startsWith("#") ? "" : '""'))
+    .trim();
+  if (!sanitized) return false;
+
+  // 1. Allow read-only GraphQL queries (starts with `query` or `{` and has no top-level mutation/subscription)
+  if (/^(?:query\b|\{)/i.test(sanitized) && !/\b(?:mutation|subscription)\b/i.test(sanitized)) {
+    return true;
+  }
+
+  // 2. Allow ONLY the exact canonical ApprovePullRequest mutation
+  const stripped = options.query.replace(/#[^\r\n]*/g, "").trim();
+  const normalized = stripped.replace(/\s+/g, " ");
+  if (normalized !== NORMALIZED_APPROVE_MUTATION) {
+    return false;
+  }
+
+  // 3. Validate mutation variables
+  const vars = options.variables as Record<string, unknown> | undefined;
+  if (!vars || typeof vars !== "object") return false;
+  if (typeof vars.pullRequestId !== "string" || !GITHUB_NODE_ID_RE.test(vars.pullRequestId)) {
+    return false;
+  }
+  if (typeof vars.commitOID !== "string" || !GIT_SHA_RE.test(vars.commitOID)) {
+    return false;
+  }
+  if (vars.event !== undefined && vars.event !== "APPROVE") {
+    return false;
+  }
+  return true;
+}
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
@@ -117,14 +157,14 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
     },
   });
 
-  // Read-only guard: the OAuth App `repo` scope grants write access, but this
-  // app is strictly read-only. Block any non-GET request except POST /graphql
-  // (GraphQL queries are read-only but always use POST).
+  // Least-privilege write guard: the OAuth App `repo` scope grants broad write access,
+  // but this app only permits GET requests, read-only GraphQL queries, and the single
+  // explicit user-confirmed PR approval mutation (APPROVE_PR_MUTATION).
   client.hook.before("request", (options) => {
     const method = (options.method ?? "GET").toUpperCase();
     if (method === "GET") return;
-    if (method === "POST" && options.url === "/graphql") return;
-    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. This app is read-only.`);
+    if (method === "POST" && options.url === "/graphql" && isAllowedGraphqlRequest(options)) return;
+    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. Only read queries and PR approvals are permitted.`);
   });
 
   // Track every API request for usage analytics + update rate limit display

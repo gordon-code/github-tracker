@@ -11,6 +11,17 @@ type GitHubOctokitInstance = InstanceType<typeof GitHubOctokit>;
 
 // ── Client factory ───────────────────────────────────────────────────────────
 
+function isReadOnlyGraphqlQuery(query: unknown): boolean {
+  if (typeof query !== "string") return false;
+  // Strip block strings, single-line strings, and # comments in a single left-to-right pass
+  const sanitized = query
+    .replace(/"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, (m) => (m.startsWith("#") ? "" : '""'))
+    .trim();
+  if (!sanitized) return false;
+  if (!/^(?:query\b|\{)/i.test(sanitized)) return false;
+  return !/\b(?:mutation|subscription)\b/i.test(sanitized);
+}
+
 export function createOctokitClient(token: string): GitHubOctokitInstance {
   const client = new GitHubOctokit({
     auth: token,
@@ -46,12 +57,11 @@ export function createOctokitClient(token: string): GitHubOctokitInstance {
     },
   });
 
-  // Read-only guard: block any non-GET request except POST /graphql
-  // (GraphQL queries are read-only but always use POST).
+  // Read-only guard: block any non-GET request except read-only POST /graphql queries.
   client.hook.before("request", (options) => {
     const method = (options.method ?? "GET").toUpperCase();
     if (method === "GET") return;
-    if (method === "POST" && options.url === "/graphql") return;
+    if (method === "POST" && options.url === "/graphql" && isReadOnlyGraphqlQuery(options.query)) return;
     throw new Error(
       `[mcp] Write operation blocked: ${method} ${options.url}. This server is read-only.`
     );
