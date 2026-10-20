@@ -6,6 +6,7 @@ import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { HotPRStatusUpdate, HotWorkflowRunUpdate } from "../../src/app/services/api";
 import { GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
+import { APPROVE_PR_MUTATION } from "../../src/shared/validation";
 
 const mockLocationReplace = vi.fn();
 
@@ -59,11 +60,12 @@ vi.mock("../../src/app/services/jira-keys", () => ({
   clearJiraKeyCache: vi.fn(),
 }));
 
-// Mock github service (used by Header + DashboardPage org sync)
+// Mock github service (used by Header + DashboardPage org sync + approvePullRequest)
 vi.mock("../../src/app/services/github", () => ({
   getCoreRateLimit: () => null,
   getGraphqlRateLimit: () => null,
   getClient: vi.fn(() => null),
+  updateGraphqlRateLimit: vi.fn(),
 }));
 
 // Mock notifications lib
@@ -111,6 +113,8 @@ let pollService: typeof import("../../src/app/services/poll");
 let authStore: typeof import("../../src/app/stores/auth");
 let viewStore: typeof import("../../src/app/stores/view");
 let configStore: typeof import("../../src/app/stores/config");
+let githubService: typeof import("../../src/app/services/github");
+let errorsLib: typeof import("../../src/app/lib/errors");
 
 beforeEach(async () => {
   // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
@@ -172,6 +176,8 @@ beforeEach(async () => {
   authStore = await import("../../src/app/stores/auth");
   viewStore = await import("../../src/app/stores/view");
   configStore = await import("../../src/app/stores/config");
+  githubService = await import("../../src/app/services/github");
+  errorsLib = await import("../../src/app/lib/errors");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -179,6 +185,10 @@ beforeEach(async () => {
   capturedOnTargetedData = null;
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(authStore.expireToken).mockClear();
+  vi.mocked(githubService.getClient).mockReset();
+  vi.mocked(githubService.getClient).mockReturnValue(null);
+  vi.mocked(errorsLib.pushNotification).mockClear();
+  vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -3450,5 +3460,230 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       expect(mockDetectAndLookupJiraKeys).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByText("Expired")).toBeNull();
+  });
+});
+
+// ── PR Approval Integration ──────────────────────────────────────────────────
+
+describe("DashboardPage — PR approval integration", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+  it("completes two-step PR approval flow, updates badge to Approved, seeds hot sets, and pushes info notification", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: {
+            reviewDecision: "APPROVED",
+          },
+        },
+      },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const openPR = makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+      autoMergeMethod: null,
+      viewerReviewRequested: false,
+      viewerLatestReviewState: null,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [openPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("owner/repo");
+    });
+    await user.click(screen.getByText("owner/repo"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Review needed")).toBeTruthy();
+    });
+
+    const approveBtn = screen.getByLabelText("Approve #42 Fix race condition");
+    expect(approveBtn.textContent).toBe("Approve");
+
+    // Step 1: Enter confirmation mode
+    await user.click(approveBtn);
+    expect(graphqlMock).not.toHaveBeenCalled();
+    expect(approveBtn.textContent).toBe("Confirm?");
+
+    // Step 2: Confirm approval
+    await user.click(approveBtn);
+    await waitFor(() => {
+      expect(graphqlMock).toHaveBeenCalledOnce();
+    });
+
+    expect(graphqlMock).toHaveBeenCalledWith(APPROVE_PR_MUTATION, {
+      pullRequestId: "PR_kwDOtest0042",
+      commitOID: validSha,
+      request: { apiSource: "approvePR", retries: 0 },
+    });
+
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("approve-pr:42");
+    expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith({
+      issues: [],
+      pullRequests: [expect.objectContaining({ id: 42, enriched: true, checkStatus: "pending" })],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Approved")).toBeTruthy();
+      expect(screen.queryByText("Review needed")).toBeNull();
+    });
+    expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
+
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "approve-pr:42",
+      "Approved owner/repo#42",
+      "info"
+    );
+  });
+
+  it("handles 403 / FORBIDDEN error without calling expireToken, leaves PR unapproved, re-enables Approve button, and pushes PAT write permission error", async () => {
+    const user = userEvent.setup();
+    const forbiddenErr = Object.assign(new Error("Resource not accessible by personal access token"), {
+      status: 403,
+      errors: [{ type: "FORBIDDEN", message: "Resource not accessible by personal access token" }],
+    });
+    const graphqlMock = vi.fn().mockRejectedValue(forbiddenErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const openPR = makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [openPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("owner/repo");
+    });
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition") as HTMLButtonElement);
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        "Unable to approve PR: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
+        "error"
+      );
+    });
+
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(screen.getByText("Review needed")).toBeTruthy();
+
+    const btnAfter = screen.getByLabelText("Approve #42 Fix race condition") as HTMLButtonElement;
+    expect(btnAfter.disabled).toBe(false);
+    expect(btnAfter.textContent).toBe("Approve");
+  });
+
+  it("handles stale commitOID error by pushing a warning notification and triggering manualRefresh", async () => {
+    const user = userEvent.setup();
+    const manualRefreshSpy = vi.fn();
+    vi.mocked(pollService.createPollCoordinator).mockImplementation(
+      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        capturedFetchAll = fetchAll;
+        void fetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: manualRefreshSpy,
+          destroy: vi.fn(),
+        };
+      }
+    );
+
+    const staleErr = new Error("Pull request review thread commitOID was not part of the pull request");
+    const graphqlMock = vi.fn().mockRejectedValue(staleErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const openPR = makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [openPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => {
+      screen.getByText("owner/repo");
+    });
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        "Could not approve owner/repo#42: new commits were pushed — refreshing",
+        "warning"
+      );
+    });
+    expect(manualRefreshSpy).toHaveBeenCalledOnce();
   });
 });
