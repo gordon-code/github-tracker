@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/core";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
+import { isReadOnlyGraphqlQuery } from "../../src/shared/validation.js";
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
@@ -46,12 +47,11 @@ export function createOctokitClient(token: string): GitHubOctokitInstance {
     },
   });
 
-  // Read-only guard: block any non-GET request except POST /graphql
-  // (GraphQL queries are read-only but always use POST).
+  // Read-only guard: block any non-GET request except read-only POST /graphql queries.
   client.hook.before("request", (options) => {
     const method = (options.method ?? "GET").toUpperCase();
     if (method === "GET") return;
-    if (method === "POST" && options.url === "/graphql") return;
+    if (method === "POST" && options.url === "/graphql" && isReadOnlyGraphqlQuery(options.query)) return;
     throw new Error(
       `[mcp] Write operation blocked: ${method} ${options.url}. This server is read-only.`
     );

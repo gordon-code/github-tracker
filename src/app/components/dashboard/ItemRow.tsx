@@ -1,4 +1,4 @@
-import { createMemo, For, JSX, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, Show } from "solid-js";
 import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";
@@ -20,6 +20,12 @@ export interface ItemRowProps {
   onIgnore?: () => void;
   onTrack?: () => void;
   isTracked?: boolean;
+  /** Callback invoked on the second (confirmation) click of the Approve button */
+  onApprove?: () => void;
+  /** True while an approval mutation for this PR is in flight */
+  isApproving?: boolean;
+  /** True when auto-merge is enabled on the PR, adding an auto-merge hint on the Confirm step */
+  approveAutoMerge?: boolean;
   commentCount?: number;
   hideRepo?: boolean;
   hideAuthor?: boolean;
@@ -34,6 +40,66 @@ export interface ItemRowProps {
 export default function ItemRow(props: ItemRowProps) {
   const isCompact = createMemo(() => config.viewDensity === "compact");
   const safeUrl = () => isSafeGitHubUrl(props.url) ? props.url : undefined;
+
+  const APPROVE_CONFIRM_TIMEOUT_MS = 4_000;
+  const [confirmingApprove, setConfirmingApprove] = createSignal(false);
+  let approveConfirmTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearApproveTimer() {
+    if (approveConfirmTimer !== undefined) {
+      clearTimeout(approveConfirmTimer);
+      approveConfirmTimer = undefined;
+    }
+  }
+
+  function resetApproveConfirm() {
+    clearApproveTimer();
+    setConfirmingApprove(false);
+  }
+
+  const isApproving = createMemo(() => Boolean(props.isApproving));
+  const approveAutoMerge = createMemo(() => Boolean(props.approveAutoMerge));
+
+  createEffect(
+    on(
+      [() => props.onApprove, approveAutoMerge, isApproving],
+      (curr, prev) => {
+        if (!prev || curr.some((v, i) => v !== prev[i])) {
+          resetApproveConfirm();
+        }
+      },
+      { defer: true },
+    ),
+  );
+
+  onCleanup(() => {
+    clearApproveTimer();
+  });
+
+  function handleApproveClick(e: MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (props.isApproving || !props.onApprove) return;
+    if (!confirmingApprove()) {
+      setConfirmingApprove(true);
+      clearApproveTimer();
+      approveConfirmTimer = setTimeout(() => {
+        approveConfirmTimer = undefined;
+        setConfirmingApprove(false);
+      }, APPROVE_CONFIRM_TIMEOUT_MS);
+      return;
+    }
+    resetApproveConfirm();
+    props.onApprove();
+  }
+
+  function handleApproveKeyDown(e: KeyboardEvent) {
+    if (e.key === "Escape" && confirmingApprove()) {
+      e.stopPropagation();
+      e.preventDefault();
+      resetApproveConfirm();
+    }
+  }
 
   // Static date info — recomputed only when createdAt/updatedAt change (not on tick)
   const staticDateInfo = createMemo(() => {
@@ -85,6 +151,75 @@ export default function ItemRow(props: ItemRowProps) {
     const slash = props.repo.indexOf("/");
     return slash >= 0 ? props.repo.slice(slash + 1) : props.repo;
   });
+
+  const approveButtonMeta = createMemo(() => {
+    if (props.isApproving) {
+      return {
+        wrapperClass: "ml-2 max-w-40 opacity-100 pointer-events-auto",
+        tooltip: "Submitting approval...",
+        buttonClass: "btn-ghost",
+        ariaLabel: `Approving #${props.number} ${props.title}`,
+      };
+    }
+    if (confirmingApprove()) {
+      return {
+        wrapperClass: "ml-2 max-w-40 opacity-100 pointer-events-auto",
+        tooltip: props.approveAutoMerge
+          ? "Click again to confirm approval (auto-merge enabled)"
+          : "Click again to confirm approval",
+        buttonClass: "btn-warning",
+        ariaLabel: props.approveAutoMerge
+          ? `Confirm approve #${props.number} ${props.title} (auto-merge enabled)`
+          : `Confirm approve #${props.number} ${props.title}`,
+      };
+    }
+    return {
+      wrapperClass:
+        "max-w-0 opacity-0 pointer-events-none group-hover:ml-2 group-hover:max-w-40 group-hover:opacity-100 group-hover:pointer-events-auto focus-within:ml-2 focus-within:max-w-40 focus-within:opacity-100 focus-within:pointer-events-auto",
+      tooltip: "Approve this pull request",
+      buttonClass: "btn-ghost text-success hover:bg-success/15",
+      ariaLabel: `Approve #${props.number} ${props.title}`,
+    };
+  });
+
+  const renderApproveButton = () => (
+    <Show when={props.onApprove !== undefined}>
+      <Tooltip
+        content={approveButtonMeta().tooltip}
+        class={`shrink-0 self-center relative z-10 overflow-hidden transition-all ${approveButtonMeta().wrapperClass}`}
+      >
+        <button
+          type="button"
+          data-approve-btn
+          disabled={props.isApproving}
+          onClick={handleApproveClick}
+          onKeyDown={handleApproveKeyDown}
+          onBlur={resetApproveConfirm}
+          class={`btn btn-xs shrink-0 self-center whitespace-nowrap ${approveButtonMeta().buttonClass}`}
+          aria-label={approveButtonMeta().ariaLabel}
+        >
+          <Show
+            when={!props.isApproving}
+            fallback={<span class="loading loading-spinner loading-xs" aria-hidden="true" />}
+          >
+            <Show
+              when={confirmingApprove()}
+              fallback={
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                  </svg>
+                  <span>Approve</span>
+                </>
+              }
+            >
+              <span>{props.approveAutoMerge ? "Confirm (auto)" : "Confirm?"}</span>
+            </Show>
+          </Show>
+        </button>
+      </Tooltip>
+    </Show>
+  );
 
   return (
     <div
@@ -154,10 +289,13 @@ export default function ItemRow(props: ItemRowProps) {
           <div class="relative z-10 shrink-0">{props.titlePrefix}</div>
         </Show>
 
-        {/* Title — truncated, fills available space */}
-        <span class="font-medium text-sm truncate flex-1 min-w-0">
-          {props.title}
-        </span>
+        {/* Title + inline hover Approve button — fills available space */}
+        <div class="flex items-center flex-1 min-w-0">
+          <span class="font-medium text-sm truncate">
+            {props.title}
+          </span>
+          {renderApproveButton()}
+        </div>
 
         {/* Children (badges) inline */}
         <Show when={props.children !== undefined}>
@@ -221,9 +359,12 @@ export default function ItemRow(props: ItemRowProps) {
             <Show when={props.titlePrefix !== undefined}>
               <div class="relative z-10 shrink-0">{props.titlePrefix}</div>
             </Show>
-            <span class="font-medium text-base-content truncate">
-              {props.title}
-            </span>
+            <div class="flex items-center min-w-0 max-w-full">
+              <span class="font-medium text-base-content truncate">
+                {props.title}
+              </span>
+              {renderApproveButton()}
+            </div>
           </div>
 
           {/* Labels row */}

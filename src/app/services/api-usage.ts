@@ -9,7 +9,7 @@ import { onApiRequest, type ApiRequestInfo } from "./github";
 const API_CALL_SOURCES = [
   "lightSearch", "heavyBackfill", "forkCheck", "globalUserSearch", "unfilteredSearch",
   "upstreamDiscovery", "workflowRuns", "hotPRStatus", "hotRunStatus", "userEvents",
-  "validateUser", "fetchOrgs", "fetchRepos", "rateLimitCheck", "graphql", "rest",
+  "validateUser", "fetchOrgs", "fetchRepos", "rateLimitCheck", "approvePR", "graphql", "rest",
 ] as const;
 
 export type ApiCallSource = (typeof API_CALL_SOURCES)[number];
@@ -33,6 +33,7 @@ export const SOURCE_LABELS: Record<ApiCallSource, string> = {
   fetchOrgs: "Fetch Orgs",
   fetchRepos: "Fetch Repos",
   rateLimitCheck: "Rate Limit Check",
+  approvePR: "Approve PR",
   graphql: "GraphQL (other)",
   rest: "REST (other)",
 };

@@ -57,7 +57,7 @@ const graphqlLightPRNodeDefaults = {
   repository: { nameWithOwner: "octocat/Hello-World" },
   headRefName: "feature-branch",
   baseRefName: "main",
-  reviewDecision: "APPROVED",
+  reviewDecision: "APPROVED" as string | null,
   labels: { nodes: [{ name: "feature", color: "a2eeef" }] },
 };
 
@@ -69,7 +69,7 @@ function makeHeavyPRNode(databaseId: number, _nodeId?: string) {
     headRepository: { owner: { login: "octocat" }, nameWithOwner: "octocat/Hello-World" },
     mergeStateStatus: "CLEAN",
     assignees: { nodes: [{ login: "octocat" }] },
-    reviewRequests: { nodes: [{ requestedReviewer: { login: "reviewer2" } }] },
+    reviewRequests: { nodes: [{ requestedReviewer: { login: "reviewer2" } as { login?: string } | null }] },
     latestReviews: { totalCount: 1, nodes: [{ author: { login: "reviewer1" } }] },
     additions: 100,
     deletions: 20,
@@ -77,6 +77,9 @@ function makeHeavyPRNode(databaseId: number, _nodeId?: string) {
     comments: { totalCount: 3 },
     reviewThreads: { totalCount: 2 },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    autoMergeRequest: null as { mergeMethod: string } | null,
+    viewerLatestReview: null as { state: string } | null,
+    viewerLatestReviewRequest: null as { id: string } | null,
   };
 }
 
@@ -708,6 +711,9 @@ describe("pickEnrichmentFields", () => {
       checkStatus: "success",
       additions: 10,
       reviewerLogins: ["r1"],
+      autoMergeMethod: "SQUASH",
+      viewerReviewRequested: true,
+      viewerLatestReviewState: "COMMENTED",
     });
     const fields = pickEnrichmentFields(pr);
     expect(fields).toEqual({
@@ -721,9 +727,126 @@ describe("pickEnrichmentFields", () => {
       comments: pr.comments,
       reviewThreads: pr.reviewThreads,
       totalReviewCount: pr.totalReviewCount,
+      autoMergeMethod: pr.autoMergeMethod,
+      viewerReviewRequested: pr.viewerReviewRequested,
+      viewerLatestReviewState: pr.viewerLatestReviewState,
     });
     expect(fields).not.toHaveProperty("title");
     expect(fields).not.toHaveProperty("state");
     expect(fields).not.toHaveProperty("enriched");
+  });
+});
+
+describe("Phase 1 prReviewReq -> Phase 2 mergeEnrichment team review request preservation", () => {
+  const repos = makeRepos(2);
+
+  it("retains viewerReviewRequested: true and adds normalized userLogin to reviewerLogins for a team review request (even when also returned in prInvolves)", async () => {
+    const lightPR = makeLightPRNode({
+      id: "PR_kwDOteam42",
+      databaseId: 42,
+      reviewDecision: null,
+    });
+    const heavyNode = {
+      ...makeHeavyPRNode(42, "PR_kwDOteam42"),
+      // Team review request: no direct User node in reviewRequests and viewerLatestReviewRequest is null
+      reviewRequests: { nodes: [{ requestedReviewer: {} }] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      autoMergeRequest: { mergeMethod: "SQUASH" },
+      viewerLatestReview: null,
+      viewerLatestReviewRequest: null,
+    };
+
+    const octokit = makeTwoPhaseOctokit(
+      async () => ({
+        issues: makeSearchResponse([]),
+        prInvolves: makeSearchResponse([lightPR]),
+        prReviewReq: makeSearchResponse([lightPR]),
+        rateLimit,
+      }),
+      [heavyNode],
+    );
+
+    const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "TestUser");
+    expect(result.pullRequests).toHaveLength(1);
+    const pr = result.pullRequests[0];
+    expect(pr.viewerReviewRequested).toBe(true);
+    expect(pr.autoMergeMethod).toBe("SQUASH");
+    expect(pr.reviewerLogins).toContain("testuser");
+  });
+
+  it("clears viewerReviewRequested to false when viewerLatestReview.state is APPROVED and viewerLatestReviewRequest is null, while retaining userLogin in reviewerLogins", async () => {
+    const lightPR = makeLightPRNode({
+      id: "PR_kwDOteam43",
+      databaseId: 43,
+      reviewDecision: "APPROVED",
+    });
+    const heavyNode = {
+      ...makeHeavyPRNode(43, "PR_kwDOteam43"),
+      reviewRequests: { nodes: [] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      autoMergeRequest: null,
+      viewerLatestReview: { state: "APPROVED" },
+      viewerLatestReviewRequest: null,
+    };
+
+    const octokit = makeTwoPhaseOctokit(
+      async () => ({
+        issues: makeSearchResponse([]),
+        prInvolves: makeSearchResponse([]),
+        prReviewReq: makeSearchResponse([lightPR]),
+        rateLimit,
+      }),
+      [heavyNode],
+    );
+
+    const result = await fetchIssuesAndPullRequests(octokit as unknown as OctokitLike, repos, "TestUser");
+    expect(result.pullRequests).toHaveLength(1);
+    const pr = result.pullRequests[0];
+    expect(pr.viewerLatestReviewState).toBe("APPROVED");
+    expect(pr.viewerReviewRequested).toBe(false);
+    expect(pr.reviewerLogins).toContain("testuser");
+  });
+
+  it("does not set viewerReviewRequested or inject viewerLogin into reviewerLogins when prReviewReq matches a tracked user (globalUserSearch)", async () => {
+    const lightPR = makeLightPRNode({
+      id: "PR_kwDOteam44",
+      databaseId: 44,
+      reviewDecision: null,
+    });
+    const heavyNode = {
+      ...makeHeavyPRNode(44, "PR_kwDOteam44"),
+      reviewRequests: { nodes: [{ requestedReviewer: { login: "teammate" } }] },
+      latestReviews: { totalCount: 0, nodes: [] },
+      autoMergeRequest: null,
+      viewerLatestReview: null,
+      viewerLatestReviewRequest: null,
+    };
+
+    const octokit = makeTwoPhaseOctokit(
+      async (_query, variables) => {
+        const prRevQ = String((variables as Record<string, unknown> | undefined)?.prRevQ ?? "");
+        const isTrackedUserQuery = prRevQ.includes("review-requested:teammate");
+        return {
+          issues: makeSearchResponse([]),
+          prInvolves: makeSearchResponse([]),
+          prReviewReq: makeSearchResponse(isTrackedUserQuery ? [lightPR] : []),
+          rateLimit,
+        };
+      },
+      [heavyNode],
+    );
+
+    const result = await fetchIssuesAndPullRequests(
+      octokit as unknown as OctokitLike,
+      repos,
+      "TestUser",
+      undefined,
+      [{ login: "teammate", avatarUrl: "https://github.com/teammate.png", name: "Teammate", type: "user" }],
+    );
+    expect(result.pullRequests).toHaveLength(1);
+    const pr = result.pullRequests[0];
+    expect(pr.viewerReviewRequested).toBe(false);
+    expect(pr.reviewerLogins).toEqual(["teammate"]);
+    expect(pr.reviewerLogins).not.toContain("testuser");
   });
 });

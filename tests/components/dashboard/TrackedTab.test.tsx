@@ -30,6 +30,7 @@ vi.mock("../../../src/app/lib/url", () => ({
 
 import TrackedTab from "../../../src/app/components/dashboard/TrackedTab";
 import { viewState, resetViewState, updateViewState, untrackJiraItem } from "../../../src/app/stores/view";
+import { setConfig, resetConfig } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorageMock.clear();
   resetViewState();
+  resetConfig();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -348,5 +350,105 @@ describe("TrackedTab — Jira items", () => {
 
     // Should NOT show "#-42" or any number prefix — Jira items have number: undefined
     expect(screen.queryByText(/#-42/)).toBeNull();
+  });
+});
+
+describe("TrackedTab — auto-merge badge and Approve action", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+  it("renders auto-merge badge on live PR rows in comfortable and compact density, and omits when null or unenriched", () => {
+    const prAuto = makePullRequest({
+      id: 901,
+      number: 901,
+      title: "Auto Tracked PR",
+      autoMergeMethod: "MERGE",
+      enriched: true,
+    });
+    const prUnenriched = makePullRequest({
+      id: 902,
+      number: 902,
+      title: "Unenriched Tracked PR",
+      autoMergeMethod: "MERGE",
+      enriched: false,
+    });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 901, number: 901, type: "pullRequest", title: "Auto Tracked PR" }),
+        makeTrackedItem({ id: 902, number: 902, type: "pullRequest", title: "Unenriched Tracked PR" }),
+      ],
+    });
+
+    const { unmount } = render(() => (
+      <TrackedTab issues={[]} pullRequests={[prAuto, prUnenriched]} userLogin="testuser" />
+    ));
+    const badges = screen.getAllByTestId("auto-merge-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].className).toContain("badge-sm");
+    unmount();
+
+    setConfig("viewDensity", "compact");
+    render(() => (
+      <TrackedTab issues={[]} pullRequests={[prAuto, prUnenriched]} userLogin="testuser" />
+    ));
+    const compactBadges = screen.getAllByTestId("auto-merge-badge");
+    expect(compactBadges).toHaveLength(1);
+    expect(compactBadges[0].className).toContain("badge-xs");
+  });
+
+  it("renders Approve button on eligible live PR rows, suppresses on issue/fallback/self-authored rows, and calls onApprovePR(pr) on confirmation", () => {
+    const onApprovePR = vi.fn();
+    const eligiblePR = makePullRequest({
+      id: 910,
+      number: 910,
+      title: "Eligible Tracked PR",
+      userLogin: "otheruser",
+      nodeId: "PR_kwDOtrack910",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      enriched: true,
+    });
+    const selfPR = makePullRequest({
+      id: 911,
+      number: 911,
+      title: "Self Tracked PR",
+      userLogin: "testuser",
+      nodeId: "PR_kwDOtrack911",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      enriched: true,
+    });
+    const liveIssue = makeIssue({ id: 912, number: 912, title: "Tracked Issue" });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 910, number: 910, type: "pullRequest", title: "Eligible Tracked PR" }),
+        makeTrackedItem({ id: 911, number: 911, type: "pullRequest", title: "Self Tracked PR" }),
+        makeTrackedItem({ id: 912, number: 912, type: "issue", title: "Tracked Issue" }),
+        makeTrackedItem({ id: 913, number: 913, type: "pullRequest", title: "Fallback Missing PR" }),
+      ],
+    });
+
+    render(() => (
+      <TrackedTab
+        issues={[liveIssue]}
+        pullRequests={[eligiblePR, selfPR]}
+        userLogin="testuser"
+        onApprovePR={onApprovePR}
+      />
+    ));
+
+    const approveBtn = screen.getByLabelText("Approve #910 Eligible Tracked PR");
+    expect(screen.queryByLabelText(/Approve #911/)).toBeNull();
+    expect(screen.queryByLabelText(/Approve #912/)).toBeNull();
+    expect(screen.queryByLabelText(/Approve #913/)).toBeNull();
+
+    fireEvent.click(approveBtn);
+    expect(onApprovePR).not.toHaveBeenCalled();
+    expect(approveBtn.textContent).toBe("Confirm?");
+
+    fireEvent.click(approveBtn);
+    expect(onApprovePR).toHaveBeenCalledOnce();
+    expect(onApprovePR).toHaveBeenCalledWith(eligiblePR);
   });
 });

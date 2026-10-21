@@ -7,9 +7,11 @@ import {
   validateGitHubUser,
   fetchPREnrichment,
   fetchHotPRStatus,
+  approvePullRequest,
   discoverUpstreamRepos,
   type RepoRef,
 } from "../../src/app/services/api";
+import { APPROVE_PR_MUTATION } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 import { pushNotification } from "../../src/app/lib/errors";
 
@@ -1390,5 +1392,188 @@ describe("error-path rateLimit extraction — updateGraphqlRateLimit called", ()
     expect(updateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 5000, remaining: 42, resetAt: mockResetAt })
     );
+  });
+});
+
+// ── fetchPREnrichment — autoMergeMethod, viewerLatestReviewState, viewerReviewRequested ──
+
+describe("fetchPREnrichment — autoMergeMethod and viewer review fields", () => {
+  it("maps MERGE, SQUASH, REBASE, unknown autoMergeMethod, viewerLatestReviewState, and viewerReviewRequested", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        nodes: [
+          {
+            databaseId: 101,
+            headRefOid: "1111111111111111111111111111111111111111",
+            headRepository: null,
+            mergeStateStatus: "CLEAN",
+            assignees: { nodes: [] },
+            reviewRequests: { nodes: [] },
+            latestReviews: { totalCount: 1, nodes: [] },
+            additions: 10,
+            deletions: 2,
+            changedFiles: 1,
+            comments: { totalCount: 0 },
+            reviewThreads: { totalCount: 0 },
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+            autoMergeRequest: { mergeMethod: "SQUASH" },
+            viewerLatestReview: { state: "CHANGES_REQUESTED" },
+            viewerLatestReviewRequest: { id: "RR_kwDOtest101" },
+          },
+          {
+            databaseId: 102,
+            headRefOid: "2222222222222222222222222222222222222222",
+            headRepository: null,
+            mergeStateStatus: "CLEAN",
+            assignees: { nodes: [] },
+            reviewRequests: { nodes: [] },
+            latestReviews: { totalCount: 0, nodes: [] },
+            additions: 1,
+            deletions: 1,
+            changedFiles: 1,
+            comments: { totalCount: 0 },
+            reviewThreads: { totalCount: 0 },
+            commits: { nodes: [] },
+            autoMergeRequest: { mergeMethod: "MERGE" },
+            viewerLatestReview: { state: "APPROVED" },
+            viewerLatestReviewRequest: null,
+          },
+          {
+            databaseId: 103,
+            headRefOid: "3333333333333333333333333333333333333333",
+            headRepository: null,
+            mergeStateStatus: "CLEAN",
+            assignees: { nodes: [] },
+            reviewRequests: { nodes: [] },
+            latestReviews: { totalCount: 0, nodes: [] },
+            additions: 1,
+            deletions: 1,
+            changedFiles: 1,
+            comments: { totalCount: 0 },
+            reviewThreads: { totalCount: 0 },
+            commits: { nodes: [] },
+            autoMergeRequest: { mergeMethod: "REBASE" },
+            viewerLatestReview: { state: "UNKNOWN_STATE" },
+            viewerLatestReviewRequest: null,
+          },
+          {
+            databaseId: 104,
+            headRefOid: "4444444444444444444444444444444444444444",
+            headRepository: null,
+            mergeStateStatus: "CLEAN",
+            assignees: { nodes: [] },
+            reviewRequests: { nodes: [] },
+            latestReviews: { totalCount: 0, nodes: [] },
+            additions: 1,
+            deletions: 1,
+            changedFiles: 1,
+            comments: { totalCount: 0 },
+            reviewThreads: { totalCount: 0 },
+            commits: { nodes: [] },
+            autoMergeRequest: { mergeMethod: "INVALID" },
+            viewerLatestReview: null,
+            viewerLatestReviewRequest: null,
+          },
+        ],
+        rateLimit: { limit: 5000, remaining: 4990, resetAt: "2026-04-23T12:00:00Z" },
+      })
+    );
+
+    const { enrichments } = await fetchPREnrichment(octokit as never, ["PR_1", "PR_2", "PR_3", "PR_4"]);
+
+    expect(enrichments.get(101)).toMatchObject({
+      autoMergeMethod: "SQUASH",
+      viewerLatestReviewState: "CHANGES_REQUESTED",
+      viewerReviewRequested: true,
+    });
+    expect(enrichments.get(102)).toMatchObject({
+      autoMergeMethod: "MERGE",
+      viewerLatestReviewState: "APPROVED",
+      viewerReviewRequested: false,
+    });
+    expect(enrichments.get(103)).toMatchObject({
+      autoMergeMethod: "REBASE",
+      viewerLatestReviewState: null,
+      viewerReviewRequested: false,
+    });
+    expect(enrichments.get(104)).toMatchObject({
+      autoMergeMethod: null,
+      viewerLatestReviewState: null,
+      viewerReviewRequested: false,
+    });
+  });
+});
+
+// ── approvePullRequest ────────────────────────────────────────────────────────
+
+describe("approvePullRequest", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+  it("executes APPROVE_PR_MUTATION with commitOID, retries: 0, updates rateLimit, and returns normalized state + reviewDecision", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    const updateSpy = vi.spyOn(githubModule, "updateGraphqlRateLimit");
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        addPullRequestReview: {
+          pullRequestReview: {
+            state: "APPROVED",
+            pullRequest: {
+              reviewDecision: "APPROVED",
+            },
+          },
+        },
+        rateLimit: { cost: 1, limit: 5000, remaining: 4988, resetAt: "2026-04-23T12:00:00Z" },
+      })
+    );
+
+    const result = await approvePullRequest(octokit as never, "PR_kwDOtest0042", validSha);
+
+    expect(octokit.graphql).toHaveBeenCalledWith(APPROVE_PR_MUTATION, {
+      pullRequestId: "PR_kwDOtest0042",
+      commitOID: validSha,
+      request: { apiSource: "approvePR", retries: 0 },
+    });
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5000, remaining: 4988, resetAt: "2026-04-23T12:00:00Z" })
+    );
+    expect(result).toEqual({
+      state: "APPROVED",
+      reviewDecision: "APPROVED",
+    });
+  });
+
+  it("rejects invalid pullRequestId or commitOID before calling octokit.graphql", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+
+    await expect(
+      approvePullRequest(octokit as never, "bad!id", validSha)
+    ).rejects.toThrow(/Invalid pullRequestId/);
+
+    await expect(
+      approvePullRequest(octokit as never, "PR_kwDOtest0042", "not-a-40-char-sha")
+    ).rejects.toThrow(/Invalid commitOID/);
+
+    expect(octokit.graphql).not.toHaveBeenCalled();
+  });
+
+  it("throws when GitHub response does not confirm APPROVED review state", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        addPullRequestReview: {
+          pullRequestReview: {
+            state: "PENDING",
+            pullRequest: { reviewDecision: "REVIEW_REQUIRED" },
+          },
+        },
+      })
+    );
+
+    await expect(
+      approvePullRequest(octokit as never, "PR_kwDOtest0042", validSha)
+    ).rejects.toThrow("GitHub did not confirm pull request approval");
   });
 });

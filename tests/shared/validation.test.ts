@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractJiraKeys } from "../../src/shared/validation";
+import { extractJiraKeys, isReadOnlyGraphqlQuery } from "../../src/shared/validation";
 
 // ── Jira key pattern (via extractJiraKeys) ───────────────────────────────────
 
@@ -104,5 +104,43 @@ describe("extractJiraKeys", () => {
     const result = extractJiraKeys("TEAM-42 PROJ-1 TEAM-42");
     expect(result[0]).toBe("TEAM-42");
     expect(result[1]).toBe("PROJ-1");
+  });
+});
+
+// ── isReadOnlyGraphqlQuery ────────────────────────────────────────────────────
+
+describe("isReadOnlyGraphqlQuery", () => {
+  it("allows shorthand and named query operations", () => {
+    expect(isReadOnlyGraphqlQuery("{ viewer { login } }")).toBe(true);
+    expect(isReadOnlyGraphqlQuery("query GetViewer { viewer { login } }")).toBe(true);
+  });
+
+  it("ignores mutation/subscription keywords inside comments and string literals", () => {
+    expect(
+      isReadOnlyGraphqlQuery(
+        '# mutation fake\nquery { search(query: "mutation subscription", type: ISSUE, first: 1) { issueCount } }'
+      )
+    ).toBe(true);
+    expect(
+      isReadOnlyGraphqlQuery(
+        'query { search(query: """mutation { closePullRequest }""", type: ISSUE, first: 1) { issueCount } }'
+      )
+    ).toBe(true);
+  });
+
+  it("rejects mutations, comment-prefixed mutations, subscriptions, empty queries, and non-strings", () => {
+    expect(
+      isReadOnlyGraphqlQuery('mutation { closePullRequest(input: { pullRequestId: "PR_1" }) { clientMutationId } }')
+    ).toBe(false);
+    expect(
+      isReadOnlyGraphqlQuery(
+        '# query { viewer { login } }\nmutation { closePullRequest(input: { pullRequestId: "PR_1" }) { clientMutationId } }'
+      )
+    ).toBe(false);
+    expect(isReadOnlyGraphqlQuery("subscription { viewer { login } }")).toBe(false);
+    expect(isReadOnlyGraphqlQuery("# only a comment")).toBe(false);
+    expect(isReadOnlyGraphqlQuery("   ")).toBe(false);
+    expect(isReadOnlyGraphqlQuery(undefined)).toBe(false);
+    expect(isReadOnlyGraphqlQuery(null)).toBe(false);
   });
 });

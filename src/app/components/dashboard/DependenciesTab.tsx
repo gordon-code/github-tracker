@@ -3,6 +3,7 @@ import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
+import { canApprovePR } from "../../lib/format";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
@@ -23,6 +24,7 @@ import RepoGroupHeader from "../shared/RepoGroupHeader";
 import StatusDot from "../shared/StatusDot";
 import SizeBadge from "../shared/SizeBadge";
 import ReviewBadge from "../shared/ReviewBadge";
+import AutoMergeBadge from "../shared/AutoMergeBadge";
 import ItemRow from "./ItemRow";
 import SkeletonRows from "../shared/SkeletonRows";
 
@@ -110,6 +112,8 @@ interface DependenciesTabProps {
   userLogin: string;
   trackedBotLogins: ReadonlySet<string>;
   onRefresh?: () => void;
+  onApprovePR?: (pr: PullRequest) => void;
+  approvingPRIds?: ReadonlySet<number>;
 }
 
 export default function DependenciesTab(props: DependenciesTabProps) {
@@ -363,6 +367,9 @@ export default function DependenciesTab(props: DependenciesTabProps) {
                 enableTracking={config.enableTracking}
                 onIgnore={handleIgnore}
                 onTrack={handleTrack}
+                userLogin={props.userLogin}
+                onApprovePR={props.onApprovePR}
+                approvingPRIds={props.approvingPRIds}
               />
             )}
           </For>
@@ -385,6 +392,9 @@ interface StatusGroupProps {
   enableTracking: boolean;
   onIgnore: (pr: PullRequest) => void;
   onTrack: (pr: PullRequest) => void;
+  userLogin: string;
+  onApprovePR?: (pr: PullRequest) => void;
+  approvingPRIds?: ReadonlySet<number>;
 }
 
 function stripCommitPrefix(title: string): string {
@@ -436,6 +446,9 @@ function StatusGroup(props: StatusGroupProps) {
                     onIgnore={() => props.onIgnore(pr)}
                     onTrack={props.enableTracking ? () => props.onTrack(pr) : undefined}
                     isTracked={props.enableTracking ? props.trackedPrIds.has(pr.id) : undefined}
+                    onApprove={props.onApprovePR && canApprovePR(pr, props.userLogin) ? () => props.onApprovePR!(pr) : undefined}
+                    isApproving={props.approvingPRIds?.has(pr.id)}
+                    approveAutoMerge={pr.autoMergeMethod != null}
                     isPolling={props.hotPollingPRIds?.has(pr.id)}
                     hideAuthor
                     hideNumber
@@ -451,10 +464,8 @@ function StatusGroup(props: StatusGroupProps) {
                     <div class="flex items-center gap-1.5 flex-wrap">
                       <Show when={pr.enriched !== false}>
                         <StatusDot status={pr.checkStatus} />
-                      </Show>
-
-                      <Show when={pr.enriched !== false}>
                         <ReviewBadge decision={pr.reviewDecision} />
+                        <AutoMergeBadge method={pr.autoMergeMethod} compact={config.viewDensity === "compact"} />
                       </Show>
 
                       <Show when={pr.enriched !== false && (pr.additions > 0 || pr.deletions > 0)}>

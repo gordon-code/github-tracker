@@ -209,6 +209,13 @@ describe("LoginPage — PAT form navigation", () => {
     screen.getByText(/only access one org at a time/i);
   });
 
+  it("displays 'Read and write for Pull requests' in fine-grained token guidance", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    expect(screen.getByText(/Read and write for Pull requests/)).toBeTruthy();
+  });
+
   it("clicking 'Use OAuth instead' returns to OAuth view and clears state", async () => {
     const user = userEvent.setup();
     render(() => <LoginPage />);

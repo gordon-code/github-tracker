@@ -55,6 +55,43 @@ describe("createOctokitClient — write guard hook", () => {
       })
     ).rejects.toThrow("Write operation blocked");
   });
+
+  it("blocks GraphQL mutations (including addPullRequestReview) on POST /graphql", async () => {
+    const { createOctokitClient } = await import("../src/octokit.js");
+    const client = createOctokitClient("fake-token");
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation ApprovePullRequest($pullRequestId: ID!, $commitOID: GitObjectID!) {
+          addPullRequestReview(input: { pullRequestId: $pullRequestId, commitOID: $commitOID, event: APPROVE }) {
+            pullRequestReview { state }
+          }
+        }`,
+        variables: {
+          pullRequestId: "PR_kwDOtest42",
+          commitOID: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `mutation { mergePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `# query { viewer { login } }\nmutation { closePullRequest(input: { pullRequestId: "PR_kwDOtest42" }) { clientMutationId } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: `subscription { viewer { login } }`,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
 });
 
 // ── Singleton tests ───────────────────────────────────────────────────────────

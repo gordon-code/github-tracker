@@ -81,7 +81,7 @@ If you prefer not to use OAuth, you can sign in with a GitHub Personal Access To
 Two token formats are accepted:
 
 - **Classic tokens** (starts with `ghp_`) — recommended. Works across all organizations you belong to. Required scopes: `repo`, `read:org` (under admin:org).
-- **Fine-grained tokens** (starts with `github_pat_`) — also work, but only access one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
+- **Fine-grained tokens** (starts with `github_pat_`) — also work, but only access one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read and write to approve PRs from the dashboard, or read-only for viewing only).
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
@@ -222,6 +222,18 @@ The dot links to the PR's checks page on GitHub.
 | Changes requested | At least one reviewer requested changes |
 | Needs review | Review has been requested but not yet submitted |
 | Dismissed | Previously submitted review was dismissed |
+
+#### Auto-Merge Badge
+
+When GitHub auto-merge is enabled on a pull request, a read-only `auto` badge appears next to the review badge (in both comfortable and compact density across the Pull Requests, Dependencies, and Tracked tabs). Hover or focus the badge to view the configured merge method (`merge`, `squash`, or `rebase`).
+
+#### Inline Approve Action
+
+Open, non-draft pull requests not authored by you show an **Approve** button next to the pull request title on hover when branch protection requires a review (`Review needed`) or when a review has been requested of you or your team (unless you have already approved the PR without a fresh re-request).
+
+Approval uses a two-step inline confirmation to prevent accidental clicks:
+1. Click **Approve** once to arm confirmation (**Confirm?**, or **Confirm (auto)** when auto-merge is enabled on the PR). The confirmation state resets automatically after 4 seconds, on Escape, or when focus leaves the button.
+2. Click **Confirm?** (or **Confirm (auto)**) to submit an `APPROVE` review bound to the PR's current head commit SHA (`commitOID`). If new commits were pushed since the last refresh, GitHub rejects the stale approval and the dashboard triggers a refresh.
 
 #### Size Badges
 
@@ -826,7 +838,11 @@ For detailed per-source API call counts, see Settings > API Usage.
 
 OAuth tokens (from "Sign in with GitHub") work across all your organizations and support all features. Classic PATs with the correct scopes (`repo`, `read:org`) behave identically to OAuth.
 
-Fine-grained PATs are limited to one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read).
+Fine-grained PATs are limited to one organization at a time. Required permissions: Actions (read), Contents (read), Issues (read), Pull requests (read and write to approve PRs from the dashboard, or read-only for viewing only).
+
+**Approving a PR fails with a permission error (403 / FORBIDDEN).**
+
+Your token does not have write permission for pull requests. If you are using a fine-grained Personal Access Token, open GitHub Settings, edit or regenerate the token with **Pull requests** set to **Read and write** (`Pull requests: Read and write`), and replace your token in **Settings > Data > Authentication**.
 
 **Data looks stale after switching back to the tab.**
 

@@ -1,6 +1,8 @@
 // ── Shared format utilities ───────────────────────────────────────────────────
 // Browser-agnostic formatting functions shared between the SPA and MCP server.
 
+import type { PullRequest } from "./types.js";
+
 const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
 /**
@@ -134,4 +136,22 @@ export function formatStarCount(count: number): string {
   if (count >= 10000) return `${Math.round(count / 1000)}k`;
   if (count >= 1000) return `${parseFloat((count / 1000).toFixed(1))}k`;
   return String(count);
+}
+
+/**
+ * Returns true when the authenticated user can approve the given PR from a row action:
+ * - PR is OPEN, enriched, not a draft, and has a valid GraphQL nodeId + headSha
+ * - Authenticated user is not the PR author (case-insensitive)
+ * - Viewer has not already approved the PR without a fresh review request
+ *   (`!(viewerLatestReviewState === "APPROVED" && !viewerReviewRequested)`)
+ * - Either branch protection requires review (`reviewDecision === "REVIEW_REQUIRED"`)
+ *   or a review has been requested of the viewer/their team (`viewerReviewRequested === true`)
+ */
+export function canApprovePR(pr: PullRequest, userLogin: string): boolean {
+  if (!userLogin || !pr.nodeId || !pr.headSha) return false;
+  if (pr.enriched === false) return false;
+  if (pr.state !== "OPEN" || pr.draft) return false;
+  if (pr.userLogin.toLowerCase() === userLogin.toLowerCase()) return false;
+  if (pr.viewerLatestReviewState === "APPROVED" && !pr.viewerReviewRequested) return false;
+  return pr.reviewDecision === "REVIEW_REQUIRED" || pr.viewerReviewRequested === true;
 }

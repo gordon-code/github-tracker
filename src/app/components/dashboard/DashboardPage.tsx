@@ -14,9 +14,9 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
-import type { Issue, PullRequest, WorkflowRun } from "../../services/api";
+import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
 import {
   createPollCoordinator,
@@ -36,10 +36,10 @@ import { JIRA_SETTINGS_ACTION, type JiraIssue } from "../../../shared/jira-types
 import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
-import { pushNotification, pushError } from "../../lib/errors";
+import { pushNotification, pushError, dismissNotificationBySource } from "../../lib/errors";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
+import { canApprovePR, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
@@ -179,6 +179,86 @@ const [depMeta, setDepMeta] = createSignal<ReadonlyMap<number, VersionInfo>>(loa
 let _fetchingDashboardBodies = false;
 let _fetchingDepBodies = false;
 
+const [approvingPRIds, setApprovingPRIds] = createSignal<ReadonlySet<number>>(new Set<number>());
+const RECENT_APPROVAL_TTL_MS = 60_000;
+const recentlyApprovedPRs = new Map<
+  number,
+  { headSha: string; reviewDecision: PullRequest["reviewDecision"]; approvedAt: number }
+>();
+
+function applyRecentApprovalGuard(pr: PullRequest, currentLogin: string): void {
+  const now = Date.now();
+  for (const [id, entry] of recentlyApprovedPRs) {
+    if (now - entry.approvedAt > RECENT_APPROVAL_TTL_MS) {
+      recentlyApprovedPRs.delete(id);
+    }
+  }
+  const entry = recentlyApprovedPRs.get(pr.id);
+  if (!entry) return;
+  if (pr.headSha && pr.headSha !== entry.headSha) {
+    recentlyApprovedPRs.delete(pr.id);
+    return;
+  }
+  // Keep the entry for the full 60s TTL even if Phase 2 `nodes()` already shows
+  // `viewerLatestReviewState === "APPROVED"`, because Phase 1's search index can lag
+  // behind `nodes()` on `reviewDecision` ("REVIEW_REQUIRED" / "CHANGES_REQUESTED" vs "APPROVED").
+  pr.viewerLatestReviewState = "APPROVED";
+  pr.viewerReviewRequested = false;
+  pr.reviewDecision = entry.reviewDecision;
+  const loginLower = currentLogin.toLowerCase();
+  if (loginLower && !pr.reviewerLogins.some((r) => r.toLowerCase() === loginLower)) {
+    pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
+  }
+}
+
+export function applyHotPollPRUpdates(
+  state: { pullRequests: PullRequest[] },
+  prUpdates: ReadonlyMap<number, HotPRStatusUpdate>,
+  currentLogin = ""
+): Set<number> {
+  const terminalPrIds = new Set<number>();
+  for (const [prId, update] of prUpdates) {
+    const s = update.state;
+    if (s === "CLOSED" || s === "MERGED") terminalPrIds.add(prId);
+  }
+  const loginLower = currentLogin.toLowerCase();
+  for (const pr of state.pullRequests) {
+    const update = prUpdates.get(pr.id);
+    if (!update) continue;
+    pr.state = update.state; // detect closed/merged quickly
+    pr.checkStatus = update.checkStatus;
+    pr.reviewDecision = update.reviewDecision;
+    if (update.headSha) {
+      pr.headSha = update.headSha;
+    }
+    if (update.autoMergeMethod !== undefined) {
+      pr.autoMergeMethod = update.autoMergeMethod;
+    }
+    if (update.viewerLatestReviewState !== undefined) {
+      pr.viewerLatestReviewState = update.viewerLatestReviewState;
+    }
+    if (update.viewerReviewRequested !== undefined) {
+      if (update.viewerReviewRequested) {
+        pr.viewerReviewRequested = true;
+      } else if (update.viewerLatestReviewState === "APPROVED") {
+        pr.viewerReviewRequested = false;
+      }
+    }
+    if (
+      loginLower &&
+      (pr.viewerReviewRequested || pr.viewerLatestReviewState != null) &&
+      !pr.reviewerLogins.some((r) => r.toLowerCase() === loginLower)
+    ) {
+      pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
+    }
+    applyRecentApprovalGuard(pr, currentLogin);
+  }
+  if (terminalPrIds.size > 0) {
+    state.pullRequests = state.pullRequests.filter((pr) => !terminalPrIds.has(pr.id));
+  }
+  return terminalPrIds;
+}
+
 // Skip retrying a dep-PR body fetch that errored/timed out on its last attempt until
 // this cooldown elapses — prevents burning a full GRAPHQL_BODY_FETCH_TIMEOUT_MS timeout,
 // an undeduped Sentry event, and a repeated user notification every poll cycle for as
@@ -201,6 +281,8 @@ onAuthCleared(() => {
   _fetchingDashboardBodies = false;
   _fetchingDepBodies = false;
   _depBodyFailureCooldown.clear();
+  setApprovingPRIds(new Set<number>());
+  recentlyApprovedPRs.clear();
   resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {
@@ -260,6 +342,8 @@ async function pollFetch(): Promise<DashboardData> {
 
     setHasFetchedFresh(true);
     const now = new Date();
+    const currentLogin = user()?.login ?? "";
+    for (const pr of data.pullRequests) applyRecentApprovalGuard(pr, currentLogin);
 
     if (phaseOneFired) {
       // Phase 1 fired — use fine-grained merge for the light→enriched
@@ -291,14 +375,17 @@ async function pollFetch(): Promise<DashboardData> {
             const regressing = e.enriched === false && pr.enriched !== false;
             if (!regressing) {
               Object.assign(pr, pickEnrichmentFields(e));
+              pr.reviewDecision = e.reviewDecision;
               pr.enriched = e.enriched;
             }
             pr.nodeId = e.nodeId;
             pr.surfacedBy = e.surfacedBy;
             pr.starCount = e.starCount;
+            applyRecentApprovalGuard(pr, currentLogin);
           }
         } else {
           state.pullRequests = fallbackToPreviousEnrichment(state.pullRequests, data.pullRequests);
+          for (const pr of state.pullRequests) applyRecentApprovalGuard(pr, currentLogin);
         }
       }));
     } else {
@@ -308,6 +395,7 @@ async function pollFetch(): Promise<DashboardData> {
       // DOM updates are synchronous within the setter, so save/restore
       // around it to prevent scroll reset from <For> DOM rebuild.
       const pullRequests = fallbackToPreviousEnrichment(dashboardData.pullRequests, data.pullRequests);
+      for (const pr of pullRequests) applyRecentApprovalGuard(pr, currentLogin);
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
@@ -361,6 +449,25 @@ const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPol
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 const [_eventsCoordinator, _setEventsCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 
+function persistDashboardSnapshot(): void {
+  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
+  // between here and the deferred setTimeout write.
+  const snapshot = {
+    _v: CACHE_VERSION,
+    issues: [...dashboardData.issues],
+    pullRequests: [...dashboardData.pullRequests],
+    workflowRuns: [...dashboardData.workflowRuns],
+    lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+  };
+  setTimeout(() => {
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Non-fatal
+    }
+  }, 0);
+}
+
 // Mutates data.issues[].surfacedBy and data.pullRequests[].surfacedBy in-place before merging.
 function handleTargetedData(data: DashboardData, affectedRepos: string[]): void {
   const affectedSet = new Set(affectedRepos.map(r => r.toLowerCase()));
@@ -373,7 +480,9 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }
   }
   const oldSurfacedByPRs = new Map<number, string[]>();
+  const existingPRById = new Map<number, PullRequest>();
   for (const pr of dashboardData.pullRequests) {
+    existingPRById.set(pr.id, pr);
     if (affectedSet.has(pr.repoFullName.toLowerCase()) && pr.surfacedBy?.length) {
       oldSurfacedByPRs.set(pr.id, pr.surfacedBy);
     }
@@ -386,11 +495,18 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
       item.surfacedBy = [...new Set([...(item.surfacedBy ?? []), ...oldSb])];
     }
   }
+  const currentLogin = user()?.login ?? "";
   for (const pr of data.pullRequests) {
     const oldSb = oldSurfacedByPRs.get(pr.id);
     if (oldSb) {
       pr.surfacedBy = [...new Set([...(pr.surfacedBy ?? []), ...oldSb])];
     }
+    const existingPr = existingPRById.get(pr.id);
+    if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
+      Object.assign(pr, pickEnrichmentFields(existingPr));
+      pr.enriched = existingPr.enriched;
+    }
+    applyRecentApprovalGuard(pr, currentLogin);
   }
 
   withScrollLock(() => {
@@ -432,24 +548,7 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
   dispatchNotifications(newItems, config);
 
   seedHotSetsFromTargeted(data);
-
-  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
-  // between here and the deferred setTimeout write.
-  const lastRefreshed = dashboardData.lastRefreshedAt;
-  const snapshot = {
-    _v: CACHE_VERSION,
-    issues: [...dashboardData.issues],
-    pullRequests: [...dashboardData.pullRequests],
-    workflowRuns: [...dashboardData.workflowRuns],
-    lastRefreshedAt: lastRefreshed?.toISOString() ?? null,
-  };
-  setTimeout(() => {
-    try {
-      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Non-fatal
-    }
-  }, 0);
+  persistDashboardSnapshot();
 }
 
 export default function DashboardPage() {
@@ -739,20 +838,10 @@ export default function DashboardPage() {
           // If a full refresh completed during the fetch, _hotPollGeneration will have
           // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
           if (fetchGeneration !== getHotPollGeneration()) return; // stale, discard
-          const terminalPrIds = new Set<number>();
-          for (const [prId, update] of prUpdates) {
-            const s = update.state;
-            if (s === "CLOSED" || s === "MERGED") terminalPrIds.add(prId);
-          }
+          let terminalPrIds = new Set<number>();
           setDashboardData(produce((state) => {
-            // Apply PR status updates
-            for (const pr of state.pullRequests) {
-              const update = prUpdates.get(pr.id);
-              if (!update) continue;
-              pr.state = update.state; // detect closed/merged quickly
-              pr.checkStatus = update.checkStatus;
-              pr.reviewDecision = update.reviewDecision;
-            }
+            const currentLogin = user()?.login ?? "";
+            terminalPrIds = applyHotPollPRUpdates(state, prUpdates, currentLogin);
             // Apply workflow run updates
             for (const run of state.workflowRuns) {
               const update = runUpdates.get(run.id);
@@ -761,9 +850,6 @@ export default function DashboardPage() {
               run.conclusion = update.conclusion;
               run.updatedAt = update.updatedAt;
               run.completedAt = update.completedAt;
-            }
-            if (terminalPrIds.size > 0) {
-              state.pullRequests = state.pullRequests.filter((pr) => !terminalPrIds.has(pr.id));
             }
           }));
           if (terminalPrIds.size > 0) {
@@ -1335,6 +1421,130 @@ export default function DashboardPage() {
     [...new Set([...config.selectedRepos, ...config.upstreamRepos, ...config.monitoredRepos].map(r => r.fullName))]
   );
 
+  function isPermissionDeniedError(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const errObj = err as Record<string, unknown>;
+    if (Array.isArray(errObj.errors)) {
+      for (const item of errObj.errors) {
+        if (item && typeof item === "object") {
+          const type = (item as Record<string, unknown>).type;
+          const msg = String((item as Record<string, unknown>).message ?? "");
+          if (
+            type === "FORBIDDEN" ||
+            type === "INSUFFICIENT_SCOPES" ||
+            /resource not accessible by personal access token|insufficient_scopes|write access/i.test(msg)
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    if (errObj.status === 403) {
+      const headers = (errObj.response as { headers?: Record<string, string> } | undefined)?.headers;
+      if (headers?.["x-ratelimit-remaining"] === "0" || headers?.["retry-after"]) return false;
+      return true;
+    }
+    return false;
+  }
+
+  function isStaleCommitError(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const errObj = err as Record<string, unknown>;
+    const msg = err instanceof Error ? err.message : String(errObj.message ?? "");
+    return /commitOID|was not part of the pull request|pull request head|outdated|end of the branch/i.test(msg);
+  }
+
+  async function handleApprovePR(pr: PullRequest): Promise<void> {
+    const currentLogin = userLogin();
+    if (!canApprovePR(pr, currentLogin)) return;
+    if (approvingPRIds().has(pr.id)) return;
+    const client = getClient();
+    if (!client || !pr.nodeId || !pr.headSha) return;
+    const nodeId = pr.nodeId;
+    const approvedHeadSha = pr.headSha;
+    const priorReviewDecision = pr.reviewDecision;
+
+    // Clear any prior notification for this PR so a retry with the same error message
+    // is not suppressed by pushNotification's same-message no-op guard.
+    dismissNotificationBySource(`approve-pr:${pr.id}`);
+
+    setApprovingPRIds((prev) => {
+      const next = new Set(prev);
+      next.add(pr.id);
+      return next;
+    });
+
+    try {
+      const result = await approvePullRequest(client, nodeId, approvedHeadSha);
+      if (getClient() !== client) return;
+
+      const nextDecision: PullRequest["reviewDecision"] =
+        result.reviewDecision ?? (priorReviewDecision === "REVIEW_REQUIRED" ? "APPROVED" : priorReviewDecision);
+
+      recentlyApprovedPRs.set(pr.id, {
+        headSha: approvedHeadSha,
+        reviewDecision: nextDecision,
+        approvedAt: Date.now(),
+      });
+
+      setDashboardData(
+        produce((state) => {
+          const target = state.pullRequests.find((item) => item.id === pr.id);
+          if (target) applyRecentApprovalGuard(target, currentLogin);
+        })
+      );
+
+      // Seed the approved PR into _hotPRs so the next hot-poll cycle detects if
+      // GitHub auto-merged it (splicing it from dashboardData.pullRequests via onHotData),
+      // even when checkStatus was already "success" prior to approval.
+      seedHotSetsFromTargeted({
+        issues: [],
+        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "pending" }],
+        workflowRuns: [],
+        errors: [],
+      });
+
+      persistDashboardSnapshot();
+    } catch (err) {
+      if (getClient() !== client) return;
+      const status =
+        typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+          ? ((err as Record<string, unknown>).status as number)
+          : null;
+      if (status === 401) {
+        expireToken();
+        window.location.replace("/login");
+        return;
+      }
+      if (isPermissionDeniedError(err)) {
+        pushNotification(
+          `approve-pr:${pr.id}`,
+          "Unable to approve PR: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
+          "error"
+        );
+        return;
+      }
+      if (isStaleCommitError(err)) {
+        pushNotification(
+          `approve-pr:${pr.id}`,
+          `Could not approve ${pr.repoFullName}#${pr.number}: new commits were pushed — refreshing`,
+          "warning"
+        );
+        _coordinator()?.manualRefresh();
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushNotification(`approve-pr:${pr.id}`, `Failed to approve ${pr.repoFullName}#${pr.number}: ${message}`, "error");
+    } finally {
+      setApprovingPRIds((prev) => {
+        if (!prev.has(pr.id)) return prev;
+        const next = new Set(prev);
+        next.delete(pr.id);
+        return next;
+      });
+    }
+  }
+
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -1405,6 +1615,8 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   jiraKeyMap={jiraKeyMap}
                   depPrIds={dependencyPrIds()}
+                  onApprovePR={handleApprovePR}
+                  approvingPRIds={approvingPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "dependencies"}>
@@ -1420,20 +1632,8 @@ export default function DashboardPage() {
                   userLogin={userLogin()}
                   trackedBotLogins={trackedBotLogins()}
                   onRefresh={() => _coordinator()?.manualRefresh()}
-                />
-              </Match>
-              <Match when={activeTab() === "dependencies"}>
-                <DependenciesTab
-                  pullRequests={visibleDependencyPullRequests()}
-                  loading={dashboardData.loading}
-                  abandonedDepsMap={abandonedDepsMap()}
-                  dashboardIssueUrls={dashboardIssueUrls()}
-                  hotPollingPRIds={hotPollingPRIds()}
-                  refreshTick={refreshTick()}
-                  rebaseLabel={config.dependencies.rebaseLabel}
-                  userLogin={userLogin()}
-                  trackedBotLogins={trackedBotLogins()}
-                  onRefresh={() => _coordinator()?.manualRefresh()}
+                  onApprovePR={handleApprovePR}
+                  approvingPRIds={approvingPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
@@ -1444,6 +1644,8 @@ export default function DashboardPage() {
                   refreshTick={refreshTick()}
                   userLogin={userLogin()}
                   hotPollingPRIds={hotPollingPRIds()}
+                  onApprovePR={handleApprovePR}
+                  approvingPRIds={approvingPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "jiraAssigned"}>
@@ -1508,6 +1710,8 @@ export default function DashboardPage() {
                           customTabId={tab().id}
                           filterPreset={tab().filterPreset}
                           jiraKeyMap={jiraKeyMap}
+                          onApprovePR={handleApprovePR}
+                          approvingPRIds={approvingPRIds()}
                         />
                       </Match>
                       <Match when={tab().baseType === "actions"}>

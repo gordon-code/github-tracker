@@ -46,6 +46,9 @@ export interface CheckStatus {
   status: "success" | "failure" | "pending" | "conflict" | null;
 }
 
+export type AutoMergeMethod = "MERGE" | "SQUASH" | "REBASE";
+export type ViewerReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+
 export interface PullRequest {
   id: number;
   number: number;
@@ -72,6 +75,12 @@ export interface PullRequest {
   labels: { name: string; color: string }[];
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   totalReviewCount: number;
+  /** Non-null when GitHub auto-merge is enabled on the PR */
+  autoMergeMethod?: AutoMergeMethod | null;
+  /** True when a review has been requested of the authenticated viewer (directly or via team) */
+  viewerReviewRequested?: boolean;
+  /** State of the authenticated viewer's latest submitted review */
+  viewerLatestReviewState?: ViewerReviewState | null;
   starCount?: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;

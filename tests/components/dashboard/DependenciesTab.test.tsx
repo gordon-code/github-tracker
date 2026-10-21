@@ -782,6 +782,87 @@ describe("DependenciesTab — unknown bot banner", () => {
   });
 });
 
+// ── Auto-merge badge and inline Approve action ───────────────────────────────
+
+describe("DependenciesTab — auto-merge badge and Approve action", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+  it("renders auto-merge badge in comfortable and compact density and preserves category badge first in DOM order", () => {
+    const prAuto = makeMergeablePR({
+      id: 8001,
+      number: 801,
+      title: "Bump axios from 0.27.1 to 0.27.2",
+      autoMergeMethod: "SQUASH",
+      enriched: true,
+    });
+    const prNoAuto = makeMergeablePR({
+      id: 8002,
+      number: 802,
+      title: "Bump lodash from 4.16.0 to 4.17.0",
+      autoMergeMethod: null,
+      enriched: true,
+    });
+
+    const { unmount } = renderTab({ pullRequests: [prAuto, prNoAuto] });
+    const badges = screen.getAllByTestId("auto-merge-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].className).toContain("badge-sm");
+
+    // Verify category badge ("patch") still comes before auto-merge badge in DOM order
+    const items = screen.getAllByRole("listitem");
+    expect(items[0].querySelector(".badge")?.textContent?.trim()).toBe("patch");
+    unmount();
+
+    updateConfig({ viewDensity: "compact" });
+    renderTab({ pullRequests: [prAuto, prNoAuto] });
+    const compactBadges = screen.getAllByTestId("auto-merge-badge");
+    expect(compactBadges).toHaveLength(1);
+    expect(compactBadges[0].className).toContain("badge-xs");
+  });
+
+  it("shows Approve button for eligible dependency PRs and invokes onApprovePR(pr) on confirmation", () => {
+    const onApprovePR = vi.fn();
+    const eligibleDepPR = makeNeedsActionPR({
+      id: 8010,
+      number: 810,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      nodeId: "PR_kwDOdep8010",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+      enriched: true,
+    });
+    const alreadyApprovedDepPR = makeMergeablePR({
+      id: 8011,
+      number: 811,
+      title: "Bump lodash from 4.16.0 to 4.17.0",
+      nodeId: "PR_kwDOdep8011",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerLatestReviewState: "APPROVED",
+      viewerReviewRequested: false,
+      enriched: true,
+    });
+
+    renderTab({
+      pullRequests: [eligibleDepPR, alreadyApprovedDepPR],
+      userLogin: "testuser",
+      onApprovePR,
+    });
+
+    const approveBtn = screen.getByLabelText(/^Approve #810 /);
+    expect(screen.queryByLabelText(/^Approve #811 /)).toBeNull();
+
+    fireEvent.click(approveBtn);
+    expect(onApprovePR).not.toHaveBeenCalled();
+    expect(approveBtn.textContent).toBe("Confirm?");
+
+    fireEvent.click(approveBtn);
+    expect(onApprovePR).toHaveBeenCalledOnce();
+    expect(onApprovePR).toHaveBeenCalledWith(eligibleDepPR);
+  });
+});
+
 // ── Ignore button ─────────────────────────────────────────────────────────────
 
 describe("DependenciesTab — ignore button", () => {

@@ -3,13 +3,13 @@ import * as Sentry from "@sentry/solid";
 import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
-import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP } from "../../shared/validation";
+import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
 import { REPO_CAP } from "../../shared/types";
-import type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
+import type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
 // ── Re-exports from shared/types (backward compat for existing importers) ─────
 export { REPO_CAP };
-export type { Issue, IssueState, PullRequest, PullRequestState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
+export type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -399,6 +399,9 @@ const HEAVY_PR_BACKFILL_QUERY = `
         changedFiles
         comments { totalCount }
         reviewThreads { totalCount }
+        autoMergeRequest { mergeMethod }
+        viewerLatestReview { state }
+        viewerLatestReviewRequest { id }
         commits(last: 1) {
           nodes {
             commit {
@@ -419,8 +422,12 @@ const HOT_PR_STATUS_QUERY = `
       ... on PullRequest {
         databaseId
         state
+        headRefOid
         mergeStateStatus
         reviewDecision
+        autoMergeRequest { mergeMethod }
+        viewerLatestReview { state }
+        viewerLatestReviewRequest { id }
         commits(last: 1) {
           nodes {
             commit {
@@ -437,8 +444,12 @@ const HOT_PR_STATUS_QUERY = `
 interface HotPRStatusNode {
   databaseId: number;
   state: PullRequestState;
+  headRefOid?: string;
   mergeStateStatus: string;
   reviewDecision: string | null;
+  autoMergeRequest?: { mergeMethod: string } | null;
+  viewerLatestReview?: { state: string } | null;
+  viewerLatestReviewRequest?: { id: string } | null;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 }
 
@@ -481,6 +492,9 @@ interface GraphQLHeavyPRNode {
   changedFiles: number;
   comments: { totalCount: number };
   reviewThreads: { totalCount: number };
+  autoMergeRequest?: { mergeMethod: string } | null;
+  viewerLatestReview?: { state: string } | null;
+  viewerLatestReviewRequest?: { id: string } | null;
   commits: {
     nodes: {
       commit: {
@@ -750,10 +764,16 @@ interface LightSearchResult {
 function processLightPRNode(
   node: GraphQLLightPRNode,
   prMap: Map<number, PullRequest>,
-  nodeIdMap: Map<number, string>
+  nodeIdMap: Map<number, string>,
+  isViewerReviewRequested = false,
 ): boolean {
   if (node.databaseId == null || !node.repository) return false;
-  if (prMap.has(node.databaseId)) return false;
+  if (prMap.has(node.databaseId)) {
+    if (isViewerReviewRequested) {
+      prMap.get(node.databaseId)!.viewerReviewRequested = true;
+    }
+    return false;
+  }
 
   nodeIdMap.set(node.databaseId, node.id);
   prMap.set(node.databaseId, {
@@ -782,6 +802,9 @@ function processLightPRNode(
     labels: node.labels.nodes.map((l) => ({ name: l.name, color: l.color })),
     reviewDecision: mapReviewDecision(node.reviewDecision),
     totalReviewCount: 0,
+    autoMergeMethod: null,
+    viewerReviewRequested: isViewerReviewRequested,
+    viewerLatestReviewState: null,
     starCount: node.repository.stargazerCount,
     enriched: false,
     nodeId: node.id,
@@ -853,7 +876,7 @@ async function executeLightCombinedQuery(
   for (const node of response.prReviewReq.nodes) {
     if (prMap.size >= prCap) break;
     if (!node) continue;
-    processLightPRNode(node, prMap, nodeIdMap);
+    processLightPRNode(node, prMap, nodeIdMap, source === "lightSearch");
   }
 
   if (isPartial) return;
@@ -877,7 +900,7 @@ async function executeLightCombinedQuery(
   if (response.prReviewReq.pageInfo.hasNextPage && response.prReviewReq.pageInfo.endCursor && prMap.size < prCap) {
     prPaginationTasks.push(paginateGraphQLSearch<LightPRSearchResponse, GraphQLLightPRNode>(
       octokit, LIGHT_PR_SEARCH_QUERY, prRevQ, errorLabel, errors,
-      (node) => processLightPRNode(node, prMap, nodeIdMap),
+      (node) => processLightPRNode(node, prMap, nodeIdMap, source === "lightSearch"),
       () => prMap.size, prCap, source, response.prReviewReq.pageInfo.endCursor,
     ));
   }
@@ -1081,6 +1104,9 @@ export interface PREnrichmentData {
   comments: number;
   reviewThreads: number;
   totalReviewCount: number;
+  autoMergeMethod: AutoMergeMethod | null;
+  viewerReviewRequested: boolean;
+  viewerLatestReviewState: ViewerReviewState | null;
 }
 
 /**
@@ -1145,6 +1171,9 @@ export async function fetchPREnrichment(
           comments: node.comments.totalCount,
           reviewThreads: node.reviewThreads.totalCount,
           totalReviewCount: node.latestReviews.totalCount,
+          autoMergeMethod: mapAutoMergeMethod(node.autoMergeRequest?.mergeMethod),
+          viewerReviewRequested: Boolean(node.viewerLatestReviewRequest?.id),
+          viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
         });
       }
     } catch (err) {
@@ -1351,6 +1380,9 @@ type EnrichmentFields = Pick<
   | "comments"
   | "reviewThreads"
   | "totalReviewCount"
+  | "autoMergeMethod"
+  | "viewerReviewRequested"
+  | "viewerLatestReviewState"
 >;
 
 /** Extracts just the heavy enrichment fields from any PR-shaped source. */
@@ -1366,6 +1398,9 @@ export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields
     comments: source.comments,
     reviewThreads: source.reviewThreads,
     totalReviewCount: source.totalReviewCount,
+    autoMergeMethod: source.autoMergeMethod,
+    viewerReviewRequested: source.viewerReviewRequested,
+    viewerLatestReviewState: source.viewerLatestReviewState,
   };
 }
 
@@ -1376,7 +1411,8 @@ export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields
 function mergeEnrichment(
   lightPRs: PullRequest[],
   enrichments: Map<number, PREnrichmentData>,
-  forkInfoMap: Map<number, { owner: string; repoName: string }>
+  forkInfoMap: Map<number, { owner: string; repoName: string }>,
+  viewerLogin = "",
 ): PullRequest[] {
   return lightPRs.map((pr) => {
     const e = enrichments.get(pr.id);
@@ -1386,9 +1422,22 @@ function mergeEnrichment(
       forkInfoMap.set(pr.id, e.headRepository);
     }
 
+    const viewerReviewRequested =
+      e.viewerLatestReviewState === "APPROVED" && !e.viewerReviewRequested
+        ? false
+        : Boolean(pr.viewerReviewRequested || e.viewerReviewRequested);
+    const reviewerLogins =
+      viewerLogin &&
+      (viewerReviewRequested || e.viewerLatestReviewState !== null) &&
+      !e.reviewerLogins.includes(viewerLogin)
+        ? [...e.reviewerLogins, viewerLogin]
+        : e.reviewerLogins;
+
     return {
       ...pr,
       ...pickEnrichmentFields(e),
+      reviewerLogins,
+      viewerReviewRequested,
       enriched: true,
     };
   });
@@ -1605,7 +1654,7 @@ export async function fetchIssuesAndPullRequests(
 
   // Apply main backfill enrichments to all PRs (main user PRs get enriched, tracked-only PRs get nothing yet)
   let enrichedPRs = mainBackfill.enrichments.size > 0
-    ? mergeEnrichment(mergedPRs, mainBackfill.enrichments, forkInfoMap)
+    ? mergeEnrichment(mergedPRs, mainBackfill.enrichments, forkInfoMap, normalizedLogin)
     : mergedPRs;
 
   // Delta backfill: enrich PRs not already covered by main backfill —
@@ -1621,7 +1670,7 @@ export async function fetchIssuesAndPullRequests(
   if (deltaNodeIds.length > 0) {
     const delta = await fetchPREnrichment(octokit, deltaNodeIds);
     backfillErrors.push(...delta.errors);
-    enrichedPRs = mergeEnrichment(enrichedPRs, delta.enrichments, forkInfoMap);
+    enrichedPRs = mergeEnrichment(enrichedPRs, delta.enrichments, forkInfoMap, normalizedLogin);
   }
 
   // Fork PR fallback for enriched PRs
@@ -1670,6 +1719,24 @@ function mapReviewDecision(
     raw === "APPROVED" ||
     raw === "CHANGES_REQUESTED" ||
     raw === "REVIEW_REQUIRED"
+  ) {
+    return raw;
+  }
+  return null;
+}
+
+function mapAutoMergeMethod(raw: string | null | undefined): AutoMergeMethod | null {
+  if (raw === "MERGE" || raw === "SQUASH" || raw === "REBASE") return raw;
+  return null;
+}
+
+function mapViewerReviewState(raw: string | null | undefined): ViewerReviewState | null {
+  if (
+    raw === "APPROVED" ||
+    raw === "CHANGES_REQUESTED" ||
+    raw === "COMMENTED" ||
+    raw === "DISMISSED" ||
+    raw === "PENDING"
   ) {
     return raw;
   }
@@ -1915,6 +1982,10 @@ export interface HotPRStatusUpdate {
   checkStatus: CheckStatus["status"];
   mergeStateStatus: string;
   reviewDecision: PullRequest["reviewDecision"];
+  headSha?: string;
+  autoMergeMethod?: AutoMergeMethod | null;
+  viewerReviewRequested?: boolean;
+  viewerLatestReviewState?: ViewerReviewState | null;
 }
 
 /**
@@ -1951,6 +2022,10 @@ export async function fetchHotPRStatus(
         checkStatus,
         mergeStateStatus: node.mergeStateStatus,
         reviewDecision: mapReviewDecision(node.reviewDecision),
+        ...(node.headRefOid ? { headSha: node.headRefOid } : {}),
+        autoMergeMethod: mapAutoMergeMethod(node.autoMergeRequest?.mergeMethod),
+        viewerReviewRequested: Boolean(node.viewerLatestReviewRequest?.id),
+        viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
       });
     }
   }));
@@ -2150,4 +2225,51 @@ export async function discoverUpstreamRepos(
   repos.sort((a, b) => a.fullName.localeCompare(b.fullName));
   if (repos.length > CAP) repos.splice(CAP);
   return repos;
+}
+
+// ── PR Approval Mutation ─────────────────────────────────────────────────────
+
+interface ApprovePullRequestResponse {
+  addPullRequestReview: {
+    pullRequestReview: {
+      state: string | null;
+      pullRequest: {
+        reviewDecision: string | null;
+      } | null;
+    } | null;
+  } | null;
+  rateLimit?: GraphQLRateLimit;
+}
+
+export async function approvePullRequest(
+  octokit: GitHubOctokit,
+  pullRequestId: string,
+  commitOID: string,
+): Promise<{ state: ViewerReviewState | null; reviewDecision: PullRequest["reviewDecision"] }> {
+  if (!GITHUB_NODE_ID_RE.test(pullRequestId)) {
+    throw new Error(`Invalid pullRequestId: "${pullRequestId}"`);
+  }
+  if (!GIT_SHA_RE.test(commitOID)) {
+    throw new Error(`Invalid commitOID: "${commitOID}"`);
+  }
+
+  const response = await octokit.graphql<ApprovePullRequestResponse>(APPROVE_PR_MUTATION, {
+    pullRequestId,
+    commitOID,
+    request: { apiSource: "approvePR", retries: 0 },
+  });
+
+  if (response.rateLimit) {
+    updateGraphqlRateLimit(response.rateLimit);
+  }
+
+  const review = response.addPullRequestReview?.pullRequestReview;
+  const state = mapViewerReviewState(review?.state);
+  if (state !== "APPROVED") {
+    throw new Error("GitHub did not confirm pull request approval");
+  }
+  return {
+    state,
+    reviewDecision: mapReviewDecision(review?.pullRequest?.reviewDecision ?? null),
+  };
 }

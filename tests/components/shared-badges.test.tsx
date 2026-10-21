@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@solidjs/testing-library";
 import RoleBadge from "../../src/app/components/shared/RoleBadge";
 import ReviewBadge from "../../src/app/components/shared/ReviewBadge";
 import SizeBadge from "../../src/app/components/shared/SizeBadge";
+import AutoMergeBadge from "../../src/app/components/shared/AutoMergeBadge";
 
 describe("RoleBadge", () => {
   it("renders nothing for empty roles", () => {
@@ -147,5 +148,54 @@ describe("SizeBadge", () => {
       fireEvent.pointerLeave(trigger!);
       vi.advanceTimersByTime(500);
     });
+  });
+});
+
+describe("AutoMergeBadge", () => {
+  it("renders nothing when method is null or undefined", () => {
+    const { container: c1 } = render(() => <AutoMergeBadge method={null} />);
+    expect(c1.textContent).toBe("");
+    const { container: c2 } = render(() => <AutoMergeBadge />);
+    expect(c2.textContent).toBe("");
+  });
+
+  it("renders 'auto' with badge-sm by default for MERGE, SQUASH, and REBASE", () => {
+    const { unmount: u1 } = render(() => <AutoMergeBadge method="MERGE" />);
+    const b1 = screen.getByTestId("auto-merge-badge");
+    expect(b1.textContent).toBe("auto");
+    expect(b1.className).toContain("badge-sm");
+    expect(b1.getAttribute("aria-label")).toBe("Auto-merge enabled (merge)");
+    u1();
+
+    const { unmount: u2 } = render(() => <AutoMergeBadge method="SQUASH" />);
+    const b2 = screen.getByTestId("auto-merge-badge");
+    expect(b2.getAttribute("aria-label")).toBe("Auto-merge enabled (squash)");
+    u2();
+
+    const { unmount: u3 } = render(() => <AutoMergeBadge method="REBASE" />);
+    const b3 = screen.getByTestId("auto-merge-badge");
+    expect(b3.getAttribute("aria-label")).toBe("Auto-merge enabled (rebase)");
+    u3();
+  });
+
+  it("renders badge-xs when compact={true}", () => {
+    render(() => <AutoMergeBadge method="SQUASH" compact />);
+    const badge = screen.getByTestId("auto-merge-badge");
+    expect(badge.className).toContain("badge-xs");
+    expect(badge.className).not.toContain("badge-sm");
+  });
+
+  it("shows tooltip with merge method on hover", () => {
+    vi.useFakeTimers();
+    const { container, unmount } = render(() => <AutoMergeBadge method="SQUASH" />);
+    const trigger = container.querySelector("span.inline-flex");
+    expect(trigger).not.toBeNull();
+    fireEvent.pointerEnter(trigger!);
+    vi.advanceTimersByTime(300);
+    expect(document.body.textContent).toContain("Auto-merge enabled (squash)");
+    fireEvent.pointerLeave(trigger!);
+    vi.advanceTimersByTime(500);
+    unmount();
+    vi.useRealTimers();
   });
 });

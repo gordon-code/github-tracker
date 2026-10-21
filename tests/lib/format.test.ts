@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, formatScopeSummary } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, formatScopeSummary, canApprovePR } from "../../src/app/lib/format";
+import { makePullRequest } from "../helpers/factories";
 
 describe("relativeTime", () => {
   beforeEach(() => {
@@ -442,5 +443,138 @@ describe("formatStarCount", () => {
 
   it("returns '1.2M' for 1234567", () => {
     expect(formatStarCount(1234567)).toBe("1.2M");
+  });
+});
+
+describe("canApprovePR", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+  it("returns true when reviewDecision is REVIEW_REQUIRED on an open enriched non-draft PR by another author", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(canApprovePR(pr, "reviewer")).toBe(true);
+  });
+
+  it("returns true when viewerReviewRequested is true even if reviewDecision is null or CHANGES_REQUESTED", () => {
+    const prNullDecision = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: null,
+      viewerReviewRequested: true,
+    });
+    const prChangesRequested = makePullRequest({
+      nodeId: "PR_kwDOtest0002",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "CHANGES_REQUESTED",
+      viewerReviewRequested: true,
+    });
+    expect(canApprovePR(prNullDecision, "reviewer")).toBe(true);
+    expect(canApprovePR(prChangesRequested, "reviewer")).toBe(true);
+  });
+
+  it("returns false for self-authored PR (case-insensitive)", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "OctoCat",
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerReviewRequested: true,
+    });
+    expect(canApprovePR(pr, "octocat")).toBe(false);
+  });
+
+  it("returns false when viewerLatestReviewState is APPROVED and viewerReviewRequested is false", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerLatestReviewState: "APPROVED",
+      viewerReviewRequested: false,
+    });
+    expect(canApprovePR(pr, "reviewer")).toBe(false);
+  });
+
+  it("returns true when viewerLatestReviewState is APPROVED but viewerReviewRequested is true (re-requested review)", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerLatestReviewState: "APPROVED",
+      viewerReviewRequested: true,
+    });
+    expect(canApprovePR(pr, "reviewer")).toBe(true);
+  });
+
+  it("returns false when PR is a draft", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      draft: true,
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(canApprovePR(pr, "reviewer")).toBe(false);
+  });
+
+  it("returns false when PR state is CLOSED or MERGED", () => {
+    const closedPr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      state: "CLOSED",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    const mergedPr = makePullRequest({
+      nodeId: "PR_kwDOtest0002",
+      headSha: validSha,
+      userLogin: "author",
+      state: "MERGED",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(canApprovePR(closedPr, "reviewer")).toBe(false);
+    expect(canApprovePR(mergedPr, "reviewer")).toBe(false);
+  });
+
+  it("returns false when PR is not yet enriched (enriched === false)", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      enriched: false,
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(canApprovePR(pr, "reviewer")).toBe(false);
+  });
+
+  it("returns false when nodeId, headSha, or userLogin is missing", () => {
+    const noNodeId = makePullRequest({
+      nodeId: undefined,
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    const noHeadSha = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: "",
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    const validPr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(canApprovePR(noNodeId, "reviewer")).toBe(false);
+    expect(canApprovePR(noHeadSha, "reviewer")).toBe(false);
+    expect(canApprovePR(validPr, "")).toBe(false);
   });
 });
