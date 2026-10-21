@@ -53,7 +53,7 @@ Per-repo opt-in to see all open issues and PRs in that repo, not just ones invol
 
 ### Upstream Repo Discovery
 
-When you sign in, the app searches for repos you've interacted with that aren't in your selected list and offers to add them as "upstream" repos. These are included in issue/PR fetches but excluded from workflow run polling.
+When you sign in, the app searches for repos you've interacted with that aren't in your selected list and offers to add them as "upstream" repos. These are included in issue/PR fetches but excluded from workflow run polling. In the org and personal repository picker, forked repositories are highlighted with a muted name and a `Fork` badge, and archived repositories are automatically excluded from both the repository list and upstream discovery.
 
 ### Hot Polling
 

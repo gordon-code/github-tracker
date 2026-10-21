@@ -8,6 +8,7 @@ import {
   fetchPREnrichment,
   fetchHotPRStatus,
   approvePullRequest,
+  discoverUpstreamRepos,
   type RepoRef,
 } from "../../src/app/services/api";
 import { APPROVE_PR_MUTATION } from "../../src/app/services/github";
@@ -229,9 +230,121 @@ describe("fetchRepos", () => {
     );
   });
 
+  it("maps isFork boolean from raw fork field", async () => {
+    const octokit = makeBasicOctokit();
+    const result = await fetchRepos(octokit as never, "octocat", "user");
+
+    const helloWorld = result.find((r) => r.fullName === "octocat/Hello-World");
+    const spoonKnife = result.find((r) => r.fullName === "octocat/Spoon-Knife");
+
+    expect(helloWorld?.isFork).toBe(false);
+    expect(spoonKnife?.isFork).toBe(true);
+  });
+
+  it("excludes archived repositories for both org and user calls", async () => {
+    const octokit = makeBasicOctokit();
+
+    const orgResult = await fetchRepos(octokit as never, "acme-corp", "org");
+    expect(orgResult.map((r) => r.fullName)).not.toContain("acme-corp/legacy-service");
+    expect(orgResult.map((r) => r.fullName)).toContain("acme-corp/acme-api");
+
+    const userResult = await fetchRepos(octokit as never, "octocat", "user");
+    expect(userResult.map((r) => r.fullName)).not.toContain("acme-corp/legacy-service");
+    expect(userResult.map((r) => r.fullName)).toContain("octocat/Hello-World");
+  });
+
+  it("does not count archived repositories toward the 1000-repo REPO_CAP", async () => {
+    vi.mocked(pushNotification).mockClear();
+
+    async function* mockPaginator() {
+      yield {
+        data: Array.from({ length: 100 }, (_, i) => ({
+          owner: { login: "org" },
+          name: `archived-${i}`,
+          full_name: `org/archived-${i}`,
+          pushed_at: "2026-01-01T00:00:00Z",
+          fork: false,
+          archived: true,
+        })),
+      };
+      yield {
+        data: Array.from({ length: 50 }, (_, i) => ({
+          owner: { login: "org" },
+          name: `active-${i}`,
+          full_name: `org/active-${i}`,
+          pushed_at: "2026-01-02T00:00:00Z",
+          fork: i % 2 === 0,
+          archived: false,
+        })),
+      };
+    }
+
+    const octokit = makeBasicOctokit();
+    octokit.paginate.iterator.mockImplementation((() => mockPaginator()) as never);
+
+    const result = await fetchRepos(octokit as never, "org", "org");
+
+    expect(result).toHaveLength(50);
+    expect(result.every((r) => r.name.startsWith("active-"))).toBe(true);
+    expect(result[0].isFork).toBe(true);
+    expect(result[1].isFork).toBe(false);
+    expect(pushNotification).not.toHaveBeenCalled();
+  });
+
   // VALID_REPO_NAME is not exported. It is exercised indirectly via buildRepoQualifiers
   // (called inside fetchIssuesAndPullRequests). Invalid repo names are silently
   // filtered from the GraphQL query qualifiers. No additional test added here.
+});
+
+// ── discoverUpstreamRepos ─────────────────────────────────────────────────────
+
+describe("discoverUpstreamRepos", () => {
+  it("includes archived:false in both issue and PR GraphQL search queries", async () => {
+    const queries: string[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {}, headers: {} }),
+      async (_query: string, variables: unknown) => {
+        const vars = variables as { q?: string };
+        if (vars.q) queries.push(vars.q);
+        return {
+          search: {
+            issueCount: 1,
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                databaseId: 101,
+                id: "I_kwDO101",
+                number: 1,
+                title: "Upstream issue",
+                state: "OPEN",
+                url: "https://github.com/upstream/repo/issues/1",
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-02T00:00:00Z",
+                author: { login: "octocat", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+                labels: { nodes: [] },
+                assignees: { nodes: [] },
+                repository: { nameWithOwner: "upstream/repo" },
+                comments: { totalCount: 0 },
+              },
+            ],
+          },
+          rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
+        };
+      }
+    );
+
+    const result = await discoverUpstreamRepos(
+      octokit as never,
+      "octocat",
+      new Set(["octocat/Hello-World"])
+    );
+
+    expect(queries).toContain("is:issue is:open archived:false involves:octocat");
+    expect(queries).toContain("is:pr is:open archived:false involves:octocat");
+    expect(result).toEqual([
+      { owner: "upstream", name: "repo", fullName: "upstream/repo" },
+    ]);
+  });
 });
 
 

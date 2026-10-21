@@ -89,7 +89,7 @@ To replace your token later (e.g., after expiration or rotation), go to **Settin
 
 ### Repository Selection
 
-After signing in, the onboarding wizard asks you to select repositories to track. Search by name or browse by organization. You can change your selection at any time in **Settings > Repositories**.
+After signing in, the onboarding wizard asks you to select repositories to track. Search by name or browse by organization. Forked repositories are displayed with a muted name and a `Fork` badge so you can distinguish them from source repositories at a glance. Archived repositories are automatically excluded from the list (and removed from your selection if a previously tracked repository is archived on GitHub). You can change your selection at any time in **Settings > Repositories**.
 
 ### Organization Access
 
