@@ -612,5 +612,20 @@ describe("ItemRow", () => {
       setApprovingSet(new Set<number>());
       expect(btn.textContent).toBe("Confirm?");
     });
+
+    it("renders right after the title and collapses width (max-w-0) when idle so non-hovered rows have no blank space", () => {
+      const onApprove = vi.fn();
+      render(() => <ItemRow {...defaultProps} onApprove={onApprove} />);
+
+      const btn = screen.getByLabelText("Approve #42 Fix a bug");
+      const wrapper = btn.parentElement!;
+      expect(wrapper.previousElementSibling?.textContent).toBe("Fix a bug");
+      expect(wrapper.className).toContain("max-w-0");
+      expect(wrapper.className).toContain("group-hover:max-w-40");
+
+      fireEvent.click(btn);
+      expect(wrapper.className).toContain("max-w-40");
+      expect(wrapper.className).not.toContain("max-w-0");
+    });
   });
 });

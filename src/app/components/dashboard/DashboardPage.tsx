@@ -1505,8 +1505,6 @@ export default function DashboardPage() {
       });
 
       persistDashboardSnapshot();
-
-      pushNotification(`approve-pr:${pr.id}`, `Approved ${pr.repoFullName}#${pr.number}`, "info");
     } catch (err) {
       if (getClient() !== client) return;
       const status =

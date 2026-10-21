@@ -229,7 +229,7 @@ When GitHub auto-merge is enabled on a pull request, a read-only `auto` badge ap
 
 #### Inline Approve Action
 
-Open, non-draft pull requests not authored by you show an **Approve** button in the right-side action slot (next to Pin and Ignore) when branch protection requires a review (`Review needed`) or when a review has been requested of you or your team (unless you have already approved the PR without a fresh re-request).
+Open, non-draft pull requests not authored by you show an **Approve** button next to the pull request title on hover when branch protection requires a review (`Review needed`) or when a review has been requested of you or your team (unless you have already approved the PR without a fresh re-request).
 
 Approval uses a two-step inline confirmation to prevent accidental clicks:
 1. Click **Approve** once to arm confirmation (**Confirm?**, or **Confirm (auto)** when auto-merge is enabled on the PR). The confirmation state resets automatically after 4 seconds, on Escape, or when focus leaves the button.

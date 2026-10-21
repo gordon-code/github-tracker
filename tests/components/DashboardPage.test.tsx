@@ -3598,7 +3598,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
 describe("DashboardPage — PR approval integration", () => {
   const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
 
-  it("completes two-step PR approval flow, updates badge to Approved, seeds hot sets, and pushes info notification", async () => {
+  it("completes two-step PR approval flow, updates badge to Approved, seeds hot sets, and does not push a persistent notification on success", async () => {
     const user = userEvent.setup();
     const graphqlMock = vi.fn().mockResolvedValue({
       addPullRequestReview: {
@@ -3684,12 +3684,7 @@ describe("DashboardPage — PR approval integration", () => {
       expect(screen.queryByText("Review needed")).toBeNull();
     });
     expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
-
-    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
-      "approve-pr:42",
-      "Approved owner/repo#42",
-      "info"
-    );
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 
   it("handles 403 / FORBIDDEN error without calling expireToken, leaves PR unapproved, re-enables Approve button, and pushes PAT write permission error", async () => {
@@ -4066,7 +4061,7 @@ describe("DashboardPage — PR approval integration", () => {
     });
 
     await waitFor(() => {
-      expect(errorsLib.pushNotification).toHaveBeenCalledWith("approve-pr:42", "Approved owner/repo#42", "info");
+      expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledOnce();
     });
 
     // Because headSha changed to newSha while validSha was being approved, the guard evicts the entry
