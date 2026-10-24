@@ -31,7 +31,7 @@
     "directory": "mcp"
   },
   "engines": {
-    "node": "v25.9.0"
+    "node": "v26.12.1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
