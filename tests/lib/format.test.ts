@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, formatScopeSummary, canApprovePR } from "../../src/app/lib/format";
+import { relativeTime, shortRelativeTime, labelTextColor, formatDuration, prSizeCategory, deriveInvolvementRoles, formatCount, formatStarCount, formatScopeSummary, canApprovePR, canMarkPRReady } from "../../src/app/lib/format";
 import { makePullRequest } from "../helpers/factories";
 
 describe("relativeTime", () => {
@@ -576,5 +576,87 @@ describe("canApprovePR", () => {
     expect(canApprovePR(noNodeId, "reviewer")).toBe(false);
     expect(canApprovePR(noHeadSha, "reviewer")).toBe(false);
     expect(canApprovePR(validPr, "")).toBe(false);
+  });
+
+  it("returns false when checkStatus is failure and true for success, pending, conflict, or null", () => {
+    const base = {
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED" as const,
+    };
+
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "failure" }), "reviewer")).toBe(false);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "success" }), "reviewer")).toBe(true);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "pending" }), "reviewer")).toBe(true);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "conflict" }), "reviewer")).toBe(true);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: null }), "reviewer")).toBe(true);
+  });
+});
+
+describe("canMarkPRReady", () => {
+  it("returns true for an OPEN draft PR authored by userLogin (case-insensitive)", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      state: "OPEN",
+      draft: true,
+      userLogin: "OctoCat",
+    });
+    expect(canMarkPRReady(pr, "octocat")).toBe(true);
+    expect(canMarkPRReady(pr, "OCTOCAT")).toBe(true);
+  });
+
+  it("returns false when userLogin is not the PR author", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      state: "OPEN",
+      draft: true,
+      userLogin: "author",
+    });
+    expect(canMarkPRReady(pr, "reviewer")).toBe(false);
+  });
+
+  it("returns false when draft is false", () => {
+    const pr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      state: "OPEN",
+      draft: false,
+      userLogin: "octocat",
+    });
+    expect(canMarkPRReady(pr, "octocat")).toBe(false);
+  });
+
+  it("returns false when PR state is CLOSED or MERGED", () => {
+    const closedPr = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      state: "CLOSED",
+      draft: true,
+      userLogin: "octocat",
+    });
+    const mergedPr = makePullRequest({
+      nodeId: "PR_kwDOtest0002",
+      state: "MERGED",
+      draft: true,
+      userLogin: "octocat",
+    });
+    expect(canMarkPRReady(closedPr, "octocat")).toBe(false);
+    expect(canMarkPRReady(mergedPr, "octocat")).toBe(false);
+  });
+
+  it("returns false when nodeId is missing or userLogin is empty", () => {
+    const noNodeId = makePullRequest({
+      nodeId: undefined,
+      state: "OPEN",
+      draft: true,
+      userLogin: "octocat",
+    });
+    const validDraft = makePullRequest({
+      nodeId: "PR_kwDOtest0001",
+      state: "OPEN",
+      draft: true,
+      userLogin: "octocat",
+    });
+    expect(canMarkPRReady(noNodeId, "octocat")).toBe(false);
+    expect(canMarkPRReady(validDraft, "")).toBe(false);
   });
 });

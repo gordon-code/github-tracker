@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, type ApiRequestInfo } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
@@ -209,6 +209,106 @@ describe("createGitHubClient", () => {
       client.request("POST /graphql", {
         query: APPROVE_PR_MUTATION,
         variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha, event: "REQUEST_CHANGES" },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Unexpected extra variable on APPROVE_PR_MUTATION
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha, extra: "unexpected" },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Array variables on APPROVE_PR_MUTATION
+    await expect(
+      client.request("POST /graphql", {
+        query: APPROVE_PR_MUTATION,
+        variables: ["PR_kwDOtest42", validSha] as unknown as Record<string, unknown>,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("allows MARK_PR_READY_MUTATION with valid PR_ or legacy Base64 nodeId", async () => {
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            markPullRequestReadyForReview: {
+              pullRequest: { isDraft: false, reviewDecision: "REVIEW_REQUIRED" },
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42" },
+      })
+    ).resolves.toBeDefined();
+
+    await expect(
+      client.graphql(MARK_PR_READY_MUTATION, {
+        pullRequestId: "MDExOlB1bGxSZXF1ZXN0NDI=",
+      })
+    ).resolves.toBeDefined();
+
+    expect(MARK_PR_READY_MUTATION).not.toContain("rateLimit");
+    vi.unstubAllGlobals();
+  });
+
+  it("blocks MARK_PR_READY_MUTATION with missing, malformed, array, or extra variables", async () => {
+    const client = createGitHubClient("test-token");
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+    // Missing variables object
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Empty variables object
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: {},
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Malformed pullRequestId
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: { pullRequestId: "bad!id" },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Extra unexpected variable (e.g. commitOID or extra)
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", commitOID: validSha },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: { pullRequestId: "PR_kwDOtest42", extra: "unexpected" },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+
+    // Array variables
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: ["PR_kwDOtest42"] as unknown as Record<string, unknown>,
       })
     ).rejects.toThrow(/Write operation blocked/);
   });

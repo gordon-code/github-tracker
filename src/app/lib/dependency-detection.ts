@@ -282,12 +282,12 @@ export function classifyDepStatus(
     return "pending-rebase";
   }
 
-  // 2. Enriched + CI green + not draft + not approved → mergeable
+  // 2. Enriched + CI green (or no CI configured) + not draft + not changes-requested → mergeable
   if (
     pr.enriched !== false &&
     !pr.draft &&
-    pr.checkStatus === "success" &&
-    pr.reviewDecision !== "APPROVED"
+    (pr.checkStatus === "success" || pr.checkStatus === null) &&
+    pr.reviewDecision !== "CHANGES_REQUESTED"
   ) {
     return "mergeable";
   }

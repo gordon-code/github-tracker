@@ -456,16 +456,28 @@ describe("classifyDepStatus", () => {
     expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns needs-action for unenriched PR (enriched=false, checkStatus is null)", () => {
+  it("returns needs-action for unenriched PR (enriched=false, draft=false, checkStatus is null)", () => {
     const pr = makePullRequest({
       enriched: false,
+      draft: false,
       checkStatus: null,
       updatedAt: RECENT,
     });
     expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns needs-action for approved PR (already handled, not mergeable)", () => {
+  it("returns mergeable for enriched non-draft PR with checkStatus null (no CI configured)", () => {
+    const pr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: null,
+      reviewDecision: null,
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(pr, "", 14)).toBe("mergeable");
+  });
+
+  it("returns mergeable for approved PR with passing CI", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
@@ -473,15 +485,26 @@ describe("classifyDepStatus", () => {
       reviewDecision: "APPROVED",
       updatedAt: RECENT,
     });
-    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
+    expect(classifyDepStatus(pr, "", 14)).toBe("mergeable");
   });
 
-  it("returns stale for approved PR that has not been updated in over 14 days", () => {
+  it("returns needs-action for recent PR with changes requested even when CI is green", () => {
     const pr = makePullRequest({
       enriched: true,
       draft: false,
       checkStatus: "success",
-      reviewDecision: "APPROVED",
+      reviewDecision: "CHANGES_REQUESTED",
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
+  });
+
+  it("returns stale for PR with changes requested that has not been updated in over 14 days", () => {
+    const pr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: "success",
+      reviewDecision: "CHANGES_REQUESTED",
       updatedAt: OLD,
     });
     expect(classifyDepStatus(pr, "", 14)).toBe("stale");
