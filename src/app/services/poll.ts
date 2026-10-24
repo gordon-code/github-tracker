@@ -547,7 +547,7 @@ export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
       if (
         upd.state === "CLOSED" ||
         upd.state === "MERGED" ||
-        (upd.checkStatus !== "pending" && upd.checkStatus !== null)
+        upd.checkStatus !== "pending"
       ) {
         const nodeId = _hotPRsByDbId.get(databaseId);
         if (nodeId) {

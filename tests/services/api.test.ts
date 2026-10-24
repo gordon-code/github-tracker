@@ -8,10 +8,11 @@ import {
   fetchPREnrichment,
   fetchHotPRStatus,
   approvePullRequest,
+  markPullRequestReady,
   discoverUpstreamRepos,
   type RepoRef,
 } from "../../src/app/services/api";
-import { APPROVE_PR_MUTATION } from "../../src/app/services/github";
+import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
 import { pushNotification } from "../../src/app/lib/errors";
 
@@ -1575,5 +1576,82 @@ describe("approvePullRequest", () => {
     await expect(
       approvePullRequest(octokit as never, "PR_kwDOtest0042", validSha)
     ).rejects.toThrow("GitHub did not confirm pull request approval");
+  });
+});
+
+// ── markPullRequestReady ──────────────────────────────────────────────────────
+
+describe("markPullRequestReady", () => {
+  it("executes MARK_PR_READY_MUTATION with retries: 0, updates rateLimit, and returns draft: false + reviewDecision", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    const updateSpy = vi.spyOn(githubModule, "updateGraphqlRateLimit");
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        markPullRequestReadyForReview: {
+          pullRequest: {
+            isDraft: false,
+            reviewDecision: "REVIEW_REQUIRED",
+          },
+        },
+        rateLimit: { cost: 1, limit: 5000, remaining: 4987, resetAt: "2026-04-23T12:00:00Z" },
+      })
+    );
+
+    const result = await markPullRequestReady(octokit as never, "PR_kwDOtest0042");
+
+    expect(octokit.graphql).toHaveBeenCalledWith(MARK_PR_READY_MUTATION, {
+      pullRequestId: "PR_kwDOtest0042",
+      request: { apiSource: "markPRReady", retries: 0 },
+    });
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 5000, remaining: 4987, resetAt: "2026-04-23T12:00:00Z" })
+    );
+    expect(result).toEqual({
+      draft: false,
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+  });
+
+  it("rejects invalid pullRequestId before calling octokit.graphql", async () => {
+    const octokit = makeOctokit(async () => ({ data: {} }));
+
+    await expect(
+      markPullRequestReady(octokit as never, "bad!id")
+    ).rejects.toThrow("Invalid pullRequestId");
+
+    expect(octokit.graphql).not.toHaveBeenCalled();
+  });
+
+  it("throws when pullRequest is null or isDraft is true", async () => {
+    const octokitStillDraft = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        markPullRequestReadyForReview: {
+          pullRequest: {
+            isDraft: true,
+            reviewDecision: null,
+          },
+        },
+      })
+    );
+
+    await expect(
+      markPullRequestReady(octokitStillDraft as never, "PR_kwDOtest0042")
+    ).rejects.toThrow("GitHub did not confirm pull request is ready for review");
+
+    const octokitNullPR = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({
+        markPullRequestReadyForReview: {
+          pullRequest: null,
+        },
+      })
+    );
+
+    await expect(
+      markPullRequestReady(octokitNullPR as never, "PR_kwDOtest0042")
+    ).rejects.toThrow("GitHub did not confirm pull request is ready for review");
   });
 });

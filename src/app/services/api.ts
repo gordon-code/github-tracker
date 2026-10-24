@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/solid";
 import { pushNotification } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
-import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
+import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
 import { REPO_CAP } from "../../shared/types";
 import type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
@@ -422,6 +422,7 @@ const HOT_PR_STATUS_QUERY = `
       ... on PullRequest {
         databaseId
         state
+        isDraft
         headRefOid
         mergeStateStatus
         reviewDecision
@@ -444,6 +445,7 @@ const HOT_PR_STATUS_QUERY = `
 interface HotPRStatusNode {
   databaseId: number;
   state: PullRequestState;
+  isDraft?: boolean;
   headRefOid?: string;
   mergeStateStatus: string;
   reviewDecision: string | null;
@@ -1979,6 +1981,7 @@ export async function fetchWorkflowRuns(
 
 export interface HotPRStatusUpdate {
   state: PullRequestState;
+  draft?: boolean;
   checkStatus: CheckStatus["status"];
   mergeStateStatus: string;
   reviewDecision: PullRequest["reviewDecision"];
@@ -2019,6 +2022,7 @@ export async function fetchHotPRStatus(
 
       results.set(node.databaseId, {
         state: node.state,
+        ...(typeof node.isDraft === "boolean" ? { draft: node.isDraft } : {}),
         checkStatus,
         mergeStateStatus: node.mergeStateStatus,
         reviewDecision: mapReviewDecision(node.reviewDecision),
@@ -2271,5 +2275,42 @@ export async function approvePullRequest(
   return {
     state,
     reviewDecision: mapReviewDecision(review?.pullRequest?.reviewDecision ?? null),
+  };
+}
+
+interface MarkPullRequestReadyResponse {
+  markPullRequestReadyForReview: {
+    pullRequest: {
+      isDraft: boolean | null;
+      reviewDecision: string | null;
+    } | null;
+  } | null;
+  rateLimit?: GraphQLRateLimit;
+}
+
+export async function markPullRequestReady(
+  octokit: GitHubOctokit,
+  pullRequestId: string,
+): Promise<{ draft: false; reviewDecision: PullRequest["reviewDecision"] }> {
+  if (!GITHUB_NODE_ID_RE.test(pullRequestId)) {
+    throw new Error(`Invalid pullRequestId: "${pullRequestId}"`);
+  }
+
+  const response = await octokit.graphql<MarkPullRequestReadyResponse>(MARK_PR_READY_MUTATION, {
+    pullRequestId,
+    request: { apiSource: "markPRReady", retries: 0 },
+  });
+
+  if (response.rateLimit) {
+    updateGraphqlRateLimit(response.rateLimit);
+  }
+
+  const pr = response.markPullRequestReadyForReview?.pullRequest;
+  if (!pr || pr.isDraft !== false) {
+    throw new Error("GitHub did not confirm pull request is ready for review");
+  }
+  return {
+    draft: false,
+    reviewDecision: mapReviewDecision(pr.reviewDecision ?? null),
   };
 }
