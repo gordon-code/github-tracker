@@ -132,7 +132,7 @@ The login flow requests `scope=repo read:org`:
 | `repo` | Read issues, PRs, check runs, workflow runs (includes private repos) |
 | `read:org` | `GET /user/orgs` — list user's organizations for the org selector |
 
-**Note:** The `repo` scope grants write access to repositories. An Octokit request guard blocks all REST write operations (POST/PUT/PATCH/DELETE) and all GraphQL mutations except explicit user-confirmed PR approvals (`addPullRequestReview` with `event: APPROVE`).
+**Note:** The `repo` scope grants write access to repositories. An Octokit request guard blocks all REST write operations (POST/PUT/PATCH/DELETE) and all GraphQL mutations except explicit user-confirmed PR approvals (`addPullRequestReview` with `event: APPROVE`) and marking draft PRs ready (`markPullRequestReadyForReview`).
 
 ### Local development OAuth App
 

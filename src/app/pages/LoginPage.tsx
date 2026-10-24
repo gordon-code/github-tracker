@@ -287,7 +287,7 @@ export default function LoginPage() {
                     >
                       Fine-grained tokens
                     </a>
-                    {" "}also work, but only access one org at a time. Add read-only permissions for Actions, Contents, and Issues, plus Read and write for Pull requests (or read-only if you don't approve PRs from the dashboard).
+                    {" "}also work, but only access one org at a time. Add read-only permissions for Actions, Contents, and Issues, plus Read and write for Pull requests (or read-only if you don't approve PRs or mark drafts ready from the dashboard).
                   </p>
                 </div>
 

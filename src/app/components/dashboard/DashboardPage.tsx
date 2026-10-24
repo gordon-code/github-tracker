@@ -14,7 +14,7 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -39,7 +39,7 @@ import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification, pushError, dismissNotificationBySource } from "../../lib/errors";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
-import { canApprovePR, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
+import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
@@ -211,6 +211,28 @@ function applyRecentApprovalGuard(pr: PullRequest, currentLogin: string): void {
   }
 }
 
+const [markingReadyPRIds, setMarkingReadyPRIds] = createSignal<ReadonlySet<number>>(new Set<number>());
+const RECENT_READY_TTL_MS = 60_000;
+const recentlyMarkedReadyPRs = new Map<
+  number,
+  { reviewDecision: PullRequest["reviewDecision"]; markedAt: number }
+>();
+
+function applyRecentReadyGuard(pr: PullRequest): void {
+  const now = Date.now();
+  for (const [id, entry] of recentlyMarkedReadyPRs) {
+    if (now - entry.markedAt > RECENT_READY_TTL_MS) {
+      recentlyMarkedReadyPRs.delete(id);
+    }
+  }
+  const entry = recentlyMarkedReadyPRs.get(pr.id);
+  if (!entry) return;
+  pr.draft = false;
+  if (pr.reviewDecision === null && entry.reviewDecision !== null) {
+    pr.reviewDecision = entry.reviewDecision;
+  }
+}
+
 export function applyHotPollPRUpdates(
   state: { pullRequests: PullRequest[] },
   prUpdates: ReadonlyMap<number, HotPRStatusUpdate>,
@@ -226,6 +248,7 @@ export function applyHotPollPRUpdates(
     const update = prUpdates.get(pr.id);
     if (!update) continue;
     pr.state = update.state; // detect closed/merged quickly
+    if (typeof update.draft === "boolean") pr.draft = update.draft;
     pr.checkStatus = update.checkStatus;
     pr.reviewDecision = update.reviewDecision;
     if (update.headSha) {
@@ -251,6 +274,7 @@ export function applyHotPollPRUpdates(
     ) {
       pr.reviewerLogins = [...pr.reviewerLogins, loginLower];
     }
+    applyRecentReadyGuard(pr);
     applyRecentApprovalGuard(pr, currentLogin);
   }
   if (terminalPrIds.size > 0) {
@@ -283,6 +307,8 @@ onAuthCleared(() => {
   _depBodyFailureCooldown.clear();
   setApprovingPRIds(new Set<number>());
   recentlyApprovedPRs.clear();
+  setMarkingReadyPRIds(new Set<number>());
+  recentlyMarkedReadyPRs.clear();
   resetAbandonedPatternCache();
   const coord = _coordinator();
   if (coord) {
@@ -343,7 +369,10 @@ async function pollFetch(): Promise<DashboardData> {
     setHasFetchedFresh(true);
     const now = new Date();
     const currentLogin = user()?.login ?? "";
-    for (const pr of data.pullRequests) applyRecentApprovalGuard(pr, currentLogin);
+    for (const pr of data.pullRequests) {
+      applyRecentReadyGuard(pr);
+      applyRecentApprovalGuard(pr, currentLogin);
+    }
 
     if (phaseOneFired) {
       // Phase 1 fired — use fine-grained merge for the light→enriched
@@ -376,16 +405,21 @@ async function pollFetch(): Promise<DashboardData> {
             if (!regressing) {
               Object.assign(pr, pickEnrichmentFields(e));
               pr.reviewDecision = e.reviewDecision;
+              pr.draft = e.draft;
               pr.enriched = e.enriched;
             }
             pr.nodeId = e.nodeId;
             pr.surfacedBy = e.surfacedBy;
             pr.starCount = e.starCount;
+            applyRecentReadyGuard(pr);
             applyRecentApprovalGuard(pr, currentLogin);
           }
         } else {
           state.pullRequests = fallbackToPreviousEnrichment(state.pullRequests, data.pullRequests);
-          for (const pr of state.pullRequests) applyRecentApprovalGuard(pr, currentLogin);
+          for (const pr of state.pullRequests) {
+            applyRecentReadyGuard(pr);
+            applyRecentApprovalGuard(pr, currentLogin);
+          }
         }
       }));
     } else {
@@ -395,7 +429,10 @@ async function pollFetch(): Promise<DashboardData> {
       // DOM updates are synchronous within the setter, so save/restore
       // around it to prevent scroll reset from <For> DOM rebuild.
       const pullRequests = fallbackToPreviousEnrichment(dashboardData.pullRequests, data.pullRequests);
-      for (const pr of pullRequests) applyRecentApprovalGuard(pr, currentLogin);
+      for (const pr of pullRequests) {
+        applyRecentReadyGuard(pr);
+        applyRecentApprovalGuard(pr, currentLogin);
+      }
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
@@ -407,7 +444,15 @@ async function pollFetch(): Promise<DashboardData> {
       });
     }
     const filteredRuns = config.enableActions ? data.workflowRuns : [];
-    rebuildHotSets({ ...data, workflowRuns: filteredRuns });
+    const hotPullRequests =
+      recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
+        ? data.pullRequests.map((pr) =>
+            (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
+              ? { ...pr, enriched: true, checkStatus: "pending" as const }
+              : pr
+          )
+        : data.pullRequests;
+    rebuildHotSets({ ...data, pullRequests: hotPullRequests, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted. Deferred to avoid blocking paint.
     const cachePayload = {
@@ -506,6 +551,7 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
       Object.assign(pr, pickEnrichmentFields(existingPr));
       pr.enriched = existingPr.enriched;
     }
+    applyRecentReadyGuard(pr);
     applyRecentApprovalGuard(pr, currentLogin);
   }
 
@@ -1545,6 +1591,83 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleMarkPRReady(pr: PullRequest): Promise<void> {
+    const currentLogin = userLogin();
+    if (!canMarkPRReady(pr, currentLogin)) return;
+    if (markingReadyPRIds().has(pr.id)) return;
+    const client = getClient();
+    if (!client || !pr.nodeId) return;
+    const nodeId = pr.nodeId;
+
+    dismissNotificationBySource(`mark-ready-pr:${pr.id}`);
+
+    setMarkingReadyPRIds((prev) => {
+      const next = new Set(prev);
+      next.add(pr.id);
+      return next;
+    });
+
+    try {
+      const result = await markPullRequestReady(client, nodeId);
+      if (getClient() !== client) return;
+
+      recentlyMarkedReadyPRs.set(pr.id, {
+        reviewDecision: result.reviewDecision,
+        markedAt: Date.now(),
+      });
+
+      setDashboardData(
+        produce((state) => {
+          const target = state.pullRequests.find((item) => item.id === pr.id);
+          if (target) {
+            target.draft = false;
+            if (result.reviewDecision !== null) {
+              target.reviewDecision = result.reviewDecision;
+            }
+            applyRecentReadyGuard(target);
+          }
+        })
+      );
+
+      seedHotSetsFromTargeted({
+        issues: [],
+        pullRequests: [{ ...pr, nodeId, draft: false, enriched: true, checkStatus: "pending" }],
+        workflowRuns: [],
+        errors: [],
+      });
+
+      persistDashboardSnapshot();
+    } catch (err) {
+      if (getClient() !== client) return;
+      const status =
+        typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+          ? ((err as Record<string, unknown>).status as number)
+          : null;
+      if (status === 401) {
+        expireToken();
+        window.location.replace("/login");
+        return;
+      }
+      if (isPermissionDeniedError(err)) {
+        pushNotification(
+          `mark-ready-pr:${pr.id}`,
+          "Unable to mark PR ready: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
+          "error"
+        );
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushNotification(`mark-ready-pr:${pr.id}`, `Failed to mark ${pr.repoFullName}#${pr.number} ready for review: ${message}`, "error");
+    } finally {
+      setMarkingReadyPRIds((prev) => {
+        if (!prev.has(pr.id)) return prev;
+        const next = new Set(prev);
+        next.delete(pr.id);
+        return next;
+      });
+    }
+  }
+
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -1617,6 +1740,8 @@ export default function DashboardPage() {
                   depPrIds={dependencyPrIds()}
                   onApprovePR={handleApprovePR}
                   approvingPRIds={approvingPRIds()}
+                  onMarkPRReady={handleMarkPRReady}
+                  markingReadyPRIds={markingReadyPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "dependencies"}>
@@ -1634,6 +1759,8 @@ export default function DashboardPage() {
                   onRefresh={() => _coordinator()?.manualRefresh()}
                   onApprovePR={handleApprovePR}
                   approvingPRIds={approvingPRIds()}
+                  onMarkPRReady={handleMarkPRReady}
+                  markingReadyPRIds={markingReadyPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "tracked"}>
@@ -1646,6 +1773,8 @@ export default function DashboardPage() {
                   hotPollingPRIds={hotPollingPRIds()}
                   onApprovePR={handleApprovePR}
                   approvingPRIds={approvingPRIds()}
+                  onMarkPRReady={handleMarkPRReady}
+                  markingReadyPRIds={markingReadyPRIds()}
                 />
               </Match>
               <Match when={activeTab() === "jiraAssigned"}>
@@ -1712,6 +1841,8 @@ export default function DashboardPage() {
                           jiraKeyMap={jiraKeyMap}
                           onApprovePR={handleApprovePR}
                           approvingPRIds={approvingPRIds()}
+                          onMarkPRReady={handleMarkPRReady}
+                          markingReadyPRIds={markingReadyPRIds()}
                         />
                       </Match>
                       <Match when={tab().baseType === "actions"}>

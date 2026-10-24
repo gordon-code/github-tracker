@@ -138,4 +138,26 @@ describe("hot poll terminal PR splice logic", () => {
     expect(state.pullRequests[0].viewerReviewRequested).toBe(false);
     expect(state.pullRequests[0].reviewerLogins).toEqual(["testuser"]);
   });
+
+  it("updates pr.draft when update.draft is boolean and preserves pr.draft when update.draft is undefined", () => {
+    const state = {
+      pullRequests: [
+        makePullRequest({ id: 11, draft: true }),
+        makePullRequest({ id: 12, draft: false }),
+        makePullRequest({ id: 13, draft: true }),
+      ],
+    };
+
+    const prUpdates = new Map<number, HotPRStatusUpdate>([
+      [11, { state: "OPEN", draft: false, checkStatus: "pending", mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" }],
+      [12, { state: "OPEN", draft: true, checkStatus: "pending", mergeStateStatus: "DRAFT", reviewDecision: null }],
+      [13, { state: "OPEN", checkStatus: "success", mergeStateStatus: "CLEAN", reviewDecision: null }],
+    ]);
+
+    applyHotPollPRUpdates(state, prUpdates);
+
+    expect(state.pullRequests[0].draft).toBe(false);
+    expect(state.pullRequests[1].draft).toBe(true);
+    expect(state.pullRequests[2].draft).toBe(true);
+  });
 });
