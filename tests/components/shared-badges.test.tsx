@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import RoleBadge from "../../src/app/components/shared/RoleBadge";
 import ReviewBadge from "../../src/app/components/shared/ReviewBadge";
 import SizeBadge from "../../src/app/components/shared/SizeBadge";
 import AutoMergeBadge from "../../src/app/components/shared/AutoMergeBadge";
+import DraftBadge from "../../src/app/components/shared/DraftBadge";
 
 describe("RoleBadge", () => {
   it("renders nothing for empty roles", () => {
@@ -197,5 +199,167 @@ describe("AutoMergeBadge", () => {
     vi.advanceTimersByTime(500);
     unmount();
     vi.useRealTimers();
+  });
+});
+
+describe("DraftBadge", () => {
+  it("renders nothing when draft={false}", () => {
+    const { container } = render(() => <DraftBadge draft={false} onMarkReady={vi.fn()} />);
+    expect(container.textContent).toBe("");
+    expect(screen.queryByTestId("draft-badge")).toBeNull();
+  });
+
+  it("renders read-only <span> ('Draft' in comfortable, 'D' in compact) when onMarkReady is undefined", () => {
+    const { unmount } = render(() => <DraftBadge draft={true} />);
+    const comfortable = screen.getByTestId("draft-badge");
+    expect(comfortable.tagName.toLowerCase()).toBe("span");
+    expect(comfortable.textContent).toBe("Draft");
+    expect(comfortable.className).toContain("badge-sm");
+    unmount();
+
+    render(() => <DraftBadge draft={true} compact />);
+    const compact = screen.getByTestId("draft-badge");
+    expect(compact.tagName.toLowerCase()).toBe("span");
+    expect(compact.textContent).toBe("D");
+    expect(compact.className).toContain("badge-xs");
+  });
+
+  it("renders <button> when onMarkReady is provided; first click shows 'Ready?' without calling onMarkReady; second click within 4s calls onMarkReady once and resets", () => {
+    const onMarkReady = vi.fn();
+    const { unmount } = render(() => (
+      <DraftBadge draft={true} prNumber={42} prTitle="WIP feature" onMarkReady={onMarkReady} />
+    ));
+
+    const btn = screen.getByTestId("draft-badge") as HTMLButtonElement;
+    expect(btn.tagName.toLowerCase()).toBe("button");
+    expect(btn.textContent).toBe("Draft");
+    expect(btn.getAttribute("aria-label")).toBe("Mark #42 WIP feature ready for review");
+
+    fireEvent.click(btn);
+    expect(onMarkReady).not.toHaveBeenCalled();
+    expect(btn.textContent).toBe("Ready?");
+    expect(btn.getAttribute("aria-label")).toBe("Confirm mark #42 WIP feature ready for review");
+
+    fireEvent.click(btn);
+    expect(onMarkReady).toHaveBeenCalledOnce();
+    expect(btn.textContent).toBe("Draft");
+    expect(btn.getAttribute("aria-label")).toBe("Mark #42 WIP feature ready for review");
+    unmount();
+
+    // Compact mode: starts as "D", expands to "Ready?" on first click, resets to "D" on second click
+    const onMarkReadyCompact = vi.fn();
+    render(() => <DraftBadge draft={true} compact prNumber={7} onMarkReady={onMarkReadyCompact} />);
+    const compactBtn = screen.getByTestId("draft-badge") as HTMLButtonElement;
+    expect(compactBtn.textContent).toBe("D");
+    expect(compactBtn.className).toContain("badge-xs");
+
+    fireEvent.click(compactBtn);
+    expect(compactBtn.textContent).toBe("Ready?");
+    expect(onMarkReadyCompact).not.toHaveBeenCalled();
+
+    fireEvent.click(compactBtn);
+    expect(onMarkReadyCompact).toHaveBeenCalledOnce();
+    expect(compactBtn.textContent).toBe("D");
+  });
+
+  it("auto-resets 'Ready?' back to 'Draft' after 4,000ms timer without calling onMarkReady", () => {
+    vi.useFakeTimers();
+    const onMarkReady = vi.fn();
+    const { unmount } = render(() => (
+      <DraftBadge draft={true} prNumber={42} prTitle="WIP feature" onMarkReady={onMarkReady} />
+    ));
+
+    const btn = screen.getByTestId("draft-badge");
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Ready?");
+
+    vi.advanceTimersByTime(4000);
+    expect(btn.textContent).toBe("Draft");
+    expect(btn.getAttribute("aria-label")).toBe("Mark #42 WIP feature ready for review");
+    expect(onMarkReady).not.toHaveBeenCalled();
+
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("resets 'Ready?' back to 'Draft' on Escape keydown and on blur", () => {
+    const onMarkReady = vi.fn();
+    render(() => (
+      <DraftBadge draft={true} prNumber={42} prTitle="WIP feature" onMarkReady={onMarkReady} />
+    ));
+
+    const btn = screen.getByTestId("draft-badge");
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Ready?");
+
+    fireEvent.keyDown(btn, { key: "Escape" });
+    expect(btn.textContent).toBe("Draft");
+
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Ready?");
+    fireEvent.blur(btn);
+    expect(btn.textContent).toBe("Draft");
+    expect(onMarkReady).not.toHaveBeenCalled();
+  });
+
+  it("resets 'Ready?' when onMarkReady or isMarkingReady changes, and does NOT disarm when isMarkingReady re-evaluates to the same boolean value", () => {
+    const onMarkReadyA = vi.fn();
+    const onMarkReadyB = vi.fn();
+    const [markReadyFn, setMarkReadyFn] = createSignal<() => void>(onMarkReadyA);
+    const [markingSet, setMarkingSet] = createSignal<ReadonlySet<number>>(new Set<number>());
+
+    render(() => (
+      <DraftBadge
+        draft={true}
+        prNumber={42}
+        prTitle="WIP feature"
+        onMarkReady={markReadyFn()}
+        isMarkingReady={markingSet().has(42)}
+      />
+    ));
+
+    const btn = screen.getByTestId("draft-badge");
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Ready?");
+
+    // Another PR (#99) starts and finishes marking ready — #42's isMarkingReady stays false, so "Ready?" stays armed
+    setMarkingSet(new Set([99]));
+    expect(btn.textContent).toBe("Ready?");
+    setMarkingSet(new Set<number>());
+    expect(btn.textContent).toBe("Ready?");
+
+    // Changing onMarkReady reference disarms confirmation
+    setMarkReadyFn(() => onMarkReadyB);
+    expect(btn.textContent).toBe("Draft");
+
+    // Re-arm and verify changing isMarkingReady for #42 disarms confirmation
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Ready?");
+    setMarkingSet(new Set([42]));
+    setMarkingSet(new Set<number>());
+    expect(btn.textContent).toBe("Draft");
+    expect(onMarkReadyA).not.toHaveBeenCalled();
+    expect(onMarkReadyB).not.toHaveBeenCalled();
+  });
+
+  it("renders spinner and disables button when isMarkingReady={true}", () => {
+    const onMarkReady = vi.fn();
+    render(() => (
+      <DraftBadge
+        draft={true}
+        prNumber={42}
+        prTitle="WIP feature"
+        onMarkReady={onMarkReady}
+        isMarkingReady={true}
+      />
+    ));
+
+    const btn = screen.getByTestId("draft-badge") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute("aria-label")).toBe("Marking #42 WIP feature ready for review");
+    expect(btn.querySelector(".loading-spinner")).not.toBeNull();
+
+    fireEvent.click(btn);
+    expect(onMarkReady).not.toHaveBeenCalled();
   });
 });

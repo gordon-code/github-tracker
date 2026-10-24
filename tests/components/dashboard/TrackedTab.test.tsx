@@ -451,4 +451,115 @@ describe("TrackedTab — auto-merge badge and Approve action", () => {
     expect(onApprovePR).toHaveBeenCalledOnce();
     expect(onApprovePR).toHaveBeenCalledWith(eligiblePR);
   });
+
+  it("hides Approve button on tracked PR when pr.checkStatus is 'failure'", () => {
+    const onApprovePR = vi.fn();
+    const failingPR = makePullRequest({
+      id: 920,
+      number: 920,
+      title: "Failing Tracked PR",
+      userLogin: "otheruser",
+      nodeId: "PR_kwDOtrack920",
+      headSha: validSha,
+      checkStatus: "failure",
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerReviewRequested: true,
+      enriched: true,
+    });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 920, number: 920, type: "pullRequest", title: "Failing Tracked PR" }),
+      ],
+    });
+
+    render(() => (
+      <TrackedTab
+        issues={[]}
+        pullRequests={[failingPR]}
+        userLogin="testuser"
+        onApprovePR={onApprovePR}
+      />
+    ));
+
+    expect(screen.queryByLabelText(/Approve #920/)).toBeNull();
+  });
+
+  it("renders interactive DraftBadge button on live self-authored draft PR rows and invokes onMarkPRReady(pr) on confirmation", () => {
+    const onMarkPRReady = vi.fn();
+    const ownDraftPR = makePullRequest({
+      id: 930,
+      number: 930,
+      title: "My Tracked Draft PR",
+      userLogin: "testuser",
+      nodeId: "PR_kwDOtrack930",
+      draft: true,
+      enriched: true,
+    });
+    const otherDraftPR = makePullRequest({
+      id: 931,
+      number: 931,
+      title: "Other Tracked Draft PR",
+      userLogin: "otheruser",
+      nodeId: "PR_kwDOtrack931",
+      draft: true,
+      enriched: true,
+    });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 930, number: 930, type: "pullRequest", title: "My Tracked Draft PR" }),
+        makeTrackedItem({ id: 931, number: 931, type: "pullRequest", title: "Other Tracked Draft PR" }),
+      ],
+    });
+
+    const { unmount } = render(() => (
+      <TrackedTab
+        issues={[]}
+        pullRequests={[ownDraftPR, otherDraftPR]}
+        userLogin="testuser"
+        onMarkPRReady={onMarkPRReady}
+      />
+    ));
+
+    const badges = screen.getAllByTestId("draft-badge");
+    expect(badges).toHaveLength(2);
+
+    const ownBtn = screen.getByLabelText("Mark #930 My Tracked Draft PR ready for review") as HTMLButtonElement;
+    expect(ownBtn.tagName.toLowerCase()).toBe("button");
+    expect(ownBtn.textContent).toBe("Draft");
+
+    const otherSpan = badges.find((el) => el !== ownBtn)!;
+    expect(otherSpan.tagName.toLowerCase()).toBe("span");
+    expect(otherSpan.textContent).toBe("Draft");
+
+    fireEvent.click(ownBtn);
+    expect(onMarkPRReady).not.toHaveBeenCalled();
+    expect(ownBtn.textContent).toBe("Ready?");
+
+    fireEvent.click(ownBtn);
+    expect(onMarkPRReady).toHaveBeenCalledOnce();
+    expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
+    unmount();
+
+    // Compact density
+    onMarkPRReady.mockClear();
+    setConfig("viewDensity", "compact");
+    render(() => (
+      <TrackedTab
+        issues={[]}
+        pullRequests={[ownDraftPR, otherDraftPR]}
+        userLogin="testuser"
+        onMarkPRReady={onMarkPRReady}
+      />
+    ));
+
+    const compactOwnBtn = screen.getByLabelText("Mark #930 My Tracked Draft PR ready for review") as HTMLButtonElement;
+    expect(compactOwnBtn.textContent).toBe("D");
+    fireEvent.click(compactOwnBtn);
+    expect(compactOwnBtn.textContent).toBe("Ready?");
+    fireEvent.click(compactOwnBtn);
+    expect(onMarkPRReady).toHaveBeenCalledOnce();
+    expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
+  });
 });

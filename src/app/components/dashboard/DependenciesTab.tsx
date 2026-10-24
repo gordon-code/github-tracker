@@ -3,7 +3,7 @@ import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { canApprovePR } from "../../lib/format";
+import { canApprovePR, canMarkPRReady } from "../../lib/format";
 import type { PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
@@ -25,6 +25,7 @@ import StatusDot from "../shared/StatusDot";
 import SizeBadge from "../shared/SizeBadge";
 import ReviewBadge from "../shared/ReviewBadge";
 import AutoMergeBadge from "../shared/AutoMergeBadge";
+import DraftBadge from "../shared/DraftBadge";
 import ItemRow from "./ItemRow";
 import SkeletonRows from "../shared/SkeletonRows";
 
@@ -114,6 +115,8 @@ interface DependenciesTabProps {
   onRefresh?: () => void;
   onApprovePR?: (pr: PullRequest) => void;
   approvingPRIds?: ReadonlySet<number>;
+  onMarkPRReady?: (pr: PullRequest) => void;
+  markingReadyPRIds?: ReadonlySet<number>;
 }
 
 export default function DependenciesTab(props: DependenciesTabProps) {
@@ -370,6 +373,8 @@ export default function DependenciesTab(props: DependenciesTabProps) {
                 userLogin={props.userLogin}
                 onApprovePR={props.onApprovePR}
                 approvingPRIds={props.approvingPRIds}
+                onMarkPRReady={props.onMarkPRReady}
+                markingReadyPRIds={props.markingReadyPRIds}
               />
             )}
           </For>
@@ -395,6 +400,8 @@ interface StatusGroupProps {
   userLogin: string;
   onApprovePR?: (pr: PullRequest) => void;
   approvingPRIds?: ReadonlySet<number>;
+  onMarkPRReady?: (pr: PullRequest) => void;
+  markingReadyPRIds?: ReadonlySet<number>;
 }
 
 function stripCommitPrefix(title: string): string {
@@ -463,9 +470,23 @@ function StatusGroup(props: StatusGroupProps) {
                   >
                     <div class="flex items-center gap-1.5 flex-wrap">
                       <Show when={pr.enriched !== false}>
-                        <StatusDot status={pr.checkStatus} />
+                        <StatusDot status={pr.checkStatus} href={isSafeGitHubUrl(pr.htmlUrl) ? `${pr.htmlUrl}/checks` : undefined} />
                         <ReviewBadge decision={pr.reviewDecision} />
                         <AutoMergeBadge method={pr.autoMergeMethod} compact={config.viewDensity === "compact"} />
+                        <Show when={pr.checkStatus === "conflict"}>
+                          <span class="badge badge-warning badge-sm gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                            </svg>
+                            Merge conflict
+                          </span>
+                        </Show>
+                        <Show when={pr.checkStatus === "failure"}>
+                          <span class="badge badge-error badge-outline badge-sm">Failing checks</span>
+                        </Show>
+                        <Show when={pr.checkStatus === "pending"}>
+                          <span class="badge badge-warning badge-outline badge-sm">Checks running</span>
+                        </Show>
                       </Show>
 
                       <Show when={pr.enriched !== false && (pr.additions > 0 || pr.deletions > 0)}>
@@ -476,9 +497,14 @@ function StatusGroup(props: StatusGroupProps) {
                         />
                       </Show>
 
-                      <Show when={pr.draft}>
-                        <span class="badge badge-ghost badge-sm">Draft</span>
-                      </Show>
+                      <DraftBadge
+                        draft={pr.draft}
+                        compact={config.viewDensity === "compact"}
+                        prNumber={pr.number}
+                        prTitle={title()}
+                        onMarkReady={props.onMarkPRReady && canMarkPRReady(pr, props.userLogin) ? () => props.onMarkPRReady!(pr) : undefined}
+                        isMarkingReady={props.markingReadyPRIds?.has(pr.id)}
+                      />
 
                       <Show when={abandoned}>
                         <Show
