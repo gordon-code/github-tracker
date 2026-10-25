@@ -33,7 +33,7 @@ Open issues where you're the creator, assignee, or mentioned. A scope filter let
 
 ### Pull Requests
 
-Open PRs with CI status dots (green/yellow/red), review decision badges, a read-only `auto` badge when GitHub auto-merge is enabled (with merge method tooltip), size badges (XS–XL by lines changed), draft indicators, and a two-step inline `Approve` button on PR rows requiring approval. A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
+Open PRs with CI status dots (green/yellow/red), review decision badges, a read-only `auto` badge when GitHub auto-merge is enabled (with merge method tooltip), size badges (XS–XL by lines changed), clickable two-step `Draft` → `Ready?` badges on your own draft PRs (read-only draft indicators on others'), and a two-step inline `Approve` button on PR rows requiring approval (hidden when CI checks are failing). A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
 
 ### Actions
 
@@ -81,7 +81,7 @@ Star counts appear in repo group headers, fetched as part of the standard data r
 
 ### Dependencies Tab
 
-An auto-detected built-in tab that appears when dependency bot PRs are found in your tracked repos. Dependency PRs are identified via a multi-layer bot detection pipeline (PR author login, branch name prefix, configurable label). Items are grouped by status — **Needs Review** (CI passing, not yet approved), **Waiting** (CI pending or draft), and **Stale** (open more than 14 days) — rather than by repo. Abandoned dependency pills link directly to the Renovate Dashboard issue for bulk resolution. Configurable via **Settings > Dependencies**.
+An auto-detected built-in tab that appears when dependency bot PRs are found in your tracked repos. Dependency PRs are identified via a multi-layer bot detection pipeline (PR author login, branch name prefix, configurable label). Items are grouped by status — **Mergeable** (CI passing or no CI configured, not a draft, and no changes requested), **Pending Rebase**, **Needs Action** (with explicit reason badges for failing/running checks, merge conflicts, drafts, or requested changes), and **Stale** (not updated in over 14 days) — rather than by repo. Abandoned dependency pills link directly to the Renovate Dashboard issue for bulk resolution. Configurable via **Settings > Dependencies**.
 
 ### Custom Tabs
 
@@ -128,8 +128,8 @@ src/
       layout/       # Header, TabBar, FilterBar
       onboarding/   # OnboardingWizard, OrgSelector, RepoSelector
       settings/     # SettingsPage, TrackedUsersSection, ThemePicker, Section, SettingRow
-      shared/       # 28 shared components: FilterInput, FilterChips, StatusDot,
-                    # ReviewBadge, AutoMergeBadge, SizeBadge, RoleBadge, SortDropdown, PaginationControls,
+      shared/       # 29 shared components: FilterInput, FilterChips, StatusDot,
+                    # ReviewBadge, AutoMergeBadge, DraftBadge, SizeBadge, RoleBadge, SortDropdown, PaginationControls,
                     # LoadingSpinner, SkeletonRows, ToastContainer, NotificationDrawer,
                     # RepoLockControls, UserAvatarBadge, ExpandCollapseButtons,
                     # RepoGitHubLink, ChevronIcon, ExternalLinkIcon, Tooltip/InfoTooltip
@@ -170,7 +170,7 @@ pnpm run screenshot # Capture dashboard screenshot
 
 ## Security
 
-OAuth tokens are stored in `localStorage` under an app-specific key — this is standard for single-user personal dashboards and matches the threat model here. CSP headers block script injection via Cloudflare (`script-src 'self'` with a SHA-256 exception for the dark-mode initialization script only). An Octokit hook blocks all non-GET REST requests and all GraphQL mutations except the single user-confirmed PR approval mutation (addPullRequestReview with event: APPROVE) — the repo scope is required for private repo access, and all other write operations are rejected client-side. OAuth state is generated with `crypto.getRandomValues` and verified on callback. Token validation runs on every page load via `GET /user`; a 401 clears the stored token immediately.
+OAuth tokens are stored in `localStorage` under an app-specific key — this is standard for single-user personal dashboards and matches the threat model here. CSP headers block script injection via Cloudflare (`script-src 'self'` with a SHA-256 exception for the dark-mode initialization script only). An Octokit hook blocks all non-GET REST requests and all GraphQL mutations except explicit user-confirmed PR approval (`addPullRequestReview` with `event: APPROVE`) and marking draft PRs ready (`markPullRequestReadyForReview`) — the repo scope is required for private repo access, and all other write operations are rejected client-side. OAuth state is generated with `crypto.getRandomValues` and verified on callback. Token validation runs on every page load via `GET /user`; a 401 clears the stored token immediately.
 
 ## Deployment
 

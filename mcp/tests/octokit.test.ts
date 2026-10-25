@@ -92,6 +92,21 @@ describe("createOctokitClient — write guard hook", () => {
       })
     ).rejects.toThrow(/Write operation blocked/);
   });
+
+  it("blocks MARK_PR_READY_MUTATION (markPullRequestReadyForReview) on POST /graphql", async () => {
+    const { createOctokitClient } = await import("../src/octokit.js");
+    const { MARK_PR_READY_MUTATION } = await import("../../src/shared/validation.js");
+    const client = createOctokitClient("fake-token");
+
+    await expect(
+      client.request("POST /graphql", {
+        query: MARK_PR_READY_MUTATION,
+        variables: {
+          pullRequestId: "PR_kwDOtest42",
+        },
+      })
+    ).rejects.toThrow(/Write operation blocked/);
+  });
 });
 
 // ── Singleton tests ───────────────────────────────────────────────────────────

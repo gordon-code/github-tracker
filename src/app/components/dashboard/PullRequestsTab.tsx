@@ -4,7 +4,7 @@ import { viewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
 import { isPrVisible } from "../../lib/filters";
 import type { PullRequest, RepoRef } from "../../services/api";
-import { canApprovePR, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { canApprovePR, canMarkPRReady, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import ItemRow from "./ItemRow";
@@ -16,6 +16,7 @@ import { scopeFilterGroup, prFilterGroups, type FilterChipGroupDef } from "../sh
 import FilterToolbar from "../shared/FilterToolbar";
 import ReviewBadge from "../shared/ReviewBadge";
 import AutoMergeBadge from "../shared/AutoMergeBadge";
+import DraftBadge from "../shared/DraftBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -46,6 +47,8 @@ export interface PullRequestsTabProps {
   depPrIds?: ReadonlySet<number>;
   onApprovePR?: (pr: PullRequest) => void;
   approvingPRIds?: ReadonlySet<number>;
+  onMarkPRReady?: (pr: PullRequest) => void;
+  markingReadyPRIds?: ReadonlySet<number>;
 }
 
 type SortField = "repo" | "title" | "author" | "createdAt" | "updatedAt" | "checkStatus" | "reviewDecision" | "size";
@@ -561,11 +564,13 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                           </span>
                                         </Show>
                                       </Show>
-                                      <Show when={pr.draft}>
-                                        <span class="badge badge-ghost badge-sm italic text-base-content/50">
-                                          Draft
-                                        </span>
-                                      </Show>
+                                      <DraftBadge
+                                        draft={pr.draft}
+                                        prNumber={pr.number}
+                                        prTitle={pr.title}
+                                        onMarkReady={props.onMarkPRReady && canMarkPRReady(pr, props.userLogin) ? () => props.onMarkPRReady!(pr) : undefined}
+                                        isMarkingReady={props.markingReadyPRIds?.has(pr.id)}
+                                      />
                                       <Show when={pr.enriched !== false && pr.reviewerLogins.length > 0}>
                                         <Tooltip content={pr.reviewerLogins.join(", ")} focusable>
                                           <span class="text-xs text-base-content/60">
@@ -593,9 +598,14 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                         </svg>
                                       </Tooltip>
                                     </Show>
-                                    <Show when={pr.draft}>
-                                      <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
-                                    </Show>
+                                    <DraftBadge
+                                      draft={pr.draft}
+                                      compact
+                                      prNumber={pr.number}
+                                      prTitle={pr.title}
+                                      onMarkReady={props.onMarkPRReady && canMarkPRReady(pr, props.userLogin) ? () => props.onMarkPRReady!(pr) : undefined}
+                                      isMarkingReady={props.markingReadyPRIds?.has(pr.id)}
+                                    />
                                     <Show when={pr.enriched !== false && (pr.reviewerLogins.length > 0 || (prMeta().get(pr.id)?.roles ?? []).length > 0)}>
                                       <Tooltip content={[
                                         (prMeta().get(pr.id)?.roles ?? []).length > 0 ? `Role: ${(prMeta().get(pr.id)?.roles ?? []).join(", ")}` : false,

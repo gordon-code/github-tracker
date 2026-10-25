@@ -22,6 +22,17 @@ export const APPROVE_PR_MUTATION = `
   }
 `.trim();
 
+export const MARK_PR_READY_MUTATION = `
+  mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+    markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+      pullRequest {
+        isDraft
+        reviewDecision
+      }
+    }
+  }
+`.trim();
+
 export const GITHUB_NODE_ID_RE = /^(?:PR_[A-Za-z0-9_-]{4,120}|[A-Za-z0-9+/=_-]{8,128})$/;
 export const GIT_SHA_RE = /^[0-9a-f]{40}$/i;
 

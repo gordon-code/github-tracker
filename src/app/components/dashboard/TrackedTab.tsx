@@ -3,12 +3,13 @@ import { config } from "../../stores/config";
 import { viewState, untrackItem, moveTrackedItem, untrackJiraItem, moveJiraItem } from "../../stores/view";
 import type { TrackedItem } from "../../stores/view";
 import type { Issue, PullRequest } from "../../services/api";
-import { canApprovePR, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
+import { canApprovePR, canMarkPRReady, deriveInvolvementRoles, prSizeCategory } from "../../lib/format";
 import { isSafeGitHubUrl } from "../../lib/url";
 import ItemRow from "./ItemRow";
 import StatusDot from "../shared/StatusDot";
 import ReviewBadge from "../shared/ReviewBadge";
 import AutoMergeBadge from "../shared/AutoMergeBadge";
+import DraftBadge from "../shared/DraftBadge";
 import SizeBadge from "../shared/SizeBadge";
 import RoleBadge from "../shared/RoleBadge";
 import { Tooltip } from "../shared/Tooltip";
@@ -79,6 +80,8 @@ export interface TrackedTabProps {
   hotPollingPRIds?: ReadonlySet<number>;
   onApprovePR?: (pr: PullRequest) => void;
   approvingPRIds?: ReadonlySet<number>;
+  onMarkPRReady?: (pr: PullRequest) => void;
+  markingReadyPRIds?: ReadonlySet<number>;
 }
 
 export default function TrackedTab(props: TrackedTabProps) {
@@ -291,9 +294,13 @@ export default function TrackedTab(props: TrackedTabProps) {
                                                   </Tooltip>
                                                 </Show>
                                               </Show>
-                                              <Show when={prData().draft}>
-                                                <span class="badge badge-ghost badge-sm italic text-base-content/50">Draft</span>
-                                              </Show>
+                                              <DraftBadge
+                                                draft={prData().draft}
+                                                prNumber={prData().number}
+                                                prTitle={prData().title}
+                                                onMarkReady={props.onMarkPRReady && canMarkPRReady(prData(), props.userLogin) ? () => props.onMarkPRReady!(prData()) : undefined}
+                                                isMarkingReady={props.markingReadyPRIds?.has(prData().id)}
+                                              />
                                             </div>
                                           }
                                         >
@@ -312,9 +319,14 @@ export default function TrackedTab(props: TrackedTabProps) {
                                                 </svg>
                                               </Tooltip>
                                             </Show>
-                                            <Show when={prData().draft}>
-                                              <span class="badge badge-ghost badge-xs italic text-base-content/50">D</span>
-                                            </Show>
+                                            <DraftBadge
+                                              draft={prData().draft}
+                                              compact
+                                              prNumber={prData().number}
+                                              prTitle={prData().title}
+                                              onMarkReady={props.onMarkPRReady && canMarkPRReady(prData(), props.userLogin) ? () => props.onMarkPRReady!(prData()) : undefined}
+                                              isMarkingReady={props.markingReadyPRIds?.has(prData().id)}
+                                            />
                                           </div>
                                         </Show>
                                       );

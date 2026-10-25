@@ -197,8 +197,8 @@ export default function PrivacyPage() {
             The app accesses the GitHub API on your behalf using an OAuth token or
             Personal Access Token. It reads your issues, pull requests, and workflow
             runs, and only writes to GitHub when you explicitly click and confirm
-            Approve on a pull request. All other write operations are blocked
-            client-side. You can revoke access at any time from{" "}
+            Approve or mark a draft pull request as ready for review. All other write
+            operations are blocked client-side. You can revoke access at any time from{" "}
             <a
               href="https://github.com/settings/applications"
               target="_blank"

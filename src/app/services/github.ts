@@ -6,11 +6,13 @@ import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
 import { pushNotification } from "../lib/errors";
-import { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery } from "../../shared/validation";
+import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery } from "../../shared/validation";
 
-export { APPROVE_PR_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery };
+export { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery };
 
 const NORMALIZED_APPROVE_MUTATION = APPROVE_PR_MUTATION.replace(/\s+/g, " ");
+const NORMALIZED_MARK_READY_MUTATION = MARK_PR_READY_MUTATION.replace(/\s+/g, " ");
+const APPROVE_ALLOWED_KEYS = new Set(["pullRequestId", "commitOID", "event"]);
 
 function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown }): boolean {
   if (typeof options.query !== "string") return false;
@@ -20,26 +22,42 @@ function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown
     return true;
   }
 
-  // 2. Allow ONLY the exact canonical ApprovePullRequest mutation
+  // 2. Allow ONLY the exact canonical ApprovePullRequest or MarkPullRequestReadyForReview mutations
   const stripped = options.query.replace(/#[^\r\n]*/g, "").trim();
   const normalized = stripped.replace(/\s+/g, " ");
-  if (normalized !== NORMALIZED_APPROVE_MUTATION) {
-    return false;
-  }
 
   // 3. Validate mutation variables
   const vars = options.variables as Record<string, unknown> | undefined;
-  if (!vars || typeof vars !== "object") return false;
-  if (typeof vars.pullRequestId !== "string" || !GITHUB_NODE_ID_RE.test(vars.pullRequestId)) {
-    return false;
+  if (!vars || typeof vars !== "object" || Array.isArray(vars)) return false;
+
+  if (normalized === NORMALIZED_APPROVE_MUTATION) {
+    if (!Object.keys(vars).every((k) => APPROVE_ALLOWED_KEYS.has(k))) {
+      return false;
+    }
+    if (typeof vars.pullRequestId !== "string" || !GITHUB_NODE_ID_RE.test(vars.pullRequestId)) {
+      return false;
+    }
+    if (typeof vars.commitOID !== "string" || !GIT_SHA_RE.test(vars.commitOID)) {
+      return false;
+    }
+    if (vars.event !== undefined && vars.event !== "APPROVE") {
+      return false;
+    }
+    return true;
   }
-  if (typeof vars.commitOID !== "string" || !GIT_SHA_RE.test(vars.commitOID)) {
-    return false;
+
+  if (normalized === NORMALIZED_MARK_READY_MUTATION) {
+    const keys = Object.keys(vars);
+    if (keys.length !== 1 || keys[0] !== "pullRequestId") {
+      return false;
+    }
+    if (typeof vars.pullRequestId !== "string" || !GITHUB_NODE_ID_RE.test(vars.pullRequestId)) {
+      return false;
+    }
+    return true;
   }
-  if (vars.event !== undefined && vars.event !== "APPROVE") {
-    return false;
-  }
-  return true;
+
+  return false;
 }
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
@@ -169,13 +187,13 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
   });
 
   // Least-privilege write guard: the OAuth App `repo` scope grants broad write access,
-  // but this app only permits GET requests, read-only GraphQL queries, and the single
-  // explicit user-confirmed PR approval mutation (APPROVE_PR_MUTATION).
+  // but this app only permits GET requests, read-only GraphQL queries, and explicit
+  // user-confirmed mutations (APPROVE_PR_MUTATION and MARK_PR_READY_MUTATION).
   client.hook.before("request", (options) => {
     const method = (options.method ?? "GET").toUpperCase();
     if (method === "GET") return;
     if (method === "POST" && options.url === "/graphql" && isAllowedGraphqlRequest(options)) return;
-    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. Only read queries and PR approvals are permitted.`);
+    throw new Error(`[github] Write operation blocked: ${method} ${options.url}. Only read queries, PR approvals, and marking draft PRs ready are permitted.`);
   });
 
   // Track every API request for usage analytics + update rate limit display

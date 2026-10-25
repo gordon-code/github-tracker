@@ -861,6 +861,166 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
     expect(onApprovePR).toHaveBeenCalledOnce();
     expect(onApprovePR).toHaveBeenCalledWith(eligibleDepPR);
   });
+
+  it("hides Approve button when pr.checkStatus is 'failure'", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const onApprovePR = vi.fn();
+    const failingDepPR = makeNeedsActionPR({
+      id: 8012,
+      number: 812,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      nodeId: "PR_kwDOdep8012",
+      headSha: validSha,
+      checkStatus: "failure",
+      reviewDecision: "REVIEW_REQUIRED",
+      viewerReviewRequested: true,
+      enriched: true,
+    });
+
+    renderTab({
+      pullRequests: [failingDepPR],
+      userLogin: "testuser",
+      onApprovePR,
+    });
+
+    expect(screen.queryByLabelText(/^Approve #812 /)).toBeNull();
+  });
+
+  it("renders interactive DraftBadge button for self-authored draft PRs in 'Needs Action' and invokes onMarkPRReady(pr) on second click", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const onMarkPRReady = vi.fn();
+    const selfDraftDepPR = makeNeedsActionPR({
+      id: 8020,
+      number: 820,
+      userLogin: "testuser",
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      nodeId: "PR_kwDOdep8020",
+      draft: true,
+      checkStatus: "success",
+      enriched: true,
+    });
+    const botDraftDepPR = makeNeedsActionPR({
+      id: 8021,
+      number: 821,
+      userLogin: "dependabot[bot]",
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      nodeId: "PR_kwDOdep8021",
+      draft: true,
+      checkStatus: "success",
+      enriched: true,
+    });
+
+    renderTab({
+      pullRequests: [selfDraftDepPR, botDraftDepPR],
+      userLogin: "testuser",
+      onMarkPRReady,
+    });
+
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup).not.toBeNull();
+
+    const badges = screen.getAllByTestId("draft-badge");
+    expect(badges).toHaveLength(2);
+
+    const ownBtn = screen.getByLabelText("Mark #820 axios: 0.27.2 → 1.0.0 ready for review") as HTMLButtonElement;
+    expect(ownBtn.tagName.toLowerCase()).toBe("button");
+    expect(ownBtn.textContent).toBe("Draft");
+
+    const botSpan = badges.find((el) => el !== ownBtn)!;
+    expect(botSpan.tagName.toLowerCase()).toBe("span");
+    expect(botSpan.textContent).toBe("Draft");
+
+    fireEvent.click(ownBtn);
+    expect(onMarkPRReady).not.toHaveBeenCalled();
+    expect(ownBtn.textContent).toBe("Ready?");
+
+    fireEvent.click(ownBtn);
+    expect(onMarkPRReady).toHaveBeenCalledOnce();
+    expect(onMarkPRReady).toHaveBeenCalledWith(selfDraftDepPR);
+  });
+
+  it("renders 'Merge conflict', 'Failing checks', and 'Checks running' badges in 'Needs Action' and links StatusDot to /checks", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const conflictPR = makeNeedsActionPR({
+      id: 8030,
+      number: 830,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      htmlUrl: "https://github.com/owner/repo/pull/830",
+      checkStatus: "conflict",
+      enriched: true,
+    });
+    const failingPR = makeNeedsActionPR({
+      id: 8031,
+      number: 831,
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      htmlUrl: "https://github.com/owner/repo/pull/831",
+      checkStatus: "failure",
+      enriched: true,
+    });
+    const pendingPR = makeNeedsActionPR({
+      id: 8032,
+      number: 832,
+      title: "Bump react from 17.0.0 to 18.0.0",
+      htmlUrl: "https://github.com/owner/repo/pull/832",
+      checkStatus: "pending",
+      enriched: true,
+    });
+
+    renderTab({
+      pullRequests: [conflictPR, failingPR, pendingPR],
+      userLogin: "testuser",
+    });
+
+    expect(screen.getByText("Merge conflict")).toBeDefined();
+    expect(screen.getByText("Failing checks")).toBeDefined();
+    expect(screen.getByText("Checks running")).toBeDefined();
+
+    const conflictDotLink = screen.getByLabelText("Checks blocked by merge conflict").closest("a");
+    expect(conflictDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/830/checks");
+
+    const failingDotLink = screen.getByLabelText("Checks failing").closest("a");
+    expect(failingDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/831/checks");
+
+    const pendingDotLink = screen.getByLabelText("Checks in progress").closest("a");
+    expect(pendingDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/832/checks");
+  });
+
+  it("classifies enriched non-draft PRs with checkStatus: null or reviewDecision: 'APPROVED' into 'Mergeable' and 'CHANGES_REQUESTED' into 'Needs Action'", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const noCiPR = makeMergeablePR({
+      id: 8040,
+      number: 840,
+      title: "Bump axios from 0.27.1 to 0.27.2",
+      checkStatus: null,
+      reviewDecision: null,
+    });
+    const approvedPR = makeMergeablePR({
+      id: 8041,
+      number: 841,
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      checkStatus: "success",
+      reviewDecision: "APPROVED",
+    });
+    const changesRequestedPR = makeNeedsActionPR({
+      id: 8042,
+      number: 842,
+      title: "Bump react from 17.0.0 to 18.0.0",
+      checkStatus: "success",
+      reviewDecision: "CHANGES_REQUESTED",
+    });
+
+    renderTab({
+      pullRequests: [noCiPR, approvedPR, changesRequestedPR],
+      userLogin: "testuser",
+    });
+
+    const mergeableGroup = document.getElementById("dep-group-mergeable")!;
+    expect(mergeableGroup.textContent).toContain("axios: 0.27.1 → 0.27.2");
+    expect(mergeableGroup.textContent).toContain("lodash: 4.17.20 → 4.17.21");
+
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup.textContent).toContain("react: 17.0.0 → 18.0.0");
+  });
 });
 
 // ── Ignore button ─────────────────────────────────────────────────────────────

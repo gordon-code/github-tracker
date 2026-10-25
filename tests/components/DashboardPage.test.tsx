@@ -6,7 +6,7 @@ import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 import type { DashboardData } from "../../src/app/services/poll";
 import type { HotPRStatusUpdate, HotWorkflowRunUpdate } from "../../src/app/services/api";
 import { GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
-import { APPROVE_PR_MUTATION } from "../../src/shared/validation";
+import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION } from "../../src/shared/validation";
 
 const mockLocationReplace = vi.fn();
 
@@ -4374,5 +4374,452 @@ describe("DashboardPage — PR approval integration", () => {
       expect(screen.queryByLabelText("Approve #43 PR with changes requested")).toBeNull();
     });
     expect(screen.getByText("Changes")).toBeTruthy();
+  });
+});
+
+// ── Mark PR Ready Integration ────────────────────────────────────────────────
+
+describe("DashboardPage — Mark PR ready integration", () => {
+  it("completes two-step Draft -> Ready? flow on a self-authored draft PR, removes Draft badge, seeds hot sets, preserves ready state across hot/targeted/full polls within 60s, and evicts after TTL", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      markPullRequestReadyForReview: {
+        pullRequest: {
+          isDraft: false,
+          reviewDecision: "REVIEW_REQUIRED",
+        },
+      },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const makeStaleDraftPR = () =>
+      makePullRequest({
+        id: 77,
+        number: 77,
+        title: "Ship draft feature",
+        repoFullName: "owner/repo",
+        userLogin: "testuser",
+        state: "OPEN",
+        draft: true,
+        enriched: true,
+        nodeId: "PR_kwDOtest0077",
+        reviewDecision: null,
+        checkStatus: "success",
+      });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStaleDraftPR()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    expect(draftBtn.textContent).toBe("Draft");
+
+    // Step 1: Enter confirmation mode
+    await user.click(draftBtn);
+    expect(graphqlMock).not.toHaveBeenCalled();
+    expect(draftBtn.textContent).toBe("Ready?");
+    expect(draftBtn.getAttribute("aria-label")).toBe("Confirm mark #77 Ship draft feature ready for review");
+
+    // Step 2: Confirm mark ready
+    await user.click(draftBtn);
+    await waitFor(() => {
+      expect(graphqlMock).toHaveBeenCalledOnce();
+    });
+
+    expect(graphqlMock).toHaveBeenCalledWith(MARK_PR_READY_MUTATION, {
+      pullRequestId: "PR_kwDOtest0077",
+      request: { apiSource: "markPRReady", retries: 0 },
+    });
+
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("mark-ready-pr:77");
+    expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith({
+      issues: [],
+      pullRequests: [
+        expect.objectContaining({
+          id: 77,
+          nodeId: "PR_kwDOtest0077",
+          draft: false,
+          enriched: true,
+          checkStatus: "pending",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("draft-badge")).toBeNull();
+      expect(screen.getByText("Review needed")).toBeTruthy();
+    });
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+
+    // 1. Subsequent hot poll reporting stale draft: true and reviewDecision: null within 60s
+    capturedOnHotData!(
+      new Map([[77, {
+        state: "OPEN",
+        draft: true,
+        checkStatus: "pending",
+        mergeStateStatus: "DRAFT",
+        reviewDecision: null,
+      }]]),
+      new Map(),
+      0
+    );
+    expect(screen.queryByTestId("draft-badge")).toBeNull();
+    expect(screen.getByText("Review needed")).toBeTruthy();
+
+    // 2. Subsequent targeted poll reporting stale draft: true within 60s
+    capturedOnTargetedData!(
+      { issues: [], pullRequests: [makeStaleDraftPR()], workflowRuns: [], errors: [] },
+      ["owner/repo"]
+    );
+    expect(screen.queryByTestId("draft-badge")).toBeNull();
+    expect(screen.getByText("Review needed")).toBeTruthy();
+
+    // 3. Subsequent full poll reporting stale draft: true within 60s keeps pr.draft === false
+    // and preserves hot-set membership (checkStatus: "pending" passed to rebuildHotSets)
+    vi.mocked(pollService.rebuildHotSets).mockClear();
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [makeStaleDraftPR()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    expect(screen.queryByTestId("draft-badge")).toBeNull();
+    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(pollService.rebuildHotSets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequests: [
+          expect.objectContaining({
+            id: 77,
+            nodeId: "PR_kwDOtest0077",
+            enriched: true,
+            checkStatus: "pending",
+          }),
+        ],
+      })
+    );
+
+    // 3b. Subsequent poll within 60s returning a non-null reviewDecision ("APPROVED") preserves
+    // "APPROVED" rather than overwriting it with entry.reviewDecision ("REVIEW_REQUIRED"),
+    // while still guarding pr.draft === false
+    capturedOnHotData!(
+      new Map([[77, {
+        state: "OPEN",
+        draft: true,
+        checkStatus: "success",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED",
+      }]]),
+      new Map(),
+      0
+    );
+    expect(screen.queryByTestId("draft-badge")).toBeNull();
+    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.queryByText("Review needed")).toBeNull();
+
+    // 4. Advance Date.now past the 60_000ms TTL and run a full poll -> guard entry is evicted
+    const expiredNow = Date.now() + 60_001;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(expiredNow);
+    try {
+      vi.mocked(pollService.fetchAllData).mockResolvedValue({
+        issues: [],
+        pullRequests: [makeStaleDraftPR()],
+        workflowRuns: [],
+        errors: [],
+      });
+      await capturedFetchAll!();
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(screen.getByTestId("draft-badge")).toBeTruthy();
+    });
+  });
+
+  it("merges Phase 2 draft state, reviewDecision, and recent ready guard when Phase 1 onLightData fires", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      markPullRequestReadyForReview: {
+        pullRequest: {
+          isDraft: false,
+          reviewDecision: "REVIEW_REQUIRED",
+        },
+      },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const lightPR1 = makePullRequest({
+      id: 201,
+      number: 201,
+      title: "Phase 1 draft PR",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: true,
+      enriched: false,
+      nodeId: "PR_kwDOtest0201",
+      reviewDecision: null,
+      checkStatus: null,
+    });
+    const lightPR2 = makePullRequest({
+      id: 202,
+      number: 202,
+      title: "Mark ready during Phase 1",
+      repoFullName: "owner/repo",
+      userLogin: "testuser",
+      state: "OPEN",
+      draft: true,
+      enriched: false,
+      nodeId: "PR_kwDOtest0202",
+      reviewDecision: null,
+      checkStatus: null,
+    });
+
+    let resolvePhase2!: (data: DashboardData) => void;
+    vi.mocked(pollService.fetchAllData).mockImplementation(async (onLightData) => {
+      onLightData?.({ issues: [], pullRequests: [lightPR1, lightPR2], workflowRuns: [], errors: [] });
+      return new Promise<DashboardData>((resolve) => {
+        resolvePhase2 = resolve;
+      });
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    // Phase 1 is rendered; mark PR #202 ready before Phase 2 resolves
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #202 Mark ready during Phase 1 ready for review"));
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    // Resolve Phase 2: PR #201 transitions draft: true -> false with reviewDecision: "CHANGES_REQUESTED",
+    // while PR #202 returns stale draft: true and reviewDecision: null that applyRecentReadyGuard must override
+    const enrichedPR1 = makePullRequest({
+      id: 201,
+      number: 201,
+      title: "Phase 1 draft PR",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0201",
+      reviewDecision: "CHANGES_REQUESTED",
+      checkStatus: "success",
+    });
+    const staleEnrichedPR2 = makePullRequest({
+      id: 202,
+      number: 202,
+      title: "Mark ready during Phase 1",
+      repoFullName: "owner/repo",
+      userLogin: "testuser",
+      state: "OPEN",
+      draft: true,
+      enriched: true,
+      nodeId: "PR_kwDOtest0202",
+      reviewDecision: null,
+      checkStatus: "success",
+    });
+
+    resolvePhase2({
+      issues: [],
+      pullRequests: [enrichedPR1, staleEnrichedPR2],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("draft-badge")).toBeNull();
+      expect(screen.getByText("Changes")).toBeTruthy();
+      expect(screen.getByText("Review needed")).toBeTruthy();
+    });
+  });
+
+  it("handles 403 / FORBIDDEN error from markPullRequestReady by pushing mark-ready-pr:<id> PAT permission notification without calling expireToken", async () => {
+    const user = userEvent.setup();
+    const forbiddenErr = Object.assign(new Error("Resource not accessible by personal access token"), {
+      status: 403,
+      errors: [{ type: "FORBIDDEN", message: "Resource not accessible by personal access token" }],
+    });
+    const graphqlMock = vi.fn().mockRejectedValue(forbiddenErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const draftPR = makePullRequest({
+      id: 77,
+      number: 77,
+      title: "Ship draft feature",
+      repoFullName: "owner/repo",
+      userLogin: "testuser",
+      state: "OPEN",
+      draft: true,
+      enriched: true,
+      nodeId: "PR_kwDOtest0077",
+      reviewDecision: null,
+      checkStatus: "success",
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [draftPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review") as HTMLButtonElement);
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "mark-ready-pr:77",
+        "Unable to mark PR ready: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
+        "error"
+      );
+    });
+
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    const btnAfter = screen.getByLabelText("Mark #77 Ship draft feature ready for review") as HTMLButtonElement;
+    expect(btnAfter.disabled).toBe(false);
+    expect(btnAfter.textContent).toBe("Draft");
+  });
+
+  it("treats 403 with rate-limit headers (x-ratelimit-remaining: 0 or retry-after) as a generic error instead of permission denied when marking PR ready", async () => {
+    const user = userEvent.setup();
+    const rateLimit403 = Object.assign(new Error("API rate limit exceeded"), {
+      status: 403,
+      response: { headers: { "x-ratelimit-remaining": "0" } },
+    });
+    const retryAfter403 = Object.assign(new Error("Secondary rate limit"), {
+      status: 403,
+      response: { headers: { "retry-after": "60" } },
+    });
+    const graphqlMock = vi.fn()
+      .mockRejectedValueOnce(rateLimit403)
+      .mockRejectedValueOnce(retryAfter403);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 77,
+          number: 77,
+          title: "Ship draft feature",
+          repoFullName: "owner/repo",
+          userLogin: "testuser",
+          state: "OPEN",
+          draft: true,
+          enriched: true,
+          nodeId: "PR_kwDOtest0077",
+          reviewDecision: null,
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "mark-ready-pr:77",
+        "Failed to mark owner/repo#77 ready for review: API rate limit exceeded",
+        "error"
+      );
+    });
+
+    // Second attempt: 403 with retry-after header
+    const retryBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    await user.click(retryBtn);
+    await user.click(retryBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "mark-ready-pr:77",
+        "Failed to mark owner/repo#77 ready for review: Secondary rate limit",
+        "error"
+      );
+    });
+  });
+
+  it("handles 401 error when marking PR ready by calling expireToken and redirecting to /login", async () => {
+    const user = userEvent.setup();
+    const unauthorizedErr = Object.assign(new Error("Bad credentials"), { status: 401 });
+    const graphqlMock = vi.fn().mockRejectedValue(unauthorizedErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 77,
+          number: 77,
+          title: "Ship draft feature",
+          repoFullName: "owner/repo",
+          userLogin: "testuser",
+          state: "OPEN",
+          draft: true,
+          enriched: true,
+          nodeId: "PR_kwDOtest0077",
+          reviewDecision: null,
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() => {
+      expect(authStore.expireToken).toHaveBeenCalledOnce();
+      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+    });
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 });

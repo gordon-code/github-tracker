@@ -247,6 +247,45 @@ describe("fetchHotPRStatus", () => {
     expect(u47.viewerLatestReviewState).toBeNull();
     expect(u47.viewerReviewRequested).toBe(false);
   });
+
+  it("requests isDraft in HOT_PR_STATUS_QUERY and maps isDraft to draft on HotPRStatusUpdate", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        {
+          databaseId: 48,
+          state: "OPEN",
+          isDraft: false,
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "REVIEW_REQUIRED",
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        },
+        {
+          databaseId: 49,
+          state: "OPEN",
+          isDraft: true,
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          commits: { nodes: [] },
+        },
+        {
+          databaseId: 50,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          commits: { nodes: [] },
+        },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_node7", "PR_node8", "PR_node9"]);
+    const calledQuery = octokit.graphql.mock.calls[0][0] as string;
+    expect(calledQuery).toContain("isDraft");
+
+    expect(results.get(48)!.draft).toBe(false);
+    expect(results.get(49)!.draft).toBe(true);
+    expect(results.get(50)!.draft).toBeUndefined();
+  });
 });
 
 describe("fetchWorkflowRunById", () => {
@@ -477,6 +516,40 @@ describe("fetchHotData", () => {
     expect(first.prUpdates.get(1)!.checkStatus).toBe("success");
 
     // Second fetch — PR was evicted, should not query
+    graphqlFn.mockClear();
+    const second = await fetchHotData();
+    expect(second.prUpdates.size).toBe(0);
+    expect(graphqlFn).not.toHaveBeenCalled();
+  });
+
+  it("evicts OPEN PRs from hot set when checkStatus is null (no CI checks configured)", async () => {
+    const graphqlFn = vi.fn(() => Promise.resolve({
+      nodes: [{
+        databaseId: 2,
+        state: "OPEN",
+        isDraft: false,
+        mergeStateStatus: "CLEAN",
+        reviewDecision: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+      }],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    const octokit = makeOctokit(undefined, graphqlFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    // Seed PR into _hotPRs (e.g. synthetically seeded with pending checkStatus before hot poll confirms no CI)
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_no_ci" })],
+    });
+
+    // First fetch — PR is OPEN with checkStatus: null -> evicts after single cycle
+    const first = await fetchHotData();
+    expect(first.prUpdates.size).toBe(1);
+    expect(first.prUpdates.get(2)!.checkStatus).toBeNull();
+    expect(first.prUpdates.get(2)!.draft).toBe(false);
+
+    // Second fetch — PR was evicted, should not query again
     graphqlFn.mockClear();
     const second = await fetchHotData();
     expect(second.prUpdates.size).toBe(0);

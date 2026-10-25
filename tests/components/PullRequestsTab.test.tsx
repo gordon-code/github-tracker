@@ -784,5 +784,119 @@ describe("PullRequestsTab", () => {
       expect(onApprovePR).toHaveBeenCalledOnce();
       expect(onApprovePR).toHaveBeenCalledWith(eligiblePR);
     });
+
+    it("hides Approve button when pr.checkStatus is 'failure'", () => {
+      setAllExpanded("pullRequests", true);
+      const onApprovePR = vi.fn();
+
+      const failingPR = makePullRequest({
+        id: 14,
+        number: 14,
+        title: "Failing CI PR",
+        repoFullName: "org/repo",
+        userLogin: "bob",
+        nodeId: "PR_kwDOtest0014",
+        headSha: validSha,
+        checkStatus: "failure",
+        reviewDecision: "REVIEW_REQUIRED",
+        viewerReviewRequested: true,
+        enriched: true,
+      });
+
+      render(() => (
+        <PullRequestsTab
+          pullRequests={[failingPR]}
+          userLogin="alice"
+          onApprovePR={onApprovePR}
+        />
+      ));
+
+      expect(screen.queryByLabelText(/Approve #14/)).toBeNull();
+    });
+
+    it("renders interactive DraftBadge button for self-authored draft PRs (in comfortable and compact density) and read-only span for another author's draft PR", () => {
+      setAllExpanded("pullRequests", true);
+      const onMarkPRReady = vi.fn();
+
+      const ownDraftPR = makePullRequest({
+        id: 20,
+        number: 20,
+        title: "My Draft PR",
+        repoFullName: "org/repo",
+        userLogin: "alice",
+        nodeId: "PR_kwDOtest0020",
+        draft: true,
+        enriched: true,
+      });
+      const otherDraftPR = makePullRequest({
+        id: 21,
+        number: 21,
+        title: "Bob Draft PR",
+        repoFullName: "org/repo",
+        userLogin: "bob",
+        reviewerLogins: ["alice"],
+        nodeId: "PR_kwDOtest0021",
+        draft: true,
+        enriched: true,
+      });
+
+      const { unmount } = render(() => (
+        <PullRequestsTab
+          pullRequests={[ownDraftPR, otherDraftPR]}
+          userLogin="alice"
+          onMarkPRReady={onMarkPRReady}
+        />
+      ));
+
+      const badges = screen.getAllByTestId("draft-badge");
+      expect(badges).toHaveLength(2);
+
+      const ownBtn = screen.getByLabelText("Mark #20 My Draft PR ready for review") as HTMLButtonElement;
+      expect(ownBtn.tagName.toLowerCase()).toBe("button");
+      expect(ownBtn.textContent).toBe("Draft");
+
+      const otherSpan = badges.find((el) => el !== ownBtn)!;
+      expect(otherSpan.tagName.toLowerCase()).toBe("span");
+      expect(otherSpan.textContent).toBe("Draft");
+
+      fireEvent.click(ownBtn);
+      expect(onMarkPRReady).not.toHaveBeenCalled();
+      expect(ownBtn.textContent).toBe("Ready?");
+
+      fireEvent.click(ownBtn);
+      expect(onMarkPRReady).toHaveBeenCalledOnce();
+      expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
+      unmount();
+
+      // Compact density
+      onMarkPRReady.mockClear();
+      setConfig("viewDensity", "compact");
+      render(() => (
+        <PullRequestsTab
+          pullRequests={[ownDraftPR, otherDraftPR]}
+          userLogin="alice"
+          onMarkPRReady={onMarkPRReady}
+        />
+      ));
+
+      const compactBadges = screen.getAllByTestId("draft-badge");
+      expect(compactBadges).toHaveLength(2);
+
+      const compactOwnBtn = screen.getByLabelText("Mark #20 My Draft PR ready for review") as HTMLButtonElement;
+      expect(compactOwnBtn.tagName.toLowerCase()).toBe("button");
+      expect(compactOwnBtn.textContent).toBe("D");
+
+      const compactOtherSpan = compactBadges.find((el) => el !== compactOwnBtn)!;
+      expect(compactOtherSpan.tagName.toLowerCase()).toBe("span");
+      expect(compactOtherSpan.textContent).toBe("D");
+
+      fireEvent.click(compactOwnBtn);
+      expect(compactOwnBtn.textContent).toBe("Ready?");
+      expect(onMarkPRReady).not.toHaveBeenCalled();
+
+      fireEvent.click(compactOwnBtn);
+      expect(onMarkPRReady).toHaveBeenCalledOnce();
+      expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
+    });
   });
 });
