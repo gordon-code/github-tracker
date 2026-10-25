@@ -14,7 +14,7 @@ export interface DraftBadgeProps {
 
 const READY_CONFIRM_TIMEOUT_MS = 4_000;
 
-export default function DraftBadge(props: DraftBadgeProps) {
+function InteractiveDraftBadge(props: DraftBadgeProps) {
   const [confirming, setConfirming] = createSignal(false);
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -49,7 +49,7 @@ export default function DraftBadge(props: DraftBadgeProps) {
   function handleClick(e: MouseEvent) {
     e.stopPropagation();
     e.preventDefault();
-    if (props.isMarkingReady || !props.onMarkReady) return;
+    if (isMarkingReady() || !props.onMarkReady) return;
     if (!confirming()) {
       setConfirming(true);
       clearTimer();
@@ -78,7 +78,7 @@ export default function DraftBadge(props: DraftBadgeProps) {
     const labelTarget = target ? ` ${target}` : "";
     const sizeClass = props.compact ? "badge-xs" : "badge-sm";
 
-    if (props.isMarkingReady) {
+    if (isMarkingReady()) {
       return {
         tooltip: "Marking ready for review...",
         ariaLabel: `Marking${labelTarget} ready for review`,
@@ -102,6 +102,33 @@ export default function DraftBadge(props: DraftBadgeProps) {
   });
 
   return (
+    <Tooltip content={meta().tooltip} class="relative z-10 inline-flex">
+      <button
+        type="button"
+        data-testid="draft-badge"
+        data-draft-ready-btn
+        disabled={isMarkingReady()}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        onBlur={resetConfirm}
+        aria-label={meta().ariaLabel}
+        class={meta().buttonClass}
+      >
+        <Show
+          when={!isMarkingReady()}
+          fallback={<span class="loading loading-spinner loading-xs" aria-hidden="true" />}
+        >
+          <Show when={confirming()} fallback={props.compact ? "D" : "Draft"}>
+            Ready?
+          </Show>
+        </Show>
+      </button>
+    </Tooltip>
+  );
+}
+
+export default function DraftBadge(props: DraftBadgeProps) {
+  return (
     <Show when={props.draft}>
       <Show
         when={props.onMarkReady !== undefined}
@@ -118,28 +145,7 @@ export default function DraftBadge(props: DraftBadgeProps) {
           </span>
         }
       >
-        <Tooltip content={meta().tooltip} class="relative z-10 inline-flex">
-          <button
-            type="button"
-            data-testid="draft-badge"
-            data-draft-ready-btn
-            disabled={props.isMarkingReady}
-            onClick={handleClick}
-            onKeyDown={handleKeyDown}
-            onBlur={resetConfirm}
-            aria-label={meta().ariaLabel}
-            class={meta().buttonClass}
-          >
-            <Show
-              when={!props.isMarkingReady}
-              fallback={<span class="loading loading-spinner loading-xs" aria-hidden="true" />}
-            >
-              <Show when={confirming()} fallback={props.compact ? "D" : "Draft"}>
-                Ready?
-              </Show>
-            </Show>
-          </button>
-        </Tooltip>
+        <InteractiveDraftBadge {...props} />
       </Show>
     </Show>
   );

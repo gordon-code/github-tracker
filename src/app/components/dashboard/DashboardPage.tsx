@@ -1500,6 +1500,40 @@ export default function DashboardPage() {
     return /commitOID|was not part of the pull request|pull request head|outdated|end of the branch/i.test(msg);
   }
 
+  function addIdToSet(prev: ReadonlySet<number>, id: number): ReadonlySet<number> {
+    const next = new Set(prev);
+    next.add(id);
+    return next;
+  }
+
+  function removeIdFromSet(prev: ReadonlySet<number>, id: number): ReadonlySet<number> {
+    if (!prev.has(id)) return prev;
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  }
+
+  function handlePRMutationCommonError(
+    err: unknown,
+    source: string,
+    permissionDeniedMsg: string
+  ): boolean {
+    const status =
+      typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+        ? ((err as Record<string, unknown>).status as number)
+        : null;
+    if (status === 401) {
+      expireToken();
+      window.location.replace("/login");
+      return true;
+    }
+    if (isPermissionDeniedError(err)) {
+      pushNotification(source, permissionDeniedMsg, "error");
+      return true;
+    }
+    return false;
+  }
+
   async function handleApprovePR(pr: PullRequest): Promise<void> {
     const currentLogin = userLogin();
     if (!canApprovePR(pr, currentLogin)) return;
@@ -1514,11 +1548,7 @@ export default function DashboardPage() {
     // is not suppressed by pushNotification's same-message no-op guard.
     dismissNotificationBySource(`approve-pr:${pr.id}`);
 
-    setApprovingPRIds((prev) => {
-      const next = new Set(prev);
-      next.add(pr.id);
-      return next;
-    });
+    setApprovingPRIds((prev) => addIdToSet(prev, pr.id));
 
     try {
       const result = await approvePullRequest(client, nodeId, approvedHeadSha);
@@ -1553,21 +1583,13 @@ export default function DashboardPage() {
       persistDashboardSnapshot();
     } catch (err) {
       if (getClient() !== client) return;
-      const status =
-        typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
-          ? ((err as Record<string, unknown>).status as number)
-          : null;
-      if (status === 401) {
-        expireToken();
-        window.location.replace("/login");
-        return;
-      }
-      if (isPermissionDeniedError(err)) {
-        pushNotification(
+      if (
+        handlePRMutationCommonError(
+          err,
           `approve-pr:${pr.id}`,
-          "Unable to approve PR: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
-          "error"
-        );
+          "Unable to approve PR: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings."
+        )
+      ) {
         return;
       }
       if (isStaleCommitError(err)) {
@@ -1582,12 +1604,7 @@ export default function DashboardPage() {
       const message = err instanceof Error ? err.message : "Unknown error";
       pushNotification(`approve-pr:${pr.id}`, `Failed to approve ${pr.repoFullName}#${pr.number}: ${message}`, "error");
     } finally {
-      setApprovingPRIds((prev) => {
-        if (!prev.has(pr.id)) return prev;
-        const next = new Set(prev);
-        next.delete(pr.id);
-        return next;
-      });
+      setApprovingPRIds((prev) => removeIdFromSet(prev, pr.id));
     }
   }
 
@@ -1601,11 +1618,7 @@ export default function DashboardPage() {
 
     dismissNotificationBySource(`mark-ready-pr:${pr.id}`);
 
-    setMarkingReadyPRIds((prev) => {
-      const next = new Set(prev);
-      next.add(pr.id);
-      return next;
-    });
+    setMarkingReadyPRIds((prev) => addIdToSet(prev, pr.id));
 
     try {
       const result = await markPullRequestReady(client, nodeId);
@@ -1624,7 +1637,6 @@ export default function DashboardPage() {
             if (result.reviewDecision !== null) {
               target.reviewDecision = result.reviewDecision;
             }
-            applyRecentReadyGuard(target);
           }
         })
       );
@@ -1639,32 +1651,19 @@ export default function DashboardPage() {
       persistDashboardSnapshot();
     } catch (err) {
       if (getClient() !== client) return;
-      const status =
-        typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
-          ? ((err as Record<string, unknown>).status as number)
-          : null;
-      if (status === 401) {
-        expireToken();
-        window.location.replace("/login");
-        return;
-      }
-      if (isPermissionDeniedError(err)) {
-        pushNotification(
+      if (
+        handlePRMutationCommonError(
+          err,
           `mark-ready-pr:${pr.id}`,
-          "Unable to mark PR ready: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings.",
-          "error"
-        );
+          "Unable to mark PR ready: your token lacks Pull Requests write permission. For fine-grained PATs, set 'Pull requests' to 'Read and write' in GitHub Settings, then replace your token in Settings."
+        )
+      ) {
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error";
       pushNotification(`mark-ready-pr:${pr.id}`, `Failed to mark ${pr.repoFullName}#${pr.number} ready for review: ${message}`, "error");
     } finally {
-      setMarkingReadyPRIds((prev) => {
-        if (!prev.has(pr.id)) return prev;
-        const next = new Set(prev);
-        next.delete(pr.id);
-        return next;
-      });
+      setMarkingReadyPRIds((prev) => removeIdFromSet(prev, pr.id));
     }
   }
 
