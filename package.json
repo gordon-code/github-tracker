@@ -30,7 +30,7 @@
     "@solidjs/router": "1.0.0",
     "idb": "8.0.3",
     "solid-js": "1.9.15",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "8.0.0",
@@ -44,7 +44,7 @@
     "@types/node": "26.6.4",
     "daisyui": "5.7.47",
     "fake-indexeddb": "6.2.5",
-    "happy-dom": "20.14.5",
+    "happy-dom": "21.0.4",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.3",

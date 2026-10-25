@@ -36,7 +36,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
     "ws": "8.22.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@octokit/core": "7.0.8",
