@@ -38,6 +38,7 @@ describe("findDashboardIssues", () => {
       htmlUrl: "https://github.com/owner/repo/issues/42",
       repoFullName: "owner/repo",
       number: 42,
+      updatedAt: "2026-04-10T12:34:56Z",
     });
     const result = findDashboardIssues([issue], NO_BOT_LOGINS);
     expect(result).toHaveLength(1);
@@ -46,7 +47,21 @@ describe("findDashboardIssues", () => {
       nodeId: "I_renovate_dash_1",
       repoFullName: "owner/repo",
       htmlUrl: "https://github.com/owner/repo/issues/42",
+      updatedAt: "2026-04-10T12:34:56Z",
     });
+  });
+
+  it("preserves updatedAt from matching issues", () => {
+    const issue = makeIssue({
+      title: "Dependency Dashboard",
+      state: "OPEN",
+      userLogin: "renovate[bot]",
+      nodeId: "I_renovate_dash_updated",
+      updatedAt: "2026-05-01T08:30:00Z",
+    });
+    const result = findDashboardIssues([issue], NO_BOT_LOGINS);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.updatedAt).toBe("2026-05-01T08:30:00Z");
   });
 
   it("finds issues from tracked bot logins", () => {

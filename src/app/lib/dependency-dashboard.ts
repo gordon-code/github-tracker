@@ -20,7 +20,7 @@ export function escapeRegex(s: string): string {
 export function findDashboardIssues(
   issues: Issue[],
   botLogins: Set<string>
-): { issueNumber: number; nodeId: string; repoFullName: string; htmlUrl: string }[] {
+): { issueNumber: number; nodeId: string; repoFullName: string; htmlUrl: string; updatedAt: string }[] {
   const allBotLogins = new Set([...KNOWN_DEP_BOT_LOGINS, ...botLogins]);
   return issues
     .filter((issue) => {
@@ -35,6 +35,7 @@ export function findDashboardIssues(
       nodeId: issue.nodeId!,
       repoFullName: issue.repoFullName,
       htmlUrl: issue.htmlUrl,
+      updatedAt: issue.updatedAt,
     }));
 }
 
