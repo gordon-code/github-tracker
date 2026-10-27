@@ -27,7 +27,37 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[notifications]",
 ];
 
+const BACKGROUND_POLL_SOURCES = new Set([
+  "prEnrichment",
+  "dashboardBodies",
+  "depPRBodies",
+  "pr-pagination",
+  "poll-cycle",
+  "hot-poll-pr-batch",
+  "hot-poll-pr-fetch",
+  "hot-poll-run-fetch",
+]);
+
+function isBrowserFetchDisconnectMessage(value: string | undefined): boolean {
+  if (!value) return false;
+  return (
+    /^(?:Failed to fetch|Load failed)(?:\s*\([^)]+\))?$/i.test(value) ||
+    /^NetworkError when attempting to fetch resource\.?$/i.test(value)
+  );
+}
+
 export function beforeSendHandler(event: ErrorEvent): ErrorEvent | null {
+  const source = event.tags?.source;
+  if (typeof source === "string" && BACKGROUND_POLL_SOURCES.has(source)) {
+    const values = event.exception?.values;
+    if (
+      values &&
+      values.length > 0 &&
+      values.every((ex) => isBrowserFetchDisconnectMessage(ex.value))
+    ) {
+      return null;
+    }
+  }
   // Strip OAuth params from captured URLs
   if (event.request?.url) {
     event.request.url = scrubUrl(event.request.url);

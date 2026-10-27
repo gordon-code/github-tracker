@@ -1,6 +1,10 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchDashboardIssueBodies, GRAPHQL_BODY_FETCH_TIMEOUT_MS } from "../../src/app/services/api";
+import {
+  fetchDashboardIssueBodies,
+  GRAPHQL_BODY_FETCH_TIMEOUT_MS,
+  GraphqlFetchTimeoutError,
+} from "../../src/app/services/api";
 import { getClient } from "../../src/app/services/github";
 import { pushNotification } from "../../src/app/lib/errors";
 import { captureException } from "@sentry/solid";
@@ -276,9 +280,15 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       expect(result.failedIds.has("N_1")).toBe(true);
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalledWith(
-        expect.any(Error),
+        expect.objectContaining({
+          name: "GraphqlFetchTimeoutError",
+          message: `GraphQL request exceeded ${GRAPHQL_BODY_FETCH_TIMEOUT_MS}ms`,
+        }),
         { tags: { source: "dashboardBodies" } }
       );
+      const capturedErr = vi.mocked(captureException).mock.calls[0]?.[0];
+      expect(capturedErr).toBeInstanceOf(GraphqlFetchTimeoutError);
+      expect((capturedErr as Error).name).toBe("GraphqlFetchTimeoutError");
       expect(pushNotification).toHaveBeenCalledWith(
         "dashboardBodies",
         expect.stringContaining("could not be loaded"),

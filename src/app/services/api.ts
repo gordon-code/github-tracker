@@ -1205,7 +1205,9 @@ export async function fetchPREnrichment(
 
 export const GRAPHQL_BODY_FETCH_TIMEOUT_MS = 20_000;
 
-export class GraphqlFetchTimeoutError extends Error {}
+export class GraphqlFetchTimeoutError extends Error {
+  override readonly name = "GraphqlFetchTimeoutError";
+}
 
 export function raceWithTimeout<T>(promise: Promise<T>, ms: number, controller: AbortController): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
