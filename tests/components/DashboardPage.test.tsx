@@ -5159,4 +5159,190 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       vi.useRealTimers();
     }
   });
+
+  it("prunes _dashboardBodyCache and _dashboardBodyFailureCooldown when a dashboard issue leaves dashboardData.issues and later reappears", async () => {
+    const graphqlSpy = vi.fn()
+      .mockRejectedValueOnce(new Error("transient fail"))
+      .mockResolvedValue({
+        nodes: [{ id: "DASH_PRUNE", body: "" }],
+        rateLimit: null,
+      });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const makeDashIssue = () =>
+      makeIssue({
+        id: 13,
+        number: 13,
+        title: "Dependency Dashboard",
+        userLogin: "renovate[bot]",
+        nodeId: "DASH_PRUNE",
+        repoFullName: "owner/repo",
+        state: "OPEN",
+        updatedAt: "2026-04-01T00:00:00Z",
+      });
+
+    // Poll 1: fails and records cooldown on DASH_PRUNE
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Poll 2: dashboard issue is closed/absent — prunes DASH_PRUNE from cooldown and cache
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Poll 3: dashboard issue reappears within cooldown window — re-fetched immediately because cooldown was pruned
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it("clears _dashboardBodyCache on onAuthCleared and ignores in-flight fetch resolution after logout", async () => {
+    let resolveInFlight: ((val: unknown) => void) | null = null;
+    const graphqlSpy = vi.fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveInFlight = resolve;
+          })
+      )
+      .mockResolvedValue({
+        nodes: [
+          {
+            id: "DASH_AUTH",
+            body: "## Detected Dependencies\n\n`abandoned-pkg` is Marked as abandoned\n",
+          },
+        ],
+        rateLimit: null,
+      });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const makeDashIssue = () =>
+      makeIssue({
+        id: 14,
+        number: 14,
+        title: "Dependency Dashboard",
+        userLogin: "renovate[bot]",
+        nodeId: "DASH_AUTH",
+        repoFullName: "owner/repo",
+        state: "OPEN",
+        updatedAt: "2026-04-01T00:00:00Z",
+      });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+
+    // Fire onAuthCleared while first fetch is still in flight
+    for (const cb of authClearCallbacks) cb();
+
+    // Now resolve the stale in-flight request — its result must be ignored (not cached)
+    resolveInFlight!({
+      nodes: [
+        {
+          id: "DASH_AUTH",
+          body: "## Detected Dependencies\n\n`stale-pkg` is Marked as abandoned\n",
+        },
+      ],
+      rateLimit: null,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Subsequent mount/poll for the new session must re-fetch DASH_AUTH (not hit a stale cache entry)
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it("clears abandonedDepsMap and dashboardIssueUrls when relevant dashboard issues become empty", async () => {
+    const user = userEvent.setup();
+    const graphqlSpy = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: "DASH_CLEAR",
+          body: [
+            "## Abandoned",
+            "",
+            "| Datasource | Package | Last Updated |",
+            "| --- | --- | --- |",
+            "| npm | axios | 2020-01-01 |",
+          ].join("\n"),
+        },
+      ],
+      rateLimit: null,
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          id: 15,
+          number: 15,
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_CLEAR",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          updatedAt: "2026-04-01T00:00:00Z",
+        }),
+      ],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/abandoned/i)).toBeDefined();
+    });
+
+    // Next refresh has no dashboard issues (relevant.length === 0) while the dependency PR remains open —
+    // clears abandonedDepsMap and dashboardIssueUrls so the abandoned badge is removed from the PR row
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => {
+      expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
+      expect(screen.queryByText(/abandoned/i)).toBeNull();
+    });
+  });
 });

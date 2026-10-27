@@ -291,9 +291,11 @@ export const DEP_BODY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const _depBodyFailureCooldown = new Map<number, number>();
 const _dashboardBodyCache = new Map<string, { updatedAt: string; deps: AbandonedDependency[] }>();
 const _dashboardBodyFailureCooldown = new Map<string, number>();
+let _bodyFetchAuthGen = 0;
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
+  _bodyFetchAuthGen++;
   resetDashboardData();
   setHasFetchedFresh(false);
   setJiraIssues([]);
@@ -1346,6 +1348,7 @@ export default function DashboardPage() {
       const octokit = getClient();
       if (!octokit) return;
       _fetchingDashboardBodies = true;
+      const authGen = _bodyFetchAuthGen;
       void (async () => {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
@@ -1378,6 +1381,7 @@ export default function DashboardPage() {
               octokit,
               toFetch.map((di) => di.nodeId)
             );
+            if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
             failedCount = failedIds.size;
             for (const di of toFetch) {
               if (failedIds.has(di.nodeId)) {
@@ -1409,7 +1413,9 @@ export default function DashboardPage() {
             setAbandonedDepsMap(newAbandonedMap);
           }
         } finally {
-          _fetchingDashboardBodies = false;
+          if (authGen === _bodyFetchAuthGen) {
+            _fetchingDashboardBodies = false;
+          }
         }
       })();
     },
@@ -1454,12 +1460,14 @@ export default function DashboardPage() {
     }
 
     _fetchingDepBodies = true;
+    const authGen = _bodyFetchAuthGen;
     const effectStart = Date.now();
     console.debug(`[dashboard] depBodies effect: fetch started for ${toFetch.length} PRs at ${effectStart}`);
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
         const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
+        if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
         console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
 
         // Record/clear per-PR cooldown so a batch that errored or timed out isn't
@@ -1487,7 +1495,9 @@ export default function DashboardPage() {
         console.debug(`[dashboard] depBodies effect: depMeta updated, size=${merged.size}`);
         setTimeout(() => persistDepMeta(merged), 0);
       } finally {
-        _fetchingDepBodies = false;
+        if (authGen === _bodyFetchAuthGen) {
+          _fetchingDepBodies = false;
+        }
         console.debug(`[dashboard] depBodies effect: guard released after ${Date.now() - effectStart}ms`);
       }
     })();
