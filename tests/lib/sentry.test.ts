@@ -215,6 +215,114 @@ describe("beforeSendHandler", () => {
     expect(result!.exception!.values![0].value).toContain("client_secret=[REDACTED]");
     expect(result!.exception!.values![0].value).toContain("ghu_[REDACTED]");
   });
+
+  it("drops transient browser fetch disconnect errors when event.tags.source is a background poll source", () => {
+    const backgroundSources = [
+      "prEnrichment",
+      "dashboardBodies",
+      "depPRBodies",
+      "pr-pagination",
+      "poll-cycle",
+      "hot-poll-pr-batch",
+      "hot-poll-pr-fetch",
+      "hot-poll-run-fetch",
+    ];
+
+    for (const source of backgroundSources) {
+      expect(
+        beforeSendHandler({
+          tags: { source },
+          exception: { values: [{ type: "TypeError", value: "Failed to fetch" }] },
+        } as never)
+      ).toBeNull();
+
+      expect(
+        beforeSendHandler({
+          tags: { source },
+          exception: {
+            values: [
+              { type: "TypeError", value: "Failed to fetch (api.github.com)" },
+              { type: "HttpError", value: "Failed to fetch" },
+            ],
+          },
+        } as never)
+      ).toBeNull();
+
+      expect(
+        beforeSendHandler({
+          tags: { source },
+          exception: {
+            values: [{ type: "TypeError", value: "NetworkError when attempting to fetch resource." }],
+          },
+        } as never)
+      ).toBeNull();
+
+      expect(
+        beforeSendHandler({
+          tags: { source },
+          exception: {
+            values: [
+              { type: "TypeError", value: "Load failed" },
+              { type: "TypeError", value: "Load failed (api.github.com)" },
+            ],
+          },
+        } as never)
+      ).toBeNull();
+    }
+  });
+
+  it("preserves transient browser fetch disconnect errors when event.tags.source is interactive or absent", () => {
+    const interactiveSources = [
+      "oauth-callback",
+      "pat-validation",
+      "pat-replace",
+      "jira-api-token-connect",
+    ];
+
+    for (const source of interactiveSources) {
+      const event = {
+        tags: { source },
+        exception: { values: [{ type: "TypeError", value: "Failed to fetch" }] },
+      };
+      expect(beforeSendHandler(event as never)).not.toBeNull();
+    }
+
+    const untaggedEvent = {
+      exception: { values: [{ type: "TypeError", value: "Failed to fetch" }] },
+    };
+    expect(beforeSendHandler(untaggedEvent as never)).not.toBeNull();
+  });
+
+  it("preserves GraphqlFetchTimeoutError, HTTP status errors, code TypeErrors, and prefix lookalikes on background poll sources", () => {
+    const preservedValues = [
+      { type: "GraphqlFetchTimeoutError", value: "GraphQL request exceeded 20000ms" },
+      { type: "HttpError", value: "Bad Gateway (502)" },
+      { type: "HttpError", value: "Resource not accessible by integration (403)" },
+      { type: "TypeError", value: "Cannot read properties of undefined (reading 'nodes')" },
+      { type: "Error", value: "Failed to fetch user profile: 500" },
+      { type: "Error", value: "Load failed for module /assets/index.js" },
+    ];
+
+    for (const ex of preservedValues) {
+      const event = {
+        tags: { source: "prEnrichment" },
+        exception: { values: [ex] },
+      };
+      expect(beforeSendHandler(event as never)).not.toBeNull();
+    }
+
+    // Mixed chain where one entry is a non-disconnect error must also be preserved
+    const mixedEvent = {
+      tags: { source: "poll-cycle" },
+      exception: {
+        values: [
+          { type: "TypeError", value: "Failed to fetch" },
+          { type: "HttpError", value: "HttpError: 500 Internal Server Error" },
+        ],
+      },
+    };
+    expect(beforeSendHandler(mixedEvent as never)).not.toBeNull();
+  });
 });
 
 describe("beforeBreadcrumbHandler", () => {

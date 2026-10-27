@@ -289,9 +289,13 @@ export function applyHotPollPRUpdates(
 // long as the underlying failure (e.g. a secondary-rate-limit stall) persists.
 export const DEP_BODY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const _depBodyFailureCooldown = new Map<number, number>();
+const _dashboardBodyCache = new Map<string, { updatedAt: string; deps: AbandonedDependency[] }>();
+const _dashboardBodyFailureCooldown = new Map<string, number>();
+let _bodyFetchAuthGen = 0;
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
+  _bodyFetchAuthGen++;
   resetDashboardData();
   setHasFetchedFresh(false);
   setJiraIssues([]);
@@ -305,6 +309,8 @@ onAuthCleared(() => {
   _fetchingDashboardBodies = false;
   _fetchingDepBodies = false;
   _depBodyFailureCooldown.clear();
+  _dashboardBodyCache.clear();
+  _dashboardBodyFailureCooldown.clear();
   setApprovingPRIds(new Set<number>());
   recentlyApprovedPRs.clear();
   setMarkingReadyPRIds(new Set<number>());
@@ -374,6 +380,7 @@ async function pollFetch(): Promise<DashboardData> {
       applyRecentApprovalGuard(pr, currentLogin);
     }
 
+    let resolvedPullRequests: PullRequest[];
     if (phaseOneFired) {
       // Phase 1 fired — use fine-grained merge for the light→enriched
       // transition. Only update heavy fields to avoid re-rendering the
@@ -422,17 +429,19 @@ async function pollFetch(): Promise<DashboardData> {
           }
         }
       }));
+      resolvedPullRequests = unwrap(dashboardData.pullRequests).map((pr) => ({ ...pr }));
     } else {
       // Phase 1 did NOT fire (cached data existed or subsequent poll).
       // Full atomic replacement — all fields (light + heavy) may have
       // changed since the last cycle. Preserve scroll position: SolidJS
       // DOM updates are synchronous within the setter, so save/restore
       // around it to prevent scroll reset from <For> DOM rebuild.
-      const pullRequests = fallbackToPreviousEnrichment(dashboardData.pullRequests, data.pullRequests);
+      const pullRequests = fallbackToPreviousEnrichment(unwrap(dashboardData.pullRequests), data.pullRequests);
       for (const pr of pullRequests) {
         applyRecentReadyGuard(pr);
         applyRecentApprovalGuard(pr, currentLogin);
       }
+      resolvedPullRequests = pullRequests;
       withScrollLock(() => {
         setDashboardData({
           issues: data.issues,
@@ -446,19 +455,19 @@ async function pollFetch(): Promise<DashboardData> {
     const filteredRuns = config.enableActions ? data.workflowRuns : [];
     const hotPullRequests =
       recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
-        ? data.pullRequests.map((pr) =>
+        ? resolvedPullRequests.map((pr) =>
             (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
               ? { ...pr, enriched: true, checkStatus: "pending" as const }
               : pr
           )
-        : data.pullRequests;
+        : resolvedPullRequests;
     rebuildHotSets({ ...data, pullRequests: hotPullRequests, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted. Deferred to avoid blocking paint.
     const cachePayload = {
       _v: CACHE_VERSION,
       issues: data.issues,
-      pullRequests: data.pullRequests,
+      pullRequests: resolvedPullRequests,
       workflowRuns: filteredRuns,
       lastRefreshedAt: now.toISOString(),
     };
@@ -1339,31 +1348,74 @@ export default function DashboardPage() {
       const octokit = getClient();
       if (!octokit) return;
       _fetchingDashboardBodies = true;
+      const authGen = _bodyFetchAuthGen;
       void (async () => {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
+          const activeNodeIds = new Set(dashboardIssues.map((di) => di.nodeId));
+          for (const k of [..._dashboardBodyCache.keys()]) {
+            if (!activeNodeIds.has(k)) _dashboardBodyCache.delete(k);
+          }
+          for (const k of [..._dashboardBodyFailureCooldown.keys()]) {
+            if (!activeNodeIds.has(k)) _dashboardBodyFailureCooldown.delete(k);
+          }
+
           const depRepos = new Set(visibleDependencyPullRequests().map((pr) => pr.repoFullName));
           const relevant = dashboardIssues.filter((di) => depRepos.has(di.repoFullName));
-          if (relevant.length === 0) return;
+          if (relevant.length === 0) {
+            if (abandonedDepsMap().size > 0) setAbandonedDepsMap(new Map());
+            if (dashboardIssueUrls().size > 0) setDashboardIssueUrls(new Map());
+            return;
+          }
 
-          const nodeIds = relevant.map((di) => di.nodeId);
-          const { bodies: bodyMap } = await fetchDashboardIssueBodies(octokit, nodeIds);
+          const now = Date.now();
+          const toFetch = relevant.filter((di) => {
+            if (_dashboardBodyCache.get(di.nodeId)?.updatedAt === di.updatedAt) return false;
+            const failedAt = _dashboardBodyFailureCooldown.get(di.nodeId);
+            return !failedAt || now - failedAt >= DEP_BODY_FAILURE_COOLDOWN_MS;
+          });
+
+          let failedCount = 0;
+          if (toFetch.length > 0) {
+            const { bodies: bodyMap, failedIds } = await fetchDashboardIssueBodies(
+              octokit,
+              toFetch.map((di) => di.nodeId)
+            );
+            if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
+            failedCount = failedIds.size;
+            for (const di of toFetch) {
+              if (failedIds.has(di.nodeId)) {
+                _dashboardBodyFailureCooldown.set(di.nodeId, now);
+              } else {
+                _dashboardBodyFailureCooldown.delete(di.nodeId);
+              }
+              if (bodyMap.has(di.nodeId)) {
+                _dashboardBodyCache.set(di.nodeId, {
+                  updatedAt: di.updatedAt,
+                  deps: parseAbandonedSection(bodyMap.get(di.nodeId) ?? ""),
+                });
+              }
+            }
+          }
 
           const newAbandonedMap = new Map<string, AbandonedDependency[]>();
           const newUrlMap = new Map<string, string>();
           for (const di of relevant) {
-            const body = bodyMap.get(di.nodeId);
-            if (body != null) {
-              newAbandonedMap.set(di.repoFullName, parseAbandonedSection(body));
+            const cached = _dashboardBodyCache.get(di.nodeId);
+            if (cached) {
+              newAbandonedMap.set(di.repoFullName, cached.deps);
             }
             newUrlMap.set(di.repoFullName, di.htmlUrl);
           }
-          // Don't replace valid data with empty results from a failed fetch
-          if (bodyMap.size === 0 && relevant.length > 0) return;
-          setAbandonedDepsMap(newAbandonedMap);
           setDashboardIssueUrls(newUrlMap);
+          // Don't replace valid data with empty results from a failed fetch
+          if (!(newAbandonedMap.size === 0 && abandonedDepsMap().size > 0 && failedCount > 0)) {
+            setAbandonedDepsMap(newAbandonedMap);
+          }
         } finally {
-          _fetchingDashboardBodies = false;
+          if (authGen === _bodyFetchAuthGen) {
+            _fetchingDashboardBodies = false;
+          }
         }
       })();
     },
@@ -1408,12 +1460,14 @@ export default function DashboardPage() {
     }
 
     _fetchingDepBodies = true;
+    const authGen = _bodyFetchAuthGen;
     const effectStart = Date.now();
     console.debug(`[dashboard] depBodies effect: fetch started for ${toFetch.length} PRs at ${effectStart}`);
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
         const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
+        if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
         console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
 
         // Record/clear per-PR cooldown so a batch that errored or timed out isn't
@@ -1441,7 +1495,9 @@ export default function DashboardPage() {
         console.debug(`[dashboard] depBodies effect: depMeta updated, size=${merged.size}`);
         setTimeout(() => persistDepMeta(merged), 0);
       } finally {
-        _fetchingDepBodies = false;
+        if (authGen === _bodyFetchAuthGen) {
+          _fetchingDepBodies = false;
+        }
         console.debug(`[dashboard] depBodies effect: guard released after ${Date.now() - effectStart}ms`);
       }
     })();

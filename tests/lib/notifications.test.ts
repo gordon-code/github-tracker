@@ -296,4 +296,35 @@ describe("dispatchNotifications", () => {
     openSpy.mockRestore();
     focusSpy.mockRestore();
   });
+
+  it("does not throw when Notification constructor throws TypeError: Illegal constructor", () => {
+    NotificationMock.mockImplementation(() => {
+      throw new TypeError(
+        "Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead."
+      );
+    });
+
+    expect(() =>
+      dispatchNotifications(makeNewItems({ issues: [makeIssue(1)] }), makeConfig())
+    ).not.toThrow();
+    expect(NotificationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues dispatching subsequent notifications when the first Notification constructor call throws", () => {
+    NotificationMock.mockImplementationOnce(() => {
+      throw new TypeError(
+        "Failed to construct 'Notification': Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead."
+      );
+    });
+
+    expect(() =>
+      dispatchNotifications(
+        makeNewItems({ issues: [makeIssue(1)], pullRequests: [makePr(2)] }),
+        makeConfig()
+      )
+    ).not.toThrow();
+    expect(NotificationMock).toHaveBeenCalledTimes(2);
+    expect(NotificationMock.mock.calls[0][0]).toContain("Issue 1");
+    expect(NotificationMock.mock.calls[1][0]).toContain("PR 2");
+  });
 });
