@@ -6,9 +6,13 @@ import {
   addMutedSource,
   clearMutedSources,
   dismissError,
+  dismissNotificationBySource,
   getNotifications,
 } from "../../../src/app/lib/errors";
-import ToastContainer, { resetToastState } from "../../../src/app/components/shared/ToastContainer";
+import ToastContainer, {
+  resetToastState,
+  TOAST_REPEAT_COOLDOWN_MS,
+} from "../../../src/app/components/shared/ToastContainer";
 
 // Mirrors the private TOASTED_MESSAGES_KEY constant in ToastContainer.tsx —
 // hardcoded here the same way tests/stores/config.test.ts hardcodes STORAGE_KEY.
@@ -332,15 +336,24 @@ describe("ToastContainer", () => {
     pushNotification("github-status", "Actions Outage", "error");
     expect(screen.queryAllByRole("alert")).toHaveLength(1);
 
-    // Incident fully resolves — source drops out of the store entirely.
+    // Incident resolves — source drops out of the store while cooldown entry remains.
     const notifId = getNotifications()[0].id;
     dismissError(notifId);
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
 
     first.unmount();
 
-    // A later, unrelated incident happens to have identical text — should
-    // not be suppressed forever just because the same string was toasted once.
+    // Recurring within TOAST_REPEAT_COOLDOWN_MS (1 minute later) is suppressed.
+    vi.advanceTimersByTime(60_000);
+    pushNotification("github-status", "Actions Outage", "error");
+    const second = render(() => <ToastContainer />);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Dismiss again, advance past the 15-minute cooldown, and re-push: it re-toasts.
+    dismissError(getNotifications()[0].id);
+    second.unmount();
+    vi.advanceTimersByTime(TOAST_REPEAT_COOLDOWN_MS);
+
     pushNotification("github-status", "Actions Outage", "error");
     render(() => <ToastContainer />);
     expect(screen.queryAllByRole("alert")).toHaveLength(1);
@@ -445,5 +458,64 @@ describe("ToastContainer", () => {
     pushNotification("api", "Plain error", "error");
     const alert = screen.getByRole("alert");
     expect(alert.querySelector("a")).toBeNull();
+  });
+
+  it("suppresses toast popup when silentToast is true while keeping notification in store", () => {
+    render(() => <ToastContainer />);
+    pushNotification("pr-enrichment", "Msg", "warning", true, undefined, {
+      silentToast: true,
+    });
+    expect(getNotifications()).toHaveLength(1);
+    expect(getNotifications()[0].source).toBe("pr-enrichment");
+    expect(getNotifications()[0].silentToast).toBe(true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("suppresses flapping poll notifications across dismissNotificationBySource within 15 minutes and re-toasts after cooldown", () => {
+    render(() => <ToastContainer />);
+
+    // Poll 1 at t=0 pushes notification -> toasts
+    pushNotification("hot-poll", "Failed to fetch", "error", true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    // Poll 2 at t=60s succeeds and reconciles via dismissNotificationBySource
+    vi.advanceTimersByTime(60_000);
+    dismissNotificationBySource("hot-poll");
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Poll 3 at t=120s fails again with the same message -> suppressed by 15m cooldown
+    vi.advanceTimersByTime(60_000);
+    pushNotification("hot-poll", "Failed to fetch", "error", true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Dismiss and advance past the 15-minute cooldown from the initial toast at t=0
+    dismissNotificationBySource("hot-poll");
+    vi.advanceTimersByTime(TOAST_REPEAT_COOLDOWN_MS);
+    pushNotification("hot-poll", "Failed to fetch", "error", true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("clears in-memory toastedMessages cooldown map when resetToastState() is called while mounted", () => {
+    render(() => <ToastContainer />);
+    pushNotification("api", "Transient error", "error", true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    // Clear the active notification within the 15m cooldown
+    vi.advanceTimersByTime(10_000);
+    dismissNotificationBySource("api");
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Resetting toast state while mounted clears the in-memory cooldown map
+    resetToastState();
+
+    vi.advanceTimersByTime(5_000);
+    pushNotification("api", "Transient error", "error", true);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("does not set redundant aria-live='assertive' on the outer wrapper", () => {
+    const { container } = render(() => <ToastContainer />);
+    expect(container.firstElementChild?.getAttribute("aria-live")).toBeNull();
+    expect(container.firstElementChild?.getAttribute("aria-atomic")).toBeNull();
   });
 });

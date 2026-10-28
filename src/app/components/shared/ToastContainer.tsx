@@ -60,26 +60,41 @@ interface ToastItem {
 // re-toast. sessionStorage survives both a remount and a refresh, so this is
 // the one place dedup needs to persist beyond the component's own lifetime.
 const TOASTED_MESSAGES_KEY = "github-tracker:toasted-messages";
+export const TOAST_REPEAT_COOLDOWN_MS = 15 * 60 * 1000;
 
-function loadToastedMessages(): Map<string, string> {
+interface ToastedMessageEntry {
+  message: string;
+  toastedAt: number;
+}
+
+const _activeResetHandlers = new Set<() => void>();
+
+function loadToastedMessages(): Map<string, ToastedMessageEntry> {
   try {
     const raw = sessionStorage.getItem(TOASTED_MESSAGES_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return new Map();
-    return new Map(
-      parsed.filter(
-        (e): e is [string, string] =>
-          Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "string"
-      )
-    );
+    const result = new Map<string, ToastedMessageEntry>();
+    for (const e of parsed) {
+      if (!Array.isArray(e) || typeof e[0] !== "string" || typeof e[1] !== "string") continue;
+      if (e.length === 3 && typeof e[2] === "number" && Number.isFinite(e[2])) {
+        result.set(e[0], { message: e[1], toastedAt: e[2] });
+      } else if (e.length === 2) {
+        result.set(e[0], { message: e[1], toastedAt: 0 });
+      }
+    }
+    return result;
   } catch {
     return new Map();
   }
 }
 
-function persistToastedMessages(map: Map<string, string>): void {
+function persistToastedMessages(map: Map<string, ToastedMessageEntry>): void {
   try {
-    sessionStorage.setItem(TOASTED_MESSAGES_KEY, JSON.stringify([...map.entries()]));
+    sessionStorage.setItem(
+      TOASTED_MESSAGES_KEY,
+      JSON.stringify(Array.from(map.entries()).map(([source, v]) => [source, v.message, v.toastedAt]))
+    );
   } catch {
     /* best-effort — dedup persistence is low-stakes, no user-facing notification needed */
   }
@@ -90,6 +105,7 @@ function persistToastedMessages(map: Map<string, string>): void {
 // resetGitHubStatusState()/resetPollState() etc.).
 export function resetToastState(): void {
   sessionStorage.removeItem(TOASTED_MESSAGES_KEY);
+  for (const fn of _activeResetHandlers) fn();
 }
 
 // toastedMessages stores per-source API/search/graphql error text, which is
@@ -126,6 +142,15 @@ export default function ToastContainer() {
   // THAT TIME (not the coalesced value itself) so a value that was
   // suppressed and never superseded still surfaces once the window elapses.
   const coalesceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const handleReset = () => {
+    toastedMessages.clear();
+    lastToastedAt.clear();
+    seenTimestamps.clear();
+    for (const t of coalesceTimers.values()) clearTimeout(t);
+    coalesceTimers.clear();
+  };
+  _activeResetHandlers.add(handleReset);
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const animDelay = reducedMotion ? 0 : 300;
@@ -180,8 +205,9 @@ export default function ToastContainer() {
   }
 
   function showToast(notif: AppNotification) {
-    lastToastedAt.set(notif.source, Date.now());
-    toastedMessages.set(notif.source, notif.message);
+    const now = Date.now();
+    lastToastedAt.set(notif.source, now);
+    toastedMessages.set(notif.source, { message: notif.message, toastedAt: now });
     persistToastedMessages(toastedMessages);
     setVisibleToasts((prev) => {
       const next = new Map(prev);
@@ -198,8 +224,15 @@ export default function ToastContainer() {
     const t = setTimeout(() => {
       coalesceTimers.delete(source);
       const current = getNotifications().find(n => n.source === source);
-      if (!current || isMuted(source)) return;
-      if (toastedMessages.get(source) === current.message) return;
+      if (!current || current.silentToast || isMuted(source)) return;
+      const entry = toastedMessages.get(source);
+      if (
+        entry !== undefined &&
+        entry.message === current.message &&
+        current.timestamp - entry.toastedAt < TOAST_REPEAT_COOLDOWN_MS
+      ) {
+        return;
+      }
       seenTimestamps.set(current.id, current.timestamp);
       showToast(current);
     }, remaining);
@@ -217,10 +250,21 @@ export default function ToastContainer() {
 
       seenTimestamps.set(notif.id, notif.timestamp);
 
+      if (notif.silentToast) continue;
+
       const lastToasted = lastToastedAt.get(notif.source);
       const coalescing = lastToasted !== undefined && Date.now() - lastToasted < COALESCE_MS;
       const muted = isMuted(notif.source);
-      const alreadyToasted = toastedMessages.get(notif.source) === notif.message;
+      const toastedEntry = toastedMessages.get(notif.source);
+      let alreadyToasted = false;
+      if (toastedEntry && toastedEntry.message === notif.message) {
+        if (toastedEntry.toastedAt === 0 && isNew) {
+          toastedEntry.toastedAt = notif.timestamp;
+          alreadyToasted = true;
+        } else {
+          alreadyToasted = notif.timestamp - toastedEntry.toastedAt < TOAST_REPEAT_COOLDOWN_MS;
+        }
+      }
 
       if (coalescing || muted || alreadyToasted) {
         if (coalescing) scheduleCoalesceRecheck(notif.source);
@@ -239,9 +283,14 @@ export default function ToastContainer() {
       [...lastToastedAt.keys(), ...toastedMessages.keys()].filter(source => !currentSources.has(source))
     );
     let toastedMessagesChanged = false;
+    const now = Date.now();
     for (const source of staleSources) {
       lastToastedAt.delete(source);
-      if (toastedMessages.delete(source)) toastedMessagesChanged = true;
+      const entry = toastedMessages.get(source);
+      if (entry && (entry.toastedAt === 0 || now - entry.toastedAt >= TOAST_REPEAT_COOLDOWN_MS)) {
+        toastedMessages.delete(source);
+        toastedMessagesChanged = true;
+      }
       const ct = coalesceTimers.get(source);
       if (ct !== undefined) { clearTimeout(ct); coalesceTimers.delete(source); }
     }
@@ -258,13 +307,14 @@ export default function ToastContainer() {
   });
 
   onCleanup(() => {
+    _activeResetHandlers.delete(handleReset);
     for (const t of timeouts.values()) clearTimeout(t);
     for (const t of dismissingTimeouts.values()) clearTimeout(t);
     for (const t of coalesceTimers.values()) clearTimeout(t);
   });
 
   return (
-    <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96" aria-live="assertive" aria-atomic="false">
+    <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96">
       <For each={[...visibleToasts().values()]}>
         {(item) => {
           const cfg = severityConfig(item.notification.severity);
