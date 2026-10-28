@@ -1430,9 +1430,16 @@ async function handleJiraProxy(
     // GET with params as query string — only allowlisted keys forwarded
     const searchParams = new URLSearchParams();
     if (params && typeof params === "object") {
-      for (const [k, v] of Object.entries(params as Record<string, string | number | boolean | unknown[] | null | undefined>)) {
-        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null)
-          searchParams.set(k, Array.isArray(v) ? v.join(",") : String(v));
+      for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+        if (!ALLOWED_SEARCH_PARAMS.has(k) || v === undefined || v === null) continue;
+        if (Array.isArray(v)) {
+          searchParams.set(
+            k,
+            v.filter((item): item is string | number | boolean => typeof item === "string" || typeof item === "number" || typeof item === "boolean").join(","),
+          );
+        } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          searchParams.set(k, String(v));
+        }
       }
     }
     jiraUrl = `${baseUrl}?${searchParams.toString()}`;

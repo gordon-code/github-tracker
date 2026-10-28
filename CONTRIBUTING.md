@@ -149,6 +149,6 @@ git push upstream main --follow-tags
 
 All PRs target `main` on `gordon-code/github-tracker`. Keep PRs focused — one feature or fix per PR makes review faster and reverts cleaner.
 
-In the PR body, describe what changed and why. CI runs typecheck, unit tests, and E2E tests automatically. PRs need a passing CI run before merge.
+In the PR body, describe what changed and why. CI runs typecheck, lint, unit tests, and E2E tests automatically. PRs need a passing CI run before merge.
 
 When adding or changing user-facing features, update [docs/USER_GUIDE.md](docs/USER_GUIDE.md) to reflect the changes.
