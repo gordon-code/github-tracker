@@ -15,7 +15,7 @@ import type { DataSource } from "../src/data-source.js";
 // ── Mock ws-relay module ───────────────────────────────────────────────────────
 // isRelayConnected is used by CompositeDataSource.tryBoth()
 let _mockIsConnected = false;
-let _mockSendRequest: ReturnType<typeof vi.fn>;
+let _mockSendRequest: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
 
 vi.mock("../src/ws-relay.js", () => ({
   get isRelayConnected() {
@@ -145,7 +145,7 @@ describe("OctokitDataSource", () => {
         pull_request: { merged_at: null },
       };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([searchItem])],
       ]);
@@ -177,7 +177,7 @@ describe("OctokitDataSource", () => {
         // no pull_request field
       };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([issueItem])],
       ]);
@@ -192,7 +192,7 @@ describe("OctokitDataSource", () => {
       // Clear cached config to verify explicit param works without it
       setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([])],
       ]);
@@ -253,7 +253,7 @@ describe("OctokitDataSource", () => {
       };
       const readyPR = { ...draftPR, id: 2, number: 2, draft: false, title: "Ready" };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([draftPR, readyPR])],
       ]);
@@ -267,7 +267,7 @@ describe("OctokitDataSource", () => {
 
     it("filters by status=approved", async () => {
       // Note: REST search doesn't return reviewDecision, so approved filter returns empty
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([{
           id: 1, number: 1, title: "Approved", state: "open", draft: false,
@@ -302,7 +302,7 @@ describe("OctokitDataSource", () => {
         pull_request: { merged_at: null },
       };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([prItem])],
       ]);
@@ -341,7 +341,7 @@ describe("OctokitDataSource", () => {
         pull_request: { merged_at: null },
       };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([prItem])],
       ]);
@@ -377,7 +377,7 @@ describe("OctokitDataSource", () => {
         pull_request: { merged_at: null },
       };
 
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([issueItem, prItem])],
       ]);
@@ -392,7 +392,7 @@ describe("OctokitDataSource", () => {
     });
 
     it("passes explicit repo to search query", async () => {
-      const responses = new Map([
+      const responses = new Map<string, unknown>([
         ["GET /user", makeUserResponse()],
         ["GET /search/issues", makeSearchResponse([])],
       ]);
@@ -541,7 +541,7 @@ describe("OctokitDataSource", () => {
     });
 
     it("constructs involves_me query with user login", async () => {
-      const requestMock = vi.fn().mockImplementation(async (route: string) => {
+      const requestMock = vi.fn(async (route: string, _params?: Record<string, unknown>) => {
         if (route === "GET /user") return { data: { login: "testuser" }, headers: {} };
         if (route === "GET /search/issues") return { data: { items: [], total_count: 0 }, headers: {} };
         if (route === "GET /repos/{owner}/{repo}/actions/runs") return { data: { workflow_runs: [], total_count: 0 }, headers: {} };
@@ -552,17 +552,17 @@ describe("OctokitDataSource", () => {
       await ds.getDashboardSummary("involves_me");
 
       const searchCalls = requestMock.mock.calls.filter(
-        ([route]: [string]) => route === "GET /search/issues"
+        ([route]) => route === "GET /search/issues"
       );
-      const prCall = searchCalls.find(([, params]: [string, Record<string, unknown>]) =>
-        typeof params?.q === "string" && (params.q as string).includes("is:pr")
+      const prCall = searchCalls.find(([, params]) =>
+        typeof params?.q === "string" && (params.q).includes("is:pr")
       );
       expect(prCall).toBeDefined();
-      expect(prCall![1].q).toContain("involves:testuser");
+      expect(prCall![1]?.q).toContain("involves:testuser");
     });
 
     it("constructs all-scope query without involves filter", async () => {
-      const requestMock = vi.fn().mockImplementation(async (route: string) => {
+      const requestMock = vi.fn(async (route: string, _params?: Record<string, unknown>) => {
         if (route === "GET /user") return { data: { login: "testuser" }, headers: {} };
         if (route === "GET /search/issues") return { data: { items: [], total_count: 0 }, headers: {} };
         if (route === "GET /repos/{owner}/{repo}/actions/runs") return { data: { workflow_runs: [], total_count: 0 }, headers: {} };
@@ -573,14 +573,14 @@ describe("OctokitDataSource", () => {
       await ds.getDashboardSummary("all");
 
       const searchCalls = requestMock.mock.calls.filter(
-        ([route]: [string]) => route === "GET /search/issues"
+        ([route]) => route === "GET /search/issues"
       );
-      const prCall = searchCalls.find(([, params]: [string, Record<string, unknown>]) =>
-        typeof params?.q === "string" && (params.q as string).includes("is:pr") &&
-        !(params.q as string).includes("review-requested")
+      const prCall = searchCalls.find(([, params]) =>
+        typeof params?.q === "string" && (params.q).includes("is:pr") &&
+        !(params.q).includes("review-requested")
       );
       expect(prCall).toBeDefined();
-      expect(prCall![1].q).not.toContain("involves:");
+      expect(prCall![1]?.q).not.toContain("involves:");
     });
 
     it("returns failingRunCount=null and skips actions API when enableActions is false", async () => {
@@ -591,7 +591,7 @@ describe("OctokitDataSource", () => {
         monitoredRepos: [],
         enableActions: false,
       });
-      const requestMock = vi.fn().mockImplementation(async (route: string) => {
+      const requestMock = vi.fn(async (route: string, _params?: Record<string, unknown>) => {
         if (route === "GET /user") return { data: { login: "testuser" }, headers: {} };
         if (route === "GET /search/issues") return { data: { items: [], total_count: 0 }, headers: {} };
         throw new Error(`Unexpected: ${route}`);
@@ -602,7 +602,7 @@ describe("OctokitDataSource", () => {
 
       expect(summary.failingRunCount).toBeNull();
       const actionsCalls = requestMock.mock.calls.filter(
-        ([route]: [string]) => route === "GET /repos/{owner}/{repo}/actions/runs"
+        ([route]) => route === "GET /repos/{owner}/{repo}/actions/runs"
       );
       expect(actionsCalls).toHaveLength(0);
     });

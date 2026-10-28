@@ -7,9 +7,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "../src/tools.js";
 import type { DataSource } from "../src/data-source.js";
 import type {
-  Issue,
-  PullRequest,
-  WorkflowRun,
   DashboardSummary,
   RateLimitInfo,
 } from "../../src/shared/types.js";

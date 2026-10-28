@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "e2e/**/*",
+    "mcp/tests/**/*.ts",
+    "vite.config.ts",
+    "vite-plugins/**/*",
+    "scripts/**/*.ts"
+  ]
+}

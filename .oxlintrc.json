@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "import", "promise", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "mcp/dist/**",
+    "**/node_modules/**",
+    ".wrangler/**",
+    "hack/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "rules": {
+    "typescript/no-unsafe-type-assertion": "off",
+    "eslint/no-underscore-dangle": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "eslint/no-unassigned-vars": "off",
+    "eslint/no-await-in-loop": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "import/no-unassigned-import": "off",
+    "promise/always-return": "off"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**", "e2e/**", "mcp/tests/**"],
+      "rules": {
+        "vitest/require-mock-type-parameters": "off",
+        "vitest/expect-expect": "off",
+        "typescript/unbound-method": "off",
+        "vitest/no-standalone-expect": "off",
+        "vitest/no-conditional-expect": "off",
+        "vitest/require-to-throw-message": "off",
+        "typescript/no-misused-spread": "off",
+        "vitest/valid-expect": "off"
+      }
+    }
+  ]
+}
