@@ -1640,7 +1640,7 @@ export default function SettingsPage() {
                   <span class="text-sm">{config.jira?.authMethod === "token" ? "API Token" : "OAuth"}</span>
                   <Show when={config.jira?.authMethod === "token"}>
                     <button
-                      ref={replaceJiraButtonRef}
+                      ref={(el) => { replaceJiraButtonRef = el; }}
                       type="button"
                       onClick={() => {
                         if (!showReplaceJiraToken()) {
@@ -1695,7 +1695,7 @@ export default function SettingsPage() {
                         onInput={(e) => setReplaceJiraEmail(e.currentTarget.value)}
                       />
                       <input
-                        ref={replaceJiraTokenInputRef}
+                        ref={(el) => { replaceJiraTokenInputRef = el; }}
                         type="password"
                         autocomplete="new-password"
                         placeholder="New Atlassian API token"
@@ -1911,7 +1911,7 @@ export default function SettingsPage() {
               <span class="text-sm">{config.authMethod === "pat" ? "Personal Access Token" : "OAuth"}</span>
               <Show when={config.authMethod === "pat"}>
                 <button
-                  ref={replaceButtonRef}
+                  ref={(el) => { replaceButtonRef = el; }}
                   type="button"
                   onClick={() => {
                     const opening = !showReplaceToken();
@@ -1937,7 +1937,7 @@ export default function SettingsPage() {
               <form onSubmit={(e) => { e.preventDefault(); void handleReplaceToken(); }}>
                 <div class="flex flex-col gap-2">
                   <input
-                    ref={replaceInputRef}
+                    ref={(el) => { replaceInputRef = el; }}
                     type="password"
                     autocomplete="new-password"
                     placeholder="ghp_... or github_pat_..."
@@ -2035,7 +2035,7 @@ export default function SettingsPage() {
               fallback={
                 <Show when={!credentialImport.credImport()}>
                   <input
-                    ref={importInputRef}
+                    ref={(el) => { importInputRef = el; }}
                     type="file"
                     accept="application/json,.json"
                     class="hidden"

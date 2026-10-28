@@ -9,7 +9,10 @@
     "tests/**/*",
     "e2e/**/*",
     "mcp/tests/**/*.ts",
-    "vite.config.ts",
+    "*.config.ts",
+    "playwright.config.*.ts",
+    "vitest.*.ts",
+    "mcp/*.config.ts",
     "vite-plugins/**/*",
     "scripts/**/*.ts"
   ]

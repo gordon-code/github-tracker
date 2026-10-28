@@ -140,7 +140,7 @@ describe("SettingsTOC — scroll to section", () => {
     vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo?) => {
       const style = origGetComputedStyle(el, pseudo);
       if (el === targetEl) {
-        return { ...style, scrollMarginTop: "96px", getPropertyValue: style.getPropertyValue.bind(style) };
+        return { scrollMarginTop: "96px", getPropertyValue: style.getPropertyValue.bind(style) } as unknown as CSSStyleDeclaration;
       }
       return style;
     });

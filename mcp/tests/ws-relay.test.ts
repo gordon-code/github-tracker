@@ -103,8 +103,9 @@ describe("WebSocket relay server — connection", () => {
 
   beforeEach(async () => {
     process.env.MCP_WS_PORT = "0";
-    wss = startWebSocketServer()!;
-    expect(wss).not.toBeNull();
+    const started = startWebSocketServer();
+    if (!started) throw new Error("Server not started");
+    wss = started;
     await waitForEvent(wss, "listening");
     port = getServerPort(wss);
   });

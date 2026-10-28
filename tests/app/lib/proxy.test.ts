@@ -203,10 +203,7 @@ describe("acquireTurnstileToken", () => {
 
   it("resolves with token when Turnstile callback fires", async () => {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     // Mock script loading: stub createElement so the script tag triggers onload
     const realCreateElement = document.createElement.bind(document);
@@ -260,10 +257,7 @@ describe("acquireTurnstileToken", () => {
 
   it("rejects when Turnstile fires error-callback", async () => {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -286,10 +280,7 @@ describe("acquireTurnstileToken", () => {
 
   it("rejects when Turnstile fires expired-callback", async () => {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -312,10 +303,7 @@ describe("acquireTurnstileToken", () => {
 
   it("rejects when Turnstile fires timeout-callback", async () => {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -341,10 +329,7 @@ describe("acquireTurnstileToken", () => {
     mockTurnstile.render.mockImplementation(() => {
       throw new Error("Invalid sitekey");
     });
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -397,10 +382,7 @@ describe("acquireTurnstileToken — 30-second outer timeout", () => {
     // ready() captures the callback but never calls it — simulates a hung Turnstile widget
     mockTurnstile.ready = vi.fn();
 
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -444,10 +426,7 @@ describe("acquireTurnstileToken — script reuse", () => {
       mockTurnstile._resolveToken("reuse-token");
     });
 
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     const appendSpy = vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -491,10 +470,7 @@ describe("sealApiToken", () => {
 
   function setupMockedTurnstile(token: string) {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", {
-      ...window,
-      turnstile: mockTurnstile,
-    });
+    vi.stubGlobal("turnstile", mockTurnstile);
 
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
@@ -729,7 +705,7 @@ describe("unsealCredentialBundle — retryable non-consuming failures (SEC-001/A
   // reaches fetch, where each test varies the outcome.
   function setupSuccessfulTurnstile() {
     const mockTurnstile = makeMockTurnstile();
-    vi.stubGlobal("window", { ...window, turnstile: mockTurnstile });
+    vi.stubGlobal("turnstile", mockTurnstile);
     vi.spyOn(document.head, "appendChild").mockImplementation((node) => {
       const el = node as HTMLScriptElement;
       if (el.tagName === "SCRIPT") {

@@ -438,11 +438,16 @@ function handleAuthStorage(e: StorageEvent): void {
     _setToken(e.newValue);
     const gen = ++_crossTabFetchGen;
     const newToken = e.newValue;
-    fetch("https://api.github.com/user", {
-      headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
-    })
-      .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
-      .then((data) => {
+    void (async () => {
+      try {
+        const r = await fetch("https://api.github.com/user", {
+          headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+        });
+        if (!r.ok) {
+          void r.body?.cancel();
+          return;
+        }
+        const data = (await r.json()) as GitHubUser;
         if (data && _token() === newToken && _crossTabFetchGen === gen) {
           // Only a CONFIRMED same-user rotation (a known previous login that
           // case-insensitively matches the fetched identity) skips the
@@ -475,8 +480,10 @@ function handleAuthStorage(e: StorageEvent): void {
             crossTabReload.reloadForIdentitySwitch();
           }
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Ignore network errors during passive cross-tab user check
+      }
+    })();
   }
   if (e.key === JIRA_AUTH_STORAGE_KEY) {
     try {

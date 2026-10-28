@@ -763,7 +763,7 @@ describe("proxy — sealCredentialBundle / unsealCredentialBundle", () => {
   it("sealCredentialBundle rejects an oversized ciphertext BEFORE any network call (pre-check)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(proxyLib.sealCredentialBundle("z".repeat(4097))).rejects.toThrow();
+    await expect(proxyLib.sealCredentialBundle("z".repeat(4097))).rejects.toThrow("Credentials are too large to export securely");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/cloudflare";
 import {
-  CryptoEnv,
+  type CryptoEnv,
   deriveKey,
   sealToken,
   unsealTokenWithRotation,
@@ -9,8 +9,8 @@ import {
   CREDENTIAL_BUNDLE_EXPIRY_MS,
   SEAL_SALT,
 } from "./crypto";
-import { SessionEnv, ensureSession } from "./session";
-import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
+import { type SessionEnv, ensureSession } from "./session";
+import { type TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
 import { validateProxyRequest, validateOrigin } from "./validation";
 import { getWorkerSentryOptions } from "./sentry";
 

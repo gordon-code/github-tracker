@@ -1,7 +1,7 @@
 import { createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, unwrap } from "solid-js/store";
 import Header from "../layout/Header";
-import TabBar, { TabId } from "../layout/TabBar";
+import TabBar, { type TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
 import ActionsTab from "./ActionsTab";
 import IssuesTab from "./IssuesTab";
@@ -429,7 +429,7 @@ async function pollFetch(): Promise<DashboardData> {
           }
         }
       }));
-      resolvedPullRequests = unwrap(dashboardData.pullRequests).map((pr) => ({ ...pr }));
+      resolvedPullRequests = unwrap(dashboardData.pullRequests).map((pr) => Object.assign({}, pr));
     } else {
       // Phase 1 did NOT fire (cached data existed or subsequent poll).
       // Full atomic replacement — all fields (light + heavy) may have
@@ -723,7 +723,8 @@ export default function DashboardPage() {
   }
 
   function fetchAndSetRlDetail(): void {
-    void fetchRateLimitDetails().then((detail) => {
+    void (async () => {
+      const detail = await fetchRateLimitDetails();
       if (!detail) {
         setRlDetail("Failed to load");
         return;
@@ -734,11 +735,10 @@ export default function DashboardPage() {
         `GraphQL: ${detail.graphql.remaining.toLocaleString()}/${detail.graphql.limit.toLocaleString()} remaining\n` +
         `Resets:  ${resetTime}`
       );
-    });
+    })();
   }
 
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__debug = {
       forceHotPoll: () => {
         const allPrIds = new Set<number>(dashboardData.pullRequests.map(pr => pr.id));
@@ -958,18 +958,21 @@ export default function DashboardPage() {
     // Only adds orgs to the filter list — repos are user-selected via Settings.
     const client = getClient();
     if (client && config.onboardingComplete) {
-      void fetchOrgs(client).then((allOrgs) => {
-        const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
-        const newOrgs = allOrgs
-          .map((o) => o.login)
-          .filter((login) => !currentSet.has(login.toLowerCase()));
-        if (newOrgs.length > 0) {
-          setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgs]);
-          console.info(`[dashboard] auto-synced ${newOrgs.length} new org(s)`);
+      void (async () => {
+        try {
+          const allOrgs = await fetchOrgs(client);
+          const currentSet = new Set(config.selectedOrgs.map((o) => o.toLowerCase()));
+          const newOrgs = allOrgs
+            .map((o) => o.login)
+            .filter((login) => !currentSet.has(login.toLowerCase()));
+          if (newOrgs.length > 0) {
+            setConfig("selectedOrgs", [...config.selectedOrgs, ...newOrgs]);
+            console.info(`[dashboard] auto-synced ${newOrgs.length} new org(s)`);
+          }
+        } catch {
+          // Non-fatal — org sync failure doesn't block dashboard
         }
-      }).catch(() => {
-        // Non-fatal — org sync failure doesn't block dashboard
-      });
+      })();
     }
 
     // Backfill config.jira.siteUrl from auth state if missing (handles configs
@@ -1294,10 +1297,15 @@ export default function DashboardPage() {
       ...dashboardData.issues.map((i) => ({ title: i.title })),
       ...dashboardData.pullRequests.map((p) => ({ title: p.title, headRef: p.headRef })),
     ];
-    void detectAndLookupJiraKeys(items, client).then((map) => {
-      if (import.meta.env.DEV) console.info("[jira] key detection:", map.size, "keys found", [...map.keys()].slice(0, 10));
-      setJiraKeyMap(map);
-    }).catch(handleJiraError);
+    void (async () => {
+      try {
+        const map = await detectAndLookupJiraKeys(items, client);
+        if (import.meta.env.DEV) console.info("[jira] key detection:", map.size, "keys found", [...map.keys()].slice(0, 10));
+        setJiraKeyMap(map);
+      } catch (err) {
+        handleJiraError(err);
+      }
+    })();
   }));
 
   // Re-fetch Jira assigned issues when Jira auth transitions false -> true

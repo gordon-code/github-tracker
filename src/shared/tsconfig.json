@@ -9,6 +9,13 @@
     "moduleResolution": "nodenext",
     "target": "ES2022",
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "skipLibCheck": true
   },

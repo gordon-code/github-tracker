@@ -114,7 +114,6 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
         const err = new DOMException("QuotaExceededError", "QuotaExceededError");
         throw err;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return originalPut(...(args as [any, any]));
     });
 

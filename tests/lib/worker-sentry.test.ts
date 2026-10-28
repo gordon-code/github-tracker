@@ -182,7 +182,6 @@ describe("getWorkerSentryOptions", () => {
     const env = { SENTRY_DSN: "https://key@sentry.io/123" };
     const opts = getWorkerSentryOptions(env);
     // integrations is now a filter function — invoke it to trigger requestDataIntegration call
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (opts.integrations as (defaults: any[]) => any[])([]);
     expect(requestDataIntegration).toHaveBeenCalledWith({
       include: { headers: false, cookies: false, data: false },
@@ -219,7 +218,6 @@ describe("getWorkerSentryOptions", () => {
     const fakeConsole = { name: "Console" };
     const fakeLinkedErrors = { name: "LinkedErrors" };
     const fakeRequestData = { name: "RequestData" };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filterFn = opts.integrations as (defaults: any[]) => any[];
     const filtered = filterFn([fakeConsole, fakeLinkedErrors, fakeRequestData]);
     // Console and default RequestData should be removed

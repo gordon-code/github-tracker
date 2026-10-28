@@ -289,7 +289,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     const result = filteredSorted().map((issue): JiraItem => {
       const cached = itemsWithGroupKeyCache.get(issue.key);
       if (cached && cached.source === issue) return cached.wrapped;
-      const wrapped: JiraItem = { ...issue, repoFullName: issue.fields.project?.key ?? "OTHER" };
+      const wrapped: JiraItem = Object.assign({}, issue, { repoFullName: issue.fields.project?.key ?? "OTHER" });
       itemsWithGroupKeyCache.set(issue.key, { source: issue, wrapped });
       return wrapped;
     });

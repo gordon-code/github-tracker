@@ -192,7 +192,7 @@ describe("Integration: WebSocket relay data flow", () => {
     const promise = sendRelayRequest(METHODS.GET_OPEN_PRS, {});
     client.close();
 
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow("WebSocket relay disconnected");
     expect(isRelayConnected()).toBe(false);
   });
 

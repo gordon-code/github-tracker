@@ -490,7 +490,7 @@ describe("cross-tab auth sync", () => {
 
   it("calls expireToken and redirects to /login when another tab clears the token", () => {
     const replaceMock = vi.fn();
-    vi.stubGlobal("location", { ...window.location, replace: replaceMock });
+    vi.stubGlobal("location", { href: window.location.href, replace: replaceMock });
 
     mod.setAuth({ access_token: "ghs_abc" });
     // Simulate another tab removing the token from localStorage

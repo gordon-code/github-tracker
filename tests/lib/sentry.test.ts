@@ -449,7 +449,7 @@ describe("initSentry", () => {
   it("sets allowUrls to a RegExp anchored to window.location.origin", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
-    vi.stubGlobal("location", { ...window.location, origin: "https://test.example.com" });
+    vi.stubGlobal("location", { origin: "https://test.example.com" });
     initSentry();
     const [config] = mockInit.mock.calls[0] as [{ allowUrls: RegExp[] }];
     expect(config.allowUrls).toHaveLength(1);

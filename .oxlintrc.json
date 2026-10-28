@@ -1,6 +1,11 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "import", "promise", "vitest"],
+  "options": {
+    "typeAware": true,
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "vitest"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn",
@@ -11,6 +16,7 @@
     "mcp/dist/**",
     "**/node_modules/**",
     ".wrangler/**",
+    ".claude/**",
     "hack/**",
     "playwright-report/**",
     "test-results/**"
@@ -19,23 +25,51 @@
     "typescript/no-unsafe-type-assertion": "off",
     "eslint/no-underscore-dangle": "off",
     "unicorn/consistent-function-scoping": "off",
-    "eslint/no-unassigned-vars": "off",
-    "eslint/no-await-in-loop": "off",
-    "unicorn/prefer-add-event-listener": "off",
-    "import/no-unassigned-import": "off",
-    "promise/always-return": "off"
+    "import/no-unassigned-import": "off"
   },
   "overrides": [
     {
-      "files": ["tests/**", "e2e/**", "mcp/tests/**"],
+      "files": [
+        "src/app/services/api.ts",
+        "src/app/services/events.ts",
+        "src/app/stores/cache.ts",
+        "src/app/components/settings/JiraFieldPicker.tsx"
+      ],
       "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
+        "src/app/lib/mcp-relay.ts",
+        "src/app/lib/notifications.ts",
+        "src/app/lib/proxy.ts"
+      ],
+      "rules": {
+        "unicorn/prefer-add-event-listener": "off"
+      }
+    },
+    {
+      "files": ["tests/**", "e2e/**", "mcp/tests/**"],
+      "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "vitest"],
+      "rules": {
+        "eslint/no-await-in-loop": "off",
+        "unicorn/prefer-add-event-listener": "off",
         "vitest/require-mock-type-parameters": "off",
         "vitest/expect-expect": "off",
         "typescript/unbound-method": "off",
-        "vitest/no-standalone-expect": "off",
-        "vitest/no-conditional-expect": "off",
-        "vitest/require-to-throw-message": "off",
-        "typescript/no-misused-spread": "off",
+        "vitest/no-conditional-expect": "off"
+      }
+    },
+    {
+      "files": ["tests/**/*.steps.tsx", "tests/worker/crypto.test.ts"],
+      "rules": {
+        "vitest/no-standalone-expect": "off"
+      }
+    },
+    {
+      "files": ["tests/lib/settings-transfer.test.ts"],
+      "rules": {
         "vitest/valid-expect": "off"
       }
     }

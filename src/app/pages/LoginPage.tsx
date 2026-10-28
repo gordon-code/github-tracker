@@ -314,7 +314,7 @@ export default function LoginPage() {
                         Restore your settings and sign in from a previously exported backup file.
                       </p>
                       <input
-                        ref={importInputRef}
+                        ref={(el) => { importInputRef = el; }}
                         type="file"
                         accept="application/json,.json"
                         class="hidden"

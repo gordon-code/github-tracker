@@ -288,12 +288,6 @@ describe("SettingsPage Jira section — disconnected state", () => {
   });
 
   it("OAuth connect button sets window.location.href to authorize URL", async () => {
-    const assignMock = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { ...window.location, assign: assignMock },
-    });
-
     // Track href assignment via defineProperty
     let capturedHref = "";
     const locationStub = {
