@@ -5,7 +5,7 @@ import { requestDataIntegration, type CloudflareOptions } from "@sentry/cloudfla
 interface WorkerSentryEvent {
   request?: {
     url?: string;
-    query_string?: string | unknown;
+    query_string?: unknown;
     headers?: unknown;
     cookies?: unknown;
     data?: unknown;

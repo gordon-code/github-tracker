@@ -19,7 +19,7 @@ function renderScalar(value: unknown): string {
   if (typeof value === "object" && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
     for (const key of ["displayName", "name", "value", "label"]) {
-      if (typeof obj[key] === "string") return obj[key] as string;
+      if (typeof obj[key] === "string") return obj[key];
     }
   }
   const json = JSON.stringify(value);

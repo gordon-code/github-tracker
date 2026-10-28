@@ -115,7 +115,7 @@ describe("SettingsTOC — active highlighting", () => {
           intersectionRect: {} as DOMRect,
           rootBounds: null,
           time: 0,
-        } as unknown as IntersectionObserverEntry,
+        },
       ],
       {} as IntersectionObserver
     );
@@ -140,7 +140,7 @@ describe("SettingsTOC — scroll to section", () => {
     vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo?) => {
       const style = origGetComputedStyle(el, pseudo);
       if (el === targetEl) {
-        return { ...style, scrollMarginTop: "96px", getPropertyValue: style.getPropertyValue.bind(style) } as CSSStyleDeclaration;
+        return { ...style, scrollMarginTop: "96px", getPropertyValue: style.getPropertyValue.bind(style) };
       }
       return style;
     });

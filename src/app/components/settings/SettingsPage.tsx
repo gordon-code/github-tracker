@@ -587,7 +587,7 @@ export default function SettingsPage() {
   function handleJiraDeepLink() {
     if (typeof window === "undefined" || window.location.hash !== "#jira") return;
     const shouldOpenReplace =
-      config.jira?.authMethod === "token" && (isJiraAuthenticated() || Boolean(config.jira?.enabled));
+      config.jira?.authMethod === "token" && (isJiraAuthenticated() || config.jira.enabled);
     if (shouldOpenReplace) {
       openReplaceJiraTokenPanel(false, true);
     }
@@ -671,9 +671,9 @@ export default function SettingsPage() {
 
   async function handleJiraApiTokenConnect() {
     const email = jiraApiEmail().trim();
-    const token = jiraApiToken().trim();
+    const apiToken = jiraApiToken().trim();
     const siteUrl = jiraApiSiteUrl();
-    if (!email || !token || !siteUrl) {
+    if (!email || !apiToken || !siteUrl) {
       setJiraApiError("Email, API token, and site name are all required.");
       return;
     }
@@ -697,7 +697,7 @@ export default function SettingsPage() {
         return;
       }
 
-      const sealedToken = await sealApiToken(token, "jira-api-token");
+      const sealedToken = await sealApiToken(apiToken, "jira-api-token");
       // Validate by making a search request through the proxy
       const resp = await fetch("/api/jira/proxy", {
         method: "POST",
@@ -1769,7 +1769,7 @@ export default function SettingsPage() {
                   disabled={!isJiraAuthenticated()}
                   onClick={() => {
                     setShowFieldPicker((v) => !v);
-                    setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);
+                    setTimeout(() => { document.querySelector<HTMLElement>("[data-picker-search]")?.focus(); }, 0);
                   }}
                   aria-expanded={showFieldPicker()}
                 >
@@ -1800,7 +1800,7 @@ export default function SettingsPage() {
                   disabled={!isJiraAuthenticated()}
                   onClick={() => {
                     setShowScopePicker((v) => !v);
-                    setTimeout(() => { (document.querySelector("[data-picker-search]") as HTMLElement | null)?.focus(); }, 0);
+                    setTimeout(() => { document.querySelector<HTMLElement>("[data-picker-search]")?.focus(); }, 0);
                   }}
                   aria-expanded={showScopePicker()}
                 >

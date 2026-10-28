@@ -764,7 +764,7 @@ describe("setJiraAuth / jiraAuth signal", () => {
     mod.setJiraAuth(makeJiraAuth());
     const stored = localStorageMock.getItem("github-tracker:jira-auth");
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!);
+    const parsed = JSON.parse(stored);
     expect(parsed.accessToken).toBe("atl-access-tok");
     expect(parsed.cloudId).toBe("cloud-abc");
   });

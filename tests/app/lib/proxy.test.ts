@@ -197,7 +197,7 @@ describe("acquireTurnstileToken", () => {
 
   it("throws immediately when siteKey is undefined-like empty", async () => {
     await expect(
-      mod.acquireTurnstileToken("" as string, "seal"),
+      mod.acquireTurnstileToken("", "seal"),
     ).rejects.toThrow("VITE_TURNSTILE_SITE_KEY not configured");
   });
 
@@ -219,7 +219,7 @@ describe("acquireTurnstileToken", () => {
           set(fn: () => void) {
             if (originalSet) originalSet.call(this, fn);
             // Schedule onload after current microtask
-            Promise.resolve().then(() => fn?.());
+            void Promise.resolve().then(() => fn?.());
           },
           get() { return null; },
           configurable: true,

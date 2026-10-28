@@ -17,6 +17,7 @@ jobs:
       - name: Verify CSP inline script hash
         run: bash scripts/verify-csp-hash.sh
       - run: pnpm run typecheck
+      - run: pnpm lint
       - run: pnpm test
       # No `playwright install` step: playwright.config.ts uses channel: "chrome",
       # which resolves to ubuntu-latest's preinstalled Google Chrome — Playwright's

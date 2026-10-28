@@ -157,7 +157,7 @@ function loadDepMetaCache(): Map<number, VersionInfo> {
     const map = new Map<number, VersionInfo>();
     for (const [k, v] of Object.entries(parsed)) {
       const id = Number(k);
-      if (!isNaN(id) && v && typeof v === "object") map.set(id, v as VersionInfo);
+      if (!isNaN(id) && v && typeof v === "object") map.set(id, v);
     }
     return map;
   } catch {
@@ -1353,10 +1353,10 @@ export default function DashboardPage() {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
           const activeNodeIds = new Set(dashboardIssues.map((di) => di.nodeId));
-          for (const k of [..._dashboardBodyCache.keys()]) {
+          for (const k of _dashboardBodyCache.keys()) {
             if (!activeNodeIds.has(k)) _dashboardBodyCache.delete(k);
           }
-          for (const k of [..._dashboardBodyFailureCooldown.keys()]) {
+          for (const k of _dashboardBodyFailureCooldown.keys()) {
             if (!activeNodeIds.has(k)) _dashboardBodyFailureCooldown.delete(k);
           }
 
@@ -1445,7 +1445,7 @@ export default function DashboardPage() {
     // PR happens to trigger a fetch would incorrectly stay excluded on a stale
     // cooldown entry for up to DEP_BODY_FAILURE_COOLDOWN_MS.
     const depPrIds = new Set(depPrs.map((pr) => pr.id));
-    for (const k of [..._depBodyFailureCooldown.keys()]) {
+    for (const k of _depBodyFailureCooldown.keys()) {
       if (!depPrIds.has(k)) _depBodyFailureCooldown.delete(k);
     }
 
@@ -1488,7 +1488,7 @@ export default function DashboardPage() {
           if (parsed) merged.set(id, parsed);
         }
         // Prune entries for PRs no longer in the dependency set
-        for (const k of [...merged.keys()]) {
+        for (const k of merged.keys()) {
           if (!depPrIds.has(k)) merged.delete(k);
         }
         setDepMeta(merged);
@@ -1529,8 +1529,9 @@ export default function DashboardPage() {
     if (Array.isArray(errObj.errors)) {
       for (const item of errObj.errors) {
         if (item && typeof item === "object") {
-          const type = (item as Record<string, unknown>).type;
-          const msg = String((item as Record<string, unknown>).message ?? "");
+          const itemObj = item as Record<string, unknown>;
+          const type = itemObj.type;
+          const msg = typeof itemObj.message === "string" ? itemObj.message : "";
           if (
             type === "FORBIDDEN" ||
             type === "INSUFFICIENT_SCOPES" ||
@@ -1552,7 +1553,7 @@ export default function DashboardPage() {
   function isStaleCommitError(err: unknown): boolean {
     if (!err || typeof err !== "object") return false;
     const errObj = err as Record<string, unknown>;
-    const msg = err instanceof Error ? err.message : String(errObj.message ?? "");
+    const msg = err instanceof Error ? err.message : typeof errObj.message === "string" ? errObj.message : "";
     return /commitOID|was not part of the pull request|pull request head|outdated|end of the branch/i.test(msg);
   }
 
@@ -1745,8 +1746,8 @@ export default function DashboardPage() {
               counts={tabCounts()}
               enableTracking={config.enableTracking}
               enableActions={config.enableActions}
-              enableJira={!!config.jira?.enabled}
-              jiraExpired={Boolean(config.jira?.enabled && !isJiraAuthenticated())}
+              enableJira={config.jira?.enabled ?? false}
+              jiraExpired={(config.jira?.enabled ?? false) && !isJiraAuthenticated()}
               enableDependencies={enableDependencies()}
               customTabs={config.customTabs.filter((t) => config.enableActions || t.baseType !== "actions").map((t) => ({ id: t.id, name: t.name, isUnscoped: isTabUnscoped(t) }))}
               onAddTab={() => setShowCustomTabModal(true)}

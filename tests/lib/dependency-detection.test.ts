@@ -251,8 +251,8 @@ describe("extractVersionInfo", () => {
       expect(title.toLowerCase()).not.toContain("docker");
       expect(title.toLowerCase()).not.toContain("crate");
     }
-    expect(extractVersionInfo(titles[0]!)).toEqual({ packageName: "renovate", to: "v44" });
-    expect(extractVersionInfo(titles[1]!)).toEqual({ packageName: "node", to: "v24.18.1" });
+    expect(extractVersionInfo(titles[0])).toEqual({ packageName: "renovate", to: "v44" });
+    expect(extractVersionInfo(titles[1])).toEqual({ packageName: "node", to: "v24.18.1" });
   });
 
   it("does not match the generic single-target fallback when the captured target is not version-shaped", () => {

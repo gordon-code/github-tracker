@@ -362,7 +362,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     const states = orgStates();
 
     // Invalidate frozen order when org membership changes (key is order-independent).
-    const currentKey = [...props.selectedOrgs].sort().join(",");
+    const currentKey = props.selectedOrgs.toSorted().join(",");
     if (currentKey !== frozenOrgsKey) {
       frozenOrder = null;
       frozenOrgsKey = currentKey;
@@ -393,7 +393,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     if (states.some((s) => !selectedOrgSet.has(s.org))) return states;
 
     // Sort: personal org first, then alphabetically. Capture order to freeze it.
-    const sorted = [...states].sort((a, b) => {
+    const sorted = states.toSorted((a, b) => {
       const aIsUser = a.type === "user" ? 0 : 1;
       const bIsUser = b.type === "user" ? 0 : 1;
       if (aIsUser !== bIsUser) return aIsUser - bIsUser;

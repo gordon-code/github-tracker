@@ -202,7 +202,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
     });
   }
 
-  const expandByDefault = () => !!(config.jira?.expandIssueDetails);
+  const expandByDefault = () => config.jira?.expandIssueDetails ?? false;
 
   const pinnedJiraKeys = createMemo(() =>
     new Set(
@@ -256,14 +256,14 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
           break;
         }
         case "updated": {
-          const aUp = String(a.fields.updated ?? "");
-          const bUp = String(b.fields.updated ?? "");
+          const aUp = a.fields.updated ?? "";
+          const bUp = b.fields.updated ?? "";
           cmp = aUp < bUp ? -1 : aUp > bUp ? 1 : 0;
           break;
         }
         case "created": {
-          const aCr = String(a.fields.created ?? "");
-          const bCr = String(b.fields.created ?? "");
+          const aCr = a.fields.created ?? "";
+          const bCr = b.fields.created ?? "";
           cmp = aCr < bCr ? -1 : aCr > bCr ? 1 : 0;
           break;
         }
@@ -474,7 +474,7 @@ export default function JiraAssignedTab(props: JiraAssignedTabProps) {
                           fallback={<IssueTypeFallbackIcon name={type().name} />}
                         >
                           <img
-                            src={type().iconUrl!}
+                            src={type().iconUrl}
                             alt={type().name}
                             class="h-4 w-4 shrink-0"
                             loading="lazy"

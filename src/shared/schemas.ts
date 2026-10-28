@@ -62,7 +62,7 @@ export function isTabUnscoped(tab: Pick<CustomTab, "orgScope" | "repoScope">): b
 export const JiraAuthMethodSchema = z.enum(["oauth", "token"]).default("oauth");
 
 export const JiraCustomFieldSchema = z.object({
-  id: z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100),
+  id: z.string().regex(/^[a-zA-Z0-9_-]+$/).max(100),
   name: z.string().max(200),
 });
 

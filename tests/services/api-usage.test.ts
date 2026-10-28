@@ -170,7 +170,7 @@ describe("flushUsageData / loadUsageData", () => {
     vi.advanceTimersByTime(600);
     const raw = localStorageMock.getItem("github-tracker:api-usage");
     expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!);
+    const parsed = JSON.parse(raw);
     expect(parsed.records["lightSearch:graphql"]).toBeDefined();
     expect(parsed.records["lightSearch:graphql"].count).toBe(1);
   });
@@ -242,7 +242,7 @@ describe("resetUsageData", () => {
     mod.trackApiCall("lightSearch", "graphql");
     mod.resetUsageData();
     const raw = localStorageMock.getItem("github-tracker:api-usage");
-    const parsed = JSON.parse(raw!);
+    const parsed = JSON.parse(raw);
     expect(Object.keys(parsed.records)).toHaveLength(0);
   });
 });
@@ -351,7 +351,7 @@ describe("checkAndResetIfExpired", () => {
     mod.checkAndResetIfExpired();
 
     const raw = localStorageMock.getItem("github-tracker:api-usage");
-    const parsed = JSON.parse(raw!);
+    const parsed = JSON.parse(raw);
     expect(parsed.resetAt).toBeNull();
   });
 
@@ -364,7 +364,7 @@ describe("checkAndResetIfExpired", () => {
 
     // Record localStorage state before the expiry check
     const before = localStorageMock.getItem("github-tracker:api-usage");
-    const beforeParsed = JSON.parse(before!);
+    const beforeParsed = JSON.parse(before);
     expect(beforeParsed.resetAt).not.toBeNull();
     expect(Object.keys(beforeParsed.records)).toHaveLength(1);
 
@@ -373,7 +373,7 @@ describe("checkAndResetIfExpired", () => {
 
     // After expiry: records cleared, resetAt null — written in a single pass
     const after = localStorageMock.getItem("github-tracker:api-usage");
-    const afterParsed = JSON.parse(after!);
+    const afterParsed = JSON.parse(after);
     expect(afterParsed.resetAt).toBeNull();
     expect(Object.keys(afterParsed.records)).toHaveLength(0);
   });

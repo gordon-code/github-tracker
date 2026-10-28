@@ -90,7 +90,7 @@ function groupRuns(runs: WorkflowRun[]): RepoGroup[] {
 }
 
 function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
-  return [...workflows].sort((a, b) => {
+  return workflows.toSorted((a, b) => {
     const priorityOf = (wf: WorkflowGroup): number => {
       const latest = wf.runs[0];
       if (!latest) return 2;
@@ -336,7 +336,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                       <For each={sortedWorkflows()}>
                         {(wfGroup) => {
                           const wfKey = `${repoGroup.repoFullName}:${wfGroup.workflowId}`;
-                          const isWfExpanded = () => !!expandedWorkflows[wfKey];
+                          const isWfExpanded = () => expandedWorkflows[wfKey] ?? false;
 
                           return (
                             <div class={isWfExpanded() ? "col-span-full" : ""}>

@@ -72,7 +72,7 @@ export function parseAbandonedSection(body: string): AbandonedDependency[] {
     const deps: AbandonedDependency[] = [];
     // Skip header (index 0) and separator (index 1)
     for (let i = 2; i < tableRows.length; i++) {
-      const row = tableRows[i]!;
+      const row = tableRows[i];
       // Split on pipe, trim cells, drop leading/trailing empty from outer pipes
       const cells = row
         .split("|")

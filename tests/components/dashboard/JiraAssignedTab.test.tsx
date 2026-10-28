@@ -28,7 +28,7 @@ function bumpMockJiraFilters(next: typeof mockJiraFilters): void {
 }
 
 vi.mock("../../../src/app/stores/view", () => ({
-  viewState: new Proxy({} as Record<string, unknown>, {
+  viewState: new Proxy({}, {
     get(_t, key: string) {
       if (key === "trackedItems") return mockTrackedItems;
       if (key === "tabFilters") {
@@ -771,8 +771,8 @@ describe("JiraAssignedTab", () => {
       render(() => <JiraAssignedTab issues={issues()} loading={false} siteUrl={SITE_URL} />);
 
       // Initial: PROJ-1 first (up disabled), PROJ-3 last (down disabled).
-      expect((screen.getByRole("button", { name: "Move up: PROJ-1" }) as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByRole("button", { name: "Move down: PROJ-3" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move up: PROJ-1" }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move down: PROJ-3" }).disabled).toBe(true);
 
       // Move PROJ-1 to the bottom; poke the signal (same object refs) to force
       // filtered → filteredSorted → customPageItems → <For> to re-evaluate.
@@ -782,10 +782,10 @@ describe("JiraAssignedTab", () => {
       // New first row (PROJ-2): up disabled. Moved-to-last row (PROJ-1): up now
       // enabled, down now disabled. Former-last row (PROJ-3): down now enabled.
       // Pre-fix, every one of these was frozen at its first-render value.
-      expect((screen.getByRole("button", { name: "Move up: PROJ-2" }) as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByRole("button", { name: "Move up: PROJ-1" }) as HTMLButtonElement).disabled).toBe(false);
-      expect((screen.getByRole("button", { name: "Move down: PROJ-1" }) as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByRole("button", { name: "Move down: PROJ-3" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move up: PROJ-2" }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move up: PROJ-1" }).disabled).toBe(false);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move down: PROJ-1" }).disabled).toBe(true);
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Move down: PROJ-3" }).disabled).toBe(false);
     });
 
     it("disables arrow buttons when a status filter is active", () => {
@@ -889,7 +889,7 @@ describe("JiraAssignedTab", () => {
       let rectCallCount = 0;
       vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(() => {
         rectCallCount += 1;
-        return { top: rectCallCount * 10, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+        return { top: rectCallCount * 10, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
       });
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { cb(0); return 0; });
       const animateSpy = vi.fn();

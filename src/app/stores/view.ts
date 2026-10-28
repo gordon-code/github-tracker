@@ -81,7 +81,7 @@ export type DependencyFilterField = keyof DependencyFilters;
 
 // "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
 export const JiraFiltersSchema = z.object({
-  scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_\-]+$/).max(100)).default("assigned"),
+  scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_-]+$/).max(100)).default("assigned"),
   statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
   priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
   sortField: z.string().default(JIRA_CUSTOM_SORT_FIELD),
@@ -242,7 +242,8 @@ function coerceStrippedItemsArray(raw: unknown): unknown {
  * means validation failed.
  */
 function validateViewStateField<K extends keyof ViewState>(key: K, value: unknown): ViewState[K] | undefined {
-  const result = ViewStateSchema.pick({ [key]: true } as Partial<Record<keyof ViewState, true>>).safeParse({
+  const mask: Partial<Record<keyof ViewState, true>> = { [key]: true };
+  const result = ViewStateSchema.pick(mask).safeParse({
     [key]: value,
   });
   return result.success ? ((result.data as Record<string, unknown>)[key] as ViewState[K]) : undefined;

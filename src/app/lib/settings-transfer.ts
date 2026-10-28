@@ -128,8 +128,8 @@ function buildViewPreferencesSection(viewState: ViewState): Record<string, unkno
  * (plaintext — it never carries secrets, so it does NOT go through the
  * encrypted-credentials envelope), and stamps `_exportVersion`.
  */
-export function buildExportPayload(config: Config, viewState: ViewState): Record<string, unknown> {
-  const snapshot = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+export function buildExportPayload(currentConfig: Config, viewState: ViewState): Record<string, unknown> {
+  const snapshot = JSON.parse(JSON.stringify(currentConfig)) as Record<string, unknown>;
   for (const [parentKey, childKeys] of Object.entries(EXPORT_DENYLIST)) {
     const parent = snapshot[parentKey];
     if (parent && typeof parent === "object") {
@@ -214,10 +214,10 @@ export function parseImportFile(rawText: string): ParseImportResult {
   }
 
   // (e) post-parse migrations (stale-defaultTab cleanup)
-  const config = postParseConfigFixups(result.data);
+  const parsedConfig = postParseConfigFixups(result.data);
 
   // (f) success — rawJson is the parsed original, retained for _credentials/_viewPreferences inspection
-  return { ok: true, config, rawJson };
+  return { ok: true, config: parsedConfig, rawJson };
 }
 
 // ── Client-side envelope encryption ─────────────────────────────────
@@ -810,10 +810,10 @@ export async function commitImportedSettings(
  * the user is always already authenticated, so that flow always confirms and
  * never consults this helper.
  */
-export function hasExistingLocalConfig(config: Config): boolean {
+export function hasExistingLocalConfig(localConfig: Config): boolean {
   return (
-    config.onboardingComplete === true ||
-    config.selectedRepos.length > 0 ||
-    config.selectedOrgs.length > 0
+    localConfig.onboardingComplete ||
+    localConfig.selectedRepos.length > 0 ||
+    localConfig.selectedOrgs.length > 0
   );
 }

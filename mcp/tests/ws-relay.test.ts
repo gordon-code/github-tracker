@@ -45,7 +45,7 @@ function waitForMessage(ws: WebSocket, timeout = 2000): Promise<string> {
     const t = setTimeout(() => reject(new Error("Timeout waiting for message")), timeout);
     ws.once("message", (data) => {
       clearTimeout(t);
-      resolve(data.toString());
+      resolve((data as Buffer).toString());
     });
   });
 }

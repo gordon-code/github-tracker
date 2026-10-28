@@ -70,14 +70,14 @@ function makeOrgRepos(org: string): RepoEntry[] {
 function getOrgHeaderOrder(orgNames: string[]): string[] {
   const escaped = orgNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const pattern = new RegExp(`^(${escaped.join("|")})$`);
-  return screen.getAllByText(pattern).map((el) => el.textContent!);
+  return screen.getAllByText(pattern).map((el) => el.textContent);
 }
 
 // ── Helper: accordion (6+ orgs) org header order ─────────────────────────────
 function getAccordionOrder(orgNames: string[]): string[] {
   return orgNames
     .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }) }))
-    .sort((a, b) => {
+    .toSorted((a, b) => {
       const pos = a.btn.compareDocumentPosition(b.btn);
       return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
     })
@@ -116,7 +116,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
       async () => {
         vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
           if (org === "beta-org") return Promise.reject(new Error("beta load failed"));
-          return Promise.resolve(makeOrgRepos(org as string));
+          return Promise.resolve(makeOrgRepos(org));
         });
 
         render(() => (
@@ -140,7 +140,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
       'the user clicks the Retry button on "beta-org" and the repos load successfully',
       async () => {
         vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-          Promise.resolve(makeOrgRepos(org as string))
+          Promise.resolve(makeOrgRepos(org))
         );
 
         fireEvent.click(screen.getByText("Retry"));
@@ -165,7 +165,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         'the RepoSelector displays 3 orgs sorted as "alice", "acme-corp", "beta-org" with all repos loaded',
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-            Promise.resolve(makeOrgRepos(org as string))
+            Promise.resolve(makeOrgRepos(org))
           );
 
           render(() => (
@@ -209,7 +209,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         'the RepoSelector displays 2 orgs sorted as "alice", "delta-inc" with order frozen',
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-            Promise.resolve(makeOrgRepos(org as string))
+            Promise.resolve(makeOrgRepos(org))
           );
 
           const { createSignal } = await import("solid-js");
@@ -260,7 +260,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
       'the RepoSelector is displayed with 4 orgs "charlie", "acme-corp", "beta-org", "delta-inc" where "charlie" is the personal org',
       async () => {
         vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-          Promise.resolve(makeOrgRepos(org as string))
+          Promise.resolve(makeOrgRepos(org))
         );
 
         // charlie has type "user" — sort puts it first (personal org)
@@ -306,7 +306,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
             if (org === "echo-labs") return Promise.reject(new Error("echo load failed"));
-            return Promise.resolve(makeOrgRepos(org as string));
+            return Promise.resolve(makeOrgRepos(org));
           });
 
           const sevenEntries = sevenOrgs.map((login) => ({
@@ -342,7 +342,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         'the user clicks Retry on "echo-labs" and its repos load successfully',
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-            Promise.resolve(makeOrgRepos(org as string))
+            Promise.resolve(makeOrgRepos(org))
           );
 
           fireEvent.click(screen.getByText("Retry"));
@@ -378,7 +378,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         'the RepoSelector displays 6 orgs all loaded and sorted with "alice" as the personal org',
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-            Promise.resolve(makeOrgRepos(org as string))
+            Promise.resolve(makeOrgRepos(org))
           );
 
           const startEntries = startOrgs.map((login) => ({
@@ -464,7 +464,7 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
         'the RepoSelector displays 3 orgs sorted as "alice", "acme-corp", "delta-inc" with order frozen',
         async () => {
           vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-            Promise.resolve(makeOrgRepos(org as string))
+            Promise.resolve(makeOrgRepos(org))
           );
 
           const { createSignal } = await import("solid-js");

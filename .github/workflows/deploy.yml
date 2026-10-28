@@ -17,6 +17,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
+      - run: pnpm lint
       - run: pnpm test
       - name: Verify CSP inline script hash
         run: bash scripts/verify-csp-hash.sh

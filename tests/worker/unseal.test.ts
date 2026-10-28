@@ -121,7 +121,7 @@ async function sealViaEndpoint(env: Env, token: string, purpose = "credential-ex
   if (typeof json["sealed"] !== "string") {
     throw new Error(`seal failed (status ${res.status}): ${JSON.stringify(json)}`);
   }
-  return json["sealed"] as string;
+  return json["sealed"];
 }
 
 /** Hand-craft a credential-export-bundle blob with an arbitrary createdAt (for expiry fixtures). */

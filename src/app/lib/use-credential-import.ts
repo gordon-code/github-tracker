@@ -57,8 +57,8 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
   const [terminalError, setTerminalError] = createSignal<string | null>(null);
   const [resolvedCred, setResolvedCred] = createSignal<ResolvedCredential | null>(null);
 
-  // Generation counter tying an in-flight unseal/resolve to the file that started
-  // it (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
+  // Generation counter tying an in-flight unseal/resolve to the file that started it
+  // (mirrors auth.ts's _crossTabFetchGen). Bumped on every reset and on every
   // new file selection; handleCodeSubmit captures it before each await and bails
   // if it changed, so a Cancel-then-reselect during the multi-second
   // unseal/resolve window can't strand one file's ciphertext/credential into a

@@ -83,7 +83,7 @@ describe("isValidPatFormat", () => {
   });
 
   it("rejects token with invalid characters", () => {
-    const token = "ghp_" + "abc!def" + "a".repeat(29);
+    const token = "ghp_abc!def" + "a".repeat(29);
     expect(expectInvalid(isValidPatFormat(token))).toContain("invalid characters");
   });
 

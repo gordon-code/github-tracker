@@ -37,6 +37,8 @@ pnpm test              # unit tests (Vitest — root + mcp/)
 pnpm test:e2e          # Playwright E2E tests (chromium)
 pnpm test:status-smoke # Live-network check that githubstatus.com still reports the tracked component names (also runs on a weekly schedule in CI)
 pnpm run typecheck     # TypeScript validation (root + mcp/)
+pnpm lint              # Type-aware lint check (oxlint — root + mcp/)
+pnpm lint:fix          # Auto-fix safe lint findings (oxlint)
 pnpm run screenshot    # Capture dashboard screenshot (saves to docs/)
 pnpm mcp:serve         # Start the MCP server (requires GITHUB_TOKEN)
 ```
@@ -47,7 +49,7 @@ To test MCP tools interactively, use the MCP Inspector:
 npx @modelcontextprotocol/inspector tsx mcp/src/index.ts
 ```
 
-CI runs typecheck, unit tests, and E2E tests on every PR. Make sure they pass locally before pushing.
+CI runs typecheck, lint (`oxlint`), unit tests, and E2E tests on every PR, and lint is also enforced pre-commit via `prek` alongside typecheck and unit tests. Make sure they pass locally before pushing.
 
 To run a specific test file:
 
@@ -88,6 +90,8 @@ Branch from `main`. Use one of these prefixes:
 
 - `feat/` — new functionality
 - `fix/` — bug fixes
+- `perf/` — performance changes
+- `ci/` — CI/release workflow changes
 - `docs/` — documentation only
 - `refactor/` — code changes with no behavior change
 - `test/` — test additions or fixes
@@ -99,7 +103,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 type(scope): description
 ```
 
-Scope is optional. Use present-indicative mood: "adds feature", not "add feature" or "added feature".
+Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
 
 ## Releasing the MCP server
 

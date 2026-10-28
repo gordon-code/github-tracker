@@ -133,7 +133,7 @@ export default function IssuesTab(props: IssuesTabProps) {
       if (effectiveScope === "involves_me" && !isInvolvedItem(issue)) return false;
 
       if (tabFilter.role !== "all") {
-        if (!roles.includes(tabFilter.role as "author" | "assignee")) return false;
+        if (!roles.includes(tabFilter.role)) return false;
       }
 
       if (tabFilter.comments !== "all") {
@@ -157,7 +157,7 @@ export default function IssuesTab(props: IssuesTabProps) {
     });
 
     const { field, direction } = viewState.globalSort;
-    items = [...items].sort((a, b) => {
+    items = items.toSorted((a, b) => {
       let cmp = 0;
       switch (field as SortField) {
         case "repo":

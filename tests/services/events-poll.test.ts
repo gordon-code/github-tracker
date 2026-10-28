@@ -284,7 +284,7 @@ describe("seedHotSetsFromTargeted", () => {
 
     // fetchHotPRStatus should be called with the seeded node ID
     expect(fetchHotPRStatus).toHaveBeenCalledTimes(1);
-    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1] as string[];
+    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1];
     expect(calledNodeIds).toContain("PR_a");
   });
 
@@ -335,7 +335,7 @@ describe("seedHotSetsFromTargeted", () => {
     await fetchHotData();
 
     expect(fetchHotPRStatus).toHaveBeenCalledTimes(1);
-    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1] as string[];
+    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1];
     expect(calledNodeIds).toContain("PR_existing");
     expect(calledNodeIds).toContain("PR_new");
   });

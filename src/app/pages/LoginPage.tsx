@@ -25,9 +25,11 @@ export default function LoginPage() {
         console.warn("[app] Dashboard chunk prefetch failed");
       });
     };
-    "requestIdleCallback" in window
-      ? requestIdleCallback(prefetch)
-      : setTimeout(prefetch, 2000);
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(prefetch);
+    } else {
+      setTimeout(prefetch, 2000);
+    }
   });
 
   const [showPatForm, setShowPatForm] = createSignal(false);

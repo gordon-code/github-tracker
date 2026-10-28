@@ -69,9 +69,9 @@ export async function setCacheEntry(
       try {
         const db = await getDb();
         await db.put("cache", entry);
-      } catch (err) {
+      } catch (retryErr) {
         console.warn("[cache] Still over quota after emergency eviction — entry dropped");
-        Sentry.captureException(err, { tags: { source: "cache-eviction-retry" } });
+        Sentry.captureException(retryErr, { tags: { source: "cache-eviction-retry" } });
       }
     } else {
       throw err;

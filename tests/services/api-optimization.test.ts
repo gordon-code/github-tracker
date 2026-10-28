@@ -824,7 +824,7 @@ describe("Phase 1 prReviewReq -> Phase 2 mergeEnrichment team review request pre
 
     const octokit = makeTwoPhaseOctokit(
       async (_query, variables) => {
-        const prRevQ = String((variables as Record<string, unknown> | undefined)?.prRevQ ?? "");
+        const prRevQ = ((variables as Record<string, unknown> | undefined)?.prRevQ as string | undefined) ?? "";
         const isTrackedUserQuery = prRevQ.includes("review-requested:teammate");
         return {
           issues: makeSearchResponse([]),

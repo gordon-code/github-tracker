@@ -1059,7 +1059,7 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
       const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toContain(`/rest/api/3/field`);
       expect(url).not.toContain("bulkfetch");
-      expect((init as RequestInit).method ?? "GET").toBe("GET");
+      expect((init).method ?? "GET").toBe("GET");
     });
   });
 

@@ -170,7 +170,7 @@ export function trackApiCall(source: ApiCallSource, pool: ApiPool, count = 1): v
 export function getUsageSnapshot(): ApiCallRecord[] {
   // Read _version() first to establish reactive dependency
   _version();
-  return Object.values(_usageData.records).sort((a, b) => {
+  return Object.values(_usageData.records).toSorted((a, b) => {
     if (b.count !== a.count) return b.count - a.count;
     return b.lastCalledAt - a.lastCalledAt;
   });

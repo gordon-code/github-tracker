@@ -479,7 +479,7 @@ describe("AES-256-GCM known-answer test (McGrew-Viega Test Case 14)", () => {
     // GCM spec Test Case 14: 256-bit zero key, 96-bit zero IV, empty plaintext, no AAD
     const key = await crypto.subtle.importKey(
       "raw",
-      new Uint8Array(32).buffer as ArrayBuffer, // 32 zero bytes
+      new Uint8Array(32).buffer, // 32 zero bytes
       { name: "AES-GCM" },
       false,
       ["encrypt"]

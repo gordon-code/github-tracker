@@ -199,7 +199,7 @@ function renderSettings() {
 
 function setEnv(key: string, value: string | undefined) {
   if (value === undefined) {
-    vi.stubEnv(key, undefined as unknown as string);
+    vi.stubEnv(key, undefined);
   } else {
     vi.stubEnv(key, value);
   }
@@ -500,7 +500,7 @@ describe("SettingsPage Jira section — connected state", () => {
   });
 
   it("shows auth method label as API Token when authMethod=token", async () => {
-    mockConfig = { ...mockConfig, jira: { ...mockConfig.jira!, authMethod: "token" as const } };
+    mockConfig = { ...mockConfig, jira: { ...mockConfig.jira, authMethod: "token" as const } };
     renderSettings();
     await waitFor(() => {
       expect(screen.getByText("API Token")).toBeTruthy();
@@ -748,7 +748,7 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
 
     // Re-open to verify token input was cleared
     fireEvent.click(replaceBtn);
-    expect((screen.getByLabelText("New Atlassian API token") as HTMLInputElement).value).toBe("");
+    expect(screen.getByLabelText<HTMLInputElement>("New Atlassian API token").value).toBe("");
     unmount();
 
     // Also verify Replace button is present when expired (isJiraAuthenticated() = false)
@@ -862,7 +862,7 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
         screen.getByText("API token or email is invalid — check your credentials and try again.")
       ).toBeTruthy();
       expect(
-        (screen.getByRole("button", { name: /^Replace token$/i }) as HTMLButtonElement).disabled
+        screen.getByRole<HTMLButtonElement>("button", { name: /^Replace token$/i }).disabled
       ).toBe(false);
     });
     expect(mockSetJiraAuth).not.toHaveBeenCalled();
@@ -947,7 +947,7 @@ describe("SettingsPage Jira section — Replace API token flow & deep-linking", 
     fireEvent.click(screen.getByRole("button", { name: /^Replace token$/i }));
     await waitFor(() => {
       expect(
-        (screen.getByRole("button", { name: /^Replace token$/i }) as HTMLButtonElement).disabled
+        screen.getByRole<HTMLButtonElement>("button", { name: /^Replace token$/i }).disabled
       ).toBe(false);
     });
     expect(Sentry.captureException).not.toHaveBeenCalled();

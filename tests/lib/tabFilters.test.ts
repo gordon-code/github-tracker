@@ -10,7 +10,7 @@ const { mockSetTabFilter, mockResetAllTabFilters, mockSetCustomTabFilter, mockRe
 }));
 
 const { mockViewState } = vi.hoisted(() => ({
-  mockViewState: { customTabFilters: {} as Record<string, Record<string, string>> },
+  mockViewState: { customTabFilters: {} },
 }));
 
 vi.mock("../../src/app/stores/view", () => ({

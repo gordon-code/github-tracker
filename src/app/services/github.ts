@@ -148,9 +148,9 @@ export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
 
 // ── Client factory ───────────────────────────────────────────────────────────
 
-export function createGitHubClient(token: string): GitHubOctokitInstance {
+export function createGitHubClient(authToken: string): GitHubOctokitInstance {
   const client = new GitHubOctokit({
-    auth: token,
+    auth: authToken,
     userAgent: "github-tracker",
     throttle: {
       onRateLimit: (
@@ -234,7 +234,7 @@ export function createGitHubClient(token: string): GitHubOctokitInstance {
         };
         for (const cb of _requestCallbacks) { try { cb(info); } catch { /* swallow */ } }
       }
-      const errHeaders = errResponse?.headers as Record<string, string> | undefined;
+      const errHeaders = errResponse?.headers;
       if (errHeaders) {
         try {
           if (isGraphql) {

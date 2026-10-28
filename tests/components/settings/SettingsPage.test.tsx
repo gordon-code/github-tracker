@@ -1039,7 +1039,7 @@ describe("SettingsPage — Manage org access button", () => {
     updateConfig({ selectedOrgs: [] });
     let resolveFetch!: (v: never[]) => void;
     vi.mocked(apiModule.fetchOrgs).mockReturnValue(
-      new Promise((r) => { resolveFetch = r as (v: never[]) => void; })
+      new Promise((r) => { resolveFetch = r; })
     );
     renderSettings();
     const btn = screen.getByRole("button", { name: "Manage org access" });
@@ -1215,7 +1215,7 @@ describe("SettingsPage — enableTracking toggle", () => {
         super(parts, options);
         if (parts) blobParts.push(...parts);
       }
-    } as typeof Blob;
+    };
     await user.click(screen.getByRole("button", { name: "Export config only" }));
     globalThis.Blob = originalBlob;
     const json = JSON.parse(blobParts[0] as string);
@@ -1352,7 +1352,7 @@ describe("SettingsPage — monitor toggle wiring", () => {
         super(parts, options);
         if (parts) blobParts.push(...parts);
       }
-    } as typeof Blob;
+    };
 
     await user.click(screen.getByRole("button", { name: "Export config only" }));
 
@@ -1978,10 +1978,10 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
 
     // Unseal in flight — the single-use nonce must not be abandonable mid-flight.
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Cancel" }).disabled).toBe(true)
     );
-    expect((screen.getByRole("button", { name: /continue without credentials/i }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Checking..." }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /continue without credentials/i }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Checking..." }).disabled).toBe(true);
 
     resolveUnseal({ ok: true, ciphertext: "CIPHER" });
     await waitFor(() => screen.getByText(/sign you in as/i));
@@ -1993,7 +1993,7 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CIPHER-X" });
     let finishResolveX!: (v: { ok: true; bundle: typeof BUNDLE; identity: typeof IDENTITY }) => void;
     vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
-      new Promise((r) => { finishResolveX = r as never; })
+      new Promise((r) => { finishResolveX = r; })
     );
 
     const user = userEvent.setup();
