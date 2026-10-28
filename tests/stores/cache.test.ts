@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { captureException } from "@sentry/solid";
 import {
   getDb,
   getCacheEntry,
@@ -9,6 +10,10 @@ import {
   evictStaleEntries,
   cachedFetch,
 } from "../../src/app/stores/cache";
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+}));
 
 // Reset the DB singleton between tests by closing and clearing
 beforeEach(async () => {
@@ -79,6 +84,7 @@ describe("CRUD operations", () => {
 describe("setCacheEntry — QuotaExceededError eviction", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(captureException).mockClear();
   });
 
   it("evicts oldest 50% and retries when db.put throws QuotaExceededError on first call", async () => {
@@ -122,15 +128,17 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
     const stored = await getCacheEntry("quota-new:key");
     expect(stored).toBeDefined();
     expect(stored!.data).toEqual({ new: true });
+    expect(captureException).not.toHaveBeenCalled();
   });
 
   it("logs warning and resolves when retry after eviction also fails", async () => {
     const db = await getDb();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const quotaErr = new DOMException("QuotaExceededError", "QuotaExceededError");
 
     // Throw QuotaExceededError on every put call
     vi.spyOn(db, "put").mockImplementation(async () => {
-      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      throw quotaErr;
     });
 
     // Should resolve (not throw) — entry is silently dropped
@@ -138,6 +146,9 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Still over quota")
     );
+    expect(captureException).toHaveBeenCalledWith(quotaErr, {
+      tags: { source: "cache-eviction-retry" },
+    });
   });
 });
 
