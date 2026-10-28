@@ -42,7 +42,7 @@ function isBrowserFetchDisconnectMessage(value: string | undefined): boolean {
   if (!value) return false;
   return (
     /^(?:Failed to fetch|Load failed)(?:\s*\([^)]+\))?$/i.test(value) ||
-    /^NetworkError when attempting to fetch resource\.?$/i.test(value)
+    /^NetworkError when attempting to fetch resource\.?(?:\s*\([^)]+\))?$/i.test(value)
   );
 }
 
@@ -117,6 +117,7 @@ export function beforeBreadcrumbHandler(
     if (!ALLOWED_CONSOLE_PREFIXES.some((p) => msg.startsWith(p))) {
       return null;
     }
+    breadcrumb.message = scrubUrl(msg);
   }
   return breadcrumb;
 }
@@ -129,6 +130,7 @@ export function initSentry(): void {
     dsn,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
+    enhanceFetchErrorMessages: "report-only",
 
     // ── Privacy: absolute minimum data ──────────────────────────
     dataCollection: {

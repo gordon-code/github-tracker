@@ -252,7 +252,10 @@ describe("beforeSendHandler", () => {
         beforeSendHandler({
           tags: { source },
           exception: {
-            values: [{ type: "TypeError", value: "NetworkError when attempting to fetch resource." }],
+            values: [
+              { type: "TypeError", value: "NetworkError when attempting to fetch resource." },
+              { type: "TypeError", value: "NetworkError when attempting to fetch resource. (api.github.com)" },
+            ],
           },
         } as never)
       ).toBeNull();
@@ -401,6 +404,19 @@ describe("beforeBreadcrumbHandler", () => {
     const breadcrumb = { category: "ui.click", message: "button" };
     expect(beforeBreadcrumbHandler(breadcrumb as never)).toBe(breadcrumb);
   });
+
+  it("scrubs tokens and OAuth params in allowed console breadcrumb messages", () => {
+    const breadcrumb = {
+      category: "console",
+      message:
+        "[api] Request failed for https://api.github.com/graphql?code=abc123&state=xyz789 with token ghp_secretToken123 and ATATT3xFfGF0abc123=",
+    };
+    const result = beforeBreadcrumbHandler(breadcrumb as never);
+    expect(result).not.toBeNull();
+    expect(result!.message).toBe(
+      "[api] Request failed for https://api.github.com/graphql?code=[REDACTED]&state=[REDACTED] with token ghp_[REDACTED] and ATATT[REDACTED]",
+    );
+  });
 });
 
 describe("initSentry", () => {
@@ -434,7 +450,7 @@ describe("initSentry", () => {
     expect(mockInit).not.toHaveBeenCalled();
   });
 
-  it("calls Sentry.init with correct DSN when VITE_SENTRY_DSN is set", () => {
+  it("calls Sentry.init with correct DSN and enhanceFetchErrorMessages: 'report-only' when VITE_SENTRY_DSN is set", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
     initSentry();
@@ -442,6 +458,7 @@ describe("initSentry", () => {
     expect(mockInit).toHaveBeenCalledWith(
       expect.objectContaining({
         dsn: "https://test-key@o1.ingest.us.sentry.io/1",
+        enhanceFetchErrorMessages: "report-only",
       }),
     );
   });

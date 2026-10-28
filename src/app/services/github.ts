@@ -62,7 +62,76 @@ function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
-const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
+export const REQUEST_TIMEOUT_MS = 15_000;
+
+const _syntheticResponseErrors = new WeakSet<object>();
+
+/**
+ * Runs inside @octokit/plugin-throttling (closest to @octokit/request) to attach
+ * a temporary empty response when a network or timeout error has no response object.
+ * This prevents plugin-throttling from throwing TypeError on error.response.headers
+ * when evaluating /graphql errors.
+ */
+function preThrottlingPlugin(octokit: Octokit): void {
+  octokit.hook.wrap("request", async (request, options) => {
+    try {
+      return await request(options);
+    } catch (err) {
+      if (
+        err &&
+        typeof err === "object" &&
+        (!("response" in err) || (err as { response?: unknown }).response == null)
+      ) {
+        (err as { response?: unknown }).response = {
+          url: options.url ?? "",
+          status: (err as { status?: number }).status ?? 500,
+          headers: {},
+          data: "",
+        };
+        _syntheticResponseErrors.add(err);
+      }
+      throw err;
+    }
+  });
+}
+
+/**
+ * Runs between @octokit/plugin-throttling and @octokit/plugin-retry to strip the
+ * synthetic response attached by preThrottlingPlugin, preserve options.request.retryCount
+ * when plugin-throttling resets it on non-rate-limit /graphql errors, and suppress retries
+ * when the caller's AbortSignal is already aborted.
+ */
+function postThrottlingPlugin(octokit: Octokit): void {
+  octokit.hook.wrap("request", async (request, options) => {
+    const reqOpts = (
+      options as { request?: { retryCount?: number; retries?: number; signal?: AbortSignal } }
+    ).request;
+    const priorRetryCount = reqOpts?.retryCount;
+    try {
+      return await request(options);
+    } catch (err) {
+      if (err && typeof err === "object" && _syntheticResponseErrors.has(err)) {
+        delete (err as { response?: unknown }).response;
+        _syntheticResponseErrors.delete(err);
+      }
+      if (reqOpts && priorRetryCount !== undefined) {
+        reqOpts.retryCount = Math.max(reqOpts.retryCount ?? 0, priorRetryCount);
+      }
+      if (reqOpts?.signal?.aborted) {
+        reqOpts.retries = 0;
+      }
+      throw err;
+    }
+  });
+}
+
+const GitHubOctokit = Octokit.plugin(
+  preThrottlingPlugin,
+  throttling,
+  postThrottlingPlugin,
+  retry,
+  paginateRest
+);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -149,9 +218,21 @@ export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
 // ── Client factory ───────────────────────────────────────────────────────────
 
 export function createGitHubClient(authToken: string): GitHubOctokitInstance {
+  const boundedFetch: typeof fetch = (url, init) => {
+    const baseFetch = globalThis.fetch;
+    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal;
+    return baseFetch(url, { ...init, signal });
+  };
+
   const client = new GitHubOctokit({
     auth: authToken,
     userAgent: "github-tracker",
+    request: {
+      fetch: boundedFetch,
+    },
     throttle: {
       onRateLimit: (
         retryAfter: number,
