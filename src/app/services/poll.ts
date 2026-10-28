@@ -118,7 +118,10 @@ export function processBackfillErrors(
     }
   } else {
     const hasPhase1SearchError = otherErrors.some(
-      (e) => e.repo.startsWith("light-batch-") || e.repo.startsWith("unfiltered-batch-"),
+      (e) =>
+        e.repo.startsWith("light-batch-") ||
+        e.repo.startsWith("unfiltered-batch-") ||
+        e.repo === "pr-pagination",
     );
     if (!hasPhase1SearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
       _consecutiveBackfillFailures = 0;
