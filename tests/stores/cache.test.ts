@@ -134,19 +134,20 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
   it("logs warning and resolves when retry after eviction also fails", async () => {
     const db = await getDb();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const quotaErr = new DOMException("QuotaExceededError", "QuotaExceededError");
+    const initialQuotaErr = new DOMException("QuotaExceededError (initial)", "QuotaExceededError");
+    const retryQuotaErr = new DOMException("QuotaExceededError (retry)", "QuotaExceededError");
 
-    // Throw QuotaExceededError on every put call
-    vi.spyOn(db, "put").mockImplementation(async () => {
-      throw quotaErr;
-    });
+    // Throw distinct QuotaExceededError instances on initial and retry put calls
+    vi.spyOn(db, "put")
+      .mockRejectedValueOnce(initialQuotaErr)
+      .mockRejectedValueOnce(retryQuotaErr);
 
     // Should resolve (not throw) — entry is silently dropped
     await setCacheEntry("quota-retry-fail:key", { data: true }, null);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Still over quota")
     );
-    expect(captureException).toHaveBeenCalledWith(quotaErr, {
+    expect(captureException).toHaveBeenCalledWith(retryQuotaErr, {
       tags: { source: "cache-eviction-retry" },
     });
   });
