@@ -116,23 +116,28 @@ export function processBackfillErrors(
         { silentToast: true },
       );
     }
-  } else if (pullRequests.length > 0 || otherErrors.length === 0) {
-    _consecutiveBackfillFailures = 0;
-    if (isTargeted) {
-      dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
-    }
-  } else if (
-    _consecutiveBackfillFailures >= 3 ||
-    getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
-  ) {
-    pushNotification(
-      PR_ENRICHMENT_NOTIFICATION_SOURCE,
-      PR_ENRICHMENT_DEGRADED_MESSAGE,
-      "warning",
-      true,
-      undefined,
-      { silentToast: true },
+  } else {
+    const hasPhase1SearchError = otherErrors.some(
+      (e) => e.repo.startsWith("light-batch-") || e.repo.startsWith("unfiltered-batch-"),
     );
+    if (!hasPhase1SearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
+      _consecutiveBackfillFailures = 0;
+      if (isTargeted) {
+        dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
+      }
+    } else if (
+      _consecutiveBackfillFailures >= 3 ||
+      getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
+    ) {
+      pushNotification(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true },
+      );
+    }
   }
 
   return otherErrors;

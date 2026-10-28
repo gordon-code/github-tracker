@@ -886,6 +886,31 @@ describe("createPollCoordinator", () => {
         PR_ENRICHMENT_NOTIFICATION_SOURCE
       );
 
+      // Partial light-search failure (pullRequests: [enrichedPR], errors: [light-batch-2/2])
+      // Must ALSO retain Tier 1 'pr-enrichment' even when a surviving light batch returned cached PRs
+      mockPushNotification.mockClear();
+      mockPushError.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [{ repo: "light-batch-2/2", statusCode: 502, message: "Bad Gateway", retryable: true }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).toHaveBeenCalledWith("light-batch-2/2", "Bad Gateway", true);
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+      expect(mockDismissNotificationBySource).not.toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE
+      );
+
       // Poll 5: clean poll with enriched PRs resets streak and auto-dismisses 'pr-enrichment'
       mockPushNotification.mockClear();
       mockPushError.mockClear();

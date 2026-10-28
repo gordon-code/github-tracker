@@ -604,14 +604,16 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }));
   });
 
+  const targetedBackfillErrors = data.errors.filter((e) => e.repo.startsWith("backfill-batch-"));
   for (const err of data.errors) {
     if (!err.repo.startsWith("backfill-batch-")) {
       pushError(err.repo, err.message, err.retryable);
     }
   }
   if (
-    data.errors.some((e) => e.repo.startsWith("backfill-batch-")) &&
-    data.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true)
+    targetedBackfillErrors.length > 0 &&
+    (targetedBackfillErrors.some((e) => !e.retryable) ||
+      data.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true))
   ) {
     pushNotification(
       "pr-enrichment",
