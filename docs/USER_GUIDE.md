@@ -401,7 +401,11 @@ Upstream repos are included in Issues and Pull Requests fetches but excluded fro
 
 ### Full Refresh
 
-The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the header.
+The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the toolbar.
+
+PR enrichment queries (review decisions, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
+
+When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details.
 
 Setting the interval to **Off** disables automatic polling; manual refresh still works.
 
@@ -442,7 +446,7 @@ When the tab is hidden:
 - The **full refresh pauses** in background tabs — GraphQL requests have no 304 shortcut and every poll consumes real rate-limit budget.
 - The **events poll continues in background** — it is lightweight enough to run even when the tab is hidden, giving you near-real-time change detection without the cost of a full refresh.
 
-When you return to a tab that has been hidden for more than 2 minutes, a catch-up full refresh fires immediately regardless of where the timer is in its cycle.
+When you return to a tab that has been hidden for more than 2 minutes, the dashboard waits a brief 2-second grace period (so the OS network connection can stabilize after waking from sleep) before firing a catch-up full refresh regardless of where the timer is in its cycle. Automatic refreshes also pause while the browser is offline and resume automatically once connectivity returns.
 
 ---
 
@@ -451,6 +455,8 @@ When you return to a tab that has been hidden for more than 2 minutes, a catch-u
 ### Notification Drawer
 
 The bell icon in the header opens the notification drawer, which shows API errors, rate limit warnings, and other system messages. Notifications are dismissed automatically when the underlying condition clears on the next poll cycle.
+
+Transient single-cycle PR enrichment blips are absorbed silently when cached PR details are available. When PR enrichment degradation persists across 3 consecutive polls (or leaves newly discovered PRs unenriched on initial load), a silent warning entry is logged to the Notification Drawer without popping a disruptive toast. For notifications that do trigger a toast, repeated identical toasts for the same source are rate-limited to once per 15 minutes.
 
 ### GitHub Outage Notifications
 
