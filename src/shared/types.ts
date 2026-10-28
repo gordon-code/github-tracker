@@ -84,6 +84,8 @@ export interface PullRequest {
   starCount?: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;
+  /** True when enriched via the lightweight backfill query (omitting CI check rollup) */
+  checkStatusStale?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;
   /** PR body — fetched on demand for dependency update type detection */

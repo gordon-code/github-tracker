@@ -383,6 +383,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
   query($ids: [ID!]!) {
     nodes(ids: $ids) {
       ... on PullRequest {
+        id
         databaseId
         headRefOid
         headRepository { owner { login } nameWithOwner }
@@ -410,6 +411,37 @@ const HEAVY_PR_BACKFILL_QUERY = `
             }
           }
         }
+      }
+    }
+    rateLimit { cost limit remaining resetAt }
+  }
+`;
+
+/** Lightweight backfill fallback query omitting mergeStateStatus and statusCheckRollup. */
+const LIGHT_PR_BACKFILL_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        databaseId
+        headRefOid
+        headRepository { owner { login } nameWithOwner }
+        assignees(first: 10) { nodes { login } }
+        reviewRequests(first: 10) {
+          nodes { requestedReviewer { ... on User { login } } }
+        }
+        latestReviews(first: 5) {
+          totalCount
+          nodes { author { login } }
+        }
+        additions
+        deletions
+        changedFiles
+        comments { totalCount }
+        reviewThreads { totalCount }
+        autoMergeRequest { mergeMethod }
+        viewerLatestReview { state }
+        viewerLatestReviewRequest { id }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -480,10 +512,11 @@ interface GraphQLLightPRNode {
 }
 
 interface GraphQLHeavyPRNode {
+  id?: string;
   databaseId: number;
   headRefOid: string;
   headRepository: { owner: { login: string }; nameWithOwner: string } | null;
-  mergeStateStatus: string;
+  mergeStateStatus?: string;
   assignees: { nodes: { login: string }[] };
   reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
   latestReviews: {
@@ -498,7 +531,7 @@ interface GraphQLHeavyPRNode {
   autoMergeRequest?: { mergeMethod: string } | null;
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
-  commits: {
+  commits?: {
     nodes: {
       commit: {
         statusCheckRollup: { state: string } | null;
@@ -533,6 +566,8 @@ interface HeavyBackfillResponse {
 
 // Max node IDs per nodes() query (GitHub limit)
 const NODES_BATCH_SIZE = 100;
+export const HEAVY_BACKFILL_BATCH_SIZE = 25;
+export const MIN_SPLIT_BATCH_SIZE = 6;
 
 // ── GraphQL search functions ──────────────────────────────────────────────────
 
@@ -717,7 +752,10 @@ async function runForkPRFallback(
         const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
         const state = data?.object?.statusCheckRollup?.state ?? null;
         const pr = prMap.get(forkChunk[i].databaseId);
-        if (pr) pr.checkStatus = mapCheckStatus(state);
+        if (pr) {
+          pr.checkStatus = mapCheckStatus(state);
+          if (data && pr.checkStatusStale) delete pr.checkStatusStale;
+        }
       }
     } catch (err) {
       const errDataRaw = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
@@ -734,7 +772,10 @@ async function runForkPRFallback(
           if (!data) continue;
           const state = data.object?.statusCheckRollup?.state ?? null;
           const pr = prMap.get(forkChunk[i].databaseId);
-          if (pr) pr.checkStatus = mapCheckStatus(state);
+          if (pr) {
+            pr.checkStatus = mapCheckStatus(state);
+            if (pr.checkStatusStale) delete pr.checkStatusStale;
+          }
         }
       }
 
@@ -1102,6 +1143,7 @@ export interface PREnrichmentData {
   assigneeLogins: string[];
   reviewerLogins: string[];
   checkStatus: CheckStatus["status"];
+  checkStatusStale?: boolean;
   additions: number;
   deletions: number;
   changedFiles: number;
@@ -1113,8 +1155,54 @@ export interface PREnrichmentData {
   viewerLatestReviewState: ViewerReviewState | null;
 }
 
+function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PREnrichmentData {
+  const pendingLogins = node.reviewRequests.nodes
+    .map((n) => n.requestedReviewer?.login)
+    .filter((l): l is string => l != null);
+  const actualLogins = node.latestReviews.nodes
+    .map((n) => n.author?.login)
+    .filter((l): l is string => l != null);
+  const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map((l) => l.toLowerCase()))];
+
+  const checkStatus = isLightFallback
+    ? null
+    : applyMergeStateOverride(
+        node.mergeStateStatus ?? "",
+        mapCheckStatus(node.commits?.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+      );
+
+  let headRepository: PREnrichmentData["headRepository"] = null;
+  if (node.headRepository) {
+    const parts = node.headRepository.nameWithOwner.split("/");
+    if (parts.length === 2) {
+      headRepository = { owner: node.headRepository.owner.login, repoName: parts[1] };
+    }
+  }
+
+  return {
+    id: node.databaseId,
+    headSha: node.headRefOid,
+    headRepository,
+    assigneeLogins: node.assignees.nodes.map((a) => a.login),
+    reviewerLogins,
+    checkStatus,
+    ...(isLightFallback ? { checkStatusStale: true } : {}),
+    additions: node.additions,
+    deletions: node.deletions,
+    changedFiles: node.changedFiles,
+    comments: node.comments.totalCount,
+    reviewThreads: node.reviewThreads.totalCount,
+    totalReviewCount: node.latestReviews.totalCount,
+    autoMergeMethod: mapAutoMergeMethod(node.autoMergeRequest?.mergeMethod),
+    viewerReviewRequested: Boolean(node.viewerLatestReviewRequest?.id),
+    viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
+  };
+}
+
 /**
  * Phase 2: fetches heavy PR fields using `nodes(ids: [...])` query.
+ * Chunks requests into 25-node batches, recursively splits failing batches in half
+ * down to MIN_SPLIT_BATCH_SIZE, and falls back to LIGHT_PR_BACKFILL_QUERY on leaf failures.
  * Returns enrichment data keyed by databaseId.
  */
 export async function fetchPREnrichment(
@@ -1126,77 +1214,128 @@ export async function fetchPREnrichment(
 
   if (nodeIds.length === 0) return { enrichments, errors };
 
-  const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
-  await Promise.allSettled(batches.map(async (batch, batchIdx) => {
-    try {
-      const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
-        ids: batch,
-        request: { apiSource: "heavyBackfill" },
-      });
+  const batches = chunkArray(nodeIds, HEAVY_BACKFILL_BATCH_SIZE);
+  await Promise.allSettled(
+    batches.map(async (batch, batchIdx) => {
+      const resolvedNodeIds = new Set<string>();
+      let batchErrorPushed = false;
 
-      if (response.rateLimit) {
-        updateGraphqlRateLimit(response.rateLimit);
-      }
+      const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
+        try {
+          const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
+            ids: batchIds,
+            request: {
+              apiSource: "heavyBackfill",
+              ...(isSplitRetry ? { retries: 0 } : {}),
+            },
+          });
 
-      for (const node of response.nodes) {
-        if (!node || node.databaseId == null) continue;
+          if (response.rateLimit) {
+            updateGraphqlRateLimit(response.rateLimit);
+          }
 
-        const pendingLogins = node.reviewRequests.nodes
-          .map((n) => n.requestedReviewer?.login)
-          .filter((l): l is string => l != null);
-        const actualLogins = node.latestReviews.nodes
-          .map((n) => n.author?.login)
-          .filter((l): l is string => l != null);
-        const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map(l => l.toLowerCase()))];
+          for (const node of response.nodes) {
+            if (!node || node.databaseId == null) continue;
+            enrichments.set(node.databaseId, mapHeavyPRNode(node, false));
+            if (node.id) resolvedNodeIds.add(node.id);
+          }
+        } catch (err) {
+          const partialErr =
+            err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+              ? (err.data as Partial<HeavyBackfillResponse>)
+              : null;
+          if (partialErr?.rateLimit) {
+            updateGraphqlRateLimit(partialErr.rateLimit);
+          }
+          if (Array.isArray(partialErr?.nodes)) {
+            for (const node of partialErr.nodes) {
+              if (!node || node.databaseId == null) continue;
+              enrichments.set(node.databaseId, mapHeavyPRNode(node, false));
+              if (node.id) resolvedNodeIds.add(node.id);
+            }
+          }
 
-        const checkStatus = applyMergeStateOverride(
-          node.mergeStateStatus,
-          mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
-        );
+          const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
+          if (remainingIds.length === 0) return;
 
-        let headRepository: PREnrichmentData["headRepository"] = null;
-        if (node.headRepository) {
-          const parts = node.headRepository.nameWithOwner.split("/");
-          if (parts.length === 2) {
-            headRepository = { owner: node.headRepository.owner.login, repoName: parts[1] };
+          const { statusCode, message } = extractRejectionError(err);
+          const retryable = statusCode === null || statusCode >= 500;
+
+          if (!retryable) {
+            console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+            Sentry.captureException(err, { tags: { source: "prEnrichment" } });
+            if (!batchErrorPushed) {
+              batchErrorPushed = true;
+              errors.push({
+                repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
+                statusCode,
+                message,
+                retryable: false,
+              });
+            }
+            return;
+          }
+
+          if (remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
+            const mid = Math.floor(remainingIds.length / 2);
+            await Promise.allSettled([
+              fetchBatchWithSplit(remainingIds.slice(0, mid), true),
+              fetchBatchWithSplit(remainingIds.slice(mid), true),
+            ]);
+            return;
+          }
+
+          console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+          Sentry.captureException(err, { tags: { source: "prEnrichment" } });
+          if (!batchErrorPushed) {
+            batchErrorPushed = true;
+            errors.push({
+              repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
+              statusCode,
+              message,
+              retryable: true,
+            });
+          }
+
+          try {
+            const lightResponse = await octokit.graphql<HeavyBackfillResponse>(LIGHT_PR_BACKFILL_QUERY, {
+              ids: remainingIds,
+              request: { apiSource: "heavyBackfill", retries: 0 },
+            });
+            if (lightResponse.rateLimit) {
+              updateGraphqlRateLimit(lightResponse.rateLimit);
+            }
+            for (const node of lightResponse.nodes) {
+              if (!node || node.databaseId == null) continue;
+              enrichments.set(node.databaseId, mapHeavyPRNode(node, true));
+              if (node.id) resolvedNodeIds.add(node.id);
+            }
+          } catch (lightErr) {
+            const lightPartial =
+              lightErr &&
+              typeof lightErr === "object" &&
+              "data" in lightErr &&
+              lightErr.data &&
+              typeof lightErr.data === "object"
+                ? (lightErr.data as Partial<HeavyBackfillResponse>)
+                : null;
+            if (lightPartial?.rateLimit) {
+              updateGraphqlRateLimit(lightPartial.rateLimit);
+            }
+            if (Array.isArray(lightPartial?.nodes)) {
+              for (const node of lightPartial.nodes) {
+                if (!node || node.databaseId == null) continue;
+                enrichments.set(node.databaseId, mapHeavyPRNode(node, true));
+                if (node.id) resolvedNodeIds.add(node.id);
+              }
+            }
           }
         }
+      };
 
-        enrichments.set(node.databaseId, {
-          id: node.databaseId,
-          headSha: node.headRefOid,
-          headRepository,
-          assigneeLogins: node.assignees.nodes.map((a) => a.login),
-          reviewerLogins,
-          checkStatus,
-          additions: node.additions,
-          deletions: node.deletions,
-          changedFiles: node.changedFiles,
-          comments: node.comments.totalCount,
-          reviewThreads: node.reviewThreads.totalCount,
-          totalReviewCount: node.latestReviews.totalCount,
-          autoMergeMethod: mapAutoMergeMethod(node.autoMergeRequest?.mergeMethod),
-          viewerReviewRequested: Boolean(node.viewerLatestReviewRequest?.id),
-          viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
-        });
-      }
-    } catch (err) {
-      const partialErr = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-        ? err.data as Partial<HeavyBackfillResponse>
-        : null;
-      if (partialErr?.rateLimit) {
-        updateGraphqlRateLimit(partialErr.rateLimit);
-      }
-      const { statusCode, message } = extractRejectionError(err);
-      console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
-      Sentry.captureException(err, { tags: { source: "prEnrichment" } });
-      errors.push({
-        repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
-        statusCode, message,
-        retryable: statusCode === null || statusCode >= 500,
-      });
-    }
-  }));
+      await fetchBatchWithSplit(batch, false);
+    }),
+  );
 
   return { enrichments, errors };
 }
@@ -1381,6 +1520,7 @@ type EnrichmentFields = Pick<
   | "assigneeLogins"
   | "reviewerLogins"
   | "checkStatus"
+  | "checkStatusStale"
   | "additions"
   | "deletions"
   | "changedFiles"
@@ -1399,6 +1539,7 @@ export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields
     assigneeLogins: source.assigneeLogins,
     reviewerLogins: source.reviewerLogins,
     checkStatus: source.checkStatus,
+    ...(source.checkStatusStale !== undefined ? { checkStatusStale: source.checkStatusStale } : {}),
     additions: source.additions,
     deletions: source.deletions,
     changedFiles: source.changedFiles,
@@ -1420,12 +1561,13 @@ function mergeEnrichment(
   enrichments: Map<number, PREnrichmentData>,
   forkInfoMap: Map<number, { owner: string; repoName: string }>,
   viewerLogin = "",
+  skipForkIds?: ReadonlySet<number>,
 ): PullRequest[] {
   return lightPRs.map((pr) => {
     const e = enrichments.get(pr.id);
     if (!e) return pr; // Keep enriched: false if backfill missed this PR
 
-    if (e.headRepository) {
+    if (e.headRepository && !skipForkIds?.has(pr.id)) {
       forkInfoMap.set(pr.id, e.headRepository);
     }
 
@@ -1464,7 +1606,15 @@ export function fallbackToPreviousEnrichment(
   if (previous.length === 0) return next;
   const previousMap = new Map(previous.map((pr) => [pr.id, pr]));
   return next.map((pr) => {
-    if (pr.enriched !== false) return pr;
+    if (pr.enriched !== false) {
+      if (pr.checkStatusStale) {
+        const prev = previousMap.get(pr.id);
+        if (prev && prev.enriched !== false && !prev.checkStatusStale) {
+          return { ...pr, checkStatus: prev.checkStatus, checkStatusStale: false };
+        }
+      }
+      return pr;
+    }
     const prev = previousMap.get(pr.id);
     if (!prev || prev.enriched === false) return pr;
     return {
@@ -1473,6 +1623,45 @@ export function fallbackToPreviousEnrichment(
       enriched: true,
     };
   });
+}
+
+// ── Settled-PR enrichment cache (3-minute TTL) ───────────────────────────────
+
+export const ENRICHMENT_CACHE_TTL_MS = 3 * 60 * 1000;
+
+interface CachedPREnrichment {
+  userLogin: string;
+  updatedAt: string;
+  fetchedAt: number;
+  repoFullName: string;
+  enrichment: PREnrichmentData;
+}
+
+const _prEnrichmentCache = new Map<string, CachedPREnrichment>();
+let _enrichmentCacheGen = 0;
+
+export function resetPREnrichmentCache(): void {
+  _enrichmentCacheGen++;
+  _prEnrichmentCache.clear();
+}
+
+export function invalidatePREnrichmentCacheForRepos(repoFullNames: Iterable<string>): void {
+  const targets = new Set<string>();
+  for (const name of repoFullNames) {
+    targets.add(name.toLowerCase());
+  }
+  if (targets.size === 0) return;
+  for (const [nodeId, entry] of _prEnrichmentCache) {
+    if (targets.has(entry.repoFullName.toLowerCase())) {
+      _prEnrichmentCache.delete(nodeId);
+    }
+  }
+}
+
+export function evictPREnrichmentCacheNode(nodeId: string | undefined): void {
+  if (nodeId) {
+    _prEnrichmentCache.delete(nodeId);
+  }
 }
 
 /**
@@ -1533,9 +1722,11 @@ export async function fetchIssuesAndPullRequests(
   onLightData?: (data: FetchIssuesAndPRsResult) => void,
   trackedUsers?: TrackedUser[],
   monitoredRepos?: RepoRef[],
+  force = false,
 ): Promise<FetchIssuesAndPRsResult> {
   if (!octokit) throw new Error("No GitHub client available");
 
+  const cacheGen = _enrichmentCacheGen;
   const hasTrackedUsers = (trackedUsers?.length ?? 0) > 0;
 
   // Partition repos into normal (involves: search) and monitored (unfiltered search)
@@ -1555,8 +1746,26 @@ export async function fetchIssuesAndPullRequests(
   const issueMap = new Map<number, Issue>();
   const prMap = new Map<number, PullRequest>();
   const nodeIdMap = new Map<number, string>();
+  const cachedEnrichments = new Map<number, PREnrichmentData>();
+  const cachedPrIds = new Set<number>();
 
-  // Phase 1: main user light search over normal repos (those not in monitoredRepos)
+  const tryGetCachedEnrichment = (pr: PullRequest, nodeId: string): PREnrichmentData | null => {
+    if (force) return null;
+    const cached = _prEnrichmentCache.get(nodeId);
+    if (
+      cached &&
+      cached.userLogin === normalizedLogin &&
+      cached.updatedAt === pr.updatedAt &&
+      !cached.enrichment.checkStatusStale &&
+      cached.enrichment.checkStatus !== "pending" &&
+      Date.now() - cached.fetchedAt < ENRICHMENT_CACHE_TTL_MS
+    ) {
+      return cached.enrichment;
+    }
+    return null;
+  };
+
+  // Phase 1: main user light search over normalRepos (those not in monitoredRepos)
   if (normalRepos.length > 0 && userLogin) {
     const lightResult = await graphqlLightCombinedSearch(octokit, normalRepos, userLogin, "lightSearch");
     allErrors.push(...lightResult.errors);
@@ -1580,9 +1789,20 @@ export async function fetchIssuesAndPullRequests(
     });
   }
 
-  // Main user node IDs known — start backfill in parallel with tracked user searches.
-  // This delivers enriched main-user PRs without waiting for tracked user pagination.
-  const mainNodeIds = [...nodeIdMap.values()];
+  // Main user node IDs known — check settled-PR cache first, then start backfill
+  // in parallel with tracked user searches.
+  const mainNodeIds: string[] = [];
+  for (const pr of prMap.values()) {
+    const nodeId = nodeIdMap.get(pr.id);
+    if (!nodeId) continue;
+    const cached = tryGetCachedEnrichment(pr, nodeId);
+    if (cached) {
+      cachedEnrichments.set(pr.id, cached);
+      cachedPrIds.add(pr.id);
+    } else {
+      mainNodeIds.push(nodeId);
+    }
+  }
   const mainBackfillPromise = mainNodeIds.length > 0
     ? fetchPREnrichment(octokit, mainNodeIds)
     : Promise.resolve({ enrichments: new Map<number, PREnrichmentData>(), errors: [] as ApiError[] });
@@ -1659,23 +1879,37 @@ export async function fetchIssuesAndPullRequests(
   const mergedIssues = [...issueMap.values()];
   const mergedPRs = [...prMap.values()];
 
-  // Apply main backfill enrichments to all PRs (main user PRs get enriched, tracked-only PRs get nothing yet)
-  let enrichedPRs = mainBackfill.enrichments.size > 0
-    ? mergeEnrichment(mergedPRs, mainBackfill.enrichments, forkInfoMap, normalizedLogin)
-    : mergedPRs;
-
   // Delta backfill: enrich PRs not already covered by main backfill —
   // includes both monitored repo PRs and new PRs from tracked users
   const deltaNodeIds: string[] = [];
   for (const pr of mergedPRs) {
     if (!preNewPrIds.has(pr.id)) {
       const nodeId = nodeIdMap.get(pr.id);
-      if (nodeId) deltaNodeIds.push(nodeId);
+      if (!nodeId) continue;
+      const cached = tryGetCachedEnrichment(pr, nodeId);
+      if (cached) {
+        cachedEnrichments.set(pr.id, cached);
+        cachedPrIds.add(pr.id);
+      } else {
+        deltaNodeIds.push(nodeId);
+      }
     }
   }
 
+  // Apply cached enrichments (skipping forkInfoMap population for already-resolved cached fork PRs)
+  let enrichedPRs = cachedEnrichments.size > 0
+    ? mergeEnrichment(mergedPRs, cachedEnrichments, forkInfoMap, normalizedLogin, cachedPrIds)
+    : mergedPRs;
+
+  // Apply main backfill enrichments
+  if (mainBackfill.enrichments.size > 0) {
+    enrichedPRs = mergeEnrichment(enrichedPRs, mainBackfill.enrichments, forkInfoMap, normalizedLogin);
+  }
+
+  let deltaEnrichments = new Map<number, PREnrichmentData>();
   if (deltaNodeIds.length > 0) {
     const delta = await fetchPREnrichment(octokit, deltaNodeIds);
+    deltaEnrichments = delta.enrichments;
     backfillErrors.push(...delta.errors);
     enrichedPRs = mergeEnrichment(enrichedPRs, delta.enrichments, forkInfoMap, normalizedLogin);
   }
@@ -1683,6 +1917,44 @@ export async function fetchIssuesAndPullRequests(
   // Fork PR fallback for enriched PRs
   const enrichedPRMap = new Map(enrichedPRs.map(pr => [pr.id, pr]));
   await runForkPRFallback(octokit, enrichedPRMap, forkInfoMap);
+
+  if (cacheGen === _enrichmentCacheGen && (getClient() === octokit || getClient() == null)) {
+    const now = Date.now();
+    const freshEnrichments = new Map<number, PREnrichmentData>([
+      ...mainBackfill.enrichments,
+      ...deltaEnrichments,
+    ]);
+    for (const [prId, rawEnrichment] of freshEnrichments) {
+      const finalPr = enrichedPRMap.get(prId);
+      const nodeId = nodeIdMap.get(prId);
+      if (finalPr && nodeId && !finalPr.checkStatusStale && finalPr.checkStatus !== "pending") {
+        _prEnrichmentCache.set(nodeId, {
+          userLogin: normalizedLogin,
+          updatedAt: finalPr.updatedAt,
+          fetchedAt: now,
+          repoFullName: finalPr.repoFullName,
+          enrichment: {
+            ...rawEnrichment,
+            checkStatus: finalPr.checkStatus,
+            checkStatusStale: undefined,
+          },
+        });
+      }
+    }
+    const polledRepoSet = new Set(repos.map((r) => r.fullName.toLowerCase()));
+    const activeNodeIds = allErrors.length === 0 ? new Set(nodeIdMap.values()) : null;
+    for (const [nodeId, entry] of _prEnrichmentCache) {
+      if (now - entry.fetchedAt >= ENRICHMENT_CACHE_TTL_MS) {
+        _prEnrichmentCache.delete(nodeId);
+      } else if (
+        activeNodeIds &&
+        polledRepoSet.has(entry.repoFullName.toLowerCase()) &&
+        !activeNodeIds.has(nodeId)
+      ) {
+        _prEnrichmentCache.delete(nodeId);
+      }
+    }
+  }
 
   return {
     issues: mergedIssues,

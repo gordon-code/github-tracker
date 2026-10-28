@@ -6,6 +6,7 @@ import {
   fetchPREnrichment,
   fallbackToPreviousEnrichment,
   pickEnrichmentFields,
+  resetPREnrichmentCache,
   type RepoRef,
 } from "../../src/app/services/api";
 import { clearCache } from "../../src/app/stores/cache";
@@ -156,6 +157,7 @@ function makeOctokit(graphqlImpl: (query: string, variables?: unknown) => Promis
 
 beforeEach(async () => {
   await clearCache();
+  resetPREnrichmentCache();
   vi.resetAllMocks();
 });
 
@@ -531,6 +533,7 @@ describe("scaling behavior", () => {
 
   for (const { repos: repoCount, combinedCalls } of repoCountsAndExpected) {
     it(`${repoCount} repos: combined makes ${combinedCalls} GraphQL calls`, async () => {
+      resetPREnrichmentCache();
       const repos = makeRepos(repoCount);
       let nodeId = 0;
 

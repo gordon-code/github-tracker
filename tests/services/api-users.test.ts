@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { validateGitHubUser, discoverUpstreamRepos, fetchIssuesAndPullRequests } from "../../src/app/services/api";
+import { validateGitHubUser, discoverUpstreamRepos, fetchIssuesAndPullRequests, resetPREnrichmentCache } from "../../src/app/services/api";
 import type { TrackedUser } from "../../src/app/stores/config";
 
 vi.mock("../../src/app/lib/errors", () => ({
@@ -92,6 +92,10 @@ function makeSearchPage(repoNames: string[], hasNextPage = false) {
     rateLimit: { remaining: 4990, resetAt: "2024-01-01T01:00:00Z" },
   };
 }
+
+beforeEach(() => {
+  resetPREnrichmentCache();
+});
 
 // ── validateGitHubUser ────────────────────────────────────────────────────────
 
