@@ -202,4 +202,30 @@ describe("FilterBar", () => {
     screen.getByLabelText("Filter by organization");
     screen.getByLabelText("Filter by repository");
   });
+
+  it("renders partial-sync-indicator with 'Partial sync' label and accessible tooltip when partialSync={true}", () => {
+    const tenSecondsAgo = new Date(Date.now() - 10_000);
+    render(() => (
+      <FilterBar {...defaultSortProps} lastRefreshedAt={tenSecondsAgo} partialSync={true} />
+    ));
+
+    const indicator = screen.getByTestId("partial-sync-indicator");
+    expect(indicator).toBeDefined();
+    expect(indicator.getAttribute("role")).toBe("status");
+    expect(indicator.textContent).toContain("Partial sync");
+
+    // Updated timestamp label stays visible past 8s fade-out while partialSync is active
+    vi.advanceTimersByTime(10_000);
+    const updatedSpan = screen.getByText(/Updated \d+[sm] ago/);
+    expect(updatedSpan.className).toContain("opacity-100");
+  });
+
+  it("does not render partial-sync-indicator when partialSync is false or omitted", () => {
+    const { unmount } = render(() => <FilterBar {...defaultSortProps} partialSync={false} />);
+    expect(screen.queryByTestId("partial-sync-indicator")).toBeNull();
+    unmount();
+
+    render(() => <FilterBar {...defaultSortProps} />);
+    expect(screen.queryByTestId("partial-sync-indicator")).toBeNull();
+  });
 });

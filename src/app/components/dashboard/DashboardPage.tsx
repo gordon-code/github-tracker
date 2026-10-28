@@ -14,7 +14,7 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady } from "../../services/api";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode } from "../../services/api";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -36,7 +36,7 @@ import { JIRA_SETTINGS_ACTION, type JiraIssue } from "../../../shared/jira-types
 import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
-import { pushNotification, pushError, dismissNotificationBySource } from "../../lib/errors";
+import { pushNotification, pushError, dismissNotificationBySource, getNotifications } from "../../lib/errors";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
@@ -334,7 +334,7 @@ onAuthCleared(() => {
   clearHotSets();
 });
 
-async function pollFetch(): Promise<DashboardData> {
+async function pollFetch(force = false): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
   // Subsequent refreshes keep existing data visible — the coordinator's
   // isRefreshing signal handles the "Refreshing..." indicator.
@@ -360,7 +360,7 @@ async function pollFetch(): Promise<DashboardData> {
           lastRefreshedAt: new Date(),
         });
       }
-    });
+    }, force);
     const hasErrors = data.errors.length > 0;
     setLastFetchHadErrors(hasErrors);
 
@@ -410,7 +410,13 @@ async function pollFetch(): Promise<DashboardData> {
             // enriched from a prior cycle.
             const regressing = e.enriched === false && pr.enriched !== false;
             if (!regressing) {
+              const prevCheckStatus =
+                pr.enriched !== false && !pr.checkStatusStale ? pr.checkStatus : null;
               Object.assign(pr, pickEnrichmentFields(e));
+              if (e.checkStatusStale && prevCheckStatus !== null) {
+                pr.checkStatus = prevCheckStatus;
+                pr.checkStatusStale = false;
+              }
               pr.reviewDecision = e.reviewDecision;
               pr.draft = e.draft;
               pr.enriched = e.enriched;
@@ -478,7 +484,7 @@ async function pollFetch(): Promise<DashboardData> {
         pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
       }
     }, 0);
-    return data;
+    return { ...data, pullRequests: resolvedPullRequests };
   } catch (err) {
     // Handle 401 auth errors
     const status =
@@ -559,6 +565,9 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
       Object.assign(pr, pickEnrichmentFields(existingPr));
       pr.enriched = existingPr.enriched;
+    } else if (existingPr && pr.checkStatusStale && existingPr.enriched !== false && !existingPr.checkStatusStale) {
+      pr.checkStatus = existingPr.checkStatus;
+      pr.checkStatusStale = false;
     }
     applyRecentReadyGuard(pr);
     applyRecentApprovalGuard(pr, currentLogin);
@@ -596,7 +605,22 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
   });
 
   for (const err of data.errors) {
-    pushError(err.repo, err.message, err.retryable);
+    if (!err.repo.startsWith("backfill-batch-")) {
+      pushError(err.repo, err.message, err.retryable);
+    }
+  }
+  if (
+    data.errors.some((e) => e.repo.startsWith("backfill-batch-")) &&
+    data.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true)
+  ) {
+    pushNotification(
+      "pr-enrichment",
+      "Some pull request details could not be loaded — showing cached data where available",
+      "warning",
+      true,
+      undefined,
+      { silentToast: true }
+    );
   }
 
   const newItems = detectNewItems(data);
@@ -1618,6 +1642,7 @@ export default function DashboardPage() {
     try {
       const result = await approvePullRequest(client, nodeId, approvedHeadSha);
       if (getClient() !== client) return;
+      evictPREnrichmentCacheNode(pr.nodeId);
 
       const nextDecision: PullRequest["reviewDecision"] =
         result.reviewDecision ?? (priorReviewDecision === "REVIEW_REQUIRED" ? "APPROVED" : priorReviewDecision);
@@ -1688,6 +1713,7 @@ export default function DashboardPage() {
     try {
       const result = await markPullRequestReady(client, nodeId);
       if (getClient() !== client) return;
+      evictPREnrichmentCacheNode(pr.nodeId);
 
       recentlyMarkedReadyPRs.set(pr.id, {
         reviewDecision: result.reviewDecision,
@@ -1732,6 +1758,10 @@ export default function DashboardPage() {
     }
   }
 
+  const isPartialSync = createMemo(() =>
+    (getNotifications?.() ?? []).some((n) => n.source === "pr-enrichment")
+  );
+
   return (
     <div class="min-h-screen bg-base-200">
       <Header />
@@ -1771,6 +1801,7 @@ export default function DashboardPage() {
               sortDirection={activeTab() === "dependencies" ? undefined : viewState.globalSort.direction}
               onSortChange={activeTab() === "dependencies" ? undefined : (field, dir) => setSortPreference(field, dir)}
               hideOrgRepo={!isBuiltinTab(activeTab()) || activeTab() === "dependencies"}
+              partialSync={isPartialSync()}
             />
           </div>
 

@@ -49,6 +49,7 @@ vi.mock("../../src/app/services/events", () => ({
 
 const mockFetchIssuesAndPullRequests = vi.fn();
 const mockFetchWorkflowRuns = vi.fn();
+const mockInvalidatePREnrichmentCacheForRepos = vi.fn();
 vi.mock("../../src/app/services/api", () => ({
   fetchIssuesAndPullRequests: (...args: unknown[]) => mockFetchIssuesAndPullRequests(...args),
   fetchWorkflowRuns: (...args: unknown[]) => mockFetchWorkflowRuns(...args),
@@ -59,6 +60,8 @@ vi.mock("../../src/app/services/api", () => ({
     return results;
   }),
   resetEmptyActionRepos: vi.fn(),
+  resetPREnrichmentCache: vi.fn(),
+  invalidatePREnrichmentCacheForRepos: (...args: unknown[]) => mockInvalidatePREnrichmentCacheForRepos(...args),
 }));
 
 import { fetchHotPRStatus, fetchWorkflowRunById } from "../../src/app/services/api";
@@ -168,6 +171,7 @@ describe("fetchTargetedRepoData", () => {
 
     await fetchTargetedRepoData(summaries);
 
+    expect(mockInvalidatePREnrichmentCacheForRepos).toHaveBeenCalledWith(["owner/repo-a"]);
     expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledTimes(1);
     const calledRepos = mockFetchIssuesAndPullRequests.mock.calls[0][1] as Array<{ owner: string; name: string }>;
     expect(calledRepos).toContainEqual(expect.objectContaining({ owner: "owner", name: "repo-a" }));

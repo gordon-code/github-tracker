@@ -19,10 +19,20 @@ import {
   type HotPRStatusUpdate,
   type HotWorkflowRunUpdate,
   resetEmptyActionRepos,
+  resetPREnrichmentCache,
+  invalidatePREnrichmentCacheForRepos,
 } from "./api";
 import { fetchUserEvents, parseRepoEvents, resetEventsState, type RepoEventSummary } from "./events";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
+import {
+  pushNotification,
+  pushError,
+  getNotifications,
+  dismissNotificationBySource,
+  startCycleTracking,
+  endCycleTracking,
+  resetNotificationState,
+} from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,11 +84,67 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
+export const PR_ENRICHMENT_NOTIFICATION_SOURCE = "pr-enrichment";
+export const PR_ENRICHMENT_DEGRADED_MESSAGE =
+  "Some pull request details could not be loaded — showing cached data where available";
+export const WAKE_GRACE_MS = 2_000;
+export const ONLINE_RECOVERY_GRACE_MS = 1_500;
+
+let _consecutiveBackfillFailures = 0;
+
+export function processBackfillErrors(
+  errors: ApiError[],
+  pullRequests: PullRequest[],
+  isTargeted = false,
+): ApiError[] {
+  const backfillErrors = errors.filter((e) => e.repo.startsWith("backfill-batch-"));
+  const otherErrors = errors.filter((e) => !e.repo.startsWith("backfill-batch-"));
+
+  if (backfillErrors.length > 0) {
+    _consecutiveBackfillFailures++;
+    const hasUnenrichedPR = pullRequests.some(
+      (pr) => pr.enriched === false || pr.checkStatusStale === true,
+    );
+    const hasNonRetryable = backfillErrors.some((e) => !e.retryable);
+    if (hasNonRetryable || _consecutiveBackfillFailures >= 3 || hasUnenrichedPR) {
+      pushNotification(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true },
+      );
+    }
+  } else if (pullRequests.length > 0 || otherErrors.length === 0) {
+    _consecutiveBackfillFailures = 0;
+    if (isTargeted) {
+      dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
+    }
+  } else if (
+    _consecutiveBackfillFailures >= 3 ||
+    getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
+  ) {
+    pushNotification(
+      PR_ENRICHMENT_NOTIFICATION_SOURCE,
+      PR_ENRICHMENT_DEGRADED_MESSAGE,
+      "warning",
+      true,
+      undefined,
+      { silentToast: true },
+    );
+  }
+
+  return otherErrors;
+}
+
 export function resetPollState(): void {
   _hotPRs.clear();
   _hotPRsByDbId.clear();
   _hotRuns.clear();
   _hotPollGeneration = 0;
+  _consecutiveBackfillFailures = 0;
+  resetPREnrichmentCache();
   _resetNotificationState();
   resetEmptyActionRepos();
   resetNotificationState();
@@ -182,6 +248,7 @@ createRoot(() => {
  */
 export async function fetchAllData(
   onLightData?: (data: DashboardData) => void,
+  force = false,
 ): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
@@ -219,7 +286,7 @@ export async function fetchAllData(
         workflowRuns: [],
         errors: lightData.errors,
       });
-    } : undefined, trackedUsers, monitoredRepos),
+    } : undefined, trackedUsers, monitoredRepos, force),
     config.enableActions
       ? fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
@@ -269,7 +336,14 @@ const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // Sources managed by the poll coordinator — used for reconciliation
-const POLL_MANAGED_SOURCES = new Set(["poll", "graphql", "rate-limit", "search/issues", "search/prs"]);
+const POLL_MANAGED_SOURCES = new Set([
+  "poll",
+  "graphql",
+  "rate-limit",
+  "search/issues",
+  "search/prs",
+  PR_ENRICHMENT_NOTIFICATION_SOURCE,
+]);
 
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
@@ -282,28 +356,72 @@ function withJitter(intervalMs: number): number {
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling
  * - Skips background polls when hidden (GraphQL POST has no 304 shortcut)
- * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
- *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
+ * - On re-visible after >2 min hidden, fires catch-up fetch after WAKE_GRACE_MS
+ *   (safety net for browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
  *
  * Must be called inside a reactive root (e.g., createRoot or component body).
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: () => Promise<DashboardData>
+  fetchAll: (force?: boolean) => Promise<DashboardData>
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
+  let wakeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let onlineTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let onlineListener: (() => void) | null = null;
   let hiddenAt: number | null = null;
   let destroyed = false;
   let pendingForce = false;
+
+  function clearWakeAndOnlineTimers(): void {
+    if (wakeTimeoutId !== null) {
+      clearTimeout(wakeTimeoutId);
+      wakeTimeoutId = null;
+    }
+    if (onlineTimeoutId !== null) {
+      clearTimeout(onlineTimeoutId);
+      onlineTimeoutId = null;
+    }
+    if (onlineListener !== null && typeof window !== "undefined") {
+      window.removeEventListener("online", onlineListener);
+      onlineListener = null;
+    }
+  }
 
   async function doFetch(force = false): Promise<void> {
     if (destroyed) return;
     if (isRefreshing()) {
       if (force) pendingForce = true;
+      return;
+    }
+    if (!force && typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (!onlineListener && !onlineTimeoutId && typeof window !== "undefined") {
+        onlineListener = () => {
+          if (onlineListener) {
+            window.removeEventListener("online", onlineListener);
+            onlineListener = null;
+          }
+          if (onlineTimeoutId !== null) clearTimeout(onlineTimeoutId);
+          onlineTimeoutId = setTimeout(() => {
+            onlineTimeoutId = null;
+            if (destroyed || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+            if (document.visibilityState === "hidden") {
+              hiddenAt = Date.now() - REVISIT_THRESHOLD_MS - 1;
+              return;
+            }
+            void doFetch();
+            const currentInterval = getInterval();
+            if (currentInterval > 0) {
+              startTimer(currentInterval);
+            }
+          }, ONLINE_RECOVERY_GRACE_MS);
+        };
+        window.addEventListener("online", onlineListener);
+      }
       return;
     }
     checkAndResetIfExpired();
@@ -326,10 +444,11 @@ export function createPollCoordinator(
     startCycleTracking();
 
     try {
-      const data = await fetchAll();
+      const data = await fetchAll(force);
       setLastRefreshAt(new Date());
-      // Surface per-repo API errors globally
-      for (const err of data.errors) {
+      // Surface per-repo API errors globally, routing backfill-batch-* through 3-Tier escalation
+      const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests, false);
+      for (const err of nonBackfillErrors) {
         pushError(err.repo, err.message, err.retryable);
       }
       // Reconcile: dismiss notifications for sources that didn't push this cycle
@@ -380,22 +499,40 @@ export function createPollCoordinator(
   // Safety net for browser-level tab throttling/freezing. Background polls are
   // skipped (no 304 shortcut for GraphQL), but browsers may also freeze hidden
   // tab timers (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
-  // When the tab becomes visible again after >2 min, fire a catch-up fetch.
+  // When the tab becomes visible again after >2 min, fire a catch-up fetch
+  // after WAKE_GRACE_MS so wake-from-sleep network interfaces can settle.
   function handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
-      hiddenAt = Date.now();
+      if (wakeTimeoutId !== null) {
+        clearTimeout(wakeTimeoutId);
+        wakeTimeoutId = null;
+        hiddenAt = hiddenAt ?? (Date.now() - REVISIT_THRESHOLD_MS - 1);
+      } else {
+        hiddenAt = Date.now();
+      }
     } else {
       // Became visible
       const wasHiddenFor = hiddenAt !== null ? Date.now() - hiddenAt : 0;
-      hiddenAt = null;
 
       if (wasHiddenFor > REVISIT_THRESHOLD_MS) {
-        void doFetch();
-        // Reset the interval timer so we don't double-fire shortly after
+        // Reset the interval timer immediately so an existing interval tick
+        // cannot fire inside the 2s post-wake grace window.
         const currentInterval = getInterval();
         if (currentInterval > 0) {
           startTimer(currentInterval);
         }
+        if (wakeTimeoutId !== null) {
+          clearTimeout(wakeTimeoutId);
+        }
+        wakeTimeoutId = setTimeout(() => {
+          wakeTimeoutId = null;
+          hiddenAt = null;
+          if (!destroyed && document.visibilityState !== "hidden") {
+            void doFetch();
+          }
+        }, WAKE_GRACE_MS);
+      } else {
+        hiddenAt = null;
       }
     }
   }
@@ -415,12 +552,15 @@ export function createPollCoordinator(
     destroyed = true;
     pendingForce = false;
     clearTimer();
+    clearWakeAndOnlineTimers();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
 
   onCleanup(destroy);
 
   function manualRefresh(): void {
+    clearWakeAndOnlineTimers();
+    hiddenAt = null;
     void doFetch(true);
     // Reset interval timer so next auto-poll is a full interval from now
     const currentInterval = getInterval();
@@ -773,6 +913,8 @@ export async function fetchTargetedRepoData(
         })
         .filter((r): r is NonNullable<typeof r> => r !== null)
     : [];
+
+  invalidatePREnrichmentCacheForRepos(targetRepos.map((r) => r.fullName));
 
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
     fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),

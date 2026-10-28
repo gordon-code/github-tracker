@@ -30,6 +30,8 @@ vi.mock("../../src/app/services/api", () => ({
   fetchIssuesAndPullRequests: vi.fn(),
   fetchWorkflowRuns: vi.fn(),
   resetEmptyActionRepos: vi.fn(),
+  resetPREnrichmentCache: vi.fn(),
+  invalidatePREnrichmentCacheForRepos: vi.fn(),
   isUnauthorizedError: (err: unknown) => {
     if (typeof err !== "object" || err === null) return false;
     const e = err as { status?: unknown; response?: { status?: unknown } };
@@ -145,7 +147,7 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined, [], []);
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined, [], [], false);
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
       config.selectedRepos,
@@ -404,7 +406,8 @@ describe("fetchAllData — upstream repos and tracked users", () => {
       "octocat",
       undefined,
       [],
-      []
+      [],
+      false
     );
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
@@ -813,5 +816,51 @@ describe("fetchAllData — parallel execution", () => {
     // Now resolve both
     for (const resolve of resolvers) resolve(undefined);
     await promise;
+  });
+
+  it("passes force = true as the 7th argument to fetchIssuesAndPullRequests and invalidates repo enrichment cache on fetchTargetedRepoData", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const {
+      fetchIssuesAndPullRequests,
+      fetchWorkflowRuns,
+      invalidatePREnrichmentCacheForRepos,
+    } = await import("../../src/app/services/api");
+    const { config } = await import("../../src/app/stores/config");
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData, fetchTargetedRepoData } = await import("../../src/app/services/poll");
+
+    await fetchAllData(undefined, true);
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(
+      mockOctokit,
+      config.selectedRepos,
+      "octocat",
+      undefined,
+      [],
+      [],
+      true
+    );
+
+    const repoSummaries = new Map([
+      [
+        "octocat/Hello-World",
+        {
+          repoFullName: "octocat/Hello-World",
+          eventTypes: new Set(["PullRequestEvent"]),
+          hasIssueActivity: false,
+          hasPRActivity: true,
+          hasWorkflowActivity: false,
+          latestEventAt: new Date().toISOString(),
+        },
+      ],
+    ]);
+
+    await fetchTargetedRepoData(repoSummaries);
+    expect(invalidatePREnrichmentCacheForRepos).toHaveBeenCalledWith(["octocat/Hello-World"]);
   });
 });

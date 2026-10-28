@@ -187,8 +187,10 @@ beforeEach(async () => {
   vi.mocked(authStore.expireToken).mockClear();
   vi.mocked(githubService.getClient).mockReset();
   vi.mocked(githubService.getClient).mockReturnValue(null);
+  vi.mocked(errorsLib.pushError).mockClear();
   vi.mocked(errorsLib.pushNotification).mockClear();
   vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+  vi.mocked(errorsLib.getNotifications).mockReturnValue([]);
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -5338,5 +5340,278 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
       expect(screen.queryByText(/abandoned/i)).toBeNull();
     });
+  });
+});
+
+describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale restoration, and partial-sync indicator", () => {
+  it("returns resolvedPullRequests with enriched: true from pollFetch on cached backfill failure and suppresses Tier 0 targeted backfill errors while escalating Tier 1 with silentToast: true", async () => {
+    const enrichedPR = makePullRequest({
+      id: 601,
+      number: 601,
+      title: "Already enriched PR",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: "success",
+      additions: 25,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [enrichedPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedFetchAll).not.toBeNull());
+
+    // Poll 2 fails backfill-batch-1/1, returning enriched: false for PR 601
+    const unenrichedPR = makePullRequest({
+      id: 601,
+      number: 601,
+      title: "Already enriched PR",
+      repoFullName: "owner/repo",
+      enriched: false,
+      checkStatus: null,
+      additions: 0,
+    });
+    const backfillError = {
+      repo: "backfill-batch-1/1",
+      statusCode: null,
+      message: "Failed to fetch",
+      retryable: true,
+    };
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [unenrichedPR],
+      workflowRuns: [],
+      errors: [backfillError],
+    });
+
+    const poll2Result = await capturedFetchAll!();
+    // pollFetch returns post-fallbackToPreviousEnrichment pullRequests so doFetch sees enriched: true
+    expect(poll2Result.pullRequests).toHaveLength(1);
+    expect(poll2Result.pullRequests[0].enriched).toBe(true);
+    expect(poll2Result.pullRequests[0].checkStatus).toBe("success");
+
+    // Targeted update with backfill-batch-1/1 error on an already-enriched PR: Tier 0 silent
+    const targetedUnenriched601 = makePullRequest({
+      id: 601,
+      number: 601,
+      title: "Already enriched PR",
+      repoFullName: "owner/repo",
+      enriched: false,
+      checkStatus: null,
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [targetedUnenriched601],
+        workflowRuns: [],
+        errors: [backfillError],
+      },
+      ["owner/repo"]
+    );
+    expect(errorsLib.pushError).not.toHaveBeenCalledWith(
+      "backfill-batch-1/1",
+      expect.anything(),
+      expect.anything()
+    );
+    expect(errorsLib.pushNotification).not.toHaveBeenCalledWith(
+      "pr-enrichment",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+
+    // Targeted update with a brand-new unenriched PR (cold start) and backfill-batch-1/1 error: Tier 1 silentToast
+    const coldTargetedPR = makePullRequest({
+      id: 602,
+      number: 602,
+      title: "Cold targeted PR",
+      repoFullName: "owner/repo",
+      enriched: false,
+      checkStatus: null,
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [coldTargetedPR],
+        workflowRuns: [],
+        errors: [backfillError],
+      },
+      ["owner/repo"]
+    );
+    expect(errorsLib.pushError).not.toHaveBeenCalledWith(
+      "backfill-batch-1/1",
+      expect.anything(),
+      expect.anything()
+    );
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pr-enrichment",
+      "Some pull request details could not be loaded — showing cached data where available",
+      "warning",
+      true,
+      undefined,
+      { silentToast: true }
+    );
+  });
+
+  it("renders FilterBar partial-sync-indicator when 'pr-enrichment' notification is active in getNotifications()", async () => {
+    const [notifs, setNotifs] = createSignal<import("../../src/app/lib/errors").AppNotification[]>([]);
+    vi.mocked(errorsLib.getNotifications).mockImplementation(() => notifs());
+
+    render(() => <DashboardPage />);
+    expect(screen.queryByTestId("partial-sync-indicator")).toBeNull();
+
+    setNotifs([
+      {
+        id: "notif-pr-enrichment",
+        source: "pr-enrichment",
+        message: "Some pull request details could not be loaded — showing cached data where available",
+        timestamp: Date.now(),
+        retryable: true,
+        severity: "warning",
+        read: false,
+        silentToast: true,
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("partial-sync-indicator")).toBeDefined();
+    });
+  });
+
+  it("does not trigger Tier 1 pr-enrichment warning when onLightData fires with enriched: false and full fetch completes cleanly", async () => {
+    const lightPR = makePullRequest({
+      id: 603,
+      number: 603,
+      title: "Light PR",
+      repoFullName: "owner/repo",
+      enriched: false,
+      checkStatus: null,
+    });
+    const fullPR = makePullRequest({
+      id: 603,
+      number: 603,
+      title: "Light PR",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: "success",
+    });
+
+    vi.mocked(pollService.fetchAllData).mockImplementation(async (onLightData) => {
+      onLightData?.({
+        issues: [],
+        pullRequests: [lightPR],
+        workflowRuns: [],
+        errors: [],
+      });
+      return {
+        issues: [],
+        pullRequests: [fullPR],
+        workflowRuns: [],
+        errors: [],
+      };
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(pollService.rebuildHotSets).toHaveBeenCalled());
+
+    expect(errorsLib.pushNotification).not.toHaveBeenCalledWith(
+      "pr-enrichment",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("preserves prior non-stale checkStatus in pollFetch and handleTargetedData when light backfill fallback sets checkStatusStale: true", async () => {
+    const initialPR = makePullRequest({
+      id: 604,
+      number: 604,
+      title: "PR with CI status",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: "failure",
+      additions: 12,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [initialPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(pollService.rebuildHotSets).toHaveBeenCalledTimes(1));
+
+    // Subsequent full poll returns light-fallback PR with checkStatus: null, checkStatusStale: true
+    const staleFullPR = makePullRequest({
+      id: 604,
+      number: 604,
+      title: "PR with CI status",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: null,
+      checkStatusStale: true,
+      additions: 30,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [staleFullPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const fullResult = await capturedFetchAll!();
+    expect(fullResult.pullRequests[0].checkStatus).toBe("failure");
+    expect(fullResult.pullRequests[0].checkStatusStale).toBe(false);
+    expect(fullResult.pullRequests[0].additions).toBe(30);
+
+    // Targeted update also returns light-fallback PR with checkStatus: null, checkStatusStale: true
+    const staleTargetedPR = makePullRequest({
+      id: 604,
+      number: 604,
+      title: "PR with CI status",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: null,
+      checkStatusStale: true,
+      additions: 45,
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [staleTargetedPR],
+        workflowRuns: [],
+        errors: [
+          {
+            repo: "backfill-batch-1/1",
+            statusCode: null,
+            message: "Failed to fetch",
+            retryable: true,
+          },
+        ],
+      },
+      ["owner/repo"]
+    );
+
+    expect(staleTargetedPR.checkStatus).toBe("failure");
+    expect(staleTargetedPR.checkStatusStale).toBe(false);
+    // Because checkStatusStale was restored from existingPr, Tier 1 is not triggered
+    expect(errorsLib.pushNotification).not.toHaveBeenCalledWith(
+      "pr-enrichment",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
   });
 });
