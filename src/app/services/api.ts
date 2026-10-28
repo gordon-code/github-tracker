@@ -1220,6 +1220,28 @@ export async function fetchPREnrichment(
       const resolvedNodeIds = new Set<string>();
       let batchErrorPushed = false;
 
+      const ingestBackfillPayload = (
+        payload: Partial<HeavyBackfillResponse> | null | undefined,
+        isLightFallback: boolean,
+      ): void => {
+        if (!payload) return;
+        if (payload.rateLimit) {
+          updateGraphqlRateLimit(payload.rateLimit);
+        }
+        if (Array.isArray(payload.nodes)) {
+          for (const node of payload.nodes) {
+            if (!node || node.databaseId == null) continue;
+            enrichments.set(node.databaseId, mapHeavyPRNode(node, isLightFallback));
+            if (node.id) resolvedNodeIds.add(node.id);
+          }
+        }
+      };
+
+      const extractPartialBackfillData = (err: unknown): Partial<HeavyBackfillResponse> | null =>
+        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+          ? (err.data as Partial<HeavyBackfillResponse>)
+          : null;
+
       const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
         try {
           const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
@@ -1230,30 +1252,9 @@ export async function fetchPREnrichment(
             },
           });
 
-          if (response.rateLimit) {
-            updateGraphqlRateLimit(response.rateLimit);
-          }
-
-          for (const node of response.nodes) {
-            if (!node || node.databaseId == null) continue;
-            enrichments.set(node.databaseId, mapHeavyPRNode(node, false));
-            if (node.id) resolvedNodeIds.add(node.id);
-          }
+          ingestBackfillPayload(response, false);
         } catch (err) {
-          const partialErr =
-            err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
-              ? (err.data as Partial<HeavyBackfillResponse>)
-              : null;
-          if (partialErr?.rateLimit) {
-            updateGraphqlRateLimit(partialErr.rateLimit);
-          }
-          if (Array.isArray(partialErr?.nodes)) {
-            for (const node of partialErr.nodes) {
-              if (!node || node.databaseId == null) continue;
-              enrichments.set(node.databaseId, mapHeavyPRNode(node, false));
-              if (node.id) resolvedNodeIds.add(node.id);
-            }
-          }
+          ingestBackfillPayload(extractPartialBackfillData(err), false);
 
           const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
           if (remainingIds.length === 0) return;
@@ -1302,33 +1303,9 @@ export async function fetchPREnrichment(
               ids: remainingIds,
               request: { apiSource: "heavyBackfill", retries: 0 },
             });
-            if (lightResponse.rateLimit) {
-              updateGraphqlRateLimit(lightResponse.rateLimit);
-            }
-            for (const node of lightResponse.nodes) {
-              if (!node || node.databaseId == null) continue;
-              enrichments.set(node.databaseId, mapHeavyPRNode(node, true));
-              if (node.id) resolvedNodeIds.add(node.id);
-            }
+            ingestBackfillPayload(lightResponse, true);
           } catch (lightErr) {
-            const lightPartial =
-              lightErr &&
-              typeof lightErr === "object" &&
-              "data" in lightErr &&
-              lightErr.data &&
-              typeof lightErr.data === "object"
-                ? (lightErr.data as Partial<HeavyBackfillResponse>)
-                : null;
-            if (lightPartial?.rateLimit) {
-              updateGraphqlRateLimit(lightPartial.rateLimit);
-            }
-            if (Array.isArray(lightPartial?.nodes)) {
-              for (const node of lightPartial.nodes) {
-                if (!node || node.databaseId == null) continue;
-                enrichments.set(node.databaseId, mapHeavyPRNode(node, true));
-                if (node.id) resolvedNodeIds.add(node.id);
-              }
-            }
+            ingestBackfillPayload(extractPartialBackfillData(lightErr), true);
           }
         }
       };
