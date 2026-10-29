@@ -177,6 +177,38 @@ describe("fetchTargetedRepoData", () => {
     expect(calledRepos).toContainEqual(expect.objectContaining({ owner: "owner", name: "repo-a" }));
   });
 
+  it("forwards config.trackedUsers and config.monitoredRepos as 5th and 6th arguments to fetchIssuesAndPullRequests", async () => {
+    const octokit = makeOctokit();
+    mockGetClient.mockReturnValue(octokit);
+    const { config } = await import("../../src/app/stores/config");
+    const trackedUsers = [
+      { login: "renovate", avatarUrl: "https://github.com/renovate.png", name: "Renovate", type: "bot" as const },
+    ];
+    const monitoredRepos = [{ owner: "owner", name: "repo-a", fullName: "owner/repo-a" }];
+    (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).trackedUsers = trackedUsers;
+    (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).monitoredRepos = monitoredRepos;
+
+    try {
+      const summaries = new Map([
+        ["owner/repo-a", makeRepoSummary({ repoFullName: "owner/repo-a" })],
+      ]);
+
+      await fetchTargetedRepoData(summaries);
+
+      expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledWith(
+        octokit,
+        [{ owner: "owner", name: "repo-a", fullName: "owner/repo-a" }],
+        "",
+        undefined,
+        trackedUsers,
+        monitoredRepos,
+      );
+    } finally {
+      (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).trackedUsers = [];
+      (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).monitoredRepos = [];
+    }
+  });
+
   it("calls fetchWorkflowRuns only for repos with hasWorkflowActivity=true", async () => {
     mockGetClient.mockReturnValue(makeOctokit());
     const summaries = new Map([

@@ -6119,4 +6119,309 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
     );
     expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("pr-enrichment");
   });
+
+  it("clears stale checkStatus to null and keeps checkStatusStale: true when headSha changes across a degraded pollFetch (phaseOneFired branch) or handleTargetedData", async () => {
+    const oldSha = "1111111111111111111111111111111111111111";
+    const newSha = "2222222222222222222222222222222222222222";
+    const thirdSha = "3333333333333333333333333333333333333333";
+
+    // Initial light callback populates dashboardData.pullRequests with headSha: oldSha and
+    // checkStatus: "failure", then the full fetch resolves with a light-fallback PR on newSha.
+    vi.mocked(pollService.fetchAllData).mockImplementationOnce(async (onLightData) => {
+      onLightData?.({
+        issues: [],
+        pullRequests: [
+          makePullRequest({
+            id: 610,
+            number: 610,
+            title: "Force-pushed PR",
+            repoFullName: "owner/repo",
+            nodeId: "PR_kwDO610",
+            enriched: true,
+            headSha: oldSha,
+            updatedAt: "2026-04-20T10:00:00Z",
+            checkStatus: "failure",
+          }),
+        ],
+        workflowRuns: [],
+        errors: [],
+      });
+      return {
+        issues: [],
+        pullRequests: [
+          makePullRequest({
+            id: 610,
+            number: 610,
+            title: "Force-pushed PR",
+            repoFullName: "owner/repo",
+            nodeId: "PR_kwDO610",
+            enriched: true,
+            headSha: newSha,
+            updatedAt: "2026-04-20T10:05:00Z",
+            checkStatus: null,
+            checkStatusStale: true,
+          }),
+        ],
+        workflowRuns: [],
+        errors: [],
+      };
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(pollService.rebuildHotSets).toHaveBeenCalledTimes(1));
+
+    // Because headSha changed (oldSha -> newSha), the prior 'failure' status is cleared
+    // to null, checkStatusStale remains true, and rebuildHotSets receives the stale PR.
+    expect(pollService.rebuildHotSets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        pullRequests: [
+          expect.objectContaining({
+            id: 610,
+            nodeId: "PR_kwDO610",
+            headSha: newSha,
+            checkStatus: null,
+            checkStatusStale: true,
+          }),
+        ],
+      })
+    );
+
+    // Hot poll resolves newSha to 'failure' and syncs updatedAt via applyHotPollPRUpdates
+    capturedOnHotData!(
+      new Map([
+        [
+          610,
+          {
+            state: "OPEN",
+            draft: false,
+            updatedAt: "2026-04-20T10:06:00Z",
+            checkStatus: "failure",
+            reviewDecision: "REVIEW_REQUIRED",
+            mergeStateStatus: "BLOCKED",
+            headSha: newSha,
+          },
+        ],
+      ]),
+      new Map(),
+      0
+    );
+
+    // Degraded handleTargetedData with a new commit (thirdSha) and checkStatusStale: true
+    // clears checkStatus to null and keeps checkStatusStale: true.
+    const targetedStaleNewCommit = makePullRequest({
+      id: 610,
+      number: 610,
+      title: "Force-pushed PR",
+      repoFullName: "owner/repo",
+      nodeId: "PR_kwDO610",
+      enriched: true,
+      headSha: thirdSha,
+      updatedAt: "2026-04-20T10:10:00Z",
+      checkStatus: null,
+      checkStatusStale: true,
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [targetedStaleNewCommit],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/repo"]
+    );
+
+    expect(targetedStaleNewCommit.checkStatus).toBeNull();
+    expect(targetedStaleNewCommit.checkStatusStale).toBe(true);
+  });
+
+  it("clears checkStatus to null, clears headSha to '', sets checkStatusStale: true, evicts recentlyApprovedPRs, and enrolls PR in hot sets when updatedAt changes across an unenriched regression in pollFetch or handleTargetedData", async () => {
+    const user = userEvent.setup();
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    // Initial poll: PR #620 is enriched and approved via UI so recentlyApprovedPRs has an active entry
+    const initialPR = makePullRequest({
+      id: 620,
+      number: 620,
+      title: "Approved PR before force-push",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDO620",
+      headSha: validSha,
+      updatedAt: "2026-04-20T10:00:00Z",
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+      additions: 50,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [initialPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #620 Approved PR before force-push")
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(screen.getByText("Approved")).toBeTruthy());
+
+    // Verify applyHotPollPRUpdates updates pr.updatedAt when HotPRStatusUpdate includes updatedAt
+    const dashboardMod = await import("../../src/app/components/dashboard/DashboardPage");
+    const dummyPr = makePullRequest({ id: 999, updatedAt: "2026-04-20T09:00:00Z" });
+    dashboardMod.applyHotPollPRUpdates(
+      { pullRequests: [dummyPr] },
+      new Map([
+        [
+          999,
+          {
+            state: "OPEN",
+            updatedAt: "2026-04-20T11:30:00Z",
+            checkStatus: "success",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+          },
+        ],
+      ]),
+      "testuser"
+    );
+    expect(dummyPr.updatedAt).toBe("2026-04-20T11:30:00Z");
+
+    // Targeted refresh regresses PR #620 to enriched: false with a newer updatedAt:
+    // clears headSha to '', clears checkStatus to null, sets checkStatusStale: true,
+    // and evicts recentlyApprovedPRs so REVIEW_REQUIRED is not overridden to APPROVED.
+    const targetedRegressedPR = makePullRequest({
+      id: 620,
+      number: 620,
+      title: "Approved PR before force-push",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: false,
+      nodeId: "PR_kwDO620",
+      headSha: "",
+      updatedAt: "2026-04-20T10:05:00Z",
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: null,
+      additions: 0,
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [targetedRegressedPR],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/repo"]
+    );
+
+    expect(targetedRegressedPR.enriched).toBe(true);
+    expect(targetedRegressedPR.additions).toBe(50);
+    expect(targetedRegressedPR.headSha).toBe("");
+    expect(targetedRegressedPR.checkStatus).toBeNull();
+    expect(targetedRegressedPR.checkStatusStale).toBe(true);
+    expect(targetedRegressedPR.reviewDecision).toBe("REVIEW_REQUIRED");
+
+    // Restore PR #620 via hot poll with a new SHA and updatedAt, re-approve it, then test pollFetch regression
+    const secondSha = "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3";
+    capturedOnHotData!(
+      new Map([
+        [
+          620,
+          {
+            state: "OPEN",
+            draft: false,
+            updatedAt: "2026-04-20T10:06:00Z",
+            checkStatus: "success",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: "REVIEW_REQUIRED",
+            headSha: secondSha,
+            viewerLatestReviewState: null,
+          },
+        ],
+      ]),
+      new Map(),
+      0
+    );
+
+    const reApproveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #620 Approved PR before force-push")
+    );
+    await user.click(reApproveBtn);
+    await user.click(reApproveBtn);
+    await waitFor(() => expect(screen.getByText("Approved")).toBeTruthy());
+
+    // Full pollFetch returns enriched: false with a newer updatedAt ("2026-04-20T10:15:00Z"):
+    // fallbackToPreviousEnrichment + applyRecentApprovalGuard clears headSha to "", checkStatus to null,
+    // sets checkStatusStale: true, evicts recentlyApprovedPRs, and enrolls PR in rebuildHotSets.
+    vi.mocked(pollService.rebuildHotSets).mockClear();
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 620,
+          number: 620,
+          title: "Approved PR before force-push",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: false,
+          nodeId: "PR_kwDO620",
+          headSha: "",
+          updatedAt: "2026-04-20T10:15:00Z",
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: null,
+          additions: 0,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const pollRes = await capturedFetchAll!();
+    expect(pollRes.pullRequests[0]).toMatchObject({
+      id: 620,
+      enriched: true,
+      headSha: "",
+      checkStatus: null,
+      checkStatusStale: true,
+      reviewDecision: "REVIEW_REQUIRED",
+    });
+    expect(pollService.rebuildHotSets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequests: [
+          expect.objectContaining({
+            id: 620,
+            nodeId: "PR_kwDO620",
+            enriched: true,
+            headSha: "",
+            checkStatus: null,
+            checkStatusStale: true,
+          }),
+        ],
+      })
+    );
+  });
 });
