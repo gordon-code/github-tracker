@@ -477,6 +477,27 @@ describe("classifyDepStatus", () => {
     expect(classifyDepStatus(pr, "", 14)).toBe("mergeable");
   });
 
+  it("returns needs-action when checkStatus is null and checkStatusStale is true, and mergeable when checkStatusStale is false", () => {
+    const stalePr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: null,
+      checkStatusStale: true,
+      reviewDecision: null,
+      updatedAt: RECENT,
+    });
+    const resolvedNoCiPr = makePullRequest({
+      enriched: true,
+      draft: false,
+      checkStatus: null,
+      checkStatusStale: false,
+      reviewDecision: null,
+      updatedAt: RECENT,
+    });
+    expect(classifyDepStatus(stalePr, "", 14)).toBe("needs-action");
+    expect(classifyDepStatus(resolvedNoCiPr, "", 14)).toBe("mergeable");
+  });
+
   it("returns mergeable for approved PR with passing CI", () => {
     const pr = makePullRequest({
       enriched: true,

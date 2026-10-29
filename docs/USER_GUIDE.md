@@ -328,7 +328,7 @@ Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups
 |-------|----------|
 | **Mergeable** | CI passing (or no CI configured), not a draft, and no changes requested — ready to review or merge |
 | **Pending Rebase** | PR has the configured rebase label — waiting for the bot to rebase |
-| **Needs Action** | Failing or running CI checks, merge conflicts, draft PR, or changes requested — rows display explicit reason badges (`Failing checks`, `Merge conflict`, `Checks running`, `Draft`, `Changes`) |
+| **Needs Action** | Failing or running CI checks, check status still being fetched by the app, merge conflicts, draft PR, or changes requested — rows display explicit reason badges (`Failing checks`, `Merge conflict`, `Checks running`, `Checking status`, `Draft`, `Changes`) |
 | **Stale** | PR has not been updated in over 14 days — may need a rebase or manual review |
 
 Within each group, PRs are sorted by repository name, then update category (maintenance, pin, digest, patch, minor, major), then update date.
@@ -405,7 +405,7 @@ The dashboard polls GitHub at a configurable interval (default: **5 minutes**). 
 
 PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches with adaptive binary splitting (`25 → 12 → 6`). Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
 
-When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details.
+When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details. If a PR's commit (`headSha`) or `updatedAt` timestamp changed during a degraded backfill, its previous commit's check status is cleared (`checkStatusStale`) rather than carried forward onto the new commit, and is automatically resolved on the next hot-poll cycle.
 
 Setting the interval to **Off** disables automatic polling; manual refresh still works.
 
@@ -419,7 +419,7 @@ Each full refresh also checks GitHub's own status page for outages affecting Act
 
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
 
-- **PRs with pending CI checks** — re-checks status until checks resolve
+- **PRs with pending or stale (`checkStatusStale`) CI checks** — re-checks status until checks resolve (including PRs whose commit changed during a degraded backfill)
 - **In-progress workflow runs** — re-checks until the run completes
 
 Default interval: **30 seconds** (configurable from 10 to 120 seconds in Settings).

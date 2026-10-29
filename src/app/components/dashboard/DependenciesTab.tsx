@@ -375,6 +375,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
                 approvingPRIds={props.approvingPRIds}
                 onMarkPRReady={props.onMarkPRReady}
                 markingReadyPRIds={props.markingReadyPRIds}
+                loading={props.loading}
               />
             )}
           </For>
@@ -402,6 +403,7 @@ interface StatusGroupProps {
   approvingPRIds?: ReadonlySet<number>;
   onMarkPRReady?: (pr: PullRequest) => void;
   markingReadyPRIds?: ReadonlySet<number>;
+  loading?: boolean;
 }
 
 function stripCommitPrefix(title: string): string {
@@ -487,6 +489,12 @@ function StatusGroup(props: StatusGroupProps) {
                         <Show when={pr.checkStatus === "pending"}>
                           <span class="badge badge-warning badge-outline badge-sm">Checks running</span>
                         </Show>
+                        <Show when={pr.checkStatus !== "pending" && pr.checkStatusStale === true}>
+                          <span class="badge badge-ghost badge-outline badge-sm">Checking status</span>
+                        </Show>
+                      </Show>
+                      <Show when={pr.enriched === false && !props.loading}>
+                        <span class="badge badge-ghost badge-outline badge-sm">Checking status</span>
                       </Show>
 
                       <Show when={pr.enriched !== false && (pr.additions > 0 || pr.deletions > 0)}>

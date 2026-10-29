@@ -1021,6 +1021,63 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
     const needsActionGroup = document.getElementById("dep-group-needs-action")!;
     expect(needsActionGroup.textContent).toContain("react: 17.0.0 → 18.0.0");
   });
+
+  it("places PR with checkStatus: null and checkStatusStale: true into 'Needs Action' and renders 'Checking status'", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const staleNullCheckPR = makeMergeablePR({
+      id: 8050,
+      number: 850,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      enriched: true,
+      draft: false,
+      checkStatus: null,
+      checkStatusStale: true,
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderTab({
+      pullRequests: [staleNullCheckPR],
+      userLogin: "testuser",
+      loading: false,
+    });
+
+    expect(document.getElementById("dep-group-mergeable")).toBeNull();
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup).not.toBeNull();
+    expect(needsActionGroup.textContent).toContain("axios: 0.27.2 → 1.0.0");
+    expect(screen.getByText("Checking status")).toBeDefined();
+    expect(screen.queryByText("Checks running")).toBeNull();
+  });
+
+  it("renders 'Checking status' for unenriched PR when loading is false, and suppresses it when loading is true", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const unenrichedPR = makeNeedsActionPR({
+      id: 8051,
+      number: 851,
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      enriched: false,
+      checkStatus: null,
+    });
+
+    const { unmount } = renderTab({
+      pullRequests: [unenrichedPR],
+      userLogin: "testuser",
+      loading: false,
+    });
+
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup.textContent).toContain("lodash: 4.17.20 → 4.17.21");
+    expect(screen.getByText("Checking status")).toBeDefined();
+    unmount();
+
+    renderTab({
+      pullRequests: [unenrichedPR],
+      userLogin: "testuser",
+      loading: true,
+    });
+
+    expect(screen.queryByText("Checking status")).toBeNull();
+  });
 });
 
 // ── Ignore button ─────────────────────────────────────────────────────────────
