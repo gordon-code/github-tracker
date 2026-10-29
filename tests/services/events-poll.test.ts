@@ -306,6 +306,21 @@ describe("seedHotSetsFromTargeted", () => {
     expect(fetchHotPRStatus).not.toHaveBeenCalled();
   });
 
+  it("adds enriched PRs with checkStatus=null and checkStatusStale=true to hot set", async () => {
+    seedHotSetsFromTargeted({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 2, checkStatus: null, checkStatusStale: true, enriched: true, nodeId: "PR_stale" }),
+      ],
+    });
+
+    await fetchHotData();
+
+    expect(fetchHotPRStatus).toHaveBeenCalledTimes(1);
+    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1];
+    expect(calledNodeIds).toContain("PR_stale");
+  });
+
   it("does NOT add PRs that are not enriched", async () => {
     seedHotSetsFromTargeted({
       ...emptyData,

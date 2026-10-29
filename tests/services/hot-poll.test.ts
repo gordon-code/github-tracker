@@ -391,6 +391,27 @@ describe("rebuildHotSets", () => {
     expect(calledIds).toContain("PR_a");
   });
 
+  it("populates hot PRs when checkStatusStale is true even if checkStatus is null", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 1, checkStatus: null, checkStatusStale: true, enriched: true, nodeId: "PR_stale" }),
+        makePullRequest({ id: 2, checkStatus: null, checkStatusStale: false, enriched: true, nodeId: "PR_not_stale" }),
+      ],
+    });
+
+    await fetchHotData();
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
+    expect(calledIds).toEqual(["PR_stale"]);
+  });
+
   it("populates hot runs for queued/in_progress, skips completed", async () => {
     const requestFn = vi.fn(() => Promise.resolve({
       data: { id: 1, status: "in_progress", conclusion: null, updated_at: "2026-01-01T00:00:00Z", completed_at: null },

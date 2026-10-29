@@ -4371,6 +4371,100 @@ describe("DashboardPage — PR approval integration", () => {
     });
     expect(screen.getByText("Changes")).toBeTruthy();
   });
+
+  it("blocks approval and pushes a warning notification when pr.checkStatusStale is true, then allows approval once hot-poll clears checkStatusStale", async () => {
+    const user = userEvent.setup();
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: {
+            reviewDecision: "APPROVED",
+          },
+        },
+      },
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const staleCheckPR = makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: null,
+      checkStatusStale: true,
+      autoMergeMethod: null,
+      viewerReviewRequested: false,
+      viewerLatestReviewState: null,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [staleCheckPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    // Step 1: Enter confirmation mode
+    await user.click(approveBtn);
+    expect(approveBtn.textContent).toBe("Confirm?");
+
+    // Step 2: Confirm approval while checkStatusStale === true -> blocked by runtime guard
+    await user.click(approveBtn);
+    expect(graphqlMock).not.toHaveBeenCalled();
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "approve-pr:42",
+      "Cannot approve owner/repo#42 while CI check status is unavailable",
+      "warning"
+    );
+    expect(screen.getByText("Review needed")).toBeTruthy();
+
+    // Hot poll clears checkStatusStale and updates checkStatus to "success"
+    vi.mocked(errorsLib.pushNotification).mockClear();
+    capturedOnHotData!(
+      new Map([
+        [
+          42,
+          {
+            state: "OPEN",
+            draft: false,
+            checkStatus: "success",
+            reviewDecision: "REVIEW_REQUIRED",
+            mergeStateStatus: "BLOCKED",
+            headSha: validSha,
+            autoMergeMethod: null,
+            viewerReviewRequested: false,
+            viewerLatestReviewState: null,
+          },
+        ],
+      ]),
+      new Map(),
+      0
+    );
+
+    // Retry approval after checkStatusStale is cleared -> succeeds
+    const retryBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(retryBtn);
+    await user.click(retryBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByText("Approved")).toBeTruthy());
+  });
 });
 
 // ── Mark PR Ready Integration ────────────────────────────────────────────────
@@ -5156,7 +5250,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     }
   });
 
-  it("prunes _dashboardBodyCache and _dashboardBodyFailureCooldown when a dashboard issue leaves dashboardData.issues and later reappears", async () => {
+  it("prunes _dashboardBodyCache and _dashboardBodyFailureCooldown when a dashboard issue leaves dashboardData.issues on a clean poll, but preserves _dashboardBodyCache when lastFetchHadErrors() is true", async () => {
     const graphqlSpy = vi.fn()
       .mockRejectedValueOnce(new Error("transient fail"))
       .mockResolvedValue({
@@ -5190,7 +5284,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Poll 2: dashboard issue is closed/absent — prunes DASH_PRUNE from cooldown and cache
+    // Poll 2: dashboard issue is closed/absent — prunes DASH_PRUNE from cooldown
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
       pullRequests: [depPRInRepo()],
@@ -5200,7 +5294,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     await capturedFetchAll!();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Poll 3: dashboard issue reappears within cooldown window — re-fetched immediately because cooldown was pruned
+    // Poll 3: dashboard issue reappears within cooldown window — re-fetched immediately because cooldown was pruned, populating _dashboardBodyCache
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [makeDashIssue()],
       pullRequests: [depPRInRepo()],
@@ -5209,6 +5303,57 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     });
     await capturedFetchAll!();
     await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("github-tracker:dashboard-bodies") ?? "{}") as Record<string, unknown>;
+      expect(stored.DASH_PRUNE).toBeDefined();
+    });
+
+    // Poll 4: issue search fails (errors non-empty, issues: [], pullRequests non-empty) -> !lastFetchHadErrors() guard prevents pruning _dashboardBodyCache
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [{ repo: "search-issues", statusCode: 502, message: "Bad Gateway", retryable: true }],
+    });
+    await capturedFetchAll!();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      (JSON.parse(localStorage.getItem("github-tracker:dashboard-bodies") ?? "{}") as Record<string, unknown>).DASH_PRUNE
+    ).toBeDefined();
+
+    // Poll 5: dashboard issue returns on next clean poll -> cache hit (no new GraphQL call) because Poll 4 did not prune DASH_PRUNE
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(graphqlSpy).toHaveBeenCalledTimes(2);
+
+    // Poll 6: clean poll (errors: []) with issues: [] -> prunes DASH_PRUNE from _dashboardBodyCache and persists removal
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem("github-tracker:dashboard-bodies") ?? "{}") as Record<string, unknown>;
+      expect(stored.DASH_PRUNE).toBeUndefined();
+    });
+
+    // Poll 7: dashboard issue reappears after clean prune -> re-fetched via GraphQL
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeDashIssue()],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(3));
   });
 
   it("clears _dashboardBodyCache on onAuthCleared and ignores in-flight fetch resolution after logout", async () => {
@@ -5342,7 +5487,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     });
   });
 
-  it("persists parsed _dashboardBodyCache to localStorage ('github-tracker:dashboard-bodies'), hydrates across vi.resetModules() with 0 GraphQL calls, and removes it on onAuthCleared", async () => {
+  it("persists parsed _dashboardBodyCache to localStorage ('github-tracker:dashboard-bodies'), hydrates via seedCachedDashboardBodies() before the first refresh resolves across vi.resetModules() with 0 GraphQL calls, and removes it on onAuthCleared", async () => {
     const user = userEvent.setup();
     const dashIssue = makeIssue({
       id: 16,
@@ -5384,6 +5529,8 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     const { unmount } = render(() => <DashboardPage />);
     await waitFor(() => expect(graphqlSpy1).toHaveBeenCalledTimes(1));
     await waitFor(() => {
+      // Wait for both the deferred setTimeout write of github-tracker:dashboard and github-tracker:dashboard-bodies
+      expect(localStorage.getItem("github-tracker:dashboard")).not.toBeNull();
       const storedRaw = localStorage.getItem("github-tracker:dashboard-bodies");
       expect(storedRaw).not.toBeNull();
       const stored = JSON.parse(storedRaw!) as Record<string, { updatedAt: string; deps: Array<{ packageName: string }> }>;
@@ -5398,14 +5545,15 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     vi.resetModules();
     authClearCallbacks.length = 0;
 
+    let resolveReloadFetch: ((data: DashboardData) => void) | null = null;
     const graphqlSpy2 = vi.fn();
     vi.doMock("../../src/app/services/poll", () => ({
-      fetchAllData: vi.fn().mockResolvedValue({
-        issues: [dashIssue],
-        pullRequests: [depPRInRepo()],
-        workflowRuns: [],
-        errors: [],
-      }),
+      fetchAllData: vi.fn().mockImplementation(
+        () =>
+          new Promise<DashboardData>((resolve) => {
+            resolveReloadFetch = resolve;
+          })
+      ),
       createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
         const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
         const wrappedFetchAll = async () => {
@@ -5416,7 +5564,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
         capturedFetchAll = wrappedFetchAll;
         void wrappedFetchAll().catch(() => {});
         return {
-          isRefreshing: () => false,
+          isRefreshing: () => true,
           lastRefreshAt,
           manualRefresh: vi.fn(),
           destroy: vi.fn(),
@@ -5438,9 +5586,21 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
 
     render(() => <freshDashMod.default />);
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    // Pre-refresh assertion: before fetchAllData resolves (and before the { defer: true } dashboardBodies effect runs),
+    // seedCachedDashboardBodies() has already hydrated abandonedDepsMap and dashboardIssueUrls at module load
     await waitFor(() => {
       expect(screen.getByText(/abandoned/i)).toBeDefined();
     });
+    expect(graphqlSpy2).not.toHaveBeenCalled();
+
+    // Now let the first refresh resolve — still 0 GraphQL calls because updatedAt matches _dashboardBodyCache
+    resolveReloadFetch!({
+      issues: [dashIssue],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(graphqlSpy2).not.toHaveBeenCalled();
 
     // Invoking onAuthCleared removes github-tracker:dashboard-bodies from localStorage
