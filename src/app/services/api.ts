@@ -1438,17 +1438,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
         const { statusCode } = extractRejectionError(err);
         const retryable = (statusCode === null || statusCode >= 500) && !controller.signal.aborted;
 
-        if (!retryable) {
-          for (const id of remainingIds) failedIds.add(id);
-          if (!batchErrorPushed) {
-            batchErrorPushed = true;
-            console.warn(`[api] ${source} batch failed or timed out:`, err);
-            Sentry.captureException(err, { tags: { source } });
-          }
-          return;
-        }
-
-        if (remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
+        if (retryable && remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
           const mid = Math.floor(remainingIds.length / 2);
           await Promise.allSettled([
             fetchBatchWithSplit(remainingIds.slice(0, mid), true),
