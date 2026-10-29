@@ -297,9 +297,13 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
 
       const result = await fetchDashboardIssueBodies(octokit, ids);
 
-      // Top-level call uses retries: 1; split retry sub-batches use retries: 0
-      expect(observedRetries[0]).toBe(1);
-      expect(observedRetries.slice(1).every((r) => r === 0)).toBe(true);
+      // Splittable (> 6) top-level batch and split sub-batches all use retries: 0 so 502/504 splits immediately
+      expect(observedRetries.every((r) => r === 0)).toBe(true);
+
+      // Non-splittable (<= 6) top-level batch uses retries: 1
+      observedRetries.length = 0;
+      await fetchDashboardIssueBodies(octokit, ["N_0"]);
+      expect(observedRetries).toEqual([1]);
 
       // 25 -> [0..11 (12 ok), 12..24 (13 fail)] -> [12..17 (6 fail leaf), 18..24 (7 ok)]
       // 19 healthy nodes recovered, 6 leaf nodes in failedIds

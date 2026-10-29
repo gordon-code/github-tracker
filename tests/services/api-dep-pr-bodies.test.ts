@@ -246,8 +246,13 @@ describe("fetchDepPRBodies — error resilience", () => {
 
       const result = await fetchDepPRBodies(octokit, ids);
 
-      expect(observedRetries[0]).toBe(1);
-      expect(observedRetries.slice(1).every((r) => r === 0)).toBe(true);
+      // Splittable (> 6) top-level batch and split sub-batches all use retries: 0 so 502/504 splits immediately
+      expect(observedRetries.every((r) => r === 0)).toBe(true);
+
+      // Non-splittable (<= 6) top-level batch uses retries: 1
+      observedRetries.length = 0;
+      await fetchDepPRBodies(octokit, ["PR_0"]);
+      expect(observedRetries).toEqual([1]);
 
       // 25 -> [0..11 (12 ok), 12..24 (13 fail)] -> [12..17 (6 ok), 18..24 (7 fail)]
       // Because 7 > MIN_SPLIT_BATCH_SIZE (6), [18..24] splits once more into [18..20 (3 fail leaf), 21..24 (4 ok)]

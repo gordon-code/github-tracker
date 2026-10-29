@@ -1222,13 +1222,13 @@ export async function fetchPREnrichment(
           ? err.data
           : null;
 
-      const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
+      const fetchBatchWithSplit = async (batchIds: string[]): Promise<void> => {
         try {
           const response = await octokit.graphql<HeavyBackfillResponse>(HEAVY_PR_BACKFILL_QUERY, {
             ids: batchIds,
             request: {
               apiSource: "heavyBackfill",
-              ...(isSplitRetry ? { retries: 0 } : {}),
+              retries: 0,
             },
           });
 
@@ -1260,8 +1260,8 @@ export async function fetchPREnrichment(
           if (remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
             const mid = Math.floor(remainingIds.length / 2);
             await Promise.allSettled([
-              fetchBatchWithSplit(remainingIds.slice(0, mid), true),
-              fetchBatchWithSplit(remainingIds.slice(mid), true),
+              fetchBatchWithSplit(remainingIds.slice(0, mid)),
+              fetchBatchWithSplit(remainingIds.slice(mid)),
             ]);
             return;
           }
@@ -1290,7 +1290,7 @@ export async function fetchPREnrichment(
         }
       };
 
-      await fetchBatchWithSplit(batch, false);
+      await fetchBatchWithSplit(batch);
     }),
   );
 
@@ -1421,7 +1421,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
               request: {
                 apiSource: source,
                 signal: controller.signal,
-                retries: isSplitRetry ? 0 : 1,
+                retries: isSplitRetry || batchIds.length > MIN_SPLIT_BATCH_SIZE ? 0 : 1,
               },
             },
           ),

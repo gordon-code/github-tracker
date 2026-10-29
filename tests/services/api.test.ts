@@ -1723,7 +1723,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
   it("recursively splits a failing 25-node batch (25 -> 12/13 -> 6/6/6/7) on retryable errors, recovering all 25 enrichments with zero errors or Sentry calls", async () => {
     const sentrySpy = vi.mocked(Sentry.captureException);
     const callBatchSizes: number[] = [];
-    const splitRetriesFlags: Array<number | undefined> = [];
+    const allRetriesFlags: Array<number | undefined> = [];
 
     const octokit = makeOctokit(
       async () => ({ data: {} }),
@@ -1731,9 +1731,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
         const vars = variables as { ids: string[]; request?: { retries?: number } };
         const ids = vars.ids;
         callBatchSizes.push(ids.length);
-        if (ids.length < 25) {
-          splitRetriesFlags.push(vars.request?.retries);
-        }
+        allRetriesFlags.push(vars.request?.retries);
         if (ids.length > MIN_SPLIT_BATCH_SIZE) {
           throw new TypeError("Failed to fetch");
         }
@@ -1752,9 +1750,10 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(enrichments.size).toBe(25);
     expect(errors).toEqual([]);
     expect(sentrySpy).not.toHaveBeenCalled();
-    // Split sub-batches must pass retries: 0 to avoid compounding retry sleeps
-    expect(splitRetriesFlags.length).toBeGreaterThan(0);
-    expect(splitRetriesFlags.every((r) => r === 0)).toBe(true);
+    // Both top-level and split sub-batches must pass retries: 0 so a 502/504 splits immediately
+    // without @octokit/plugin-retry re-running the unsplit 25-node batch first
+    expect(allRetriesFlags.length).toBeGreaterThan(0);
+    expect(allRetriesFlags.every((r) => r === 0)).toBe(true);
     expect(callBatchSizes).toContain(25);
     expect(callBatchSizes).toContain(12);
     expect(callBatchSizes).toContain(13);
