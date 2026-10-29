@@ -469,6 +469,21 @@ describe("ToastContainer", () => {
     expect(getNotifications()[0].source).toBe("pr-enrichment");
     expect(getNotifications()[0].silentToast).toBe(true);
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    // Updating the same source without silentToast clears silentToast and toasts
+    vi.advanceTimersByTime(10);
+    pushNotification("pr-enrichment", "Escalated msg", "error", true);
+    expect(getNotifications()[0].silentToast).toBeUndefined();
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
+
+    // Updating during the 3s coalescing window with silentToast: true does not promote on recheck
+    vi.advanceTimersByTime(10);
+    pushNotification("pr-enrichment", "Silent coalesced update", "warning", true, undefined, {
+      silentToast: true,
+    });
+    expect(getNotifications()[0].silentToast).toBe(true);
+    vi.advanceTimersByTime(3_500);
+    expect(screen.queryByText("Silent coalesced update")).toBeNull();
   });
 
   it("suppresses flapping poll notifications across dismissNotificationBySource within 15 minutes and re-toasts after cooldown", () => {

@@ -949,6 +949,127 @@ describe("createPollCoordinator", () => {
         { silentToast: true }
       );
 
+      // Poll 7: reset streak, then verify failure #1 with checkStatusStale: true also escalates immediately to Tier 1
+      resetPollState();
+      mockPushNotification.mockClear();
+      const stalePR = makePullRequest({
+        id: 3,
+        repoFullName: "owner/repo",
+        enriched: true,
+        checkStatus: null,
+        checkStatusStale: true,
+      });
+      nextResult = {
+        issues: [],
+        pullRequests: [stalePR],
+        workflowRuns: [],
+        errors: [backfillErr],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      // Poll 8: reset streak, then verify failure #1 with a non-retryable backfill error escalates immediately to Tier 1
+      resetPollState();
+      mockPushNotification.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [{ ...backfillErr, statusCode: 403, retryable: false }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      dispose();
+    });
+  });
+
+  it("defers online recovery fetch when tab is hidden and catches up after WAKE_GRACE_MS on tab focus", async () => {
+    await createRoot(async (dispose) => {
+      const fetchAll = vi.fn().mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      const coordinator = createPollCoordinator(() => 300, fetchAll);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Go offline and trigger an interval tick while offline so the 'online' listener registers
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      vi.advanceTimersByTime(360_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Hide tab (< 2m) before online recovery fires
+      setDocumentVisible(false);
+      Object.defineProperty(navigator, "onLine", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      // Should NOT fetch while hidden, but should backdate hiddenAt
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Become visible 5 seconds later (< 2m since last hide, but backdated by online recovery)
+      vi.advanceTimersByTime(5_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // Go offline again, fire 'online', then flap back to offline before ONLINE_RECOVERY_GRACE_MS elapses
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      vi.advanceTimersByTime(360_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      // Still offline -> did not fetch, but re-registered 'online' listener
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // Now genuinely come back online -> second 'online' event triggers recovery fetch
+      Object.defineProperty(navigator, "onLine", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      coordinator.destroy();
       dispose();
     });
   });

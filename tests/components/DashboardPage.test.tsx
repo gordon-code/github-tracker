@@ -5613,5 +5613,86 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
       expect.anything(),
       expect.anything()
     );
+
+    // Cold-start targeted PR with checkStatusStale: true (no existingPr) pushes 'pr-enrichment',
+    // hot-poll update clears checkStatusStale: false, and subsequent clean targeted refresh dismisses 'pr-enrichment'
+    const coldStalePR = makePullRequest({
+      id: 605,
+      number: 605,
+      title: "Cold stale PR",
+      repoFullName: "owner/repo",
+      enriched: true,
+      checkStatus: null,
+      checkStatusStale: true,
+      nodeId: "PR_kwDO605",
+    });
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [coldStalePR],
+        workflowRuns: [],
+        errors: [
+          {
+            repo: "backfill-batch-1/1",
+            statusCode: null,
+            message: "Failed to fetch",
+            retryable: true,
+          },
+        ],
+      },
+      ["owner/repo"]
+    );
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pr-enrichment",
+      "Some pull request details could not be loaded — showing cached data where available",
+      "warning",
+      true,
+      undefined,
+      { silentToast: true }
+    );
+
+    // Hot-poll update clears checkStatusStale: false on PR 605
+    capturedOnHotData!(
+      new Map([
+        [
+          605,
+          {
+            state: "OPEN",
+            draft: false,
+            checkStatus: "success",
+            reviewDecision: "APPROVED",
+            mergeStateStatus: "CLEAN",
+            headSha: "abc1234",
+            autoMergeMethod: null,
+            viewerReviewRequested: false,
+            viewerLatestReviewState: null,
+          },
+        ],
+      ]),
+      new Map(),
+      0
+    );
+
+    // Subsequent clean targeted refresh dismisses 'pr-enrichment'
+    vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+    capturedOnTargetedData!(
+      {
+        issues: [],
+        pullRequests: [
+          makePullRequest({
+            id: 605,
+            number: 605,
+            title: "Cold stale PR",
+            repoFullName: "owner/repo",
+            enriched: true,
+            checkStatus: "success",
+          }),
+        ],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/repo"]
+    );
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("pr-enrichment");
   });
 });

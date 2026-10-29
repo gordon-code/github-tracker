@@ -49,6 +49,10 @@ export interface CheckStatus {
 export type AutoMergeMethod = "MERGE" | "SQUASH" | "REBASE";
 export type ViewerReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
 
+export const PR_ENRICHMENT_NOTIFICATION_SOURCE = "pr-enrichment";
+export const PR_ENRICHMENT_DEGRADED_MESSAGE =
+  "Some pull request details could not be loaded — showing cached data where available";
+
 export interface PullRequest {
   id: number;
   number: number;

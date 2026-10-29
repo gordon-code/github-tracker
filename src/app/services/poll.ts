@@ -23,6 +23,8 @@ import {
   invalidatePREnrichmentCacheForRepos,
 } from "./api";
 import { fetchUserEvents, parseRepoEvents, resetEventsState, type RepoEventSummary } from "./events";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../shared/types";
+export { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE };
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
 import {
   pushNotification,
@@ -84,9 +86,6 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
-export const PR_ENRICHMENT_NOTIFICATION_SOURCE = "pr-enrichment";
-export const PR_ENRICHMENT_DEGRADED_MESSAGE =
-  "Some pull request details could not be loaded — showing cached data where available";
 export const WAKE_GRACE_MS = 2_000;
 export const ONLINE_RECOVERY_GRACE_MS = 1_500;
 
@@ -95,7 +94,6 @@ let _consecutiveBackfillFailures = 0;
 export function processBackfillErrors(
   errors: ApiError[],
   pullRequests: PullRequest[],
-  isTargeted = false,
 ): ApiError[] {
   const backfillErrors = errors.filter((e) => e.repo.startsWith("backfill-batch-"));
   const otherErrors = errors.filter((e) => !e.repo.startsWith("backfill-batch-"));
@@ -125,9 +123,6 @@ export function processBackfillErrors(
     );
     if (!hasPhase1SearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
       _consecutiveBackfillFailures = 0;
-      if (isTargeted) {
-        dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
-      }
     } else if (
       _consecutiveBackfillFailures >= 3 ||
       getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
@@ -406,7 +401,7 @@ export function createPollCoordinator(
       if (force) pendingForce = true;
       return;
     }
-    if (!force && typeof navigator !== "undefined" && navigator.onLine === false) {
+    if (!force && typeof navigator !== "undefined" && !navigator.onLine) {
       if (!onlineListener && !onlineTimeoutId && typeof window !== "undefined") {
         onlineListener = () => {
           if (onlineListener) {
@@ -416,7 +411,11 @@ export function createPollCoordinator(
           if (onlineTimeoutId !== null) clearTimeout(onlineTimeoutId);
           onlineTimeoutId = setTimeout(() => {
             onlineTimeoutId = null;
-            if (destroyed || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+            if (destroyed) return;
+            if (typeof navigator !== "undefined" && !navigator.onLine) {
+              void doFetch();
+              return;
+            }
             if (document.visibilityState === "hidden") {
               hiddenAt = Date.now() - REVISIT_THRESHOLD_MS - 1;
               return;
@@ -455,7 +454,7 @@ export function createPollCoordinator(
       const data = await fetchAll(force);
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally, routing backfill-batch-* through 3-Tier escalation
-      const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests, false);
+      const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests);
       for (const err of nonBackfillErrors) {
         pushError(err.repo, err.message, err.retryable);
       }
@@ -595,7 +594,7 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
-    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
+    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;
@@ -956,7 +955,7 @@ export async function fetchTargetedRepoData(
 
 export function seedHotSetsFromTargeted(data: DashboardData): void {
   for (const pr of data.pullRequests) {
-    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
+    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) break;
       if (!_hotPRs.has(pr.nodeId)) {
         _hotPRs.set(pr.nodeId, pr.id);

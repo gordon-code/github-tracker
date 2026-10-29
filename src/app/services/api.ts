@@ -378,16 +378,11 @@ interface LightPRSearchResponse {
   rateLimit?: GraphQLRateLimit;
 }
 
-/** Phase 2 backfill query: enriches PRs with heavy fields using node IDs. */
-const HEAVY_PR_BACKFILL_QUERY = `
-  query($ids: [ID!]!) {
-    nodes(ids: $ids) {
-      ... on PullRequest {
+const BASE_PR_BACKFILL_FIELDS = `
         id
         databaseId
         headRefOid
         headRepository { owner { login } nameWithOwner }
-        mergeStateStatus
         assignees(first: 10) { nodes { login } }
         reviewRequests(first: 10) {
           nodes { requestedReviewer { ... on User { login } } }
@@ -403,7 +398,14 @@ const HEAVY_PR_BACKFILL_QUERY = `
         reviewThreads { totalCount }
         autoMergeRequest { mergeMethod }
         viewerLatestReview { state }
-        viewerLatestReviewRequest { id }
+        viewerLatestReviewRequest { id }`;
+
+/** Phase 2 backfill query: enriches PRs with heavy fields using node IDs. */
+const HEAVY_PR_BACKFILL_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {${BASE_PR_BACKFILL_FIELDS}
+        mergeStateStatus
         commits(last: 1) {
           nodes {
             commit {
@@ -421,27 +423,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
 const LIGHT_PR_BACKFILL_QUERY = `
   query($ids: [ID!]!) {
     nodes(ids: $ids) {
-      ... on PullRequest {
-        id
-        databaseId
-        headRefOid
-        headRepository { owner { login } nameWithOwner }
-        assignees(first: 10) { nodes { login } }
-        reviewRequests(first: 10) {
-          nodes { requestedReviewer { ... on User { login } } }
-        }
-        latestReviews(first: 5) {
-          totalCount
-          nodes { author { login } }
-        }
-        additions
-        deletions
-        changedFiles
-        comments { totalCount }
-        reviewThreads { totalCount }
-        autoMergeRequest { mergeMethod }
-        viewerLatestReview { state }
-        viewerLatestReviewRequest { id }
+      ... on PullRequest {${BASE_PR_BACKFILL_FIELDS}
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -754,7 +736,6 @@ async function runForkPRFallback(
         const pr = prMap.get(forkChunk[i].databaseId);
         if (pr) {
           pr.checkStatus = mapCheckStatus(state);
-          if (data && pr.checkStatusStale) delete pr.checkStatusStale;
         }
       }
     } catch (err) {
@@ -766,16 +747,15 @@ async function runForkPRFallback(
       }
       const partialData = errDataRaw as Record<string, ForkRepoResult | null | undefined> | null;
 
-      if (partialData) {
-        for (let i = 0; i < forkChunk.length; i++) {
-          const data = partialData[`fork${i}`];
-          if (!data) continue;
+      for (let i = 0; i < forkChunk.length; i++) {
+        const data = partialData?.[`fork${i}`];
+        const pr = prMap.get(forkChunk[i].databaseId);
+        if (!pr) continue;
+        if (data) {
           const state = data.object?.statusCheckRollup?.state ?? null;
-          const pr = prMap.get(forkChunk[i].databaseId);
-          if (pr) {
-            pr.checkStatus = mapCheckStatus(state);
-            if (pr.checkStatusStale) delete pr.checkStatusStale;
-          }
+          pr.checkStatus = mapCheckStatus(state);
+        } else {
+          pr.checkStatusStale = true;
         }
       }
 
@@ -1263,10 +1243,10 @@ export async function fetchPREnrichment(
           const retryable = statusCode === null || statusCode >= 500;
 
           if (!retryable) {
-            console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
-            Sentry.captureException(err, { tags: { source: "prEnrichment" } });
             if (!batchErrorPushed) {
               batchErrorPushed = true;
+              console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+              Sentry.captureException(err, { tags: { source: "prEnrichment" } });
               errors.push({
                 repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
                 statusCode,
@@ -1286,10 +1266,10 @@ export async function fetchPREnrichment(
             return;
           }
 
-          console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
-          Sentry.captureException(err, { tags: { source: "prEnrichment" } });
           if (!batchErrorPushed) {
             batchErrorPushed = true;
+            console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
+            Sentry.captureException(err, { tags: { source: "prEnrichment" } });
             errors.push({
               repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
               statusCode,
@@ -1628,6 +1608,7 @@ export function invalidatePREnrichmentCacheForRepos(repoFullNames: Iterable<stri
     targets.add(name.toLowerCase());
   }
   if (targets.size === 0) return;
+  _enrichmentCacheGen++;
   for (const [nodeId, entry] of _prEnrichmentCache) {
     if (targets.has(entry.repoFullName.toLowerCase())) {
       _prEnrichmentCache.delete(nodeId);
@@ -1637,6 +1618,7 @@ export function invalidatePREnrichmentCacheForRepos(repoFullNames: Iterable<stri
 
 export function evictPREnrichmentCacheNode(nodeId: string | undefined): void {
   if (nodeId) {
+    _enrichmentCacheGen++;
     _prEnrichmentCache.delete(nodeId);
   }
 }

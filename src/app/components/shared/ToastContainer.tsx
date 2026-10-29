@@ -80,6 +80,7 @@ function loadToastedMessages(): Map<string, ToastedMessageEntry> {
       if (e.length === 3 && typeof e[2] === "number" && Number.isFinite(e[2])) {
         result.set(e[0], { message: e[1], toastedAt: e[2] });
       } else if (e.length === 2) {
+        // toastedAt: 0 is a migration sentinel for legacy [source, message] 2-tuples in sessionStorage
         result.set(e[0], { message: e[1], toastedAt: 0 });
       }
     }

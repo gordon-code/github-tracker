@@ -403,7 +403,7 @@ Upstream repos are included in Issues and Pull Requests fetches but excluded fro
 
 The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the toolbar.
 
-PR enrichment queries (review decisions, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
+PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
 
 When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details.
 

@@ -15,6 +15,7 @@ import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, 
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
 import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode } from "../../services/api";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../../shared/types";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -250,6 +251,7 @@ export function applyHotPollPRUpdates(
     pr.state = update.state; // detect closed/merged quickly
     if (typeof update.draft === "boolean") pr.draft = update.draft;
     pr.checkStatus = update.checkStatus;
+    if (pr.checkStatusStale) pr.checkStatusStale = false;
     pr.reviewDecision = update.reviewDecision;
     if (update.headSha) {
       pr.headSha = update.headSha;
@@ -296,6 +298,7 @@ let _bodyFetchAuthGen = 0;
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
   _bodyFetchAuthGen++;
+  _targetedPushedEnrichmentDegraded = false;
   resetDashboardData();
   setHasFetchedFresh(false);
   setJiraIssues([]);
@@ -333,6 +336,8 @@ onAuthCleared(() => {
   }
   clearHotSets();
 });
+
+let _targetedPushedEnrichmentDegraded = false;
 
 async function pollFetch(force = false): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
@@ -484,6 +489,7 @@ async function pollFetch(force = false): Promise<DashboardData> {
         pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
       }
     }, 0);
+    _targetedPushedEnrichmentDegraded = false;
     return { ...data, pullRequests: resolvedPullRequests };
   } catch (err) {
     // Handle 401 auth errors
@@ -615,14 +621,22 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     (targetedBackfillErrors.some((e) => !e.retryable) ||
       data.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true))
   ) {
+    _targetedPushedEnrichmentDegraded = true;
     pushNotification(
-      "pr-enrichment",
-      "Some pull request details could not be loaded — showing cached data where available",
+      PR_ENRICHMENT_NOTIFICATION_SOURCE,
+      PR_ENRICHMENT_DEGRADED_MESSAGE,
       "warning",
       true,
       undefined,
       { silentToast: true }
     );
+  } else if (
+    _targetedPushedEnrichmentDegraded &&
+    targetedBackfillErrors.length === 0 &&
+    !dashboardData.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true)
+  ) {
+    _targetedPushedEnrichmentDegraded = false;
+    dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
   }
 
   const newItems = detectNewItems(data);
@@ -1628,6 +1642,14 @@ export default function DashboardPage() {
   async function handleApprovePR(pr: PullRequest): Promise<void> {
     const currentLogin = userLogin();
     if (!canApprovePR(pr, currentLogin)) return;
+    if (pr.checkStatusStale) {
+      pushNotification(
+        `approve-pr:${pr.id}`,
+        `Cannot approve ${pr.repoFullName}#${pr.number} while CI check status is unavailable`,
+        "warning"
+      );
+      return;
+    }
     if (approvingPRIds().has(pr.id)) return;
     const client = getClient();
     if (!client || !pr.nodeId || !pr.headSha) return;
@@ -1761,7 +1783,7 @@ export default function DashboardPage() {
   }
 
   const isPartialSync = createMemo(() =>
-    (getNotifications?.() ?? []).some((n) => n.source === "pr-enrichment")
+    (getNotifications?.() ?? []).some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
   );
 
   return (

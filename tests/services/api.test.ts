@@ -1883,6 +1883,116 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(resolved[1].checkStatus).toBeNull();
     expect(resolved[1].checkStatusStale).toBe(true);
   });
+
+  it("salvages partial err.data.nodes on heavy/light failures and deduplicates batch errors across split leaves", async () => {
+    const ids = Array.from({ length: 14 }, (_, i) => `PR_node_${i + 1}`);
+    const calls: { isLight: boolean; ids: string[] }[] = [];
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as { ids: string[] };
+        const isLight = !query.includes("statusCheckRollup");
+        calls.push({ isLight, ids: vars.ids });
+
+        if (!isLight && vars.ids.length === 14) {
+          // Top-level 14-node batch fails with partial data resolving PR_node_1 and PR_node_2,
+          // leaving 12 unresolved IDs which split into 6 + 6 leaves
+          throw Object.assign(new Error("Partial heavy timeout"), {
+            status: 502,
+            data: {
+              nodes: [
+                {
+                  id: "PR_node_1",
+                  databaseId: 1,
+                  headRefOid: "sha-1",
+                  headRepository: null,
+                  mergeStateStatus: "CLEAN",
+                  assignees: { nodes: [] },
+                  reviewRequests: { nodes: [] },
+                  latestReviews: { totalCount: 0, nodes: [] },
+                  additions: 5,
+                  deletions: 1,
+                  changedFiles: 1,
+                  comments: { totalCount: 0 },
+                  reviewThreads: { totalCount: 0 },
+                  autoMergeRequest: null,
+                  viewerLatestReview: null,
+                  viewerLatestReviewRequest: null,
+                  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+                },
+                {
+                  id: "PR_node_2",
+                  databaseId: 2,
+                  headRefOid: "sha-2",
+                  headRepository: null,
+                  mergeStateStatus: "CLEAN",
+                  assignees: { nodes: [] },
+                  reviewRequests: { nodes: [] },
+                  latestReviews: { totalCount: 0, nodes: [] },
+                  additions: 6,
+                  deletions: 2,
+                  changedFiles: 1,
+                  comments: { totalCount: 0 },
+                  reviewThreads: { totalCount: 0 },
+                  autoMergeRequest: null,
+                  viewerLatestReview: null,
+                  viewerLatestReviewRequest: null,
+                  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+                },
+              ],
+            },
+          });
+        }
+
+        if (!isLight) {
+          // Both 6-node leaf sub-batches fail heavy query
+          throw Object.assign(new Error("Leaf heavy timeout"), { status: 502 });
+        }
+
+        // Light fallback rejects with partial data on the first leaf and succeeds on the second
+        const firstId = vars.ids[0];
+        const dbId = Number(firstId.replace("PR_node_", ""));
+        const lightNode = {
+          id: firstId,
+          databaseId: dbId,
+          headRefOid: `sha-${dbId}`,
+          headRepository: null,
+          assignees: { nodes: [] },
+          reviewRequests: { nodes: [] },
+          latestReviews: { totalCount: 0, nodes: [] },
+          additions: 20,
+          deletions: 4,
+          changedFiles: 2,
+          comments: { totalCount: 0 },
+          reviewThreads: { totalCount: 0 },
+          autoMergeRequest: null,
+          viewerLatestReview: null,
+          viewerLatestReviewRequest: null,
+        };
+        if (firstId === "PR_node_3") {
+          throw Object.assign(new Error("Light partial error"), {
+            status: 502,
+            data: { nodes: [lightNode] },
+          });
+        }
+        return { nodes: [lightNode] };
+      }
+    );
+
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, ids);
+    // PR_node_1 and PR_node_2 salvaged from top-level heavy partial data and excluded from split retries
+    expect(enrichments.get(1)?.checkStatus).toBe("success");
+    expect(enrichments.get(2)?.checkStatus).toBe("success");
+    expect(calls[1].ids).not.toContain("PR_node_1");
+    expect(calls[1].ids).not.toContain("PR_node_2");
+    // PR_node_3 salvaged from lightErr.data.nodes with checkStatusStale: true
+    expect(enrichments.get(3)?.checkStatusStale).toBe(true);
+    expect(enrichments.get(9)?.checkStatusStale).toBe(true);
+    // Only 1 error pushed for the top-level batch despite both 6-node leaves failing
+    expect(errors).toHaveLength(1);
+    expect(errors[0].repo).toBe("backfill-batch-1/1");
+  });
 });
 
 // ── fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache ─────────
@@ -2127,5 +2237,164 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
 
     await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
     expect(heavyCalls).toBe(4);
+  });
+
+  it("marks fork PRs with checkStatusStale === true and skips caching when runForkPRFallback fails", async () => {
+    let heavyCalls = 0;
+    let forkCalls = 0;
+    let failForkFallback = true;
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          heavyCalls++;
+          return {
+            nodes: [
+              makeHeavyPR({
+                headRepository: { owner: { login: "contributor" }, nameWithOwner: "contributor/Hello-World" },
+                commits: { nodes: [] },
+              }),
+            ],
+          };
+        }
+        if (query.includes("fork0:")) {
+          forkCalls++;
+          if (failForkFallback) {
+            throw new TypeError("Failed to fetch");
+          }
+          return {
+            fork0: {
+              object: {
+                statusCheckRollup: { state: "SUCCESS" },
+              },
+            },
+          };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [makeLightPR()] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    // Poll 1: fork fallback fails -> checkStatusStale is set to true and PR is not cached
+    const res1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(1);
+    expect(forkCalls).toBe(1);
+    expect(res1.pullRequests[0].checkStatus).toBeNull();
+    expect(res1.pullRequests[0].checkStatusStale).toBe(true);
+
+    // Poll 2: because Poll 1 did not cache the failed fork check, it re-runs heavy backfill + fork fallback
+    failForkFallback = false;
+    const res2 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(2);
+    expect(forkCalls).toBe(2);
+    expect(res2.pullRequests[0].checkStatus).toBe("success");
+    expect(res2.pullRequests[0].checkStatusStale).toBeUndefined();
+  });
+
+  it("serves delta-backfill (monitoredRepos) PRs from cache and evicts closed PRs on clean polls without evicting unpolled repos", async () => {
+    const monitoredRepo = { owner: "octocat", name: "Monitored", fullName: "octocat/Monitored" };
+    let includeMainPr = true;
+    let failSearch = false;
+    let heavyCalls = 0;
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          heavyCalls++;
+          const ids = vars.ids as string[];
+          return {
+            nodes: ids.map((id) =>
+              makeHeavyPR({
+                id,
+                databaseId: id === "PR_kwDOcache42" ? 42 : 99,
+              })
+            ),
+          };
+        }
+        if (query.includes("prs: search(")) {
+          return {
+            issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            prs: {
+              issueCount: 1,
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                makeLightPR({
+                  id: "PR_kwDOmon99",
+                  databaseId: 99,
+                  number: 99,
+                  repository: { nameWithOwner: "octocat/Monitored" },
+                }),
+              ],
+            },
+          };
+        }
+        if (failSearch) {
+          throw Object.assign(new Error("Search 502"), { status: 502 });
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: {
+            issueCount: includeMainPr ? 1 : 0,
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: includeMainPr ? [makeLightPR()] : [],
+          },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    // Poll 1: populates cache for both main PR (42 in octocat/Hello-World) and delta monitored PR (99 in octocat/Monitored)
+    await fetchIssuesAndPullRequests(
+      octokit as never,
+      [testRepo, monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [monitoredRepo]
+    );
+    expect(heavyCalls).toBe(2);
+
+    // Poll 2: both main PR and monitored delta PR hit _prEnrichmentCache (0 new heavy calls)
+    await fetchIssuesAndPullRequests(
+      octokit as never,
+      [testRepo, monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [monitoredRepo]
+    );
+    expect(heavyCalls).toBe(2);
+
+    // Poll 3: targeted poll of ONLY monitoredRepo does NOT evict octocat/Hello-World's cached PR
+    await fetchIssuesAndPullRequests(
+      octokit as never,
+      [monitoredRepo],
+      "octocat",
+      undefined,
+      undefined,
+      [monitoredRepo]
+    );
+    expect(heavyCalls).toBe(2);
+
+    // Poll 4: search error on octocat/Hello-World (allErrors.length > 0) does NOT evict its cached PR
+    failSearch = true;
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    failSearch = false;
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(2);
+
+    // Poll 5: clean poll where PR 42 is closed/absent evicts PR_kwDOcache42 from _prEnrichmentCache
+    includeMainPr = false;
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    includeMainPr = true;
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(3);
   });
 });

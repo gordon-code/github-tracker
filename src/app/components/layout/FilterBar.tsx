@@ -4,6 +4,7 @@ import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
 import { Tooltip } from "../shared/Tooltip";
 import SortDropdown, { type SortOption } from "../shared/SortDropdown";
+import { PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../../shared/types";
 
 interface FilterBarProps {
   isRefreshing?: boolean;
@@ -128,7 +129,7 @@ export default function FilterBar(props: FilterBarProps) {
       <div class="flex-1" />
 
       <Show when={props.partialSync}>
-        <Tooltip content="Some pull request details could not be loaded — showing cached data where available">
+        <Tooltip content={PR_ENRICHMENT_DEGRADED_MESSAGE}>
           <span
             data-testid="partial-sync-indicator"
             role="status"
