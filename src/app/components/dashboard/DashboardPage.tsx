@@ -257,7 +257,7 @@ function applyRecentApprovalGuard(pr: PullRequest, currentLogin: string): void {
   }
   const entry = recentlyApprovedPRs.get(pr.id);
   if (!entry) return;
-  if (pr.headSha && pr.headSha !== entry.headSha) {
+  if ((pr.headSha && pr.headSha !== entry.headSha) || (pr.checkStatusStale && !pr.headSha)) {
     recentlyApprovedPRs.delete(pr.id);
     return;
   }
@@ -311,6 +311,9 @@ export function applyHotPollPRUpdates(
     if (!update) continue;
     pr.state = update.state; // detect closed/merged quickly
     if (typeof update.draft === "boolean") pr.draft = update.draft;
+    if (update.updatedAt) {
+      pr.updatedAt = update.updatedAt;
+    }
     pr.checkStatus = update.checkStatus;
     if (pr.checkStatusStale) pr.checkStatusStale = false;
     pr.reviewDecision = update.reviewDecision;
@@ -480,7 +483,9 @@ async function pollFetch(force = false): Promise<DashboardData> {
     const currentLogin = user()?.login ?? "";
     for (const pr of data.pullRequests) {
       applyRecentReadyGuard(pr);
-      applyRecentApprovalGuard(pr, currentLogin);
+      if (pr.enriched !== false) {
+        applyRecentApprovalGuard(pr, currentLogin);
+      }
     }
 
     let resolvedPullRequests: PullRequest[];
@@ -513,16 +518,36 @@ async function pollFetch(force = false): Promise<DashboardData> {
             // enriched from a prior cycle.
             const regressing = e.enriched === false && pr.enriched !== false;
             if (!regressing) {
-              const prevCheckStatus =
-                pr.enriched !== false && !pr.checkStatusStale ? pr.checkStatus : null;
+              const sameRevision =
+                pr.enriched !== false &&
+                !pr.checkStatusStale &&
+                (pr.headSha && e.headSha ? pr.headSha === e.headSha : pr.updatedAt === e.updatedAt);
+              const prevCheckStatus = pr.checkStatus;
               Object.assign(pr, pickEnrichmentFields(e));
-              if (e.checkStatusStale && prevCheckStatus !== null) {
-                pr.checkStatus = prevCheckStatus;
-                pr.checkStatusStale = false;
+              pr.checkStatusStale = e.checkStatusStale;
+              if (e.checkStatusStale) {
+                if (sameRevision) {
+                  pr.checkStatus = prevCheckStatus;
+                  pr.checkStatusStale = false;
+                } else {
+                  pr.checkStatus = null;
+                }
               }
               pr.reviewDecision = e.reviewDecision;
               pr.draft = e.draft;
               pr.enriched = e.enriched;
+            } else {
+              const revisionChanged =
+                pr.updatedAt !== e.updatedAt ||
+                (Boolean(pr.headSha) && Boolean(e.headSha) && pr.headSha !== e.headSha);
+              pr.updatedAt = e.updatedAt;
+              pr.reviewDecision = e.reviewDecision;
+              pr.draft = e.draft;
+              if (revisionChanged || pr.checkStatusStale) {
+                pr.headSha = "";
+                pr.checkStatus = null;
+                pr.checkStatusStale = true;
+              }
             }
             pr.nodeId = e.nodeId;
             pr.surfacedBy = e.surfacedBy;
@@ -667,11 +692,30 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }
     const existingPr = existingPRById.get(pr.id);
     if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
+      const revisionChanged =
+        existingPr.updatedAt !== pr.updatedAt ||
+        (Boolean(existingPr.headSha) && Boolean(pr.headSha) && existingPr.headSha !== pr.headSha);
       Object.assign(pr, pickEnrichmentFields(existingPr));
       pr.enriched = existingPr.enriched;
+      if (revisionChanged || existingPr.checkStatusStale) {
+        pr.headSha = "";
+        pr.checkStatus = null;
+        pr.checkStatusStale = true;
+      } else {
+        pr.checkStatusStale = existingPr.checkStatusStale;
+      }
     } else if (existingPr && pr.checkStatusStale && existingPr.enriched !== false && !existingPr.checkStatusStale) {
-      pr.checkStatus = existingPr.checkStatus;
-      pr.checkStatusStale = false;
+      const sameRevision =
+        existingPr.headSha && pr.headSha
+          ? existingPr.headSha === pr.headSha
+          : existingPr.updatedAt === pr.updatedAt;
+      if (sameRevision) {
+        pr.checkStatus = existingPr.checkStatus;
+        pr.checkStatusStale = false;
+      } else {
+        pr.checkStatus = null;
+        pr.checkStatusStale = true;
+      }
     }
     applyRecentReadyGuard(pr);
     applyRecentApprovalGuard(pr, currentLogin);

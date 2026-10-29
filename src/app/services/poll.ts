@@ -923,8 +923,10 @@ export async function fetchTargetedRepoData(
 
   invalidatePREnrichmentCacheForRepos(targetRepos.map((r) => r.fullName));
 
+  const trackedUsers = config.trackedUsers ?? [];
+  const monitoredRepos = config.monitoredRepos ?? [];
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),
+    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin, undefined, trackedUsers, monitoredRepos),
     workflowRepos.length > 0
       ? fetchWorkflowRuns(octokit, workflowRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
