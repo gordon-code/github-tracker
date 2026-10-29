@@ -337,7 +337,7 @@ Within each group, PRs are sorted by repository name, then update category (main
 
 If a Renovate Dashboard issue is detected in one of your tracked repos, abandoned dependency entries from its "Abandoned" section are shown as pill badges on matching PR rows. Each pill links directly to the Renovate Dashboard issue so you can investigate further.
 
-The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table. Repos excluded from the Dependencies tab (see Dependencies Settings below) are skipped for abandoned-package detection too — their Renovate Dashboard issue is never checked.
+The parser reads the Renovate Dashboard issue body to extract package names from the abandoned dependencies table and caches the parsed entries in `localStorage` (`github-tracker:dashboard-bodies`) keyed by issue `updatedAt`, so page reloads display `Abandoned` badges immediately without re-fetching unchanged Renovate Dependency Dashboard issue bodies. Repos excluded from the Dependencies tab (see Dependencies Settings below) are skipped for abandoned-package detection too — their Renovate Dashboard issue is never checked.
 
 ### Dependencies Settings
 
@@ -403,7 +403,7 @@ Upstream repos are included in Issues and Pull Requests fetches but excluded fro
 
 The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the toolbar.
 
-PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
+PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches with adaptive binary splitting (`25 → 12 → 6`). Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
 
 When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details.
 
@@ -456,7 +456,7 @@ When you return to a tab that has been hidden for more than 2 minutes, the dashb
 
 The bell icon in the header opens the notification drawer, which shows API errors, rate limit warnings, and other system messages. Notifications are dismissed automatically when the underlying condition clears on the next poll cycle.
 
-Transient single-cycle PR enrichment blips are absorbed silently when cached PR details are available. When PR enrichment degradation persists across 3 consecutive polls (or leaves newly discovered PRs unenriched on initial load), a silent warning entry is logged to the Notification Drawer without popping a disruptive toast. For notifications that do trigger a toast, repeated identical toasts for the same source are rate-limited to once per 15 minutes.
+Transient single-cycle PR enrichment blips are absorbed silently when cached PR details are available. When PR enrichment degradation persists across 3 consecutive polls (or leaves newly discovered PRs unenriched on initial load), a silent warning entry is logged to the Notification Drawer without popping a disruptive toast. Dependency PR and Renovate Dashboard body fetches similarly use 25-node batches with adaptive binary splitting (`25 → 12 → 6`) and log a silent warning to the Notification Drawer only after 3 consecutive failing fetch cycles. For notifications that do trigger a toast, repeated identical toasts for the same source are rate-limited to once per 15 minutes.
 
 ### GitHub Outage Notifications
 

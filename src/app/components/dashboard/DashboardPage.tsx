@@ -14,8 +14,8 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode } from "../../services/api";
-import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../../shared/types";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode, resetBodyFetchFailures } from "../../services/api";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE, DASHBOARD_BODIES_STORAGE_KEY } from "../../../shared/types";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -176,6 +176,67 @@ function persistDepMeta(meta: ReadonlyMap<number, VersionInfo>): void {
   }
 }
 
+const MAX_DASHBOARD_BODY_CACHE_ENTRIES = 500;
+const DISALLOWED_CACHE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+interface CachedDashboardBodyEntry {
+  updatedAt: string;
+  deps: AbandonedDependency[];
+}
+
+function isValidAbandonedDep(val: unknown): val is AbandonedDependency {
+  if (!val || typeof val !== "object" || Array.isArray(val)) return false;
+  const d = val as Record<string, unknown>;
+  return (
+    typeof d.datasource === "string" &&
+    d.datasource.length > 0 &&
+    d.datasource.length <= 128 &&
+    typeof d.packageName === "string" &&
+    d.packageName.length > 0 &&
+    d.packageName.length <= 512 &&
+    typeof d.lastUpdated === "string" &&
+    d.lastUpdated.length > 0 &&
+    d.lastUpdated.length <= 64
+  );
+}
+
+function loadDashboardBodyCache(): Map<string, CachedDashboardBodyEntry> {
+  try {
+    const raw = localStorage.getItem?.(DASHBOARD_BODIES_STORAGE_KEY);
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    const map = new Map<string, CachedDashboardBodyEntry>();
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (map.size >= MAX_DASHBOARD_BODY_CACHE_ENTRIES) break;
+      if (!k || k.length > 128 || DISALLOWED_CACHE_KEYS.has(k)) continue;
+      if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+      const entry = v as Record<string, unknown>;
+      if (typeof entry.updatedAt !== "string" || entry.updatedAt.length === 0 || entry.updatedAt.length > 64) continue;
+      if (!Array.isArray(entry.deps) || entry.deps.length > 200) continue;
+      if (!entry.deps.every(isValidAbandonedDep)) continue;
+      map.set(k, { updatedAt: entry.updatedAt, deps: entry.deps });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function persistDashboardBodyCache(cache: ReadonlyMap<string, CachedDashboardBodyEntry>): void {
+  try {
+    const obj: Record<string, CachedDashboardBodyEntry> = {};
+    const entries = [...cache.entries()];
+    const start = Math.max(0, entries.length - MAX_DASHBOARD_BODY_CACHE_ENTRIES);
+    for (const [k, v] of entries.slice(start)) {
+      obj[k] = v;
+    }
+    localStorage.setItem?.(DASHBOARD_BODIES_STORAGE_KEY, JSON.stringify(obj));
+  } catch {
+    // Non-critical — storage may be full
+  }
+}
+
 const [depMeta, setDepMeta] = createSignal<ReadonlyMap<number, VersionInfo>>(loadDepMetaCache());
 let _fetchingDashboardBodies = false;
 let _fetchingDepBodies = false;
@@ -291,7 +352,42 @@ export function applyHotPollPRUpdates(
 // long as the underlying failure (e.g. a secondary-rate-limit stall) persists.
 export const DEP_BODY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const _depBodyFailureCooldown = new Map<number, number>();
-const _dashboardBodyCache = new Map<string, { updatedAt: string; deps: AbandonedDependency[] }>();
+const _dashboardBodyCache = loadDashboardBodyCache();
+function seedCachedDashboardBodies(): void {
+  if (!config.dependencies?.enabled || _dashboardBodyCache.size === 0 || dashboardData.issues.length === 0) return;
+  const botLogins = expandBotLogins(
+    (config.trackedUsers ?? []).filter((u) => u.type === "bot").map((u) => u.login.toLowerCase()),
+  );
+  const excludedOrgs = config.dependencies?.excludedOrgs ?? [];
+  const excludedRepos = config.dependencies?.excludedRepos ?? [];
+  const depRepos = new Set(
+    dashboardData.pullRequests
+      .filter(
+        (pr) =>
+          pr.state === "OPEN" &&
+          isDependencyPr(pr, botLogins) &&
+          !isRepoExcludedFromDependencies(pr.repoFullName, excludedOrgs, excludedRepos),
+      )
+      .map((pr) => pr.repoFullName),
+  );
+  if (depRepos.size === 0) return;
+  const relevant = findDashboardIssues(dashboardData.issues, botLogins).filter((di) =>
+    depRepos.has(di.repoFullName),
+  );
+  if (relevant.length === 0) return;
+  const seededAbandoned = new Map<string, AbandonedDependency[]>();
+  const seededUrls = new Map<string, string>();
+  for (const di of relevant) {
+    const cached = _dashboardBodyCache.get(di.nodeId);
+    if (cached && cached.updatedAt === di.updatedAt) {
+      seededAbandoned.set(di.repoFullName, cached.deps);
+    }
+    seededUrls.set(di.repoFullName, di.htmlUrl);
+  }
+  if (seededAbandoned.size > 0) setAbandonedDepsMap(seededAbandoned);
+  if (seededUrls.size > 0) setDashboardIssueUrls(seededUrls);
+}
+seedCachedDashboardBodies();
 const _dashboardBodyFailureCooldown = new Map<string, number>();
 let _bodyFetchAuthGen = 0;
 
@@ -309,11 +405,13 @@ onAuthCleared(() => {
   setDashboardIssueUrls(new Map());
   setDepMeta(new Map());
   localStorage.removeItem?.(DEP_META_STORAGE_KEY);
+  localStorage.removeItem?.(DASHBOARD_BODIES_STORAGE_KEY);
   _fetchingDashboardBodies = false;
   _fetchingDepBodies = false;
   _depBodyFailureCooldown.clear();
   _dashboardBodyCache.clear();
   _dashboardBodyFailureCooldown.clear();
+  resetBodyFetchFailures();
   setApprovingPRIds(new Set<number>());
   recentlyApprovedPRs.clear();
   setMarkingReadyPRIds(new Set<number>());
@@ -1401,8 +1499,15 @@ export default function DashboardPage() {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
           const activeNodeIds = new Set(dashboardIssues.map((di) => di.nodeId));
-          for (const k of _dashboardBodyCache.keys()) {
-            if (!activeNodeIds.has(k)) _dashboardBodyCache.delete(k);
+          if (!lastFetchHadErrors()) {
+            let pruned = false;
+            for (const k of _dashboardBodyCache.keys()) {
+              if (!activeNodeIds.has(k)) {
+                _dashboardBodyCache.delete(k);
+                pruned = true;
+              }
+            }
+            if (pruned) persistDashboardBodyCache(_dashboardBodyCache);
           }
           for (const k of _dashboardBodyFailureCooldown.keys()) {
             if (!activeNodeIds.has(k)) _dashboardBodyFailureCooldown.delete(k);
@@ -1413,6 +1518,7 @@ export default function DashboardPage() {
           if (relevant.length === 0) {
             if (abandonedDepsMap().size > 0) setAbandonedDepsMap(new Map());
             if (dashboardIssueUrls().size > 0) setDashboardIssueUrls(new Map());
+            if (_dashboardBodyFailureCooldown.size === 0) resetBodyFetchFailures("dashboardBodies");
             return;
           }
 
@@ -1423,6 +1529,10 @@ export default function DashboardPage() {
             return !failedAt || now - failedAt >= DEP_BODY_FAILURE_COOLDOWN_MS;
           });
 
+          if (toFetch.length === 0 && _dashboardBodyFailureCooldown.size === 0) {
+            resetBodyFetchFailures("dashboardBodies");
+          }
+
           let failedCount = 0;
           if (toFetch.length > 0) {
             const { bodies: bodyMap, failedIds } = await fetchDashboardIssueBodies(
@@ -1431,6 +1541,7 @@ export default function DashboardPage() {
             );
             if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
             failedCount = failedIds.size;
+            let cacheUpdated = false;
             for (const di of toFetch) {
               if (failedIds.has(di.nodeId)) {
                 _dashboardBodyFailureCooldown.set(di.nodeId, now);
@@ -1442,8 +1553,10 @@ export default function DashboardPage() {
                   updatedAt: di.updatedAt,
                   deps: parseAbandonedSection(bodyMap.get(di.nodeId) ?? ""),
                 });
+                cacheUpdated = true;
               }
             }
+            if (cacheUpdated) persistDashboardBodyCache(_dashboardBodyCache);
           }
 
           const newAbandonedMap = new Map<string, AbandonedDependency[]>();
@@ -1475,16 +1588,21 @@ export default function DashboardPage() {
   // classification survives page refresh without visual jank.
   createEffect(() => {
     if (!config.dependencies.enabled) return;
+    const meta = depMeta();
+    const depPrs = dependencyPullRequests();
+    const visibleDepPrs = visibleDependencyPullRequests();
+    const allUnenriched =
+      dashboardData.pullRequests.length > 0 &&
+      dashboardData.pullRequests.every((pr) => pr.enriched === false);
+    const isRefreshing = Boolean(_coordinator()?.isRefreshing());
     if (_fetchingDepBodies) {
       console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;
     }
     const octokit = getClient();
     if (!octokit) return;
+    if (allUnenriched && isRefreshing) return;
 
-    const meta = depMeta();
-    const depPrs = dependencyPullRequests();
-    const visibleDepPrs = visibleDependencyPullRequests();
     const now = Date.now();
 
     // Prune cooldown entries for PRs no longer in the dependency set on every
@@ -1503,6 +1621,7 @@ export default function DashboardPage() {
       return !failedAt || now - failedAt >= DEP_BODY_FAILURE_COOLDOWN_MS;
     });
     if (toFetch.length === 0) {
+      if (_depBodyFailureCooldown.size === 0) resetBodyFetchFailures("depPRBodies");
       console.debug("[dashboard] depBodies effect: nothing to fetch", { metaSize: meta.size, visibleDepPrCount: visibleDepPrs.length });
       return;
     }
@@ -1541,7 +1660,9 @@ export default function DashboardPage() {
         }
         setDepMeta(merged);
         console.debug(`[dashboard] depBodies effect: depMeta updated, size=${merged.size}`);
-        setTimeout(() => persistDepMeta(merged), 0);
+        setTimeout(() => {
+          if (authGen === _bodyFetchAuthGen) persistDepMeta(merged);
+        }, 0);
       } finally {
         if (authGen === _bodyFetchAuthGen) {
           _fetchingDepBodies = false;

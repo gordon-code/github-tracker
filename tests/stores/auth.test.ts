@@ -138,12 +138,16 @@ describe("clearAuth", () => {
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
   });
 
-  it("removes config and view keys from localStorage", () => {
+  it("removes config, view, dep-meta, and dashboard-bodies keys from localStorage", () => {
     localStorageMock.setItem("github-tracker:config", "{}");
     localStorageMock.setItem("github-tracker:view", "{}");
+    localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
+    localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
     mod.clearAuth();
     expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dep-meta")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBeNull();
   });
 
   it("does not call /api/oauth/logout (OAuth App uses permanent tokens)", () => {
@@ -186,14 +190,18 @@ describe("expireToken", () => {
     expect(mod.user()).toBeNull();
   });
 
-  it("removes auth token and dashboard cache from localStorage — config, view preserved", () => {
+  it("removes auth token, dashboard cache, dep-meta, and dashboard-bodies from localStorage — config, view preserved", () => {
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
     localStorageMock.setItem("github-tracker:dashboard", '{"cached":true}');
+    localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
+    localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
     mod.setAuth({ access_token: "ghs_abc" });
     mod.expireToken();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:dashboard")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dep-meta")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
   });
@@ -1471,25 +1479,35 @@ describe("setAuthFromPat — identity switch", () => {
     expect(mod.token()).toBe("ghp_token2");
   });
 
-  it("clears config and view localStorage keys on a genuine identity switch", () => {
+  it("clears config, view, dep-meta, and dashboard-bodies localStorage keys on a genuine identity switch", () => {
     mod.setAuthFromPat("ghp_token1", userA);
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
+    localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
 
     mod.setAuthFromPat("ghp_token2", userB);
 
     expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dep-meta")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBeNull();
   });
 
-  it("preserves config and view localStorage keys when replacing a token for the same identity", () => {
+  it("preserves config, view, dep-meta, and dashboard-bodies localStorage keys when replacing a token for the same identity", () => {
     mod.setAuthFromPat("ghp_token1", userA);
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
+    localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
 
     mod.setAuthFromPat("ghp_token2", userA);
 
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(localStorageMock.getItem("github-tracker:dep-meta")).toBe('{"1":{}}');
+    expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBe(
+      '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}'
+    );
   });
 });

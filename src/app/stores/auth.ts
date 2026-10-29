@@ -8,6 +8,7 @@ import { pushNotification } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
+import { DASHBOARD_BODIES_STORAGE_KEY } from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
@@ -257,6 +258,9 @@ export const setAuthFromCredential = setAuthFromPat;
  * non-null) and `expireToken()` never clears IndexedDB.
  */
 export async function clearIdentityData(): Promise<void> {
+  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
+  localStorage.removeItem?.(DEP_META_STORAGE_KEY);
+  localStorage.removeItem?.(DASHBOARD_BODIES_STORAGE_KEY);
   // Synchronous per-identity resets first (matches the ordering the identity-
   // switch branch has always had: callbacks complete before the awaited work).
   for (const cb of _onClearCallbacks) {
@@ -294,6 +298,8 @@ export function clearAuth(): void {
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     localStorage.removeItem(VIEW_STORAGE_KEY);
     localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+    localStorage.removeItem(DEP_META_STORAGE_KEY);
+    localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
     _setToken(null);
     setUser(null);
     // Clear IndexedDB cache to prevent data leakage between users
@@ -323,6 +329,8 @@ export function clearAuth(): void {
 export function expireToken(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
   localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+  localStorage.removeItem(DEP_META_STORAGE_KEY);
+  localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
   _setToken(null);
   setUser(null);
   _onClearCallbacks.forEach((cb) => { try { cb(); } catch (e) { console.warn("[auth] callback failed during expireToken:", e); } });

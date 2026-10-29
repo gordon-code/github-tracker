@@ -5341,6 +5341,270 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       expect(screen.queryByText(/abandoned/i)).toBeNull();
     });
   });
+
+  it("persists parsed _dashboardBodyCache to localStorage ('github-tracker:dashboard-bodies'), hydrates across vi.resetModules() with 0 GraphQL calls, and removes it on onAuthCleared", async () => {
+    const user = userEvent.setup();
+    const dashIssue = makeIssue({
+      id: 16,
+      number: 16,
+      title: "Dependency Dashboard",
+      userLogin: "renovate[bot]",
+      nodeId: "DASH_PERSIST_1",
+      repoFullName: "owner/repo",
+      state: "OPEN",
+      updatedAt: "2026-04-01T00:00:00Z",
+    });
+
+    const graphqlSpy1 = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: "DASH_PERSIST_1",
+          body: [
+            "## Abandoned",
+            "",
+            "| Datasource | Package | Last Updated |",
+            "| --- | --- | --- |",
+            "| npm | axios | 2020-01-01 |",
+          ].join("\n"),
+        },
+      ],
+      rateLimit: null,
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy1 } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [dashIssue],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const { unmount } = render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy1).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const storedRaw = localStorage.getItem("github-tracker:dashboard-bodies");
+      expect(storedRaw).not.toBeNull();
+      const stored = JSON.parse(storedRaw!) as Record<string, { updatedAt: string; deps: Array<{ packageName: string }> }>;
+      expect(stored.DASH_PERSIST_1).toEqual({
+        updatedAt: "2026-04-01T00:00:00Z",
+        deps: [{ datasource: "npm", packageName: "axios", lastUpdated: "2020-01-01" }],
+      });
+    });
+    unmount();
+
+    // Simulate reload: reset modules while keeping localStorage intact (both dashboard cache and dashboard-bodies cache)
+    vi.resetModules();
+    authClearCallbacks.length = 0;
+
+    const graphqlSpy2 = vi.fn();
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [dashIssue],
+        pullRequests: [depPRInRepo()],
+        workflowRuns: [],
+        errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+        const wrappedFetchAll = async () => {
+          const res = await fetchAll();
+          setLastRefreshAt(new Date());
+          return res;
+        };
+        capturedFetchAll = wrappedFetchAll;
+        void wrappedFetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        };
+      }),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    const freshGithub = await import("../../src/app/services/github");
+    vi.mocked(freshGithub.getClient).mockReturnValue(
+      { graphql: graphqlSpy2 } as unknown as ReturnType<typeof freshGithub.getClient>
+    );
+    const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
+
+    render(() => <freshDashMod.default />);
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/abandoned/i)).toBeDefined();
+    });
+    expect(graphqlSpy2).not.toHaveBeenCalled();
+
+    // Invoking onAuthCleared removes github-tracker:dashboard-bodies from localStorage
+    for (const cb of authClearCallbacks) cb();
+    expect(localStorage.getItem("github-tracker:dashboard-bodies")).toBeNull();
+  });
+
+  it("ignores corrupt or invalid entries in 'github-tracker:dashboard-bodies' without throwing and re-fetches uncached issues", async () => {
+    // Seed corrupt and invalid shapes into localStorage before importing DashboardPage
+    localStorage.setItem(
+      "github-tracker:dashboard-bodies",
+      JSON.stringify({
+        DASH_CORRUPT_1: { updatedAt: 12345, deps: [] }, // non-string updatedAt
+        DASH_CORRUPT_2: { updatedAt: "2026-04-01T00:00:00Z", deps: [{ datasource: "", packageName: "axios", lastUpdated: "2020-01-01" }] }, // empty datasource
+        prototype: { updatedAt: "2026-04-01T00:00:00Z", deps: [] }, // disallowed key
+      })
+    );
+
+    vi.resetModules();
+    const graphqlSpy = vi.fn().mockResolvedValue({
+      nodes: [{ id: "DASH_CORRUPT_1", body: "" }],
+      rateLimit: null,
+    });
+
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [
+          makeIssue({
+            id: 17,
+            number: 17,
+            title: "Dependency Dashboard",
+            userLogin: "renovate[bot]",
+            nodeId: "DASH_CORRUPT_1",
+            repoFullName: "owner/repo",
+            state: "OPEN",
+            updatedAt: "2026-04-01T00:00:00Z",
+          }),
+        ],
+        pullRequests: [depPRInRepo()],
+        workflowRuns: [],
+        errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+        const wrappedFetchAll = async () => {
+          const res = await fetchAll();
+          setLastRefreshAt(new Date());
+          return res;
+        };
+        capturedFetchAll = wrappedFetchAll;
+        void wrappedFetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        };
+      }),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+
+    const freshGithub = await import("../../src/app/services/github");
+    vi.mocked(freshGithub.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof freshGithub.getClient>
+    );
+    const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
+
+    expect(() => render(() => <freshDashMod.default />)).not.toThrow();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it("defers depBodies GraphQL fetch during onLightData while all PRs have enriched === false and isRefreshing() is true, then fetches when enrichment completes", async () => {
+    const [isRefreshingSig, setIsRefreshingSig] = createSignal(true);
+    let resolveFullFetch: ((data: DashboardData) => void) | null = null;
+
+    const unenrichedDepPR = makePullRequest({
+      id: 950,
+      nodeId: "PR_DEP_950",
+      repoFullName: "owner/repo",
+      title: "Update dependency some-pkg",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/some-pkg",
+      enriched: false,
+    });
+    const enrichedDepPR = makePullRequest({
+      id: 950,
+      nodeId: "PR_DEP_950",
+      repoFullName: "owner/repo",
+      title: "Update dependency some-pkg",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/some-pkg",
+      enriched: true,
+    });
+
+    const graphqlSpy = vi.fn().mockResolvedValue({
+      nodes: [
+        {
+          id: "PR_DEP_950",
+          databaseId: 950,
+          body: "| Package | Change |\n| --- | --- |\n| some-pkg | `1.0.0` -> `1.1.0` |",
+        },
+      ],
+      rateLimit: null,
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockImplementation((onLightData) => {
+      onLightData?.({
+        issues: [],
+        pullRequests: [unenrichedDepPR],
+        workflowRuns: [],
+        errors: [],
+      });
+      return new Promise<DashboardData>((resolve) => {
+        resolveFullFetch = resolve;
+      });
+    });
+
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+      const wrappedFetchAll = async () => {
+        setIsRefreshingSig(true);
+        try {
+          const res = await fetchAll();
+          setLastRefreshAt(new Date());
+          return res;
+        } finally {
+          setIsRefreshingSig(false);
+        }
+      };
+      capturedFetchAll = wrappedFetchAll;
+      void wrappedFetchAll().catch(() => {});
+      return {
+        isRefreshing: isRefreshingSig,
+        lastRefreshAt,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+
+    render(() => <DashboardPage />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // While light search data is displayed (all PRs enriched === false) and isRefreshing() is true,
+    // depBodies must NOT have fired a GraphQL query
+    expect(graphqlSpy).not.toHaveBeenCalled();
+
+    // Now full enrichment completes with enriched === true and isRefreshing transitions to false
+    resolveFullFetch!({
+      issues: [],
+      pullRequests: [enrichedDepPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale restoration, and partial-sync indicator", () => {
