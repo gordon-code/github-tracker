@@ -845,7 +845,6 @@ describe("validateGitHubUser — VALID_TRACKED_LOGIN and type detection", () => 
 
 describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
   it("returns empty result with no repos even when monitoredRepos provided", async () => {
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const octokit = makeOctokit(async () => ({ data: {} }), async () => ({}));
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
@@ -878,7 +877,6 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const monitoredRepo = { owner: "org", name: "monitored", fullName: "org/monitored" };
     await fetchIssuesAndPullRequests(
       octokit as never,
@@ -933,7 +931,6 @@ describe("fetchIssuesAndPullRequests — all repos monitored (edge case)", () =>
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
       [repo],
@@ -997,8 +994,6 @@ describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tra
   };
 
   it("deduplicates issues when same item appears in both monitored and bot searches", async () => {
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
-
     const octokit = makeOctokit(
       async () => ({ data: {}, headers: {} }),
       async (_query: string, variables: unknown) => {
@@ -1132,7 +1127,6 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
       [monitoredRepo],
@@ -1170,7 +1164,6 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
       [monitoredRepo],
@@ -1234,7 +1227,6 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
       [monitoredRepo],
@@ -1276,7 +1268,6 @@ describe("fetchIssuesAndPullRequests — all monitored + tracked users skips inv
       }
     );
 
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     await fetchIssuesAndPullRequests(
       octokit as never,
       [repo],
@@ -1322,7 +1313,6 @@ describe("fetchIssuesAndPullRequests — onLightData suppression when all monito
     );
 
     const onLightData = vi.fn();
-    const { fetchIssuesAndPullRequests } = await import("../../src/app/services/api");
     const result = await fetchIssuesAndPullRequests(
       octokit as never,
       [repo],

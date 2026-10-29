@@ -378,7 +378,7 @@ describe("beforeBreadcrumbHandler", () => {
         category: "console",
         message: `${prefix} some message`,
       };
-      expect(beforeBreadcrumbHandler(breadcrumb as never)).not.toBeNull();
+      expect(beforeBreadcrumbHandler(breadcrumb)).not.toBeNull();
     }
   });
 
@@ -387,22 +387,22 @@ describe("beforeBreadcrumbHandler", () => {
       category: "console",
       message: "random third-party log",
     };
-    expect(beforeBreadcrumbHandler(breadcrumb as never)).toBeNull();
+    expect(beforeBreadcrumbHandler(breadcrumb)).toBeNull();
   });
 
   it("drops console breadcrumbs with empty message", () => {
     const breadcrumb = { category: "console", message: "" };
-    expect(beforeBreadcrumbHandler(breadcrumb as never)).toBeNull();
+    expect(beforeBreadcrumbHandler(breadcrumb)).toBeNull();
   });
 
   it("drops console breadcrumbs with no message", () => {
     const breadcrumb = { category: "console" };
-    expect(beforeBreadcrumbHandler(breadcrumb as never)).toBeNull();
+    expect(beforeBreadcrumbHandler(breadcrumb)).toBeNull();
   });
 
   it("passes through non-console, non-navigation breadcrumbs unchanged", () => {
     const breadcrumb = { category: "ui.click", message: "button" };
-    expect(beforeBreadcrumbHandler(breadcrumb as never)).toBe(breadcrumb);
+    expect(beforeBreadcrumbHandler(breadcrumb)).toBe(breadcrumb);
   });
 
   it("scrubs tokens and OAuth params in allowed console breadcrumb messages", () => {
@@ -411,7 +411,7 @@ describe("beforeBreadcrumbHandler", () => {
       message:
         "[api] Request failed for https://api.github.com/graphql?code=abc123&state=xyz789 with token ghp_secretToken123 and ATATT3xFfGF0abc123=",
     };
-    const result = beforeBreadcrumbHandler(breadcrumb as never);
+    const result = beforeBreadcrumbHandler(breadcrumb);
     expect(result).not.toBeNull();
     expect(result!.message).toBe(
       "[api] Request failed for https://api.github.com/graphql?code=[REDACTED]&state=[REDACTED] with token ghp_[REDACTED] and ATATT[REDACTED]",

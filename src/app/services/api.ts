@@ -1,6 +1,6 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import * as Sentry from "@sentry/solid";
-import { pushNotification } from "../lib/errors";
+import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
@@ -1219,7 +1219,7 @@ export async function fetchPREnrichment(
 
       const extractPartialBackfillData = (err: unknown): Partial<HeavyBackfillResponse> | null =>
         err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
-          ? (err.data as Partial<HeavyBackfillResponse>)
+          ? err.data
           : null;
 
       const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
@@ -1301,7 +1301,23 @@ export async function fetchPREnrichment(
 // Prevents a hung request (e.g. octokit's secondary-rate-limit retry logic
 // stalling indefinitely) from wedging the caller's fetch-in-progress gate.
 
-export const GRAPHQL_BODY_FETCH_TIMEOUT_MS = 20_000;
+export const GRAPHQL_BODY_FETCH_TIMEOUT_MS = 45_000;
+export const BODY_FETCH_BATCH_SIZE = 25;
+export const BODY_FETCH_NOTIFICATION_THRESHOLD = 3;
+
+const _consecutiveBodyFetchFailures = new Map<string, number>();
+
+export function resetBodyFetchFailures(source?: string): void {
+  if (source !== undefined) {
+    _consecutiveBodyFetchFailures.delete(source);
+    dismissNotificationBySource(source);
+    return;
+  }
+  for (const s of _consecutiveBodyFetchFailures.keys()) {
+    dismissNotificationBySource(s);
+  }
+  _consecutiveBodyFetchFailures.clear();
+}
 
 export class GraphqlFetchTimeoutError extends Error {
   override readonly name = "GraphqlFetchTimeoutError";
@@ -1336,17 +1352,21 @@ export interface NodeBodiesFetchResult<K, V> {
 /**
  * Shared batched-fetch helper for GraphQL `nodes()` queries that pull a single
  * field (e.g. issue/PR body text) for a set of node IDs. Chunks ids into
- * NODES_BATCH_SIZE batches, races each batch via raceWithTimeout, and reports
- * failures via console.warn + Sentry + a single deduped pushNotification.
+ * BODY_FETCH_BATCH_SIZE batches, races each sub-batch via raceWithTimeout,
+ * salvages partial err.data.nodes on error, recursively binary-splits retryable
+ * batch failures down to MIN_SPLIT_BATCH_SIZE, and reports failures via
+ * console.warn + Sentry (capped at once per top-level batch) + a silent
+ * Notification Drawer warning after BODY_FETCH_NOTIFICATION_THRESHOLD
+ * consecutive failing calls for a source.
  *
  * `mapNode` lets each caller decide how to fold a raw node into the result map
  * (e.g. whether to keep or skip a null body) without duplicating the batching,
- * timeout, rate-limit, and error-reporting plumbing. Batches that error or time
- * out contribute their requested ids to `failedIds` so callers can avoid
- * retrying a persistently-failing id on every poll cycle.
+ * timeout, rate-limit, and error-reporting plumbing. Leaf sub-batches or
+ * non-retryable batches that fail contribute their unresolved ids to `failedIds`
+ * so callers can avoid retrying a persistently-failing id on every poll cycle.
  */
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters
-async function fetchNodeBodiesBatched<TNode, K, V>(
+async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V>(
   octokit: GitHubOctokit,
   nodeIds: string[],
   query: string,
@@ -1358,41 +1378,111 @@ async function fetchNodeBodiesBatched<TNode, K, V>(
   const failedIds = new Set<string>();
   if (nodeIds.length === 0) return { bodies, failedIds };
 
-  const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
+  const batches = chunkArray(nodeIds, BODY_FETCH_BATCH_SIZE);
   await Promise.allSettled(batches.map(async (batch) => {
     const batchStart = Date.now();
     console.debug(`[api] ${source} batch started (${batch.length} ids) at ${batchStart}`);
-    const controller = new AbortController();
-    try {
-      const response = await raceWithTimeout(
-        octokit.graphql<NodeBodiesResponse<TNode>>(
-          query,
-          { ids: batch, request: { apiSource: source, signal: controller.signal } }
-        ),
-        GRAPHQL_BODY_FETCH_TIMEOUT_MS,
-        controller,
-      );
-      if (response.rateLimit) updateGraphqlRateLimit(response.rateLimit);
-      for (const node of response.nodes) {
-        if (!node) continue;
-        mapNode(node, bodies);
+    const resolvedNodeIds = new Set<string>();
+    let batchErrorPushed = false;
+
+    const extractPartialBodyData = (err: unknown): Partial<NodeBodiesResponse<TNode>> | null =>
+      err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+        ? err.data
+        : null;
+
+    const ingestBodyPayload = (
+      payload: Partial<NodeBodiesResponse<TNode>> | null | undefined,
+      resolvedSubBatchIds?: string[],
+    ): void => {
+      if (!payload) return;
+      if (payload.rateLimit) updateGraphqlRateLimit(payload.rateLimit);
+      if (Array.isArray(payload.nodes)) {
+        for (const node of payload.nodes) {
+          if (!node) continue;
+          mapNode(node, bodies);
+          if (node.id) resolvedNodeIds.add(node.id);
+        }
       }
-    } catch (err) {
-      for (const id of batch) failedIds.add(id);
-      console.warn(`[api] ${source} batch failed or timed out:`, err);
-      Sentry.captureException(err, { tags: { source } });
-      const partialErr =
-        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
-          ? (err.data as Partial<NodeBodiesResponse<TNode>>)
-          : null;
-      if (partialErr?.rateLimit) updateGraphqlRateLimit(partialErr.rateLimit);
+      if (resolvedSubBatchIds) {
+        for (const id of resolvedSubBatchIds) {
+          resolvedNodeIds.add(id);
+        }
+      }
+    };
+
+    const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
+      const controller = new AbortController();
+      try {
+        const response = await raceWithTimeout(
+          octokit.graphql<NodeBodiesResponse<TNode>>(
+            query,
+            {
+              ids: batchIds,
+              request: {
+                apiSource: source,
+                signal: controller.signal,
+                retries: isSplitRetry ? 0 : 1,
+              },
+            },
+          ),
+          GRAPHQL_BODY_FETCH_TIMEOUT_MS,
+          controller,
+        );
+        ingestBodyPayload(response, batchIds);
+      } catch (err) {
+        ingestBodyPayload(extractPartialBodyData(err));
+
+        const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
+        if (remainingIds.length === 0) return;
+
+        const { statusCode } = extractRejectionError(err);
+        const retryable = (statusCode === null || statusCode >= 500) && !controller.signal.aborted;
+
+        if (!retryable) {
+          for (const id of remainingIds) failedIds.add(id);
+          if (!batchErrorPushed) {
+            batchErrorPushed = true;
+            console.warn(`[api] ${source} batch failed or timed out:`, err);
+            Sentry.captureException(err, { tags: { source } });
+          }
+          return;
+        }
+
+        if (remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
+          const mid = Math.floor(remainingIds.length / 2);
+          await Promise.allSettled([
+            fetchBatchWithSplit(remainingIds.slice(0, mid), true),
+            fetchBatchWithSplit(remainingIds.slice(mid), true),
+          ]);
+          return;
+        }
+
+        for (const id of remainingIds) failedIds.add(id);
+        if (!batchErrorPushed) {
+          batchErrorPushed = true;
+          console.warn(`[api] ${source} batch failed or timed out:`, err);
+          Sentry.captureException(err, { tags: { source } });
+        }
+      }
+    };
+
+    try {
+      await fetchBatchWithSplit(batch, false);
     } finally {
       console.debug(`[api] ${source} batch settled after ${Date.now() - batchStart}ms`);
     }
   }));
 
-  if (failedIds.size > 0 && getClient() === octokit) {
-    pushNotification(source, notificationMessage, "warning");
+  if (getClient() === octokit) {
+    if (failedIds.size > 0) {
+      const consecutive = (_consecutiveBodyFetchFailures.get(source) ?? 0) + 1;
+      _consecutiveBodyFetchFailures.set(source, consecutive);
+      if (consecutive >= BODY_FETCH_NOTIFICATION_THRESHOLD) {
+        pushNotification(source, notificationMessage, "warning", true, undefined, { silentToast: true });
+      }
+    } else {
+      resetBodyFetchFailures(source);
+    }
   }
 
   return { bodies, failedIds };
@@ -1437,13 +1527,14 @@ export async function fetchDashboardIssueBodies(
 const DEP_PR_BODIES_QUERY = `
   query($ids: [ID!]!) {
     nodes(ids: $ids) {
-      ... on PullRequest { databaseId body }
+      ... on PullRequest { id databaseId body }
     }
     rateLimit { cost limit remaining resetAt }
   }
 `;
 
 interface DepPRBodyNode {
+  id?: string;
   databaseId: number;
   body: string | null;
 }
@@ -1600,6 +1691,7 @@ let _enrichmentCacheGen = 0;
 export function resetPREnrichmentCache(): void {
   _enrichmentCacheGen++;
   _prEnrichmentCache.clear();
+  resetBodyFetchFailures();
 }
 
 export function invalidatePREnrichmentCacheForRepos(repoFullNames: Iterable<string>): void {
