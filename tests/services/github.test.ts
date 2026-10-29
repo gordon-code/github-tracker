@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, type ApiRequestInfo } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
+import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
 
@@ -353,13 +354,13 @@ describe("createGitHubClient", () => {
               },
               { once: true }
             );
+            queueMicrotask(() => controller.abort());
           })
       );
 
       const pending = client.graphql("{ viewer { login } }", {
         request: { signal: controller.signal },
       });
-      controller.abort();
 
       await expect(pending).rejects.toThrow(/aborted/i);
       expect(anySpy).toHaveBeenCalled();
@@ -1262,6 +1263,370 @@ describe("createGitHubClient — retryCount quadratic backoff", () => {
       }
       vi.useRealTimers();
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ── createGitHubClient — preThrottlingPlugin abort & rate-limit retry bounds ─
+// Placed at the end of the file after retryCount quadratic backoff so fake-timer
+// clock advancement on Bottleneck's shared limiters does not affect real-timer suites.
+
+describe("createGitHubClient — preThrottlingPlugin abort handling and rate-limit retry bounds", () => {
+  // Maintain a monotonically increasing fake-clock cursor across tests in this suite
+  // so Bottleneck's module-scoped limiters (_nextRequest shifted by earlier fake-timer tests)
+  // never see Date.now() move backwards when a new test starts.
+  let fakeTimeCursor = Date.now() + 30_000;
+
+  async function settleWithTimers<T>(
+    promise: Promise<T>,
+    advanceMs = 2_000
+  ): Promise<{ value?: T; error?: unknown }> {
+    let settled: { value?: T; error?: unknown } = {};
+    const wrapped = (async () => {
+      try {
+        settled = { value: await promise };
+      } catch (error) {
+        settled = { error };
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(advanceMs);
+    await wrapped;
+    return settled;
+  }
+
+  beforeEach(() => {
+    clearNotifications();
+  });
+
+  afterEach(() => {
+    fakeTimeCursor = Math.max(fakeTimeCursor, Date.now()) + 10_000;
+    clearNotifications();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("exports MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC === 15", () => {
+    expect(MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC).toBe(15);
+  });
+
+  it("rejects immediately without calling fetch when client.graphql is called with an already-aborted AbortSignal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    // 1. Default abort reason (DOMException AbortError)
+    const controller1 = new AbortController();
+    controller1.abort();
+    const reqOpts1: { signal: AbortSignal; retries?: number } = {
+      signal: controller1.signal,
+      retries: 2,
+    };
+
+    const { error: caught1 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts1 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught1).toBeInstanceOf(Error);
+    expect((caught1 as Error).name).toBe("AbortError");
+    expect((caught1 as { response?: unknown }).response).toBeUndefined();
+
+    // 2. Custom Error abort reason
+    const controller2 = new AbortController();
+    const customReason = new Error("Custom caller timeout");
+    controller2.abort(customReason);
+    const reqOpts2: { signal: AbortSignal; retries?: number } = {
+      signal: controller2.signal,
+      retries: 2,
+    };
+
+    const { error: caught2 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts2 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught2).toBe(customReason);
+    expect((caught2 as { response?: unknown }).response).toBeUndefined();
+
+    // 3. Non-Error primitive abort reason falls back to DOMException AbortError
+    const controller3 = new AbortController();
+    controller3.abort("non-error-reason");
+    const reqOpts3: { signal: AbortSignal; retries?: number } = {
+      signal: controller3.signal,
+      retries: 2,
+    };
+
+    const { error: caught3 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts3 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught3).toBeInstanceOf(DOMException);
+    expect((caught3 as DOMException).name).toBe("AbortError");
+    expect((caught3 as { response?: unknown }).response).toBeUndefined();
+  });
+
+  it("aborts a second concurrent client.graphql request queued behind Bottleneck's 1000ms state.write spacing without invoking fetch for the second call", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const controller1 = new AbortController();
+    const controller2 = new AbortController();
+    const reqOpts2: { signal: AbortSignal; retries?: number } = {
+      signal: controller2.signal,
+      retries: 2,
+    };
+
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      // Abort req2 while req1 is executing fetch and req2 is queued in Bottleneck's 1000ms state.write limiter
+      controller2.abort();
+      return new Response(
+        JSON.stringify({ data: { viewer: { login: "octocat" } } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const req1 = client.graphql("{ viewer { login } }", {
+      request: { signal: controller1.signal },
+    });
+
+    let caught2: unknown;
+    const req2 = client
+      .graphql("{ viewer { login } }", {
+        request: reqOpts2,
+      })
+      .catch((err: unknown) => {
+        caught2 = err;
+      });
+
+    // Advance past Bottleneck's 1000ms state.write minTime spacing while both promises are pending
+    await vi.advanceTimersByTimeAsync(2_500);
+    await Promise.all([req1, req2]);
+
+    // Fetch was only invoked for req1; req2 was aborted in preThrottlingPlugin before fetch
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(caught2).toBeInstanceOf(Error);
+    expect((caught2 as Error).name).toBe("AbortError");
+    expect((caught2 as { response?: unknown }).response).toBeUndefined();
+  });
+
+  it("onRateLimit retries once when retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC and signal is not aborted, and skips inline retry when retryAfter > 15s or signal is aborted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      // Case 1: retryAfter <= 15s (e.g. reset = now, so retryAfter = 1s) and !signal.aborted -> retries once and succeeds
+      let callCount1 = 0;
+      const mockFetch1 = vi.fn().mockImplementation(async () => {
+        callCount1++;
+        if (callCount1 === 1) {
+          const resetNow = Math.floor(Date.now() / 1000);
+          return new Response(
+            JSON.stringify({ message: "API rate limit exceeded" }),
+            {
+              status: 403,
+              headers: {
+                "content-type": "application/json",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": String(resetNow),
+              },
+            }
+          );
+        }
+        return new Response(JSON.stringify({ login: "octocat" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch1);
+
+      const { value: res1, error: err1 } = await settleWithTimers(
+        client.request("GET /user"),
+        3_000
+      );
+      expect(err1).toBeUndefined();
+      expect(res1?.status).toBe(200);
+      expect(mockFetch1).toHaveBeenCalledTimes(2);
+      expect(getNotifications().some((n) => n.source === "rate-limit" && /Rate limit hit/.test(n.message))).toBe(true);
+
+      clearNotifications();
+
+      // Case 2: retryAfter > 15s (e.g. reset = now + 60s, so retryAfter = 61s) -> pushes warning but returns false (no inline retry)
+      const reset60 = Math.floor(Date.now() / 1000) + 60;
+      const mockFetch2 = vi.fn().mockImplementation(async () =>
+        new Response(
+          JSON.stringify({ message: "API rate limit exceeded" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(reset60),
+            },
+          }
+        )
+      );
+      vi.stubGlobal("fetch", mockFetch2);
+
+      const { error: err2 } = await settleWithTimers(
+        client.request("GET /user"),
+        2_000
+      );
+      expect(err2).toBeInstanceOf(Error);
+      expect((err2 as Error).message).toMatch(/API rate limit exceeded/);
+      expect(mockFetch2).toHaveBeenCalledTimes(1);
+      expect(getNotifications().some((n) => n.source === "rate-limit" && /Rate limit hit — retrying in 61s/.test(n.message))).toBe(true);
+
+      clearNotifications();
+
+      // Case 3: retryAfter <= 15s, but caller signal aborts before onRateLimit runs -> returns false (no inline retry)
+      const controller3 = new AbortController();
+      const mockFetch3 = vi.fn().mockImplementation(async () => {
+        controller3.abort();
+        const resetNow = Math.floor(Date.now() / 1000);
+        return new Response(
+          JSON.stringify({ message: "API rate limit exceeded" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(resetNow),
+            },
+          }
+        );
+      });
+      vi.stubGlobal("fetch", mockFetch3);
+
+      const { error: err3 } = await settleWithTimers(
+        client.request("GET /user", { request: { signal: controller3.signal } }),
+        2_000
+      );
+      expect(err3).toBeInstanceOf(Error);
+      expect((err3 as Error).message).toMatch(/API rate limit exceeded/);
+      expect(mockFetch3).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("onSecondaryRateLimit retries once when retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC and signal is not aborted, and skips inline retry when retryAfter > 15s or signal is aborted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      // Case 1: retryAfter = 5s (<= 15s) and !signal.aborted -> retries once and succeeds
+      let callCount1 = 0;
+      const mockFetch1 = vi.fn().mockImplementation(async () => {
+        callCount1++;
+        if (callCount1 === 1) {
+          return new Response(
+            JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+            {
+              status: 403,
+              headers: {
+                "content-type": "application/json",
+                "retry-after": "5",
+              },
+            }
+          );
+        }
+        return new Response(JSON.stringify({ login: "octocat" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch1);
+
+      const { value: res1, error: err1 } = await settleWithTimers(
+        client.request("GET /user"),
+        6_000
+      );
+      expect(err1).toBeUndefined();
+      expect(res1?.status).toBe(200);
+      expect(mockFetch1).toHaveBeenCalledTimes(2);
+      expect(
+        getNotifications().some(
+          (n) => n.source === "rate-limit" && /Secondary rate limit — retrying in 5s/.test(n.message)
+        )
+      ).toBe(true);
+
+      clearNotifications();
+
+      // Case 2: retryAfter = 60s (> 15s) -> pushes warning but returns false (no 60s inline sleep)
+      const mockFetch2 = vi.fn().mockImplementation(async () =>
+        new Response(
+          JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "60",
+            },
+          }
+        )
+      );
+      vi.stubGlobal("fetch", mockFetch2);
+
+      const { error: err2 } = await settleWithTimers(
+        client.request("GET /user"),
+        2_000
+      );
+      expect(err2).toBeInstanceOf(Error);
+      expect((err2 as Error).message).toMatch(/secondary rate limit/i);
+      expect(mockFetch2).toHaveBeenCalledTimes(1);
+      expect(
+        getNotifications().some(
+          (n) => n.source === "rate-limit" && /Secondary rate limit — retrying in 60s/.test(n.message)
+        )
+      ).toBe(true);
+
+      clearNotifications();
+
+      // Case 3: retryAfter = 5s (<= 15s), but caller signal aborts before onSecondaryRateLimit runs -> returns false
+      const controller3 = new AbortController();
+      const mockFetch3 = vi.fn().mockImplementation(async () => {
+        controller3.abort();
+        return new Response(
+          JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+            },
+          }
+        );
+      });
+      vi.stubGlobal("fetch", mockFetch3);
+
+      const { error: err3 } = await settleWithTimers(
+        client.request("GET /user", { request: { signal: controller3.signal } }),
+        2_000
+      );
+      expect(err3).toBeInstanceOf(Error);
+      expect((err3 as Error).message).toMatch(/secondary rate limit/i);
+      expect(mockFetch3).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });
