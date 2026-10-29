@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, Show } from "solid-js";
 import { config } from "../../stores/config";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, shortRelativeTime, formatCount } from "../../lib/format";

@@ -1,7 +1,7 @@
 // ── MCP resource registration ─────────────────────────────────────────────────
 // Registers tracker:// resources with the MCP server.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DataSource } from "./data-source.js";
 
 // ── Resource registration ─────────────────────────────────────────────────────

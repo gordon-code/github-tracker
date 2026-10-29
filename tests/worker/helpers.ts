@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import type { vi } from "vitest";
 
 export const ALLOWED_ORIGIN = "https://gh.gordoncode.dev";
 

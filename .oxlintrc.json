@@ -22,6 +22,12 @@
     "test-results/**"
   ],
   "rules": {
+    "typescript/consistent-type-imports": [
+      "error",
+      {
+        "disallowTypeAnnotations": false
+      }
+    ],
     "typescript/no-unsafe-type-assertion": "off",
     "eslint/no-underscore-dangle": "off",
     "unicorn/consistent-function-scoping": "off",

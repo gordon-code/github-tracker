@@ -2,9 +2,9 @@ import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup } from "solid-js";
 import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
-import { ConfigSchema, RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
+import { ConfigSchema, type RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
 import type { Config, ThemeId, CustomTab, JiraConfig, JiraCustomField } from "../../shared/schemas";
-import { z } from "zod";
+import type { z } from "zod";
 
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
 export {

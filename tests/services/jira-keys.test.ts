@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { IJiraClient } from "../../src/app/services/jira-client";
-import { JiraApiError } from "../../src/app/services/jira-client";
+import type { IJiraClient, JiraApiError } from "../../src/app/services/jira-client";
 import { JIRA_SETTINGS_ACTION, type JiraIssue, type JiraBulkFetchResult } from "../../src/shared/jira-types";
 
 const mockClearJiraAuth = vi.fn();

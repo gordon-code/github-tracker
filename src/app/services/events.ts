@@ -1,4 +1,4 @@
-import { getClient } from "./github";
+import type { getClient } from "./github";
 import { onAuthCleared } from "../stores/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 // ── MCP tool registration ─────────────────────────────────────────────────────
 // Registers all 6 GitHub Tracker tools with the MCP server.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { METHODS } from "../../src/shared/protocol.js";
 import type { DataSource, CachedConfig } from "./data-source.js";
