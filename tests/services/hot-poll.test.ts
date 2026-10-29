@@ -286,6 +286,74 @@ describe("fetchHotPRStatus", () => {
     expect(results.get(49)!.draft).toBe(true);
     expect(results.get(50)!.draft).toBeUndefined();
   });
+
+  it("parses direct node.statusCheckRollup.state, propagates node.updatedAt into HotPRStatusUpdate, and handles null/missing node.commits safely", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        {
+          databaseId: 51,
+          state: "OPEN",
+          updatedAt: "2026-04-20T12:34:56Z",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "APPROVED",
+          statusCheckRollup: { state: "SUCCESS" },
+        },
+        {
+          databaseId: 52,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: null,
+          commits: null,
+        },
+        {
+          databaseId: 53,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          commits: { nodes: null },
+        },
+        {
+          databaseId: 54,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          commits: { nodes: [null] },
+        },
+        {
+          databaseId: 55,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: { state: "FAILURE" },
+          commits: { nodes: [{ commit: null }] },
+        },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results, hadErrors } = await fetchHotPRStatus(octokit as never, [
+      "PR_node51",
+      "PR_node52",
+      "PR_node53",
+      "PR_node54",
+      "PR_node55",
+    ]);
+    expect(hadErrors).toBe(false);
+
+    const calledQuery = octokit.graphql.mock.calls[0][0] as string;
+    expect(calledQuery).toContain("statusCheckRollup { state }");
+    expect(calledQuery).toContain("updatedAt");
+    expect(calledQuery).not.toContain("commits(last: 1)");
+
+    expect(results.get(51)!.checkStatus).toBe("success");
+    expect(results.get(51)!.updatedAt).toBe("2026-04-20T12:34:56Z");
+    expect(results.get(52)!.checkStatus).toBeNull();
+    expect(results.get(52)!.updatedAt).toBeUndefined();
+    expect(results.get(53)!.checkStatus).toBeNull();
+    expect(results.get(54)!.checkStatus).toBeNull();
+    expect(results.get(55)!.checkStatus).toBe("failure");
+  });
 });
 
 describe("fetchWorkflowRunById", () => {

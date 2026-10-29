@@ -406,13 +406,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
     nodes(ids: $ids) {
       ... on PullRequest {${BASE_PR_BACKFILL_FIELDS}
         mergeStateStatus
-        commits(last: 1) {
-          nodes {
-            commit {
-              statusCheckRollup { state }
-            }
-          }
-        }
+        statusCheckRollup { state }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -438,19 +432,14 @@ const HOT_PR_STATUS_QUERY = `
         databaseId
         state
         isDraft
+        updatedAt
         headRefOid
         mergeStateStatus
         reviewDecision
         autoMergeRequest { mergeMethod }
         viewerLatestReview { state }
         viewerLatestReviewRequest { id }
-        commits(last: 1) {
-          nodes {
-            commit {
-              statusCheckRollup { state }
-            }
-          }
-        }
+        statusCheckRollup { state }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -461,13 +450,21 @@ interface HotPRStatusNode {
   databaseId: number;
   state: PullRequestState;
   isDraft?: boolean;
+  updatedAt?: string;
   headRefOid?: string;
   mergeStateStatus: string;
   reviewDecision: string | null;
   autoMergeRequest?: { mergeMethod: string } | null;
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
-  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+  statusCheckRollup?: { state: string } | null;
+  commits?: {
+    nodes?: ({
+      commit?: {
+        statusCheckRollup?: { state: string } | null;
+      } | null;
+    } | null)[] | null;
+  } | null;
 }
 
 interface HotPRStatusResponse {
@@ -497,29 +494,30 @@ interface GraphQLHeavyPRNode {
   id?: string;
   databaseId: number;
   headRefOid: string;
-  headRepository: { owner: { login: string }; nameWithOwner: string } | null;
-  mergeStateStatus?: string;
-  assignees: { nodes: { login: string }[] };
-  reviewRequests: { nodes: { requestedReviewer: { login: string } | null }[] };
-  latestReviews: {
-    totalCount: number;
-    nodes: { author: { login: string } | null }[];
-  };
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  comments: { totalCount: number };
-  reviewThreads: { totalCount: number };
+  headRepository?: { owner?: { login: string } | null; nameWithOwner?: string | null } | null;
+  mergeStateStatus?: string | null;
+  assignees?: { nodes?: ({ login: string } | null)[] | null } | null;
+  reviewRequests?: { nodes?: ({ requestedReviewer?: { login: string } | null } | null)[] | null } | null;
+  latestReviews?: {
+    totalCount?: number | null;
+    nodes?: ({ author?: { login: string } | null } | null)[] | null;
+  } | null;
+  additions?: number | null;
+  deletions?: number | null;
+  changedFiles?: number | null;
+  comments?: { totalCount?: number | null } | null;
+  reviewThreads?: { totalCount?: number | null } | null;
   autoMergeRequest?: { mergeMethod: string } | null;
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
+  statusCheckRollup?: { state: string } | null;
   commits?: {
-    nodes: {
-      commit: {
-        statusCheckRollup: { state: string } | null;
-      };
-    }[];
-  };
+    nodes?: ({
+      commit?: {
+        statusCheckRollup?: { state: string } | null;
+      } | null;
+    } | null)[] | null;
+  } | null;
 }
 
 interface LightCombinedSearchResponse {
@@ -690,7 +688,7 @@ async function runForkPRFallback(
 ): Promise<void> {
   const forkCandidates: ForkCandidate[] = [];
   for (const [databaseId, pr] of prMap) {
-    if (pr.checkStatus !== null) continue;
+    if (pr.checkStatus !== null || pr.checkStatusStale) continue;
     const headInfo = forkInfoMap.get(databaseId);
     if (!headInfo) continue;
     const baseOwner = pr.repoFullName.split("/")[0].toLowerCase();
@@ -1135,12 +1133,29 @@ export interface PREnrichmentData {
   viewerLatestReviewState: ViewerReviewState | null;
 }
 
+function extractRollupState(node: {
+  statusCheckRollup?: { state: string } | null;
+  commits?: {
+    nodes?: ({
+      commit?: {
+        statusCheckRollup?: { state: string } | null;
+      } | null;
+    } | null)[] | null;
+  } | null;
+}): string | null {
+  return (
+    node.statusCheckRollup?.state ??
+    node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ??
+    null
+  );
+}
+
 function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PREnrichmentData {
-  const pendingLogins = node.reviewRequests.nodes
-    .map((n) => n.requestedReviewer?.login)
+  const pendingLogins = (node.reviewRequests?.nodes ?? [])
+    .map((n) => n?.requestedReviewer?.login)
     .filter((l): l is string => l != null);
-  const actualLogins = node.latestReviews.nodes
-    .map((n) => n.author?.login)
+  const actualLogins = (node.latestReviews?.nodes ?? [])
+    .map((n) => n?.author?.login)
     .filter((l): l is string => l != null);
   const reviewerLogins = [...new Set([...pendingLogins, ...actualLogins].map((l) => l.toLowerCase()))];
 
@@ -1148,11 +1163,11 @@ function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PRE
     ? null
     : applyMergeStateOverride(
         node.mergeStateStatus ?? "",
-        mapCheckStatus(node.commits?.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+        mapCheckStatus(extractRollupState(node)),
       );
 
   let headRepository: PREnrichmentData["headRepository"] = null;
-  if (node.headRepository) {
+  if (node.headRepository?.nameWithOwner && node.headRepository.owner?.login) {
     const parts = node.headRepository.nameWithOwner.split("/");
     if (parts.length === 2) {
       headRepository = { owner: node.headRepository.owner.login, repoName: parts[1] };
@@ -1163,20 +1178,43 @@ function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PRE
     id: node.databaseId,
     headSha: node.headRefOid,
     headRepository,
-    assigneeLogins: node.assignees.nodes.map((a) => a.login),
+    assigneeLogins: (node.assignees?.nodes ?? [])
+      .map((a) => a?.login)
+      .filter((l): l is string => l != null),
     reviewerLogins,
     checkStatus,
     ...(isLightFallback ? { checkStatusStale: true } : {}),
-    additions: node.additions,
-    deletions: node.deletions,
-    changedFiles: node.changedFiles,
-    comments: node.comments.totalCount,
-    reviewThreads: node.reviewThreads.totalCount,
-    totalReviewCount: node.latestReviews.totalCount,
+    additions: node.additions ?? 0,
+    deletions: node.deletions ?? 0,
+    changedFiles: node.changedFiles ?? 0,
+    comments: node.comments?.totalCount ?? 0,
+    reviewThreads: node.reviewThreads?.totalCount ?? 0,
+    totalReviewCount: node.latestReviews?.totalCount ?? 0,
     autoMergeMethod: mapAutoMergeMethod(node.autoMergeRequest?.mergeMethod),
     viewerReviewRequested: Boolean(node.viewerLatestReviewRequest?.id),
     viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
   };
+}
+
+function extractErroredNodeIndices(err: unknown): ReadonlySet<number> {
+  const indices = new Set<number>();
+  if (!err || typeof err !== "object" || !("errors" in err) || !Array.isArray(err.errors)) {
+    return indices;
+  }
+  for (const e of err.errors) {
+    if (!e || typeof e !== "object" || !("path" in e)) continue;
+    const path = (e as { path?: unknown }).path;
+    if (
+      Array.isArray(path) &&
+      path[0] === "nodes" &&
+      typeof path[1] === "number" &&
+      Number.isInteger(path[1]) &&
+      path[1] >= 0
+    ) {
+      indices.add(path[1]);
+    }
+  }
+  return indices;
 }
 
 /**
@@ -1203,14 +1241,15 @@ export async function fetchPREnrichment(
       const ingestBackfillPayload = (
         payload: Partial<HeavyBackfillResponse> | null | undefined,
         isLightFallback: boolean,
+        erroredIndices?: ReadonlySet<number>,
       ): void => {
         if (!payload) return;
         if (payload.rateLimit) {
           updateGraphqlRateLimit(payload.rateLimit);
         }
         if (Array.isArray(payload.nodes)) {
-          for (const node of payload.nodes) {
-            if (!node || node.databaseId == null) continue;
+          for (const [idx, node] of payload.nodes.entries()) {
+            if (!node || node.databaseId == null || erroredIndices?.has(idx)) continue;
             enrichments.set(node.databaseId, mapHeavyPRNode(node, isLightFallback));
             if (node.id) resolvedNodeIds.add(node.id);
           }
@@ -1234,7 +1273,11 @@ export async function fetchPREnrichment(
 
           ingestBackfillPayload(response, false);
         } catch (err) {
-          ingestBackfillPayload(extractPartialBackfillData(err), false);
+          ingestBackfillPayload(
+            extractPartialBackfillData(err),
+            false,
+            extractErroredNodeIndices(err),
+          );
 
           const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
           if (remainingIds.length === 0) return;
@@ -1266,6 +1309,11 @@ export async function fetchPREnrichment(
             return;
           }
 
+          if (batchIds.length > MIN_SPLIT_BATCH_SIZE && remainingIds.length < batchIds.length) {
+            await fetchBatchWithSplit(remainingIds);
+            return;
+          }
+
           if (!batchErrorPushed) {
             batchErrorPushed = true;
             console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
@@ -1285,7 +1333,11 @@ export async function fetchPREnrichment(
             });
             ingestBackfillPayload(lightResponse, true);
           } catch (lightErr) {
-            ingestBackfillPayload(extractPartialBackfillData(lightErr), true);
+            ingestBackfillPayload(
+              extractPartialBackfillData(lightErr),
+              true,
+              extractErroredNodeIndices(lightErr),
+            );
           }
         }
       };
@@ -1648,13 +1700,33 @@ export function fallbackToPreviousEnrichment(
       if (pr.checkStatusStale) {
         const prev = previousMap.get(pr.id);
         if (prev && prev.enriched !== false && !prev.checkStatusStale) {
-          return { ...pr, checkStatus: prev.checkStatus, checkStatusStale: false };
+          const sameRevision =
+            prev.headSha && pr.headSha
+              ? prev.headSha === pr.headSha
+              : prev.updatedAt === pr.updatedAt;
+          if (sameRevision) {
+            return { ...pr, checkStatus: prev.checkStatus, checkStatusStale: false };
+          }
         }
+        return { ...pr, checkStatus: null, checkStatusStale: true };
       }
       return pr;
     }
     const prev = previousMap.get(pr.id);
     if (!prev || prev.enriched === false) return pr;
+    const revisionChanged =
+      prev.updatedAt !== pr.updatedAt ||
+      (Boolean(prev.headSha) && Boolean(pr.headSha) && prev.headSha !== pr.headSha);
+    if (revisionChanged || prev.checkStatusStale) {
+      return {
+        ...pr,
+        ...pickEnrichmentFields(prev),
+        headSha: "",
+        checkStatus: null,
+        checkStatusStale: true,
+        enriched: true,
+      };
+    }
     return {
       ...pr,
       ...pickEnrichmentFields(prev),
@@ -2300,6 +2372,7 @@ export async function fetchWorkflowRuns(
 export interface HotPRStatusUpdate {
   state: PullRequestState;
   draft?: boolean;
+  updatedAt?: string;
   checkStatus: CheckStatus["status"];
   mergeStateStatus: string;
   reviewDecision: PullRequest["reviewDecision"];
@@ -2335,12 +2408,13 @@ export async function fetchHotPRStatus(
 
       const checkStatus = applyMergeStateOverride(
         node.mergeStateStatus,
-        mapCheckStatus(node.commits.nodes[0]?.commit?.statusCheckRollup?.state ?? null),
+        mapCheckStatus(extractRollupState(node)),
       );
 
       results.set(node.databaseId, {
         state: node.state,
         ...(typeof node.isDraft === "boolean" ? { draft: node.isDraft } : {}),
+        ...(node.updatedAt ? { updatedAt: node.updatedAt } : {}),
         checkStatus,
         mergeStateStatus: node.mergeStateStatus,
         reviewDecision: mapReviewDecision(node.reviewDecision),

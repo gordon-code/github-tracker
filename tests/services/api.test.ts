@@ -1982,6 +1982,221 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(errors).toHaveLength(1);
     expect(errors[0].repo).toBe("backfill-batch-1/1");
   });
+
+  it("parses direct PullRequest.statusCheckRollup.state and handles null nested collections/counts without TypeError", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string) => {
+        expect(query).toContain("statusCheckRollup { state }");
+        expect(query).not.toContain("commits(last: 1)");
+        return {
+          nodes: [
+            {
+              id: "PR_null_fields",
+              databaseId: 301,
+              headRefOid: "sha-301",
+              headRepository: { owner: null, nameWithOwner: "fork/repo" },
+              mergeStateStatus: "CLEAN",
+              assignees: { nodes: null },
+              reviewRequests: { nodes: null },
+              latestReviews: { totalCount: null, nodes: null },
+              additions: null,
+              deletions: null,
+              changedFiles: null,
+              comments: null,
+              reviewThreads: { totalCount: null },
+              autoMergeRequest: null,
+              viewerLatestReview: null,
+              viewerLatestReviewRequest: null,
+              statusCheckRollup: { state: "FAILURE" },
+              commits: { nodes: null },
+            },
+            {
+              id: "PR_direct_success",
+              databaseId: 302,
+              headRefOid: "sha-302",
+              headRepository: null,
+              mergeStateStatus: "CLEAN",
+              assignees: null,
+              reviewRequests: { nodes: [null, { requestedReviewer: null }, { requestedReviewer: { login: "Alice" } }] },
+              latestReviews: { totalCount: 2, nodes: [null, { author: null }, { author: { login: "Bob" } }] },
+              additions: 12,
+              deletions: 3,
+              changedFiles: 1,
+              comments: { totalCount: 4 },
+              reviewThreads: null,
+              autoMergeRequest: null,
+              viewerLatestReview: null,
+              viewerLatestReviewRequest: null,
+              statusCheckRollup: { state: "SUCCESS" },
+            },
+          ],
+        };
+      }
+    );
+
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, ["PR_null_fields", "PR_direct_success"]);
+    expect(errors).toEqual([]);
+
+    const e301 = enrichments.get(301);
+    expect(e301).toBeDefined();
+    expect(e301!.checkStatus).toBe("failure");
+    expect(e301!.headRepository).toBeNull();
+    expect(e301!.assigneeLogins).toEqual([]);
+    expect(e301!.reviewerLogins).toEqual([]);
+    expect(e301!.additions).toBe(0);
+    expect(e301!.deletions).toBe(0);
+    expect(e301!.changedFiles).toBe(0);
+    expect(e301!.comments).toBe(0);
+    expect(e301!.reviewThreads).toBe(0);
+    expect(e301!.totalReviewCount).toBe(0);
+
+    const e302 = enrichments.get(302);
+    expect(e302).toBeDefined();
+    expect(e302!.checkStatus).toBe("success");
+    expect(e302!.reviewerLogins).toEqual(["alice", "bob"]);
+    expect(e302!.comments).toBe(4);
+    expect(e302!.reviewThreads).toBe(0);
+  });
+
+  it("excludes truncated node indices from err.errors[].path during partial salvage and retries 1..6 remaining IDs with HEAVY_PR_BACKFILL_QUERY", async () => {
+    const ids = Array.from({ length: 9 }, (_, i) => `PR_${i + 1}`);
+    const heavyCallIds: string[][] = [];
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as { ids: string[] };
+        const isHeavy = query.includes("statusCheckRollup");
+        if (isHeavy) {
+          heavyCallIds.push(vars.ids);
+        }
+
+        if (vars.ids.length === 9) {
+          // Simulate RESOURCE_LIMITS_EXCEEDED on nodes[8]: nodes 0..7 are intact,
+          // node 8 has truncated null sub-fields and is referenced in err.errors[].path.
+          throw Object.assign(new Error("Resource limits exceeded"), {
+            errors: [
+              null,
+              { path: ["rateLimit"] },
+              { path: ["nodes", -1, "commits"] },
+              { path: ["nodes", "8", "commits"] },
+              { path: ["nodes", 8, "reviewRequests", "nodes"] },
+              { path: ["nodes", 8, "commits", "nodes"] },
+            ],
+            data: {
+              nodes: [
+                ...ids.slice(0, 8).map((id, idx) =>
+                  buildHeavyNode(idx + 1, id, {
+                    statusCheckRollup: { state: "SUCCESS" },
+                    commits: undefined,
+                  })
+                ),
+                {
+                  id: "PR_9",
+                  databaseId: 9,
+                  headRefOid: "sha-9",
+                  headRepository: null,
+                  mergeStateStatus: "CLEAN",
+                  assignees: { nodes: null },
+                  reviewRequests: { nodes: null },
+                  latestReviews: { totalCount: 0, nodes: null },
+                  additions: 1,
+                  deletions: 1,
+                  changedFiles: 1,
+                  comments: { totalCount: 0 },
+                  reviewThreads: { totalCount: 0 },
+                  statusCheckRollup: null,
+                  commits: { nodes: null },
+                },
+              ],
+            },
+          });
+        }
+
+        // Follow-up heavy retry for the single remaining ID ["PR_9"] succeeds with real FAILURE status
+        return {
+          nodes: [
+            buildHeavyNode(9, "PR_9", {
+              headRefOid: "sha-9-fresh",
+              statusCheckRollup: { state: "FAILURE" },
+              commits: undefined,
+            }),
+          ],
+        };
+      }
+    );
+
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, ids);
+
+    // 1st call: all 9 IDs; 2nd call: heavy retry of only ["PR_9"] (since 8 salvaged, leaving 1 <= MIN_SPLIT_BATCH_SIZE)
+    expect(heavyCallIds).toEqual([ids, ["PR_9"]]);
+    expect(errors).toEqual([]);
+    expect(enrichments.size).toBe(9);
+    expect(enrichments.get(1)?.checkStatus).toBe("success");
+    // Node 9 was NOT poisoned with checkStatus: null from the truncated partial node; it got "failure" from heavy retry
+    expect(enrichments.get(9)?.checkStatus).toBe("failure");
+    expect(enrichments.get(9)?.headSha).toBe("sha-9-fresh");
+  });
+
+  it("enforces revision-aware headSha and updatedAt checks in fallbackToPreviousEnrichment", () => {
+    // 1. Light-backfill PR (enriched: true, checkStatusStale: true) with matching headSha -> preserves prev.checkStatus
+    const prevMatchingSha = makePullRequest({
+      id: 10,
+      enriched: true,
+      headSha: "sha-same",
+      updatedAt: "2026-04-20T10:00:00Z",
+      checkStatus: "failure",
+    });
+    const nextMatchingSha = makePullRequest({
+      id: 10,
+      enriched: true,
+      headSha: "sha-same",
+      updatedAt: "2026-04-20T10:05:00Z",
+      checkStatus: null,
+      checkStatusStale: true,
+    });
+    const [resMatchingSha] = fallbackToPreviousEnrichment([prevMatchingSha], [nextMatchingSha]);
+    expect(resMatchingSha.checkStatus).toBe("failure");
+    expect(resMatchingSha.checkStatusStale).toBe(false);
+
+    // 2. Light-backfill PR (enriched: true, checkStatusStale: true) with different headSha (force-push) -> clears checkStatus to null and keeps checkStatusStale: true
+    const nextNewSha = makePullRequest({
+      id: 10,
+      enriched: true,
+      headSha: "sha-new-commit",
+      updatedAt: "2026-04-20T10:05:00Z",
+      checkStatus: null,
+      checkStatusStale: true,
+    });
+    const [resNewSha] = fallbackToPreviousEnrichment([prevMatchingSha], [nextNewSha]);
+    expect(resNewSha.checkStatus).toBeNull();
+    expect(resNewSha.checkStatusStale).toBe(true);
+
+    // 3. Unenriched PR (enriched: false) where updatedAt changed -> carries forward heavy counts, clears headSha to "" and checkStatus to null, sets checkStatusStale: true
+    const prevEnriched = makePullRequest({
+      id: 20,
+      enriched: true,
+      headSha: "sha-old",
+      updatedAt: "2026-04-20T10:00:00Z",
+      checkStatus: "failure",
+      additions: 55,
+    });
+    const nextUnenrichedUpdated = makePullRequest({
+      id: 20,
+      enriched: false,
+      headSha: "",
+      updatedAt: "2026-04-20T11:00:00Z",
+      checkStatus: null,
+      additions: 0,
+    });
+    const [resUnenrichedUpdated] = fallbackToPreviousEnrichment([prevEnriched], [nextUnenrichedUpdated]);
+    expect(resUnenrichedUpdated.enriched).toBe(true);
+    expect(resUnenrichedUpdated.additions).toBe(55);
+    expect(resUnenrichedUpdated.headSha).toBe("");
+    expect(resUnenrichedUpdated.checkStatus).toBeNull();
+    expect(resUnenrichedUpdated.checkStatusStale).toBe(true);
+  });
 });
 
 // ── fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache ─────────
@@ -2283,6 +2498,64 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
     expect(forkCalls).toBe(2);
     expect(res2.pullRequests[0].checkStatus).toBe("success");
     expect(res2.pullRequests[0].checkStatusStale).toBeUndefined();
+  });
+
+  it("skips runForkPRFallback when a fork PR falls back to LIGHT_PR_BACKFILL_QUERY (checkStatusStale: true)", async () => {
+    let forkCalls = 0;
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          if (query.includes("statusCheckRollup")) {
+            throw new TypeError("Failed to fetch");
+          }
+          // Light fallback succeeds for a fork PR
+          return {
+            nodes: [
+              {
+                id: "PR_kwDOcache42",
+                databaseId: 42,
+                headRefOid: "abc123def456",
+                headRepository: { owner: { login: "contributor" }, nameWithOwner: "contributor/Hello-World" },
+                assignees: { nodes: [] },
+                reviewRequests: { nodes: [] },
+                latestReviews: { totalCount: 0, nodes: [] },
+                additions: 10,
+                deletions: 2,
+                changedFiles: 1,
+                comments: { totalCount: 0 },
+                reviewThreads: { totalCount: 0 },
+                autoMergeRequest: null,
+                viewerLatestReview: null,
+                viewerLatestReviewRequest: null,
+              },
+            ],
+          };
+        }
+        if (query.includes("fork0:")) {
+          forkCalls++;
+          return {
+            fork0: {
+              object: {
+                statusCheckRollup: { state: "SUCCESS" },
+              },
+            },
+          };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [makeLightPR()] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    const res = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(forkCalls).toBe(0);
+    expect(res.pullRequests[0].checkStatus).toBeNull();
+    expect(res.pullRequests[0].checkStatusStale).toBe(true);
   });
 
   it("serves delta-backfill (monitoredRepos) PRs from cache and evicts closed PRs on clean polls without evicting unpolled repos", async () => {

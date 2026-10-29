@@ -703,6 +703,84 @@ describe("fallbackToPreviousEnrichment", () => {
     // Only the PR still in `next` remains — the closed PR (id 2) is not resurrected.
     expect(result.map((pr) => pr.id)).toEqual([1]);
   });
+
+  it("clears checkStatus to null, clears headSha to '', and sets checkStatusStale: true when updatedAt or headSha differs on unenriched PRs", () => {
+    const previous = [
+      makePullRequest({
+        id: 1,
+        enriched: true,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "prevsha1",
+        checkStatus: "failure",
+        additions: 42,
+      }),
+      makePullRequest({
+        id: 2,
+        enriched: true,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "prevsha2",
+        checkStatus: "success",
+        additions: 15,
+      }),
+      makePullRequest({
+        id: 3,
+        enriched: true,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "prevsha3",
+        checkStatus: "success",
+        additions: 8,
+      }),
+    ];
+    const next = [
+      // PR 1: updatedAt changed across failed backfill
+      makePullRequest({
+        id: 1,
+        enriched: false,
+        updatedAt: "2026-04-20T10:05:00Z",
+        headSha: "",
+        checkStatus: null,
+        additions: 0,
+      }),
+      // PR 2: headSha differs even though updatedAt is identical
+      makePullRequest({
+        id: 2,
+        enriched: false,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "newsha2",
+        checkStatus: null,
+        additions: 0,
+      }),
+      // PR 3: updatedAt and headSha match (next has empty headSha from light query)
+      makePullRequest({
+        id: 3,
+        enriched: false,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "",
+        checkStatus: null,
+        additions: 0,
+      }),
+    ];
+
+    const result = fallbackToPreviousEnrichment(previous, next);
+
+    expect(result[0].enriched).toBe(true);
+    expect(result[0].additions).toBe(42);
+    expect(result[0].checkStatus).toBeNull();
+    expect(result[0].headSha).toBe("");
+    expect(result[0].checkStatusStale).toBe(true);
+
+    expect(result[1].enriched).toBe(true);
+    expect(result[1].additions).toBe(15);
+    expect(result[1].checkStatus).toBeNull();
+    expect(result[1].headSha).toBe("");
+    expect(result[1].checkStatusStale).toBe(true);
+
+    expect(result[2].enriched).toBe(true);
+    expect(result[2].additions).toBe(8);
+    expect(result[2].checkStatus).toBe("success");
+    expect(result[2].headSha).toBe("prevsha3");
+    expect(result[2].checkStatusStale).toBeUndefined();
+  });
 });
 
 describe("pickEnrichmentFields", () => {
