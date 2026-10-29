@@ -118,7 +118,7 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // "Bump X from A to B" or "Bump X from A to B in /dir"
   const bumpMatch = /^Bump\s+(.+?)\s+from\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
   if (bumpMatch) {
-    return { packageName: bumpMatch[1]!, from: bumpMatch[2]!, to: bumpMatch[3]!, updateType: semverUpdateType(bumpMatch[2]!, bumpMatch[3]!) ?? undefined };
+    return { packageName: bumpMatch[1], from: bumpMatch[2], to: bumpMatch[3], updateType: semverUpdateType(bumpMatch[2], bumpMatch[3]) ?? undefined };
   }
 
   // "update all major/non-major dependencies"
@@ -128,21 +128,21 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // "update X requirement from >=A to >=B" (Dependabot Python)
   const reqMatch = /^update\s+(.+?)\s+requirement\s+from\s+([^\s]+)\s+to\s+([^\s]+)/i.exec(body);
   if (reqMatch) {
-    const from = stripVersionSpecifier(reqMatch[2]!);
-    const to = stripVersionSpecifier(reqMatch[3]!);
-    return { packageName: reqMatch[1]!, from, to, updateType: semverUpdateType(from, to) ?? undefined };
+    const from = stripVersionSpecifier(reqMatch[2]);
+    const to = stripVersionSpecifier(reqMatch[3]);
+    return { packageName: reqMatch[1], from, to, updateType: semverUpdateType(from, to) ?? undefined };
   }
 
   // "Update dependency X to vY"
   const depMatch = /^Update\s+dependency\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
-  if (depMatch && /^v?\d/.test(depMatch[2]!)) {
-    return { packageName: depMatch[1]!, to: depMatch[2]! };
+  if (depMatch && /^v?\d/.test(depMatch[2])) {
+    return { packageName: depMatch[1], to: depMatch[2] };
   }
 
   // "Update X action to vY"
   const actionMatch = /^Update\s+(.+?)\s+action\s+to\s+(v?[\w.\-+]+)/i.exec(body);
-  if (actionMatch && /^v?\d/.test(actionMatch[2]!)) {
-    return { packageName: actionMatch[1]!, to: actionMatch[2]! };
+  if (actionMatch && /^v?\d/.test(actionMatch[2])) {
+    return { packageName: actionMatch[1], to: actionMatch[2] };
   }
 
   // Generic "from A to B" anywhere. Checked before crateMatch/dockerMatch below so that a title
@@ -153,19 +153,19 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // "from" version, not after the package name).
   const genericMatch = /\bfrom\s+([\w.\-+]+)\s+to\s+([\w.\-+]+)/i.exec(body);
   if (genericMatch) {
-    return { from: genericMatch[1]!, to: genericMatch[2]!, updateType: semverUpdateType(genericMatch[1]!, genericMatch[2]!) ?? undefined };
+    return { from: genericMatch[1], to: genericMatch[2], updateType: semverUpdateType(genericMatch[1], genericMatch[2]) ?? undefined };
   }
 
   // "Update (rust) crate X to vY"
   const crateMatch = /^Update\s+(?:rust\s+)?crate\s+(.+?)\s+to\s+(v?[\w.\-+]+)/i.exec(body);
-  if (crateMatch && /^v?\d/.test(crateMatch[2]!)) {
-    return { packageName: crateMatch[1]!, to: crateMatch[2]! };
+  if (crateMatch && /^v?\d/.test(crateMatch[2])) {
+    return { packageName: crateMatch[1], to: crateMatch[2] };
   }
 
   // "Update X Docker tag to vY"
   const dockerMatch = /^Update\s+(.+?)\s+docker\s+tag\s+to\s+(v?[\w.\-+]+)/i.exec(body);
-  if (dockerMatch && /^v?\d/.test(dockerMatch[2]!)) {
-    return { packageName: dockerMatch[1]!, to: dockerMatch[2]! };
+  if (dockerMatch && /^v?\d/.test(dockerMatch[2])) {
+    return { packageName: dockerMatch[1], to: dockerMatch[2] };
   }
 
   // Generic "Update X to vY" (last resort, single-target version only). The package-name group
@@ -175,8 +175,8 @@ export function extractVersionInfo(title: string): VersionInfo | null {
   // bump. Real bot-generated titles for this fallback (e.g. "update renovate to v44", "update
   // node to v24.18.1") are single-token package names and are unaffected.
   const singleTargetMatch = /^Update\s+(\S+)\s+to\s+(v?[\w.\-+]+)$/i.exec(body);
-  if (singleTargetMatch && /^v?\d/.test(singleTargetMatch[2]!)) {
-    return { packageName: singleTargetMatch[1]!, to: singleTargetMatch[2]! };
+  if (singleTargetMatch && /^v?\d/.test(singleTargetMatch[2])) {
+    return { packageName: singleTargetMatch[1], to: singleTargetMatch[2] };
   }
 
   return null;

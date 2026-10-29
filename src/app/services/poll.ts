@@ -120,7 +120,7 @@ createRoot(() => {
   });
 
   createEffect(() => {
-    const key = (config.trackedUsers ?? []).map((u) => u.login).sort().join(",");
+    const key = (config.trackedUsers ?? []).map((u) => u.login).toSorted().join(",");
     if (!_trackedUsersMounted) {
       _trackedUsersMounted = true;
       _trackedUsersKey = key;
@@ -136,7 +136,7 @@ createRoot(() => {
   });
 
   createEffect(() => {
-    const key = (config.monitoredRepos ?? []).map((r) => r.fullName).sort().join(",");
+    const key = (config.monitoredRepos ?? []).map((r) => r.fullName).toSorted().join(",");
     if (!_monitoredReposMounted) {
       _monitoredReposMounted = true;
       _monitoredReposKey = key;

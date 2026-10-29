@@ -989,7 +989,7 @@ describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tra
       async (_query: string, variables: unknown) => {
         const vars = variables as Record<string, unknown>;
         // Unfiltered search for monitored repo returns monitoredIssueNode
-        if (vars.issueQ && typeof vars.issueQ === "string" && !String(vars.issueQ).includes("involves:")) {
+        if (typeof vars.issueQ === "string" && !vars.issueQ.includes("involves:")) {
           return {
             issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [monitoredIssueNode] },
             prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
@@ -997,7 +997,7 @@ describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tra
           };
         }
         // Bot tracked user search on normal repos returns botIssueNode
-        if (vars.issueQ && String(vars.issueQ).includes("involves:dependabot")) {
+        if (typeof vars.issueQ === "string" && vars.issueQ.includes("involves:dependabot")) {
           return {
             issues: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [botIssueNode] },
             prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },

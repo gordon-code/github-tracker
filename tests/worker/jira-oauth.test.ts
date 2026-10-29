@@ -687,6 +687,34 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
     expect(init.method).toBe("GET");
   });
 
+  it("filters search array params to primitives and omits non-primitive scalar params", async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], total: 0, maxResults: 10, startAt: 0 }), { status: 200 })
+    );
+    globalThis.fetch = mockFetch;
+
+    const req = makeJiraProxyRequest({
+      endpoint: "search",
+      cloudId: VALID_CLOUD_ID,
+      email: TEST_EMAIL,
+      sealed: sealedToken,
+      params: {
+        jql: "project = TEST",
+        maxResults: 10,
+        fields: ["summary", 42, true, { nested: "skip" }, null],
+        startAt: { invalid: 1 },
+      },
+    });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+
+    const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const parsedUrl = new URL(url);
+    expect(parsedUrl.searchParams.get("fields")).toBe("summary,42,true");
+    expect(parsedUrl.searchParams.has("startAt")).toBe(false);
+    expect(url).not.toContain("object+Object");
+  });
+
   it("constructs correct target URL for issue endpoint", async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({ issues: [] }), { status: 200 })
@@ -1059,7 +1087,7 @@ describe("POST /api/jira/proxy — Jira API proxy", () => {
       const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toContain(`/rest/api/3/field`);
       expect(url).not.toContain("bulkfetch");
-      expect((init as RequestInit).method ?? "GET").toBe("GET");
+      expect((init).method ?? "GET").toBe("GET");
     });
   });
 

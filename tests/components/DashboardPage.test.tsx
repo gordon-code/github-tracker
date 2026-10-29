@@ -2566,7 +2566,6 @@ describe("DashboardPage — dependency exclusions", () => {
       errors: [],
     });
 
-    const githubService = await import("../../src/app/services/github");
     const graphqlSpy = vi.fn().mockResolvedValue({ nodes: [], rateLimit: null });
     vi.mocked(githubService.getClient).mockReturnValue({ graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>);
 
@@ -2608,7 +2607,6 @@ describe("DashboardPage — dependency exclusions", () => {
       errors: [],
     });
 
-    const githubService = await import("../../src/app/services/github");
     const graphqlSpy = vi.fn().mockResolvedValue({
       nodes: [{ databaseId: 100, body: RENOVATE_BODY }],
       rateLimit: null,
@@ -2896,7 +2894,6 @@ describe("DashboardPage — depBodies fetch guard recovers from a hung GraphQL r
   it("releases the _fetchingDepBodies guard after the GraphQL timeout fires, so a later poll cycle retries the fetch", async () => {
     vi.useFakeTimers();
     try {
-      const githubService = await import("../../src/app/services/github");
       // Never resolves — reproduces a hung GraphQL request: without
       // raceWithTimeout, awaiting this promise would never settle, and
       // the effect's finally block (which releases _fetchingDepBodies) would
@@ -2974,7 +2971,6 @@ describe("DashboardPage — depBodies fetch guard recovers from a hung GraphQL r
     // unrelated real timers/intervals along the way.
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const githubService = await import("../../src/app/services/github");
       const graphqlSpy = vi.fn()
         .mockRejectedValueOnce(new Error("boom"))
         .mockResolvedValue({ nodes: [{ databaseId: 100, body: "not a renovate table" }], rateLimit: null });
@@ -3041,7 +3037,6 @@ describe("DashboardPage — depBodies fetch guard recovers from a hung GraphQL r
   });
 
   it("prunes a stale cooldown entry when its PR leaves the dependency set, so a later reappearance is retried immediately", async () => {
-    const githubService = await import("../../src/app/services/github");
     const graphqlSpy = vi.fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue({ nodes: [], rateLimit: null });
@@ -3115,7 +3110,6 @@ describe("DashboardPage — depBodies fetch guard recovers from a hung GraphQL r
     // evaluation, not only when toFetch is non-empty — otherwise a PR that
     // fails, disappears, and reopens with nothing else needing a fetch in
     // between would stay incorrectly excluded on a stale cooldown entry.
-    const githubService = await import("../../src/app/services/github");
     const graphqlSpy = vi.fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue({ nodes: [], rateLimit: null });
@@ -3727,7 +3721,7 @@ describe("DashboardPage — PR approval integration", () => {
     });
     await user.click(screen.getByText("owner/repo"));
 
-    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition") as HTMLButtonElement);
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
     await user.click(approveBtn);
     await user.click(approveBtn);
 
@@ -4691,7 +4685,7 @@ describe("DashboardPage — Mark PR ready integration", () => {
     await waitFor(() => screen.getByText("owner/repo"));
     await user.click(screen.getByText("owner/repo"));
 
-    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review") as HTMLButtonElement);
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
     await user.click(draftBtn);
     await user.click(draftBtn);
 

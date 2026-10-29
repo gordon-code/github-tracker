@@ -106,7 +106,7 @@ export async function validateTokenScopes(): Promise<boolean> {
 
   try {
     const response = await client.request("GET /user");
-    const login = String((response.data as { login?: string }).login ?? "unknown");
+    const login = (response.data as { login?: string }).login ?? "unknown";
     const rawScopeHeader = (response.headers as Record<string, string | undefined>)["x-oauth-scopes"];
 
     if (rawScopeHeader === undefined) {

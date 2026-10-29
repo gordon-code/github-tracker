@@ -459,7 +459,7 @@ describe("LoginPage — Import from backup", () => {
     await openImport(user);
     fireFileChange();
     await waitFor(() => screen.getByLabelText("One-time code"));
-    expect((screen.getByLabelText("One-time code") as HTMLInputElement).type).toBe("password");
+    expect(screen.getByLabelText<HTMLInputElement>("One-time code").type).toBe("password");
     // No error surfaced on a clean valid-creds detection.
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -748,7 +748,7 @@ describe("LoginPage — Import from backup", () => {
     // Defer the resolve so the flow can be abandoned while it is pending.
     let finishResolve!: (v: { ok: true; bundle: CredentialBundle; identity: typeof IDENTITY }) => void;
     vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
-      new Promise((r) => { finishResolve = r as never; })
+      new Promise((r) => { finishResolve = r; })
     );
     vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false); // would otherwise auto-login
     vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
@@ -790,7 +790,7 @@ describe("LoginPage — Import from backup", () => {
     await user.click(screen.getByRole("button", { name: "Restore credentials" }));
 
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Cancel" }).disabled).toBe(true)
     );
     resolveUnseal({ ok: true, ciphertext: "CT" });
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true }));

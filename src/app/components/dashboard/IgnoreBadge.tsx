@@ -15,6 +15,7 @@ function typeIcon(type: IgnoredItem["type"]): string {
     case "pullRequest":
       return "⌥";
     case "workflowRun":
+    default:
       return "▶";
   }
 }

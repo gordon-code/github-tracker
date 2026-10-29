@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { captureException } from "@sentry/solid";
 import {
   getDb,
   getCacheEntry,
@@ -9,6 +10,10 @@ import {
   evictStaleEntries,
   cachedFetch,
 } from "../../src/app/stores/cache";
+
+vi.mock("@sentry/solid", () => ({
+  captureException: vi.fn(),
+}));
 
 // Reset the DB singleton between tests by closing and clearing
 beforeEach(async () => {
@@ -79,6 +84,7 @@ describe("CRUD operations", () => {
 describe("setCacheEntry — QuotaExceededError eviction", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(captureException).mockClear();
   });
 
   it("evicts oldest 50% and retries when db.put throws QuotaExceededError on first call", async () => {
@@ -108,7 +114,6 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
         const err = new DOMException("QuotaExceededError", "QuotaExceededError");
         throw err;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return originalPut(...(args as [any, any]));
     });
 
@@ -122,22 +127,28 @@ describe("setCacheEntry — QuotaExceededError eviction", () => {
     const stored = await getCacheEntry("quota-new:key");
     expect(stored).toBeDefined();
     expect(stored!.data).toEqual({ new: true });
+    expect(captureException).not.toHaveBeenCalled();
   });
 
   it("logs warning and resolves when retry after eviction also fails", async () => {
     const db = await getDb();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const initialQuotaErr = new DOMException("QuotaExceededError (initial)", "QuotaExceededError");
+    const retryQuotaErr = new DOMException("QuotaExceededError (retry)", "QuotaExceededError");
 
-    // Throw QuotaExceededError on every put call
-    vi.spyOn(db, "put").mockImplementation(async () => {
-      throw new DOMException("QuotaExceededError", "QuotaExceededError");
-    });
+    // Throw distinct QuotaExceededError instances on initial and retry put calls
+    vi.spyOn(db, "put")
+      .mockRejectedValueOnce(initialQuotaErr)
+      .mockRejectedValueOnce(retryQuotaErr);
 
     // Should resolve (not throw) — entry is silently dropped
     await setCacheEntry("quota-retry-fail:key", { data: true }, null);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Still over quota")
     );
+    expect(captureException).toHaveBeenCalledWith(retryQuotaErr, {
+      tags: { source: "cache-eviction-retry" },
+    });
   });
 });
 

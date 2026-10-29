@@ -334,7 +334,7 @@ describe("beforeBreadcrumbHandler", () => {
         to: "https://gh.gordoncode.dev/dashboard?state=xyz",
       },
     };
-    const result = beforeBreadcrumbHandler(breadcrumb as never);
+    const result = beforeBreadcrumbHandler(breadcrumb);
     expect(result!.data!.from).toBe(
       "https://gh.gordoncode.dev/cb?code=[REDACTED]",
     );
@@ -348,7 +348,7 @@ describe("beforeBreadcrumbHandler", () => {
       category: "fetch",
       data: { url: "https://api.github.com?access_token=ghu_tok" },
     };
-    const result = beforeBreadcrumbHandler(breadcrumb as never);
+    const result = beforeBreadcrumbHandler(breadcrumb);
     expect(result!.data!.url).toBe(
       "https://api.github.com?access_token=[REDACTED]",
     );
@@ -359,7 +359,7 @@ describe("beforeBreadcrumbHandler", () => {
       category: "xhr",
       data: { url: "https://api.github.com?code=abc" },
     };
-    const result = beforeBreadcrumbHandler(breadcrumb as never);
+    const result = beforeBreadcrumbHandler(breadcrumb);
     expect(result!.data!.url).toBe(
       "https://api.github.com?code=[REDACTED]",
     );
@@ -449,7 +449,7 @@ describe("initSentry", () => {
   it("sets allowUrls to a RegExp anchored to window.location.origin", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
-    vi.stubGlobal("location", { ...window.location, origin: "https://test.example.com" });
+    vi.stubGlobal("location", { origin: "https://test.example.com" });
     initSentry();
     const [config] = mockInit.mock.calls[0] as [{ allowUrls: RegExp[] }];
     expect(config.allowUrls).toHaveLength(1);

@@ -39,7 +39,7 @@ function makeCspRequest(
   return new Request("https://gh.gordoncode.dev/api/csp-report", {
     method,
     headers,
-    body: method !== "GET" ? body : undefined,
+    ...(method !== "GET" ? { body } : {}),
   });
 }
 

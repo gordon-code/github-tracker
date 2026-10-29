@@ -110,6 +110,7 @@ function extractRejectionError(reason: unknown): { statusCode: number | null; me
  * Extracts partial data from a GraphqlResponseError for search queries.
  * Only matches responses containing a `search` key (issues/PRs search shape).
  */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 function extractSearchPartialData<T>(err: unknown): T | null {
   if (
     err &&
@@ -143,7 +144,7 @@ export async function pooledAllSettled<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number
 ): Promise<PromiseSettledResult<T>[]> {
-  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  const results = Array.from<PromiseSettledResult<T>>({ length: tasks.length });
   let nextIndex = 0;
 
   async function runWorker(): Promise<void> {
@@ -546,6 +547,7 @@ interface SearchPageResult<T> {
  * caller-provided `processNode` callback. Handles partial errors, cap enforcement,
  * and rate limit tracking. Returns the count of items added by processNode.
  */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 async function paginateGraphQLSearch<TResponse extends { search: SearchPageResult<TNode>; rateLimit?: GraphQLRateLimit }, TNode>(
   octokit: GitHubOctokit,
   query: string,
@@ -708,7 +710,7 @@ async function runForkPRFallback(
     try {
       const forkResponse = await octokit.graphql<ForkQueryResponse>(forkQuery, { ...variables, request: { apiSource: "forkCheck" } });
       if (forkResponse.rateLimit) {
-        updateGraphqlRateLimit(forkResponse.rateLimit as GraphQLRateLimit);
+        updateGraphqlRateLimit(forkResponse.rateLimit);
       }
 
       for (let i = 0; i < forkChunk.length; i++) {
@@ -1247,6 +1249,7 @@ export interface NodeBodiesFetchResult<K, V> {
  * out contribute their requested ids to `failedIds` so callers can avoid
  * retrying a persistently-failing id on every poll cycle.
  */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 async function fetchNodeBodiesBatched<TNode, K, V>(
   octokit: GitHubOctokit,
   nodeIds: string[],
@@ -1429,7 +1432,7 @@ function mergeEnrichment(
     const viewerReviewRequested =
       e.viewerLatestReviewState === "APPROVED" && !e.viewerReviewRequested
         ? false
-        : Boolean(pr.viewerReviewRequested || e.viewerReviewRequested);
+        : (pr.viewerReviewRequested ?? false) || e.viewerReviewRequested;
     const reviewerLogins =
       viewerLogin &&
       (viewerReviewRequested || e.viewerLatestReviewState !== null) &&
@@ -1639,7 +1642,7 @@ export async function fetchIssuesAndPullRequests(
   // Merge tracked user results and collect new (delta) node IDs for both
   // monitored repo PRs (added above) and tracked user PRs (added below).
   if (trackedSearchTasks.length > 0) {
-    const settled = trackedResults as PromiseSettledResult<LightSearchResult>[];
+    const settled = trackedResults;
     for (let i = 0; i < settled.length; i++) {
       const result = settled[i];
       const trackedLogin = trackedSearchTasks[i].login;
@@ -1939,7 +1942,7 @@ export async function fetchWorkflowRuns(
     workflowEntries.sort((a, b) => a.latestAt > b.latestAt ? -1 : a.latestAt < b.latestAt ? 1 : 0);
     // Take most recent M runs per workflow
     for (const { runs: workflowRuns } of workflowEntries.slice(0, maxWorkflows)) {
-      const sorted = workflowRuns.sort(
+      const sorted = workflowRuns.toSorted(
         (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {

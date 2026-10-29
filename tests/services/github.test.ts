@@ -717,7 +717,7 @@ describe("hook.wrap — request tracking callbacks", () => {
     ));
 
     const client = createGitHubClient("test-token");
-    await expect(client.request("GET /users/{username}", { username: "nonexistent" })).rejects.toThrow();
+    await expect(client.request("GET /users/{username}", { username: "nonexistent" })).rejects.toThrow("Not Found");
 
     expect(cbSpy).toHaveBeenCalled();
     const info = cbSpy.mock.calls[0][0];
@@ -731,7 +731,7 @@ describe("hook.wrap — request tracking callbacks", () => {
 
     // Disable retries — the retry plugin uses real setTimeout for backoff
     const client = createGitHubClient("test-token");
-    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow();
+    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow("fetch failed");
 
     // Octokit wraps network errors as RequestError with status 500,
     // so the hook fires with status 500 (a real API attempt was made)
@@ -831,7 +831,7 @@ describe("hook.wrap — rate limit signal routing", () => {
     ));
 
     const client = createGitHubClient("test-token");
-    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow();
+    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow("internal server error");
 
     const rl = getGraphqlRateLimit();
     expect(rl).not.toBeNull();
@@ -856,7 +856,7 @@ describe("hook.wrap — rate limit signal routing", () => {
     ));
 
     const client = createGitHubClient("test-token");
-    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow();
+    await expect(client.request("GET /user", { request: { retries: 0 } })).rejects.toThrow("internal server error");
 
     const rl = getCoreRateLimit();
     expect(rl).not.toBeNull();
@@ -1014,7 +1014,7 @@ describe("hook.wrap — rate limit signal routing", () => {
     onApiRequest((info) => { capturedInfo = info; });
 
     const client = createGitHubClient("test-token");
-    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow();
+    await expect(client.graphql("{ viewer { login } }", { request: { retries: 0 } })).rejects.toThrow(/resolver blew up|500/);
 
     expect(capturedInfo).not.toBeNull();
     expect(capturedInfo!.isGraphql).toBe(true);

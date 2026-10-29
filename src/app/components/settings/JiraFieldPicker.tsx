@@ -43,11 +43,11 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
             try {
               const result = await props.client.searchJql(jql, { maxResults: 20, fields: ["*all"] });
               for (const issue of result.issues) {
-                const fields = issue.fields as Record<string, unknown>;
+                const issueFields = issue.fields as Record<string, unknown>;
                 for (const id of fieldIdSet) {
                   if (id in merged) continue;
-                  if (fields[id] !== undefined && fields[id] !== null) {
-                    merged[id] = fields[id];
+                  if (issueFields[id] !== undefined && issueFields[id] !== null) {
+                    merged[id] = issueFields[id];
                   }
                 }
               }
@@ -73,7 +73,7 @@ export default function JiraFieldPicker(props: JiraFieldPickerProps) {
     const samples = sampleValues();
     const sel = selected();
     const selOrder = [...sel.keys()];
-    return matched.sort((a, b) => {
+    return matched.toSorted((a, b) => {
       const aSel = sel.has(a.id);
       const bSel = sel.has(b.id);
       if (aSel !== bSel) return aSel ? -1 : 1;

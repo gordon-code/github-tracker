@@ -50,10 +50,10 @@ globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
 // deterministic relative to userEvent's chain without making rAF fully synchronous
 // (real timestamp preserved so time-based animation loops, e.g. SettingsTOC's
 // smooth-scroll easing, still terminate normally when a test doesn't stub rAF).
-globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-  Promise.resolve().then(() => cb(performance.now()));
+globalThis.requestAnimationFrame = ((frameCallback: FrameRequestCallback) => {
+  void Promise.resolve().then(() => frameCallback(performance.now()));
   return 0;
-}) as typeof requestAnimationFrame;
+});
 
 afterEach(() => {
   for (const id of pendingTimers) {

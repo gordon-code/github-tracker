@@ -32,6 +32,15 @@ always_run = true
 priority = 0
 
 [[repos.hooks]]
+id = "lint"
+name = "oxlint"
+language = "system"
+entry = "pnpm lint"
+pass_filenames = false
+always_run = true
+priority = 0
+
+[[repos.hooks]]
 id = "test"
 name = "Vitest tests"
 language = "system"

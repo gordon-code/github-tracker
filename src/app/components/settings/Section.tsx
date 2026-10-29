@@ -1,4 +1,4 @@
-import { JSX, Show } from "solid-js";
+import { type JSX, Show } from "solid-js";
 
 export default function Section(props: { id?: string; title: string; description?: string; children: JSX.Element }) {
   return (

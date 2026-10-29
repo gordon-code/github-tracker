@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "e2e/**/*",
+    "mcp/tests/**/*.ts",
+    "*.config.ts",
+    "playwright.config.*.ts",
+    "vitest.*.ts",
+    "mcp/*.config.ts",
+    "vite-plugins/**/*",
+    "scripts/**/*.ts"
+  ]
+}

@@ -45,7 +45,7 @@ function waitForMessage(ws: WebSocket, timeout = 2000): Promise<string> {
     const t = setTimeout(() => reject(new Error("Timeout waiting for message")), timeout);
     ws.once("message", (data) => {
       clearTimeout(t);
-      resolve(data.toString());
+      resolve((data as Buffer).toString());
     });
   });
 }
@@ -103,8 +103,9 @@ describe("WebSocket relay server — connection", () => {
 
   beforeEach(async () => {
     process.env.MCP_WS_PORT = "0";
-    wss = startWebSocketServer()!;
-    expect(wss).not.toBeNull();
+    const started = startWebSocketServer();
+    if (!started) throw new Error("Server not started");
+    wss = started;
     await waitForEvent(wss, "listening");
     port = getServerPort(wss);
   });

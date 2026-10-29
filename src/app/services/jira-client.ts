@@ -54,7 +54,7 @@ export class JiraClient implements IJiraClient {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/json",
         "Content-Type": "application/json",
-        ...(init.headers ?? {}),
+        ...(init.headers as Record<string, string> | undefined),
       },
     });
 

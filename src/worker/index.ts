@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/cloudflare";
 import {
-  CryptoEnv,
+  type CryptoEnv,
   deriveKey,
   sealToken,
   unsealTokenWithRotation,
@@ -9,8 +9,8 @@ import {
   CREDENTIAL_BUNDLE_EXPIRY_MS,
   SEAL_SALT,
 } from "./crypto";
-import { SessionEnv, ensureSession } from "./session";
-import { TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
+import { type SessionEnv, ensureSession } from "./session";
+import { type TurnstileEnv, verifyTurnstile, extractTurnstileToken } from "./turnstile";
 import { validateProxyRequest, validateOrigin } from "./validation";
 import { getWorkerSentryOptions } from "./sentry";
 
@@ -511,7 +511,7 @@ function parseSentryDsn(dsn: string): ParsedDsn | null {
   if (!dsn) return null;
   try {
     const url = new URL(dsn);
-    const projectId = url.pathname.split("/").filter(Boolean).pop() ?? "";
+    const projectId = url.pathname.split("/").findLast(Boolean) ?? "";
     if (!url.hostname || !projectId || !url.username) return null;
     return { host: url.hostname, projectId, publicKey: url.username };
   } catch {
@@ -1067,8 +1067,8 @@ async function handleJiraTokenExchange(
     return errorResponse("jira_token_exchange_failed", 400, cors);
   }
 
-  const refreshToken = atlassianData["refresh_token"] as string;
-  const accessToken = atlassianData["access_token"] as string;
+  const refreshToken = atlassianData["refresh_token"];
+  const accessToken = atlassianData["access_token"];
   const expiresIn = atlassianData["expires_in"] ?? 3600;
 
   let sealedRefreshToken: string;
@@ -1182,8 +1182,8 @@ async function handleJiraTokenRefresh(
     return errorResponse("jira_refresh_failed", 400, cors);
   }
 
-  const newRefreshToken = atlassianData["refresh_token"] as string;
-  const newAccessToken = atlassianData["access_token"] as string;
+  const newRefreshToken = atlassianData["refresh_token"];
+  const newAccessToken = atlassianData["access_token"];
   const expiresIn = atlassianData["expires_in"] ?? 3600;
 
   let newSealedRefreshToken: string;
@@ -1431,8 +1431,15 @@ async function handleJiraProxy(
     const searchParams = new URLSearchParams();
     if (params && typeof params === "object") {
       for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
-        if (ALLOWED_SEARCH_PARAMS.has(k) && v !== undefined && v !== null)
-          searchParams.set(k, Array.isArray(v) ? v.join(",") : String(v));
+        if (!ALLOWED_SEARCH_PARAMS.has(k) || v === undefined || v === null) continue;
+        if (Array.isArray(v)) {
+          searchParams.set(
+            k,
+            v.filter((item): item is string | number | boolean => typeof item === "string" || typeof item === "number" || typeof item === "boolean").join(","),
+          );
+        } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          searchParams.set(k, String(v));
+        }
       }
     }
     jiraUrl = `${baseUrl}?${searchParams.toString()}`;

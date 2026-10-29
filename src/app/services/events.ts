@@ -1,4 +1,4 @@
-import { getClient } from "./github";
+import type { getClient } from "./github";
 import { onAuthCleared } from "../stores/auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ export async function fetchUserEvents(
       per_page: 100,
     });
 
-    let allEvents = (response.data as GitHubEvent[]);
+    const allEvents = [...(response.data as GitHubEvent[])];
 
     // Paginate if page is full — older events on subsequent pages would be
     // permanently missed since _lastEventId advances past them.
@@ -90,7 +90,7 @@ export async function fetchUserEvents(
         });
         const nextEvents = (next.data as GitHubEvent[]);
         if (nextEvents.length === 0) break;
-        allEvents = [...allEvents, ...nextEvents];
+        allEvents.push(...nextEvents);
         lastPageEvents = nextEvents;
         page++;
       } catch (err) {

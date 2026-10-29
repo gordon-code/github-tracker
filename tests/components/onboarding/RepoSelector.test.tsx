@@ -243,7 +243,7 @@ describe("RepoSelector", () => {
     ]);
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       return Promise.resolve([
-        { owner: org as string, name: "repo", fullName: `${org}/repo`, pushedAt: "2026-03-20T00:00:00Z" },
+        { owner: org, name: "repo", fullName: `${org}/repo`, pushedAt: "2026-03-20T00:00:00Z" },
       ]);
     });
     render(() => (
@@ -745,7 +745,7 @@ describe("RepoSelector — upstream discovery", () => {
       expect(api.discoverUpstreamRepos).toHaveBeenCalled();
     });
 
-    const excludeSet = vi.mocked(api.discoverUpstreamRepos).mock.calls[0][2] as Set<string>;
+    const excludeSet = vi.mocked(api.discoverUpstreamRepos).mock.calls[0][2];
     expect(excludeSet.has("myorg/repo-a")).toBe(true);
   });
 
@@ -1080,7 +1080,7 @@ describe("RepoSelector — org accordion", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
   });
 
@@ -1528,7 +1528,7 @@ describe("RepoSelector — org accordion", () => {
     const sevenOrgs = [...sixOrgs, "eta-org"];
     const sevenOrgEntries = sevenOrgs.map((login) => ({ login, avatarUrl: "", type: "org" as const }));
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     setSelectedOrgs(sevenOrgs);
@@ -1630,7 +1630,7 @@ describe("RepoSelector — org accordion", () => {
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       if (org === "zeta-org") return zetaPending;
-      return Promise.resolve(makeOrgRepos(org as string));
+      return Promise.resolve(makeOrgRepos(org));
     });
 
     render(() => (
@@ -1672,7 +1672,7 @@ describe("RepoSelector — org accordion", () => {
   it("expanding a failed accordion org panel shows Retry button and allows re-fetch", async () => {
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       if (org === "zeta-org") return Promise.reject(new Error("zeta load failed"));
-      return Promise.resolve(makeOrgRepos(org as string));
+      return Promise.resolve(makeOrgRepos(org));
     });
 
     render(() => (
@@ -1700,7 +1700,7 @@ describe("RepoSelector — org accordion", () => {
 
     // Set up the retry to succeed
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
-      return Promise.resolve(makeOrgRepos(org as string));
+      return Promise.resolve(makeOrgRepos(org));
     });
 
     fireEvent.click(screen.getByText("Retry"));
@@ -1727,14 +1727,14 @@ describe("RepoSelector — frozen org order", () => {
   function getOrgHeaderOrder(orgNames: string[]): string[] {
     const escaped = orgNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     const pattern = new RegExp(`^(${escaped.join("|")})$`);
-    return screen.getAllByText(pattern).map((el) => el.textContent!);
+    return screen.getAllByText(pattern).map((el) => el.textContent);
   }
 
   // Accordion mode: org names are inside button triggers — sort by DOM position.
   function getAccordionOrder(orgNames: string[]): string[] {
     return orgNames
       .map((name) => ({ name, btn: screen.getByRole("button", { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }) }))
-      .sort((a, b) => {
+      .toSorted((a, b) => {
         const pos = a.btn.compareDocumentPosition(b.btn);
         return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
       })
@@ -1757,7 +1757,7 @@ describe("RepoSelector — frozen org order", () => {
     vi.mocked(api.fetchRepos)
       .mockImplementation((_client, org) => {
         if (org === "beta-org") return Promise.reject(new Error("beta load failed"));
-        return Promise.resolve(makeOrgRepos(org as string));
+        return Promise.resolve(makeOrgRepos(org));
       });
 
     render(() => (
@@ -1782,7 +1782,7 @@ describe("RepoSelector — frozen org order", () => {
 
     // Set up retry to succeed for all
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     fireEvent.click(screen.getByText("Retry"));
@@ -1799,7 +1799,7 @@ describe("RepoSelector — frozen org order", () => {
   // S2: Org order remains stable when toggling a repo checkbox
   it("org order remains stable when toggling a repo checkbox", async () => {
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     render(() => (
@@ -1839,7 +1839,7 @@ describe("RepoSelector — frozen org order", () => {
     const { createSignal } = await import("solid-js");
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "delta-inc"]);
@@ -1888,7 +1888,7 @@ describe("RepoSelector — frozen org order", () => {
     }));
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(startOrgs);
@@ -1936,7 +1936,7 @@ describe("RepoSelector — frozen org order", () => {
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       if (org === "echo-labs") return Promise.reject(new Error("echo load failed"));
-      return Promise.resolve(makeOrgRepos(org as string));
+      return Promise.resolve(makeOrgRepos(org));
     });
 
     render(() => (
@@ -1968,7 +1968,7 @@ describe("RepoSelector — frozen org order", () => {
 
     // Set up retry to succeed
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     fireEvent.click(screen.getByText("Retry"));
@@ -1994,7 +1994,7 @@ describe("RepoSelector — frozen org order", () => {
     const { createSignal } = await import("solid-js");
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp", "delta-inc"]);
@@ -2042,7 +2042,7 @@ describe("RepoSelector — frozen org order", () => {
     const { createSignal } = await import("solid-js");
 
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) =>
-      Promise.resolve(makeOrgRepos(org as string))
+      Promise.resolve(makeOrgRepos(org))
     );
 
     const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp", "delta-inc"]);
@@ -2097,7 +2097,7 @@ describe("RepoSelector — frozen org order", () => {
     vi.mocked(api.fetchRepos).mockImplementation((_client, org) => {
       if (org === "echo-labs") return echoPending;
       if (org === "foxtrot-io") return foxtrotPending;
-      return Promise.resolve(makeOrgRepos(org as string));
+      return Promise.resolve(makeOrgRepos(org));
     });
 
     const [selectedOrgs, setSelectedOrgs] = createSignal<string[]>(["alice", "acme-corp"]);

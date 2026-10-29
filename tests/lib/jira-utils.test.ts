@@ -24,9 +24,7 @@ vi.mock("../../src/app/services/jira-client", async (importOriginal) => {
 import { jiraAuth as _jiraAuth, ensureJiraTokenValid as _ensureJiraTokenValid } from "../../src/app/stores/auth";
 
 // vi.mocked() infers Accessor<...> for jiraAuth which lacks mock methods — cast to any-mock first
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockJiraAuth = _jiraAuth as unknown as ReturnType<typeof vi.fn>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockEnsureJiraTokenValid = _ensureJiraTokenValid as unknown as ReturnType<typeof vi.fn>;
 
 // ── mergeCustomFields ─────────────────────────────────────────────────────────

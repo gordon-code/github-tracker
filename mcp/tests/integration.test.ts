@@ -14,12 +14,11 @@ import {
 import {
   WebSocketDataSource,
   CompositeDataSource,
-  OctokitDataSource,
   setCachedConfig,
 } from "../src/data-source.js";
 import type { DataSource } from "../src/data-source.js";
 import { METHODS, NOTIFICATIONS } from "../../src/shared/protocol.js";
-import { makeIssue, makePullRequest, makeWorkflowRun } from "../../tests/helpers/factories.js";
+import { makeIssue, makePullRequest } from "../../tests/helpers/factories.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -69,7 +68,7 @@ function waitForClose(ws: WebSocket, timeout = 3000): Promise<void> {
 function waitForMessage(ws: WebSocket, timeout = 3000): Promise<string> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("Timeout waiting for message")), timeout);
-    ws.once("message", (data) => { clearTimeout(t); resolve(data.toString()); });
+    ws.once("message", (data) => { clearTimeout(t); resolve((data as Buffer).toString()); });
   });
 }
 
@@ -126,7 +125,7 @@ describe("Integration: WebSocket relay data flow", () => {
 
     // Client acts as SPA — responds to JSON-RPC requests
     client.on("message", (data) => {
-      const req = JSON.parse(data.toString());
+      const req = JSON.parse((data as Buffer).toString());
       if (req.method === METHODS.GET_RATE_LIMIT) {
         client!.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -193,7 +192,7 @@ describe("Integration: WebSocket relay data flow", () => {
     const promise = sendRelayRequest(METHODS.GET_OPEN_PRS, {});
     client.close();
 
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow("WebSocket relay disconnected");
     expect(isRelayConnected()).toBe(false);
   });
 
@@ -231,7 +230,7 @@ describe("Integration: WebSocketDataSource through relay", () => {
     const mockPRs = [makePullRequest({ title: "Fix auth bug", repoFullName: "acme/app" })];
 
     client.on("message", (data) => {
-      const req = JSON.parse(data.toString());
+      const req = JSON.parse((data as Buffer).toString());
       if (req.method === METHODS.GET_OPEN_PRS) {
         client!.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -254,7 +253,7 @@ describe("Integration: WebSocketDataSource through relay", () => {
     await waitForOpen(client);
 
     client.on("message", (data) => {
-      const req = JSON.parse(data.toString());
+      const req = JSON.parse((data as Buffer).toString());
       if (req.method === METHODS.GET_CONFIG) {
         client!.send(JSON.stringify({
           jsonrpc: "2.0",
@@ -322,7 +321,7 @@ describe("Integration: CompositeDataSource fallback", () => {
     await waitForOpen(client);
 
     client.on("message", (data) => {
-      const req = JSON.parse(data.toString());
+      const req = JSON.parse((data as Buffer).toString());
       if (req.method === METHODS.GET_OPEN_ISSUES) {
         client.send(JSON.stringify({
           jsonrpc: "2.0",

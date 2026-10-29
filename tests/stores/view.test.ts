@@ -322,7 +322,7 @@ describe("initViewPersistence", () => {
 
       const raw = localStorageMock.getItem(VIEW_KEY);
       expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
+      const parsed = JSON.parse(raw);
       expect(parsed.globalFilter.org).toBe("testorg");
       expect(parsed.globalFilter.repo).toBe("testrepo");
       dispose();
@@ -352,7 +352,7 @@ describe("initViewPersistence", () => {
 
       // Exactly one write, reflecting the latest (second) state.
       expect(setItemSpy).toHaveBeenCalledTimes(1);
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org2");
       expect(parsed.globalFilter.repo).toBe("repo2");
 
@@ -373,7 +373,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       // The other tab's jiraCustomOrder write must survive — this tab never
       // touched that field, so its own stale in-memory copy (still []) must
@@ -394,7 +394,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.jiraCustomOrder).toEqual(["MINE-1", "MINE-2"]);
 
       dispose();
@@ -425,7 +425,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       expect(parsed.maliciousInjectedField).toBeUndefined();
       expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(false);
@@ -453,7 +453,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       // The malformed jiraCustomOrder must be dropped, not echoed back — this
       // tab's own (valid, empty) value fills the gap instead.
@@ -468,12 +468,12 @@ describe("initViewPersistence", () => {
       setJiraCustomOrder(["MINE-1"]);
       await Promise.resolve();
       vi.advanceTimersByTime(200);
-      expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)!).jiraCustomOrder).toEqual(["MINE-1"]);
+      expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)).jiraCustomOrder).toEqual(["MINE-1"]);
 
       // Simulate a stale/corrupted on-disk blob missing jiraCustomOrder entirely
       // (version skew, manual tampering) — this tab's own last-known value for
       // that key must survive even though it hasn't changed since baseline.
-      const onDisk = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const onDisk = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       delete onDisk.jiraCustomOrder;
       localStorageMock.setItem(VIEW_KEY, JSON.stringify(onDisk));
 
@@ -481,7 +481,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       expect(parsed.jiraCustomOrder).toEqual(["MINE-1"]);
 
@@ -499,7 +499,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       expect(() => vi.advanceTimersByTime(200)).not.toThrow();
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       // Must be the FULL snapshot, not just the one field this test changed —
       // an untouched default field must also be present, ruling out a
@@ -519,7 +519,7 @@ describe("initViewPersistence", () => {
       await Promise.resolve();
       vi.advanceTimersByTime(200);
 
-      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
       expect(parsed.globalFilter.org).toBe("org1");
       expect(parsed.lastActiveTab).toBe("issues");
 
@@ -555,7 +555,7 @@ describe("initViewPersistence", () => {
 
       const raw = localStorageMock.getItem(VIEW_KEY);
       expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!);
+      const parsed = JSON.parse(raw);
       expect(parsed.globalFilter.org).toBe("unmount-org");
       expect(parsed.globalFilter.repo).toBe("unmount-repo");
     });
@@ -604,7 +604,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
 
     // B's commit runs strictly after A's (registered later, same target time),
     // so B's write is the one that lands last on disk.
-    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
     expect(parsed.jiraCustomOrder).toEqual(["FROM-B"]);
 
     disposeA();
@@ -631,7 +631,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
 
     vi.advanceTimersByTime(200);
 
-    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
     expect(parsed.jiraCustomOrder).toEqual(["FROM-A"]);
 
     disposeA();
@@ -653,7 +653,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
     tabB.setJiraCustomOrder(["FROM-B"]);
     await Promise.resolve();
     vi.advanceTimersByTime(200);
-    expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)!).jiraCustomOrder).toEqual(["FROM-B"]);
+    expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)).jiraCustomOrder).toEqual(["FROM-B"]);
 
     // A, which never touched jiraCustomOrder, now changes an unrelated field.
     // A's own stale in-memory jiraCustomOrder ([]) must NOT overwrite B's
@@ -662,7 +662,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
     await Promise.resolve();
     vi.advanceTimersByTime(200);
 
-    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY)!);
+    const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
     expect(parsed.globalFilter.org).toBe("org1");
     expect(parsed.jiraCustomOrder).toEqual(["FROM-B"]);
 
@@ -837,7 +837,7 @@ describe("expandedRepos helpers", () => {
 
     const raw = localStorageMock.getItem(VIEW_KEY);
     expect(raw).not.toBeNull();
-    const restored = ViewStateSchema.parse(JSON.parse(raw!));
+    const restored = ViewStateSchema.parse(JSON.parse(raw));
     expect(restored.expandedRepos.issues["myorg/myrepo"]).toBe(true);
     expect(restored.expandDefault.actions).toBe(true);
     expect(restored.expandedRepos.actions).toEqual({});

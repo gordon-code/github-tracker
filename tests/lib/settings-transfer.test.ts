@@ -167,7 +167,7 @@ afterEach(() => {
 
 describe("settings-transfer — schema-drift guard", () => {
   it("ConfigSchema top-level shape matches the export snapshot", () => {
-    const actual = Object.keys(ConfigSchema.shape).sort();
+    const actual = Object.keys(ConfigSchema.shape).toSorted();
     const { added, removed } = diffKeys(actual, EXPECTED_CONFIG_KEYS);
     expect(
       added.length === 0 && removed.length === 0,
@@ -179,7 +179,7 @@ describe("settings-transfer — schema-drift guard", () => {
   });
 
   it("JiraConfigSchema shape matches the export snapshot", () => {
-    const actual = Object.keys(JiraConfigSchema.shape).sort();
+    const actual = Object.keys(JiraConfigSchema.shape).toSorted();
     const { added, removed } = diffKeys(actual, EXPECTED_JIRA_KEYS);
     expect(
       added.length === 0 && removed.length === 0,
@@ -191,7 +191,7 @@ describe("settings-transfer — schema-drift guard", () => {
   });
 
   it("ViewStateSchema top-level shape matches the _viewPreferences allowlist snapshot", () => {
-    const actual = Object.keys(ViewStateSchema.shape).sort();
+    const actual = Object.keys(ViewStateSchema.shape).toSorted();
     const { added, removed } = diffKeys(actual, EXPECTED_VIEW_STATE_KEYS);
     expect(
       added.length === 0 && removed.length === 0,
@@ -203,7 +203,7 @@ describe("settings-transfer — schema-drift guard", () => {
   });
 
   it("TrackedItemSchema shape matches the trackedItems export keep-list snapshot", () => {
-    const actual = Object.keys(TrackedItemSchema.shape).sort();
+    const actual = Object.keys(TrackedItemSchema.shape).toSorted();
     const { added, removed } = diffKeys(actual, EXPECTED_TRACKED_ITEM_KEYS);
     expect(
       added.length === 0 && removed.length === 0,
@@ -215,7 +215,7 @@ describe("settings-transfer — schema-drift guard", () => {
   });
 
   it("IgnoredItemSchema shape matches the ignoredItems export keep-list snapshot", () => {
-    const actual = Object.keys(IgnoredItemSchema.shape).sort();
+    const actual = Object.keys(IgnoredItemSchema.shape).toSorted();
     const { added, removed } = diffKeys(actual, EXPECTED_IGNORED_ITEM_KEYS);
     expect(
       added.length === 0 && removed.length === 0,
@@ -275,7 +275,7 @@ describe("buildExportPayload — _viewPreferences", () => {
     const out = buildExportPayload(ConfigSchema.parse({}), viewState);
     const prefs = out._viewPreferences as Record<string, unknown>;
     expect(prefs).toBeDefined();
-    expect(Object.keys(prefs).sort()).toEqual([...EXPORTED_VIEW_PREF_KEYS].sort());
+    expect(Object.keys(prefs).toSorted()).toEqual(EXPORTED_VIEW_PREF_KEYS.toSorted());
   });
 
   it("excludes the transient/privacy keys: lastActiveTab, globalSort, globalFilter", () => {
@@ -303,7 +303,7 @@ describe("buildExportPayload — _viewPreferences", () => {
     const prefs = out._viewPreferences as Record<string, unknown>;
     const entries = prefs.ignoredItems as Record<string, unknown>[];
     expect(entries).toHaveLength(1);
-    expect(Object.keys(entries[0]).sort()).toEqual(["id", "ignoredAt", "repo", "type"]);
+    expect(Object.keys(entries[0]).toSorted()).toEqual(["id", "ignoredAt", "repo", "type"]);
     expect("title" in entries[0]).toBe(false);
     expect(entries[0]).toMatchObject({ id: 1, type: "issue", repo: "org/repo", ignoredAt: 1000 });
   });
@@ -721,7 +721,7 @@ function installTurnstileHarness(): Array<Record<string, unknown>> {
       return node;
     }
     return origAppend(node as never);
-  }) as typeof document.head.appendChild);
+  }));
   return renderOpts;
 }
 
@@ -763,7 +763,7 @@ describe("proxy — sealCredentialBundle / unsealCredentialBundle", () => {
   it("sealCredentialBundle rejects an oversized ciphertext BEFORE any network call (pre-check)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(proxyLib.sealCredentialBundle("z".repeat(4097))).rejects.toThrow();
+    await expect(proxyLib.sealCredentialBundle("z".repeat(4097))).rejects.toThrow("Credentials are too large to export securely");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

@@ -212,7 +212,7 @@ export default function TrackedTab(props: TrackedTabProps) {
                                     <span class="font-medium text-sm compact:text-xs text-base-content truncate">
                                       {item.title}
                                     </span>
-                                    <TypeBadge type={item.type as "issue" | "pullRequest"} />
+                                    <TypeBadge type={item.type} />
                                   </div>
                                   <div class="text-xs text-base-content/60 mt-0.5 compact:mt-0">
                                     {item.repoFullName}{" "}

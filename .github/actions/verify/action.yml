@@ -1,0 +1,41 @@
+name: Verify
+description: Setup toolchain and run CSP, typecheck, lint, unit, WAF smoke, and E2E checks
+inputs:
+  vite-github-client-id:
+    description: VITE_GITHUB_CLIENT_ID for Playwright E2E tests
+    required: false
+    default: ""
+  deploy-domain:
+    description: Production domain for WAF smoke tests (skipped if empty)
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup
+    - name: Verify CSP inline script hash
+      shell: bash
+      run: bash scripts/verify-csp-hash.sh
+    - name: Typecheck
+      shell: bash
+      run: pnpm run typecheck
+    - name: Lint
+      shell: bash
+      run: pnpm lint
+    - name: Unit tests
+      shell: bash
+      run: pnpm test
+    - name: WAF smoke tests
+      if: inputs.deploy-domain != ''
+      shell: bash
+      run: pnpm test:waf "https://$DEPLOY_DOMAIN"
+      env:
+        DEPLOY_DOMAIN: ${{ inputs.deploy-domain }}
+    # No `playwright install` step: playwright.config.ts uses channel: "chrome",
+    # which resolves to ubuntu-latest's preinstalled Google Chrome — Playwright's
+    # own bundled Chromium download is never used and would be wasted work.
+    - name: Run E2E tests
+      shell: bash
+      run: pnpm test:e2e
+      env:
+        VITE_GITHUB_CLIENT_ID: ${{ inputs.vite-github-client-id }}

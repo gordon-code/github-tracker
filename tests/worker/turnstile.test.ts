@@ -14,7 +14,6 @@ const mockRandomUUID = vi.fn().mockReturnValue("test-uuid-1234-5678-abcd-ef01234
 
 beforeEach(() => {
   globalThis.fetch = mockFetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (crypto as any).randomUUID = mockRandomUUID;
 });
 

@@ -98,23 +98,23 @@ describe("ConfigSchema", () => {
   });
 
   it("throws on invalid refreshInterval (below min)", () => {
-    expect(() => ConfigSchema.parse({ refreshInterval: -1 })).toThrow();
+    expect(() => ConfigSchema.parse({ refreshInterval: -1 })).toThrow(/refreshInterval|Too small|>=30/i);
   });
 
   it("throws on invalid refreshInterval (above max)", () => {
-    expect(() => ConfigSchema.parse({ refreshInterval: 9999 })).toThrow();
+    expect(() => ConfigSchema.parse({ refreshInterval: 9999 })).toThrow(/refreshInterval|Too big|<=3600/i);
   });
 
   it("throws on invalid theme value", () => {
-    expect(() => ConfigSchema.parse({ theme: "invalid" })).toThrow();
+    expect(() => ConfigSchema.parse({ theme: "invalid" })).toThrow(/Invalid/i);
   });
 
   it("throws on invalid itemsPerPage (below min)", () => {
-    expect(() => ConfigSchema.parse({ itemsPerPage: 5 })).toThrow();
+    expect(() => ConfigSchema.parse({ itemsPerPage: 5 })).toThrow(/itemsPerPage|Too small|>=10/i);
   });
 
   it("throws on invalid itemsPerPage (above max)", () => {
-    expect(() => ConfigSchema.parse({ itemsPerPage: 999 })).toThrow();
+    expect(() => ConfigSchema.parse({ itemsPerPage: 999 })).toThrow(/itemsPerPage|Too big|<=200/i);
   });
 
   it("allows refreshInterval of 0 (disabled)", () => {
@@ -134,11 +134,11 @@ describe("ConfigSchema", () => {
     });
 
     it("rejects values below min (9)", () => {
-      expect(() => ConfigSchema.parse({ hotPollInterval: 9 })).toThrow();
+      expect(() => ConfigSchema.parse({ hotPollInterval: 9 })).toThrow(/hotPollInterval|Too small|>=10/i);
     });
 
     it("rejects values above max (121)", () => {
-      expect(() => ConfigSchema.parse({ hotPollInterval: 121 })).toThrow();
+      expect(() => ConfigSchema.parse({ hotPollInterval: 121 })).toThrow(/hotPollInterval|Too big|<=120/i);
     });
 
     it("persists through config round-trip", () => {
@@ -176,7 +176,7 @@ describe("ConfigSchema — upstream repos and tracked users", () => {
       avatarUrl: `https://avatars.githubusercontent.com/u/${i}`,
       name: null,
     }));
-    expect(() => ConfigSchema.parse({ trackedUsers: users })).toThrow();
+    expect(() => ConfigSchema.parse({ trackedUsers: users })).toThrow(/trackedUsers|Too big|<=10/i);
   });
 
   it("rejects trackedUser with non-GitHub-CDN avatar URL", () => {
@@ -184,7 +184,7 @@ describe("ConfigSchema — upstream repos and tracked users", () => {
       trackedUsers: [
         { login: "evil", avatarUrl: "https://evil.com/avatar.png", name: null },
       ],
-    })).toThrow();
+    })).toThrow(/avatarUrl|Invalid/i);
   });
 
   it("accepts trackedUser with null name", () => {
@@ -238,7 +238,7 @@ describe("ConfigSchema — upstream repos and tracked users", () => {
       avatarUrl: "https://avatars.githubusercontent.com/u/583231",
       name: null,
       type: "organization",
-    })).toThrow();
+    })).toThrow(/Invalid/i);
   });
 
   it("ConfigSchema preserves tracked user type through round-trip", () => {
@@ -962,11 +962,11 @@ describe("ConfigSchema — enableTracking", () => {
   });
 
   it("defaultTab rejects empty string", () => {
-    expect(() => ConfigSchema.parse({ defaultTab: "" })).toThrow();
+    expect(() => ConfigSchema.parse({ defaultTab: "" })).toThrow(/defaultTab|Too small|>=1/i);
   });
 
   it("defaultTab rejects string longer than 50 chars", () => {
-    expect(() => ConfigSchema.parse({ defaultTab: "a".repeat(51) })).toThrow();
+    expect(() => ConfigSchema.parse({ defaultTab: "a".repeat(51) })).toThrow(/defaultTab|Too big|<=50/i);
   });
 
   it("defaultTab accepts custom tab ID strings", () => {

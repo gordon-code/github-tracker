@@ -457,12 +457,12 @@ describeFeature(feature, ({ Scenario, Background, BeforeEachScenario, AfterEachS
           issues: [],
           pullRequests: [
             depBotPR({
-              repoFullName: REPOS[0]!.fullName,
+              repoFullName: REPOS[0].fullName,
               title: "Bump lodash from 4.1 to 4.2",
               headRef: "dependabot/npm_and_yarn/lodash-4.2",
             }),
             depBotPR({
-              repoFullName: REPOS[1]!.fullName,
+              repoFullName: REPOS[1].fullName,
               title: "Bump axios from 0.27 to 1.0",
               headRef: "dependabot/npm_and_yarn/axios-1.0.0",
             }),

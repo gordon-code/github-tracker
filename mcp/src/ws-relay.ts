@@ -228,7 +228,7 @@ export function startWebSocketServer(): WebSocketServer | null {
     info: { origin: string; req: IncomingMessage; secure: boolean },
     callback: (res: boolean, code?: number, message?: string) => void
   ): void {
-    const origin = info.req.headers.origin as string | undefined;
+    const origin = info.req.headers.origin;
     if (!isOriginAllowed(origin)) {
       console.error(`[mcp/ws] Rejected connection from disallowed origin: ${origin ?? "(none)"}`);
       callback(false, 403, "Origin not allowed");

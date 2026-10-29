@@ -17,7 +17,7 @@ interface NotificationDrawerProps {
 }
 
 export default function NotificationDrawer(props: NotificationDrawerProps) {
-  const sortedNotifications = createMemo(() => getNotifications().slice().reverse());
+  const sortedNotifications = createMemo(() => getNotifications().toReversed());
 
   function handleDismissAll() {
     const current = getNotifications();

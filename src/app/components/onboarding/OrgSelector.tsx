@@ -1,5 +1,5 @@
 import { createSignal, createResource, createEffect, untrack, For, Show } from "solid-js";
-import { fetchOrgs, OrgEntry } from "../../services/api";
+import { fetchOrgs, type OrgEntry } from "../../services/api";
 import { getClient } from "../../services/github";
 import { pushNotification } from "../../lib/errors";
 import LoadingSpinner from "../shared/LoadingSpinner";

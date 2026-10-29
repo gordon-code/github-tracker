@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { IJiraClient } from "../../src/app/services/jira-client";
-import { JiraApiError } from "../../src/app/services/jira-client";
+import type { IJiraClient, JiraApiError } from "../../src/app/services/jira-client";
 import { JIRA_SETTINGS_ACTION, type JiraIssue, type JiraBulkFetchResult } from "../../src/shared/jira-types";
 
 const mockClearJiraAuth = vi.fn();
@@ -282,7 +281,7 @@ describe("detectAndLookupJiraKeys", () => {
     );
 
     const calls = vi.mocked(client.bulkFetch).mock.calls;
-    expect(calls.some((c) => (c[0] as string[]).includes("FEAT-42"))).toBe(true);
+    expect(calls.some((c) => (c[0]).includes("FEAT-42"))).toBe(true);
   });
 
   it("deduplicates keys found in multiple items", async () => {
@@ -299,7 +298,7 @@ describe("detectAndLookupJiraKeys", () => {
     );
 
     // Should only call bulkFetch once with PROJ-1 (not duplicated)
-    const keys = vi.mocked(client.bulkFetch).mock.calls[0]?.[0] as string[];
+    const keys = vi.mocked(client.bulkFetch).mock.calls[0]?.[0];
     expect(keys.filter((k) => k === "PROJ-1")).toHaveLength(1);
   });
 

@@ -7,7 +7,7 @@ import {
   Index,
   For,
 } from "solid-js";
-import { fetchOrgs, fetchRepos, discoverUpstreamRepos, OrgEntry, RepoRef, RepoEntry } from "../../services/api";
+import { fetchOrgs, fetchRepos, discoverUpstreamRepos, type OrgEntry, type RepoRef, type RepoEntry } from "../../services/api";
 import { REPO_CAP } from "../../../shared/types";
 import { getClient } from "../../services/github";
 import { user } from "../../stores/auth";
@@ -291,18 +291,18 @@ export default function RepoSelector(props: RepoSelectorProps) {
           });
           const ownedOrgs = new Set(orgs.map((o) => o.toLowerCase()));
           ownedOrgs.add(currentUser.login.toLowerCase());
-          void discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames, props.trackedUsers)
-            .then((repos) => {
+          void (async () => {
+            try {
+              const repos = await discoverUpstreamRepos(discoveryClient, currentUser.login, allOrgFullNames, props.trackedUsers);
               if (version !== effectVersion) return;
               setDiscoveredRepos(repos.filter((r) => !ownedOrgs.has(r.owner.toLowerCase())));
               setDiscoveryCapped(repos.length >= 100);
-            })
-            .catch(() => {
+            } catch {
               // Non-fatal — partial results may already be in state
-            })
-            .finally(() => {
+            } finally {
               if (version === effectVersion) setDiscoveringUpstream(false);
-            });
+            }
+          })();
         }
       }
     })();
@@ -323,16 +323,16 @@ export default function RepoSelector(props: RepoSelectorProps) {
     const state = orgStates().find((s) => s.org === org);
     const type = state?.type ?? "org";
 
-    void fetchRepos(client, org, type)
-      .then((repos) => {
+    void (async () => {
+      try {
+        const repos = await fetchRepos(client, org, type);
         if (version !== effectVersion) return;
         setOrgStates((prev) =>
           prev.map((s) =>
             s.org === org ? { ...s, repos, loading: false, error: null } : s
           )
         );
-      })
-      .catch((err) => {
+      } catch (err) {
         if (version !== effectVersion) return;
         const message =
           err instanceof Error ? err.message : "Failed to load repositories";
@@ -341,7 +341,8 @@ export default function RepoSelector(props: RepoSelectorProps) {
             s.org === org ? { ...s, loading: false, error: message } : s
           )
         );
-      });
+      }
+    })();
   }
 
   // ── Selection helpers ──────────────────────────────────────────────────────
@@ -362,7 +363,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     const states = orgStates();
 
     // Invalidate frozen order when org membership changes (key is order-independent).
-    const currentKey = [...props.selectedOrgs].sort().join(",");
+    const currentKey = props.selectedOrgs.toSorted().join(",");
     if (currentKey !== frozenOrgsKey) {
       frozenOrder = null;
       frozenOrgsKey = currentKey;
@@ -393,7 +394,7 @@ export default function RepoSelector(props: RepoSelectorProps) {
     if (states.some((s) => !selectedOrgSet.has(s.org))) return states;
 
     // Sort: personal org first, then alphabetically. Capture order to freeze it.
-    const sorted = [...states].sort((a, b) => {
+    const sorted = states.toSorted((a, b) => {
       const aIsUser = a.type === "user" ? 0 : 1;
       const bIsUser = b.type === "user" ? 0 : 1;
       if (aIsUser !== bIsUser) return aIsUser - bIsUser;

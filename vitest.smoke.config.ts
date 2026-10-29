@@ -1,4 +1,4 @@
-import { defineConfig, mergeConfig, type UserConfig } from "vitest/config";
+import { defineConfig, mergeConfig, type ViteUserConfig } from "vitest/config";
 import baseConfig from "./vitest.config";
 
 // Standalone config for live-network smoke tests (e.g. github-status.smoke.test.ts).
@@ -15,14 +15,14 @@ import baseConfig from "./vitest.config";
 // `include` override here would append to vitest.config.ts's patterns
 // instead of overriding them, and this config would start running the
 // regular unit test suite too.
-const merged = mergeConfig(
+const merged: ViteUserConfig = mergeConfig(
   baseConfig,
   defineConfig({
     test: {
       name: "status-smoke",
     },
   }),
-) as UserConfig;
+);
 merged.test = { ...merged.test, include: ["tests/**/*.smoke.test.ts"] };
 
 export default merged;

@@ -490,7 +490,7 @@ describe("cross-tab auth sync", () => {
 
   it("calls expireToken and redirects to /login when another tab clears the token", () => {
     const replaceMock = vi.fn();
-    vi.stubGlobal("location", { ...window.location, replace: replaceMock });
+    vi.stubGlobal("location", { href: window.location.href, replace: replaceMock });
 
     mod.setAuth({ access_token: "ghs_abc" });
     // Simulate another tab removing the token from localStorage
@@ -764,7 +764,7 @@ describe("setJiraAuth / jiraAuth signal", () => {
     mod.setJiraAuth(makeJiraAuth());
     const stored = localStorageMock.getItem("github-tracker:jira-auth");
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!);
+    const parsed = JSON.parse(stored);
     expect(parsed.accessToken).toBe("atl-access-tok");
     expect(parsed.cloudId).toBe("cloud-abc");
   });

@@ -180,7 +180,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
       const isEnriched = pr.enriched !== false;
       if (tabFilters.role !== "all") {
         // Role depends on assigneeLogins/reviewerLogins (heavy), but "author" is light
-        if (isEnriched && !roles.includes(tabFilters.role as "author" | "reviewer" | "assignee")) return false;
+        if (isEnriched && !roles.includes(tabFilters.role)) return false;
         if (!isEnriched && tabFilters.role === "author" && !roles.includes("author")) return false;
       }
       if (tabFilters.reviewDecision !== "all") {
@@ -223,7 +223,7 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
     });
 
     const { field, direction } = viewState.globalSort;
-    items = [...items].sort((a, b) => {
+    items = items.toSorted((a, b) => {
       let cmp = 0;
       switch (field as SortField) {
         case "repo":
@@ -620,10 +620,10 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                   {(() => {
                                     const titleKeys = new Set(extractJiraKeys(pr.title));
                                     const branchKeys = new Set(extractJiraKeys(pr.headRef ?? ""));
-                                    const annotated = [...new Set([...titleKeys, ...branchKeys])].map((key) => ({
+                                    const annotated = [...new Set([...titleKeys, ...branchKeys])].map((key): { key: string; source: "title" | "branch" | "title & branch" } => ({
                                       key,
-                                      source: (titleKeys.has(key) && branchKeys.has(key) ? "title & branch"
-                                        : titleKeys.has(key) ? "title" : "branch") as "title" | "branch" | "title & branch",
+                                      source: titleKeys.has(key) && branchKeys.has(key) ? "title & branch"
+                                        : titleKeys.has(key) ? "title" : "branch",
                                     }));
                                     return (
                                       <For each={annotated}>

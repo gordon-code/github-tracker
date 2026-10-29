@@ -72,7 +72,7 @@ const [_jiraAuth, _setJiraAuth] = createSignal<JiraAuthState | null>(
         localStorage.removeItem?.(JIRA_AUTH_STORAGE_KEY);
         return null;
       }
-      return result.data as JiraAuthState;
+      return result.data;
     } catch {
       return null;
     }
@@ -201,7 +201,7 @@ export function setAuth(response: TokenExchangeResponse): void {
   console.info("[auth] access token set");
 }
 
-export function setAuthFromPat(token: string, userData: GitHubUser): void {
+export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
   const previousLogin = user()?.login;
   const isIdentitySwitch =
     previousLogin !== undefined && previousLogin.toLowerCase() !== userData.login.toLowerCase();
@@ -231,7 +231,7 @@ export function setAuthFromPat(token: string, userData: GitHubUser): void {
     void clearIdentityData();
   }
 
-  setAuth({ access_token: token });
+  setAuth({ access_token: patToken });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat" });
 }
@@ -262,8 +262,8 @@ export async function clearIdentityData(): Promise<void> {
   for (const cb of _onClearCallbacks) {
     try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity data clear:", e); }
   }
-  // IndexedDB cache clear — AWAITED so callers can sequence work strictly after
-  // it (prevents a new identity rendering the previous identity's cached data).
+  // IndexedDB cache clear — AWAITED so callers can sequence work strictly after it
+  // (prevents a new identity rendering the previous identity's cached data).
   try {
     await clearCache();
   } catch (err) {
@@ -438,11 +438,16 @@ function handleAuthStorage(e: StorageEvent): void {
     _setToken(e.newValue);
     const gen = ++_crossTabFetchGen;
     const newToken = e.newValue;
-    fetch("https://api.github.com/user", {
-      headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
-    })
-      .then((r) => { if (!r.ok) { void r.body?.cancel(); return null; } return r.json() as Promise<GitHubUser>; })
-      .then((data) => {
+    void (async () => {
+      try {
+        const r = await fetch("https://api.github.com/user", {
+          headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+        });
+        if (!r.ok) {
+          void r.body?.cancel();
+          return;
+        }
+        const data = (await r.json()) as GitHubUser;
         if (data && _token() === newToken && _crossTabFetchGen === gen) {
           // Only a CONFIRMED same-user rotation (a known previous login that
           // case-insensitively matches the fetched identity) skips the
@@ -475,8 +480,10 @@ function handleAuthStorage(e: StorageEvent): void {
             crossTabReload.reloadForIdentitySwitch();
           }
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Ignore network errors during passive cross-tab user check
+      }
+    })();
   }
   if (e.key === JIRA_AUTH_STORAGE_KEY) {
     try {

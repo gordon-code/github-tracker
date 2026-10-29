@@ -46,7 +46,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
   });
   // filterPreset: field → value. Only set keys are stored.
   const [filterPreset, setFilterPreset] = createSignal<Record<string, string>>(
-    { ...(props.editingTab?.filterPreset ?? {}) }
+    { ...props.editingTab?.filterPreset }
   );
   const [exclusive, setExclusive] = createSignal(props.editingTab?.exclusive ?? false);
   const [scopeOpen, setScopeOpen] = createSignal(false);
@@ -61,7 +61,7 @@ export default function CustomTabModal(props: CustomTabModalProps) {
     const tab = props.editingTab;
     setName(tab?.name ?? "");
     setBaseType(tab?.baseType ?? "issues");
-    setFilterPreset({ ...(tab?.filterPreset ?? {}) });
+    setFilterPreset({ ...tab?.filterPreset });
     setExclusive(tab?.exclusive ?? false);
     setScopeOpen(false);
     setCapError(false);

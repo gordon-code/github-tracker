@@ -14,7 +14,7 @@ describe("createOctokitClient — write guard hook", () => {
     let capturedMethod: string | undefined;
     client.hook.wrap("request", async (_request, options) => {
       capturedMethod = (options.method ?? "GET").toUpperCase();
-      return { data: {}, headers: {}, status: 200, url: String(options.url) };
+      return { data: {}, headers: {}, status: 200, url: options.url };
     });
 
     await client.request("GET /user");
@@ -27,8 +27,8 @@ describe("createOctokitClient — write guard hook", () => {
 
     let capturedUrl: string | undefined;
     client.hook.wrap("request", async (_request, options) => {
-      capturedUrl = String(options.url);
-      return { data: {}, headers: {}, status: 200, url: String(options.url) };
+      capturedUrl = options.url;
+      return { data: {}, headers: {}, status: 200, url: options.url };
     });
 
     await client.request("POST /graphql", { query: "{ viewer { login } }" });

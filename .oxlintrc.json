@@ -1,0 +1,83 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "options": {
+    "typeAware": true,
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "mcp/dist/**",
+    "**/node_modules/**",
+    ".wrangler/**",
+    ".claude/**",
+    "hack/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "rules": {
+    "typescript/consistent-type-imports": [
+      "error",
+      {
+        "disallowTypeAnnotations": false
+      }
+    ],
+    "typescript/no-unsafe-type-assertion": "off",
+    "eslint/no-underscore-dangle": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "import/no-unassigned-import": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/app/services/api.ts",
+        "src/app/services/events.ts",
+        "src/app/stores/cache.ts",
+        "src/app/components/settings/JiraFieldPicker.tsx"
+      ],
+      "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
+        "src/app/lib/mcp-relay.ts",
+        "src/app/lib/notifications.ts",
+        "src/app/lib/proxy.ts"
+      ],
+      "rules": {
+        "unicorn/prefer-add-event-listener": "off"
+      }
+    },
+    {
+      "files": ["tests/**", "e2e/**", "mcp/tests/**"],
+      "plugins": ["typescript", "unicorn", "oxc", "import", "promise", "vitest"],
+      "rules": {
+        "eslint/no-await-in-loop": "off",
+        "unicorn/prefer-add-event-listener": "off",
+        "vitest/require-mock-type-parameters": "off",
+        "vitest/expect-expect": "off",
+        "typescript/unbound-method": "off",
+        "vitest/no-conditional-expect": "off"
+      }
+    },
+    {
+      "files": ["tests/**/*.steps.tsx", "tests/worker/crypto.test.ts"],
+      "rules": {
+        "vitest/no-standalone-expect": "off"
+      }
+    },
+    {
+      "files": ["tests/lib/settings-transfer.test.ts"],
+      "rules": {
+        "vitest/valid-expect": "off"
+      }
+    }
+  ]
+}

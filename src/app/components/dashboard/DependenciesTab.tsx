@@ -142,11 +142,11 @@ export default function DependenciesTab(props: DependenciesTabProps) {
 
   const activeFilters = createMemo(() => ({
     ...DEP_FILTER_DEFAULTS,
-    ...(viewState.tabFilters.dependencies ?? {}),
+    ...viewState.tabFilters.dependencies,
   }));
 
   const botOptions = createMemo<FilterChipGroupDef>(() => {
-    const logins = [...new Set(props.pullRequests.map((pr) => pr.userLogin))].sort();
+    const logins = [...new Set(props.pullRequests.map((pr) => pr.userLogin))].toSorted();
     return {
       label: "Bot",
       field: "bot",

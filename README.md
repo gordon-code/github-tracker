@@ -164,6 +164,7 @@ pnpm run dev        # Start Vite dev server
 pnpm test           # Run unit/component tests
 pnpm test:e2e       # Run Playwright E2E tests
 pnpm run typecheck  # TypeScript check
+pnpm lint           # Run type-aware linter (oxlint)
 pnpm run build      # Production build
 pnpm run screenshot # Capture dashboard screenshot
 ```

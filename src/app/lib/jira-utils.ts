@@ -1,7 +1,7 @@
 import { DEFAULT_FIELDS, JiraClient, JiraProxyClient, type IJiraClient } from "../services/jira-client";
 import { jiraAuth, ensureJiraTokenValid } from "../stores/auth";
 
-const VALID_FIELD_ID = /^[a-zA-Z0-9_\-]+$/;
+const VALID_FIELD_ID = /^[a-zA-Z0-9_-]+$/;
 
 export function mergeCustomFields(customFields: Array<{ id: string }>): string[] {
   const ids = customFields.map((f) => f.id).filter((id) => VALID_FIELD_ID.test(id));
