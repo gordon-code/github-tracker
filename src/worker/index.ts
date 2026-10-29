@@ -107,7 +107,7 @@ function errorResponse(
   });
 }
 
-const SECURITY_HEADERS: Record<string, string> = {
+export const SECURITY_HEADERS: Record<string, string> = {
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -1726,7 +1726,23 @@ export default Sentry.withSentry(
       }
 
       // Forward non-API requests to static assets
-      return env.ASSETS.fetch(request);
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (
+        url.pathname.startsWith("/_app/") &&
+        assetResponse.status === 200 &&
+        (assetResponse.headers.get("content-type") ?? "").startsWith("text/html")
+      ) {
+        log("warn", "stale_asset_404", { pathname: url.pathname }, request);
+        return new Response(request.method === "HEAD" ? null : "Not Found", {
+          status: 404,
+          headers: {
+            ...SECURITY_HEADERS,
+            "Cache-Control": "no-store",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+      }
+      return assetResponse;
     },
   }
 );

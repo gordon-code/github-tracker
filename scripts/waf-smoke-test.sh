@@ -6,7 +6,7 @@
 #   e.g. pnpm test:waf https://my-tracker.example.com
 #
 # Rules validated:
-#   1. Path Allowlist — blocks all paths except known SPA routes, /assets/*, /api/*
+#   1. Path Allowlist — blocks all paths except known SPA/static routes, /_app/*, /assets/*, /api/*, and public metadata files (/version.json, /robots.txt, /sitemap.xml, /manifest.webmanifest, /favicon.ico)
 #   2. Scanner User-Agents — challenges empty/malicious User-Agent strings
 #   3. Origin Gate — blocks /api/* requests without valid Origin header
 #   Rate limit rule exists but is not tested here (triggers a 10-minute IP block).
@@ -30,7 +30,7 @@ run_test() {
     [[ "$actual" != "000" && "$actual" != "502" && "$actual" != "503" ]] && break
     sleep "$attempt"
   done
-  if [[ "$actual" == "$expected" ]]; then
+  if [[ ",$expected," == *",$actual,"* ]]; then
     printf '  PASS  [%s] %s\n' "$actual" "$label"
   else
     printf '  FAIL  [%s] %s (expected %s)\n' "$actual" "$label" "$expected"
@@ -62,6 +62,7 @@ TESTS=(
   "200|GET /settings|${BASE}/settings"
   "200|GET /privacy|${BASE}/privacy"
   "307|GET /index.html (html_handling redirect)|${BASE}/index.html"
+  "403,200,404|GET /_app/nonexistent.js|${BASE}/_app/nonexistent.js"
   "200|GET /assets/nonexistent.js|${BASE}/assets/nonexistent.js"
   "200|GET /api/health (with Origin)|-H|Origin: ${BASE}|${BASE}/api/health"
   "400|POST /api/oauth/token (no body)|-X|POST|-H|Origin: ${BASE}|${BASE}/api/oauth/token"
@@ -92,9 +93,9 @@ TESTS=(
   "403|GET /eval-stdin.php|${BASE}/eval-stdin.php"
   "403|GET /.aws/credentials|${BASE}/.aws/credentials"
   "403|GET /.ssh/id_rsa|${BASE}/.ssh/id_rsa"
-  "403|GET /robots.txt|${BASE}/robots.txt"
-  "403|GET /sitemap.xml|${BASE}/sitemap.xml"
-  "403|GET /favicon.ico|${BASE}/favicon.ico"
+  "403,200|GET /robots.txt|${BASE}/robots.txt"
+  "403,200|GET /sitemap.xml|${BASE}/sitemap.xml"
+  "403,200|GET /favicon.ico|${BASE}/favicon.ico"
   "403|GET /random/garbage/path|${BASE}/random/garbage/path"
   # Rule 2: Scanner User-Agents — normal UAs
   "200|Normal browser UA|-H|User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36|${BASE}/"

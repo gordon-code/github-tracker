@@ -8,4 +8,11 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
+  environments: {
+    client: {
+      build: {
+        assetsDir: "_app",
+      },
+    },
+  },
 });

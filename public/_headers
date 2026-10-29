@@ -6,3 +6,6 @@
   Permissions-Policy: geolocation=(), microphone=(), camera=()
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   X-Frame-Options: DENY
+
+/_app/*
+  Cache-Control: public, max-age=31536000, immutable

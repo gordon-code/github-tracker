@@ -15,7 +15,9 @@ against `api.github.com` with no server-side component.
 
 **Host the `dist/` build output on any static platform:** GitHub Pages, Netlify, Vercel,
 S3 + CloudFront, or any CDN that serves SPAs with `index.html` fallback for client-side
-routing.
+routing. Note: `public/.nojekyll` is copied into `dist/client/.nojekyll` during `pnpm run build`
+— keep this file when deploying to GitHub Pages so Jekyll does not strip the `_app/` directory
+containing hashed JS and CSS bundles.
 
 **What works without a backend:**
 - All dashboard features (Issues, PRs, Actions tabs)
@@ -214,6 +216,20 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 
 The two tunnel endpoints (`/api/error-reporting` and `/api/csp-report`) receive untrusted browser data and forward it to Sentry. They are hardened with layered fail-fast guards (IP rate limit → Origin check → DSN validation). See `hack/docs/security-runbook.md` for the full threat model, per-endpoint rate limit values, Origin check behavior, CSP field sanitization details, Content-Length pre-check semantics, and fan-out amplification analysis.
 
+### Static asset caching
+
+- **Hashed bundles (`/_app/*`):** Vite outputs content-hashed JS and CSS bundles to `dist/client/_app/`. `public/_headers` configures `Cache-Control: public, max-age=31536000, immutable` (one year) on `/_app/*` while inheriting the global security headers from `/*`.
+- **Entry HTML and unhashed public assets (`index.html`, `/assets/*`):** `index.html` and unhashed images under `public/assets/*` (favicon, logos, social preview) have no custom `Cache-Control` rule in `public/_headers` and use the Cloudflare Workers Static Assets platform default (`Cache-Control: public, max-age=0, must-revalidate`), ensuring browsers revalidate `index.html` on every load.
+- **One-time cache miss on initial `/_app/` rollout:** Moving hashed bundles from `/assets/` to `/_app/` causes a one-time cache miss on the deployment that introduces `/_app/`.
+- **Stale-chunk 404 handling (`stale_asset_404`):** Under SPA `not_found_handling`, missing non-navigation requests (such as `<script>` or `import()` fetches for a chunk from a superseded deploy) invoke the Worker and `env.ASSETS.fetch(request)` returns the `200 text/html` SPA fallback. When `url.pathname.startsWith("/_app/")`, `assetResponse.status === 200`, and `Content-Type` starts with `text/html`, the Worker logs `stale_asset_404` and returns `404 Not Found` (`text/plain; charset=utf-8`) with `Cache-Control: no-store` and `SECURITY_HEADERS` so neither the browser nor CDN caches HTML under an immutable chunk URL.
+- **Accepted navigation edge case:** A direct browser *navigation* (`Sec-Fetch-Mode: navigate`) to a non-existent `/_app/*` URL is answered by Cloudflare's static asset router with `index.html` before the Worker runs and inherits the `/_app/*` immutable header from `_headers`. This is harmless (no application route or asset reference ever navigates to a missing `/_app/*` path) and avoids routing every `/_app/*` asset hit through the Worker.
+- **GitHub Pages `.nojekyll` requirement:** `public/.nojekyll` (emitted to `dist/client/.nojekyll`) disables Jekyll processing on GitHub Pages static-only deployments so the `_`-prefixed `_app/` directory is not dropped.
+- **Post-deploy verification:**
+  ```sh
+  curl -sI https://<domain>/_app/<hashed-file> | grep -i cache-control
+  # Expected: cache-control: public, max-age=31536000, immutable
+  ```
+
 ## Local Development
 
 Copy `.dev.vars.example` to `.dev.vars` and fill in your values. Wrangler picks up `.dev.vars` automatically for local `wrangler dev` runs.
@@ -261,6 +277,41 @@ The old `POST /api/oauth/refresh` and `POST /api/oauth/logout` endpoints no long
 Configure these rules in the Cloudflare dashboard under **Security → WAF**.
 
 ### Custom Rules
+
+#### Rule 1: Path Allowlist
+
+**Rule name:** Path Allowlist (block unknown paths)
+**Where:** Security → WAF → Custom Rules
+**Action:** Block
+
+**Previous expression (pre-`/_app/` rollout, synthesized from `scripts/waf-smoke-test.sh`):**
+```
+not (
+  http.request.uri.path in {"/" "/login" "/oauth/callback" "/onboarding" "/dashboard" "/settings" "/privacy" "/index.html"} or
+  starts_with(http.request.uri.path, "/assets/") or
+  starts_with(http.request.uri.path, "/api/")
+)
+```
+
+**Updated expression (allows `/_app/*` hashed chunks and static/metadata routes on `GET`/`HEAD`):**
+```
+not (
+  (
+    http.request.method in {"GET" "HEAD"} and (
+      http.request.uri.path in {"/" "/app" "/landing" "/landing.html" "/login" "/oauth/callback" "/onboarding" "/dashboard" "/settings" "/privacy" "/index.html" "/version.json" "/robots.txt" "/sitemap.xml" "/manifest.webmanifest" "/favicon.ico"} or
+      starts_with(http.request.uri.path, "/_app/") or
+      starts_with(http.request.uri.path, "/assets/")
+    )
+  ) or
+  starts_with(http.request.uri.path, "/api/")
+)
+```
+
+**Notes:**
+- Blocks vulnerability scanners and probes for unmapped paths (`/wp-admin`, `/.env`, `/.git/config`, arbitrary paths) at the edge before the Worker or static asset router runs.
+- `scripts/waf-smoke-test.sh` (`pnpm test:waf`) validates this rule before every commit (`prek`) and deploy (`deploy.yml`).
+
+#### Rule 3: Origin Gate
 
 **Rule name:** Block API requests without valid Origin
 **Where:** Security → WAF → Custom Rules
