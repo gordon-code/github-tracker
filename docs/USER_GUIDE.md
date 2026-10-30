@@ -421,7 +421,7 @@ Each full refresh also checks GitHub's own status page for outages affecting Act
 
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
 
-- **PRs with pending or stale (`checkStatusStale`) CI checks** — re-checks status until checks resolve (including PRs whose commit changed during a degraded backfill)
+- **PRs with pending or stale (`checkStatusStale`) CI checks** — re-checks status until checks resolve (including PRs whose commit changed during a degraded backfill). For PRs from forks whose CI runs only in the fork, the status is read from the fork's head commit, the same source the full refresh uses.
 - **In-progress workflow runs** — re-checks until the run completes
 
 Default interval: **30 seconds** (configurable from 10 to 120 seconds in Settings).

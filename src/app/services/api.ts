@@ -451,6 +451,8 @@ const HOT_PR_STATUS_QUERY = `
         viewerLatestReview { state }
         viewerLatestReviewRequest { id }
         statusCheckRollup { state }
+        isCrossRepository
+        headRef { target { ... on Commit { statusCheckRollup { state } } } }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -469,6 +471,8 @@ interface HotPRStatusNode {
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
   statusCheckRollup?: { state: string } | null;
+  isCrossRepository?: boolean;
+  headRef?: { target?: { statusCheckRollup?: { state: string } | null } | null } | null;
 }
 
 interface HotPRStatusResponse {
@@ -2456,10 +2460,12 @@ export async function fetchHotPRStatus(
     for (const [idx, node] of nodes.entries()) {
       if (!node || node.databaseId == null || erroredIndices?.has(idx)) continue;
 
-      const checkStatus = applyMergeStateOverride(
-        node.mergeStateStatus,
-        mapCheckStatus(extractRollupState(node)),
-      );
+      // Fork PRs whose CI runs only in the fork report no PR-level rollup; read the
+      // fork head commit's rollup instead (the same source runForkPRFallback uses).
+      const rollupState =
+        extractRollupState(node) ??
+        (node.isCrossRepository ? (node.headRef?.target?.statusCheckRollup?.state ?? null) : null);
+      const checkStatus = applyMergeStateOverride(node.mergeStateStatus, mapCheckStatus(rollupState));
 
       results.set(node.databaseId, {
         state: node.state,

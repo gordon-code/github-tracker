@@ -1239,6 +1239,35 @@ describe("fetchHotPRStatus edge cases", () => {
     expect(hadErrors).toBe(true);
   });
 
+  it("uses the fork head commit's rollup for cross-repository PRs whose PR-level rollup is null (fork-only CI)", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        // Fork-only CI: PR-level rollup null, fork commit FAILURE
+        { databaseId: 61, state: "OPEN", mergeStateStatus: "UNKNOWN", reviewDecision: null, statusCheckRollup: null,
+          isCrossRepository: true, headRef: { target: { statusCheckRollup: { state: "FAILURE" } } } },
+        // Base-repo CI present: PR-level rollup wins over the fork commit
+        { databaseId: 62, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" },
+          isCrossRepository: true, headRef: { target: { statusCheckRollup: { state: "FAILURE" } } } },
+        // Same-repo PR: headRef rollup is never consulted
+        { databaseId: 63, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: null,
+          isCrossRepository: false, headRef: { target: { statusCheckRollup: { state: "FAILURE" } } } },
+        // Fork PR with no CI anywhere, or a deleted head branch
+        { databaseId: 64, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: null,
+          isCrossRepository: true, headRef: null },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_61", "PR_62", "PR_63", "PR_64"]);
+    const calledQuery = octokit.graphql.mock.calls[0][0] as string;
+    expect(calledQuery).toContain("isCrossRepository");
+    expect(calledQuery).toContain("headRef { target { ... on Commit { statusCheckRollup { state } } } }");
+    expect(results.get(61)!.checkStatus).toBe("failure");
+    expect(results.get(62)!.checkStatus).toBe("success");
+    expect(results.get(63)!.checkStatus).toBeNull();
+    expect(results.get(64)!.checkStatus).toBeNull();
+  });
+
   it("salvages resolved nodes from a rejected batch's partial data and skips errored node indices", async () => {
     const octokit = makeOctokit(undefined, () =>
       Promise.reject(Object.assign(new Error("Something went wrong while executing your query"), {
