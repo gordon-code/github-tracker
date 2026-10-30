@@ -105,6 +105,11 @@ interface DependenciesTabProps {
   pullRequests: PullRequest[];
   depMeta?: ReadonlyMap<number, VersionInfo>;
   loading?: boolean;
+  /**
+   * True while the dashboard is loading or a refresh's PR enrichment has not arrived
+   * yet; suppresses `Checking status` on unenriched rows.
+   */
+  enrichmentPending?: boolean;
   abandonedDepsMap: Map<string, AbandonedDependency[]>;
   dashboardIssueUrls: Map<string, string>;
   hotPollingPRIds?: ReadonlySet<number>;
@@ -375,6 +380,7 @@ export default function DependenciesTab(props: DependenciesTabProps) {
                 approvingPRIds={props.approvingPRIds}
                 onMarkPRReady={props.onMarkPRReady}
                 markingReadyPRIds={props.markingReadyPRIds}
+                enrichmentPending={props.enrichmentPending}
               />
             )}
           </For>
@@ -402,6 +408,7 @@ interface StatusGroupProps {
   approvingPRIds?: ReadonlySet<number>;
   onMarkPRReady?: (pr: PullRequest) => void;
   markingReadyPRIds?: ReadonlySet<number>;
+  enrichmentPending?: boolean;
 }
 
 function stripCommitPrefix(title: string): string {
@@ -487,6 +494,14 @@ function StatusGroup(props: StatusGroupProps) {
                         <Show when={pr.checkStatus === "pending"}>
                           <span class="badge badge-warning badge-outline badge-sm">Checks running</span>
                         </Show>
+                      </Show>
+                      <Show
+                        when={
+                          (pr.enriched !== false && pr.checkStatus !== "pending" && pr.checkStatusStale === true) ||
+                          (pr.enriched === false && !props.enrichmentPending)
+                        }
+                      >
+                        <span class="badge badge-ghost badge-outline badge-sm">Checking status</span>
                       </Show>
 
                       <Show when={pr.enriched !== false && (pr.additions > 0 || pr.deletions > 0)}>

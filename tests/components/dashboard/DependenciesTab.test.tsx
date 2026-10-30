@@ -1021,6 +1021,80 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
     const needsActionGroup = document.getElementById("dep-group-needs-action")!;
     expect(needsActionGroup.textContent).toContain("react: 17.0.0 → 18.0.0");
   });
+
+  it("places PR with checkStatus: null and checkStatusStale: true into 'Needs Action' and renders 'Checking status'", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const staleNullCheckPR = makeMergeablePR({
+      id: 8050,
+      number: 850,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      enriched: true,
+      draft: false,
+      checkStatus: null,
+      checkStatusStale: true,
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderTab({
+      pullRequests: [staleNullCheckPR],
+      userLogin: "testuser",
+      loading: false,
+    });
+
+    expect(document.getElementById("dep-group-mergeable")).toBeNull();
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup).not.toBeNull();
+    expect(needsActionGroup.textContent).toContain("axios: 0.27.2 → 1.0.0");
+    expect(screen.getByText("Checking status")).toBeDefined();
+    expect(screen.queryByText("Checks running")).toBeNull();
+  });
+
+  it("renders 'Checking status' for unenriched PR once enrichment is no longer pending, and suppresses it while light results await enrichment (loading: false, enrichmentPending: true)", () => {
+    setDependencyExpandedGroups(["mergeable", "needs-action"]);
+    const unenrichedPR = makeNeedsActionPR({
+      id: 8051,
+      number: 851,
+      title: "Bump lodash from 4.17.20 to 4.17.21",
+      enriched: false,
+      checkStatus: null,
+    });
+
+    const { unmount } = renderTab({
+      pullRequests: [unenrichedPR],
+      userLogin: "testuser",
+      loading: false,
+      enrichmentPending: false,
+    });
+
+    const needsActionGroup = document.getElementById("dep-group-needs-action")!;
+    expect(needsActionGroup.textContent).toContain("lodash: 4.17.20 → 4.17.21");
+    expect(screen.getAllByText("Checking status")).toHaveLength(1);
+    unmount();
+
+    // DashboardPage has already set loading: false once light results render
+    renderTab({
+      pullRequests: [unenrichedPR],
+      userLogin: "testuser",
+      loading: false,
+      enrichmentPending: true,
+    });
+
+    expect(document.getElementById("dep-group-needs-action")!.textContent).toContain("lodash: 4.17.20 → 4.17.21");
+    expect(screen.queryByText("Checking status")).toBeNull();
+  });
+
+  it("still renders 'Checking status' for an enriched checkStatusStale PR while enrichmentPending is true", () => {
+    const stalePR = makeMergeablePR({
+      id: 8052,
+      number: 852,
+      title: "Bump axios from 0.27.2 to 1.0.0",
+      checkStatus: null,
+      checkStatusStale: true,
+      updatedAt: new Date().toISOString(),
+    });
+    renderTab({ pullRequests: [stalePR], loading: false, enrichmentPending: true });
+    expect(screen.getAllByText("Checking status")).toHaveLength(1);
+  });
 });
 
 // ── Ignore button ─────────────────────────────────────────────────────────────

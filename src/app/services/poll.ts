@@ -16,13 +16,28 @@ import {
   type PullRequest,
   type WorkflowRun,
   type ApiError,
+  type FetchIssuesAndPRsOptions,
   type HotPRStatusUpdate,
   type HotWorkflowRunUpdate,
   resetEmptyActionRepos,
+  resetPREnrichmentCache,
+  invalidatePREnrichmentCacheForRepos,
+  setPREnrichmentCacheRefreshInterval,
+  isBackfillError,
+  hasDegradedEnrichment,
+  pushEnrichmentDegraded,
 } from "./api";
 import { fetchUserEvents, parseRepoEvents, resetEventsState, type RepoEventSummary } from "./events";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE } from "../../shared/types";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
-import { pushError, getNotifications, dismissNotificationBySource, startCycleTracking, endCycleTracking, resetNotificationState } from "../lib/errors";
+import {
+  pushError,
+  getNotifications,
+  dismissNotificationBySource,
+  startCycleTracking,
+  endCycleTracking,
+  resetNotificationState,
+} from "../lib/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,11 +89,60 @@ export function clearHotSets(): void {
   _hotRuns.clear();
 }
 
+export const WAKE_GRACE_MS = 2_000;
+export const ONLINE_RECOVERY_GRACE_MS = 1_500;
+
+/** Consecutive cycles with a backfill batch failure before the degraded-enrichment
+ * warning is shown even when every PR still has carried-forward enrichment. */
+const BACKFILL_FAILURE_NOTIFICATION_THRESHOLD = 3;
+
+let _consecutiveBackfillFailures = 0;
+
+export function processBackfillErrors(
+  errors: ApiError[],
+  pullRequests: PullRequest[],
+): ApiError[] {
+  const backfillErrors = errors.filter(isBackfillError);
+  const otherErrors = errors.filter((e) => !isBackfillError(e));
+
+  if (backfillErrors.length > 0) {
+    _consecutiveBackfillFailures++;
+    if (
+      backfillErrors.some((e) => !e.retryable) ||
+      _consecutiveBackfillFailures >= BACKFILL_FAILURE_NOTIFICATION_THRESHOLD ||
+      hasDegradedEnrichment(pullRequests)
+    ) {
+      pushEnrichmentDegraded();
+    }
+  } else {
+    // Light/unfiltered search failures (pagination follow-ups report under the
+    // same batch label) leave PRs missing, so they don't reset the streak. They
+    // keep an active warning alive only while some PR is still degraded; the
+    // search failure itself is surfaced through its own error entry.
+    const hasSearchError = otherErrors.some(
+      (e) => e.repo.startsWith("light-batch-") || e.repo.startsWith("unfiltered-batch-"),
+    );
+    if (!hasSearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
+      _consecutiveBackfillFailures = 0;
+    } else if (
+      hasDegradedEnrichment(pullRequests) &&
+      (_consecutiveBackfillFailures >= BACKFILL_FAILURE_NOTIFICATION_THRESHOLD ||
+        getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE))
+    ) {
+      pushEnrichmentDegraded();
+    }
+  }
+
+  return otherErrors;
+}
+
 export function resetPollState(): void {
   _hotPRs.clear();
   _hotPRsByDbId.clear();
   _hotRuns.clear();
   _hotPollGeneration = 0;
+  _consecutiveBackfillFailures = 0;
+  resetPREnrichmentCache();
   _resetNotificationState();
   resetEmptyActionRepos();
   resetNotificationState();
@@ -182,6 +246,7 @@ createRoot(() => {
  */
 export async function fetchAllData(
   onLightData?: (data: DashboardData) => void,
+  force = false,
 ): Promise<DashboardData> {
   const octokit = getClient();
   if (!octokit) {
@@ -204,22 +269,31 @@ export async function fetchAllData(
 
   const trackedUsers = config.trackedUsers ?? [];
   const monitoredRepos = config.monitoredRepos ?? [];
+  setPREnrichmentCacheRefreshInterval(config.refreshInterval);
 
   // Issues + PRs use a two-phase approach: light query first (phase 1),
   // then heavy backfill (phase 2). Workflow runs use REST core.
   // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
   // Note: monitoredRepos are NOT added to combinedRepos for workflow runs —
   // Actions fetches are already per selectedRepo.
+  // Phase 1: forward light issues + PRs to the caller (no workflow runs yet)
+  const forwardLightData: FetchIssuesAndPRsOptions["onLightData"] = onLightData
+    ? (lightData) =>
+        onLightData({
+          issues: lightData.issues,
+          pullRequests: lightData.pullRequests,
+          workflowRuns: [],
+          errors: lightData.errors,
+        })
+    : undefined;
+
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, onLightData ? (lightData) => {
-      // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
-      onLightData({
-        issues: lightData.issues,
-        pullRequests: lightData.pullRequests,
-        workflowRuns: [],
-        errors: lightData.errors,
-      });
-    } : undefined, trackedUsers, monitoredRepos),
+    fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, {
+      onLightData: forwardLightData,
+      trackedUsers,
+      monitoredRepos,
+      force,
+    }),
     config.enableActions
       ? fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
@@ -269,7 +343,14 @@ const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // Sources managed by the poll coordinator — used for reconciliation
-const POLL_MANAGED_SOURCES = new Set(["poll", "graphql", "rate-limit", "search/issues", "search/prs"]);
+const POLL_MANAGED_SOURCES = new Set([
+  "poll",
+  "graphql",
+  "rate-limit",
+  "search/issues",
+  "search/prs",
+  PR_ENRICHMENT_NOTIFICATION_SOURCE,
+]);
 
 function withJitter(intervalMs: number): number {
   const jitter = (Math.random() * 2 - 1) * REJITTER_WINDOW_MS;
@@ -282,28 +363,76 @@ function withJitter(intervalMs: number): number {
  * - Polls at getInterval() seconds (reactive — restarts when interval changes)
  * - If getInterval() === 0, disables auto-polling
  * - Skips background polls when hidden (GraphQL POST has no 304 shortcut)
- * - On re-visible after >2 min hidden, fires catch-up fetch (safety net for
- *   browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
+ * - On re-visible after >2 min hidden, fires catch-up fetch after WAKE_GRACE_MS
+ *   (safety net for browser tab throttling/freezing — Safari purge, Chrome Energy Saver)
  * - Applies ±30 second jitter to poll interval
  *
  * Must be called inside a reactive root (e.g., createRoot or component body).
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: () => Promise<DashboardData>
+  fetchAll: (force?: boolean) => Promise<DashboardData>
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
+  let wakeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let onlineTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let onlineListener: (() => void) | null = null;
   let hiddenAt: number | null = null;
   let destroyed = false;
   let pendingForce = false;
+
+  function clearWakeAndOnlineTimers(): void {
+    if (wakeTimeoutId !== null) {
+      clearTimeout(wakeTimeoutId);
+      wakeTimeoutId = null;
+    }
+    if (onlineTimeoutId !== null) {
+      clearTimeout(onlineTimeoutId);
+      onlineTimeoutId = null;
+    }
+    if (onlineListener !== null && typeof window !== "undefined") {
+      window.removeEventListener("online", onlineListener);
+      onlineListener = null;
+    }
+  }
 
   async function doFetch(force = false): Promise<void> {
     if (destroyed) return;
     if (isRefreshing()) {
       if (force) pendingForce = true;
+      return;
+    }
+    if (!force && typeof navigator !== "undefined" && !navigator.onLine) {
+      if (!onlineListener && !onlineTimeoutId && typeof window !== "undefined") {
+        onlineListener = () => {
+          if (onlineListener) {
+            window.removeEventListener("online", onlineListener);
+            onlineListener = null;
+          }
+          if (onlineTimeoutId !== null) clearTimeout(onlineTimeoutId);
+          onlineTimeoutId = setTimeout(() => {
+            onlineTimeoutId = null;
+            if (destroyed) return;
+            if (typeof navigator !== "undefined" && !navigator.onLine) {
+              void doFetch();
+              return;
+            }
+            if (document.visibilityState === "hidden") {
+              hiddenAt = Date.now() - REVISIT_THRESHOLD_MS - 1;
+              return;
+            }
+            void doFetch();
+            const currentInterval = getInterval();
+            if (currentInterval > 0) {
+              startTimer(currentInterval);
+            }
+          }, ONLINE_RECOVERY_GRACE_MS);
+        };
+        window.addEventListener("online", onlineListener);
+      }
       return;
     }
     checkAndResetIfExpired();
@@ -326,10 +455,11 @@ export function createPollCoordinator(
     startCycleTracking();
 
     try {
-      const data = await fetchAll();
+      const data = await fetchAll(force);
       setLastRefreshAt(new Date());
-      // Surface per-repo API errors globally
-      for (const err of data.errors) {
+      // Surface per-repo API errors globally, routing backfill-batch-* through 3-Tier escalation
+      const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests);
+      for (const err of nonBackfillErrors) {
         pushError(err.repo, err.message, err.retryable);
       }
       // Reconcile: dismiss notifications for sources that didn't push this cycle
@@ -380,22 +510,40 @@ export function createPollCoordinator(
   // Safety net for browser-level tab throttling/freezing. Background polls are
   // skipped (no 304 shortcut for GraphQL), but browsers may also freeze hidden
   // tab timers (Chrome Energy Saver, Safari tab purge, Firefox timer capping).
-  // When the tab becomes visible again after >2 min, fire a catch-up fetch.
+  // When the tab becomes visible again after >2 min, fire a catch-up fetch
+  // after WAKE_GRACE_MS so wake-from-sleep network interfaces can settle.
   function handleVisibilityChange(): void {
     if (document.visibilityState === "hidden") {
-      hiddenAt = Date.now();
+      if (wakeTimeoutId !== null) {
+        clearTimeout(wakeTimeoutId);
+        wakeTimeoutId = null;
+        hiddenAt = hiddenAt ?? (Date.now() - REVISIT_THRESHOLD_MS - 1);
+      } else {
+        hiddenAt = Date.now();
+      }
     } else {
       // Became visible
       const wasHiddenFor = hiddenAt !== null ? Date.now() - hiddenAt : 0;
-      hiddenAt = null;
 
       if (wasHiddenFor > REVISIT_THRESHOLD_MS) {
-        void doFetch();
-        // Reset the interval timer so we don't double-fire shortly after
+        // Reset the interval timer immediately so an existing interval tick
+        // cannot fire inside the 2s post-wake grace window.
         const currentInterval = getInterval();
         if (currentInterval > 0) {
           startTimer(currentInterval);
         }
+        if (wakeTimeoutId !== null) {
+          clearTimeout(wakeTimeoutId);
+        }
+        wakeTimeoutId = setTimeout(() => {
+          wakeTimeoutId = null;
+          hiddenAt = null;
+          if (!destroyed && document.visibilityState !== "hidden") {
+            void doFetch();
+          }
+        }, WAKE_GRACE_MS);
+      } else {
+        hiddenAt = null;
       }
     }
   }
@@ -415,12 +563,15 @@ export function createPollCoordinator(
     destroyed = true;
     pendingForce = false;
     clearTimer();
+    clearWakeAndOnlineTimers();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
 
   onCleanup(destroy);
 
   function manualRefresh(): void {
+    clearWakeAndOnlineTimers();
+    hiddenAt = null;
     void doFetch(true);
     // Reset interval timer so next auto-poll is a full interval from now
     const currentInterval = getInterval();
@@ -447,7 +598,7 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   for (const pr of data.pullRequests) {
-    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
+    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;
@@ -774,8 +925,13 @@ export async function fetchTargetedRepoData(
         .filter((r): r is NonNullable<typeof r> => r !== null)
     : [];
 
+  setPREnrichmentCacheRefreshInterval(config.refreshInterval);
+  invalidatePREnrichmentCacheForRepos(targetRepos.map((r) => r.fullName));
+
+  const trackedUsers = config.trackedUsers ?? [];
+  const monitoredRepos = config.monitoredRepos ?? [];
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin),
+    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin, { trackedUsers, monitoredRepos }),
     workflowRepos.length > 0
       ? fetchWorkflowRuns(octokit, workflowRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
@@ -806,7 +962,7 @@ export async function fetchTargetedRepoData(
 
 export function seedHotSetsFromTargeted(data: DashboardData): void {
   for (const pr of data.pullRequests) {
-    if (pr.enriched && pr.checkStatus === "pending" && pr.nodeId) {
+    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) break;
       if (!_hotPRs.has(pr.nodeId)) {
         _hotPRs.set(pr.nodeId, pr.id);

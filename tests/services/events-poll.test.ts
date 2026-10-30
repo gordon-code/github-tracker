@@ -49,6 +49,7 @@ vi.mock("../../src/app/services/events", () => ({
 
 const mockFetchIssuesAndPullRequests = vi.fn();
 const mockFetchWorkflowRuns = vi.fn();
+const mockInvalidatePREnrichmentCacheForRepos = vi.fn();
 vi.mock("../../src/app/services/api", () => ({
   fetchIssuesAndPullRequests: (...args: unknown[]) => mockFetchIssuesAndPullRequests(...args),
   fetchWorkflowRuns: (...args: unknown[]) => mockFetchWorkflowRuns(...args),
@@ -59,6 +60,9 @@ vi.mock("../../src/app/services/api", () => ({
     return results;
   }),
   resetEmptyActionRepos: vi.fn(),
+  resetPREnrichmentCache: vi.fn(),
+  invalidatePREnrichmentCacheForRepos: (...args: unknown[]) => mockInvalidatePREnrichmentCacheForRepos(...args),
+  setPREnrichmentCacheRefreshInterval: vi.fn(),
 }));
 
 import { fetchHotPRStatus, fetchWorkflowRunById } from "../../src/app/services/api";
@@ -168,9 +172,40 @@ describe("fetchTargetedRepoData", () => {
 
     await fetchTargetedRepoData(summaries);
 
+    expect(mockInvalidatePREnrichmentCacheForRepos).toHaveBeenCalledWith(["owner/repo-a"]);
     expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledTimes(1);
     const calledRepos = mockFetchIssuesAndPullRequests.mock.calls[0][1] as Array<{ owner: string; name: string }>;
     expect(calledRepos).toContainEqual(expect.objectContaining({ owner: "owner", name: "repo-a" }));
+  });
+
+  it("forwards config.trackedUsers and config.monitoredRepos in the fetchIssuesAndPullRequests options", async () => {
+    const octokit = makeOctokit();
+    mockGetClient.mockReturnValue(octokit);
+    const { config } = await import("../../src/app/stores/config");
+    const trackedUsers = [
+      { login: "renovate", avatarUrl: "https://github.com/renovate.png", name: "Renovate", type: "bot" as const },
+    ];
+    const monitoredRepos = [{ owner: "owner", name: "repo-a", fullName: "owner/repo-a" }];
+    (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).trackedUsers = trackedUsers;
+    (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).monitoredRepos = monitoredRepos;
+
+    try {
+      const summaries = new Map([
+        ["owner/repo-a", makeRepoSummary({ repoFullName: "owner/repo-a" })],
+      ]);
+
+      await fetchTargetedRepoData(summaries);
+
+      expect(mockFetchIssuesAndPullRequests).toHaveBeenCalledWith(
+        octokit,
+        [{ owner: "owner", name: "repo-a", fullName: "owner/repo-a" }],
+        "",
+        { trackedUsers, monitoredRepos },
+      );
+    } finally {
+      (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).trackedUsers = [];
+      (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).monitoredRepos = [];
+    }
   });
 
   it("calls fetchWorkflowRuns only for repos with hasWorkflowActivity=true", async () => {
@@ -300,6 +335,21 @@ describe("seedHotSetsFromTargeted", () => {
 
     // No PRs in hot set — fetchHotPRStatus not called
     expect(fetchHotPRStatus).not.toHaveBeenCalled();
+  });
+
+  it("adds enriched PRs with checkStatus=null and checkStatusStale=true to hot set", async () => {
+    seedHotSetsFromTargeted({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 2, checkStatus: null, checkStatusStale: true, enriched: true, nodeId: "PR_stale" }),
+      ],
+    });
+
+    await fetchHotData();
+
+    expect(fetchHotPRStatus).toHaveBeenCalledTimes(1);
+    const calledNodeIds = vi.mocked(fetchHotPRStatus).mock.calls[0][1];
+    expect(calledNodeIds).toContain("PR_stale");
   });
 
   it("does NOT add PRs that are not enriched", async () => {

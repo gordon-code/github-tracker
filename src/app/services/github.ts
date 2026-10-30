@@ -62,7 +62,85 @@ function isAllowedGraphqlRequest(options: { query?: unknown; variables?: unknown
 
 // ── Plugin-extended Octokit class ────────────────────────────────────────────
 
-const GitHubOctokit = Octokit.plugin(throttling, retry, paginateRest);
+export const REQUEST_TIMEOUT_MS = 15_000;
+export const MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC = 15;
+
+const _syntheticResponseErrors = new WeakSet<object>();
+
+/**
+ * Runs inside @octokit/plugin-throttling (closest to @octokit/request) to abort
+ * requests whose AbortSignal fired while queued in Bottleneck and to attach
+ * a temporary empty response when a network or timeout error has no response object.
+ * This prevents plugin-throttling from throwing TypeError on error.response.headers
+ * when evaluating /graphql errors.
+ */
+function preThrottlingPlugin(octokit: Octokit): void {
+  octokit.hook.wrap("request", async (request, options) => {
+    const reqOpts = (options as { request?: { signal?: AbortSignal } }).request;
+    try {
+      if (reqOpts?.signal?.aborted) {
+        const reason: unknown = reqOpts.signal.reason;
+        throw reason instanceof Error
+          ? reason
+          : new DOMException("The operation was aborted.", "AbortError");
+      }
+      return await request(options);
+    } catch (err) {
+      if (
+        err &&
+        typeof err === "object" &&
+        (!("response" in err) || (err as { response?: unknown }).response == null)
+      ) {
+        (err as { response?: unknown }).response = {
+          url: options.url ?? "",
+          status: (err as { status?: number }).status ?? 500,
+          headers: {},
+          data: "",
+        };
+        _syntheticResponseErrors.add(err);
+      }
+      throw err;
+    }
+  });
+}
+
+/**
+ * Runs between @octokit/plugin-throttling and @octokit/plugin-retry to strip the
+ * synthetic response attached by preThrottlingPlugin, preserve options.request.retryCount
+ * when plugin-throttling resets it on non-rate-limit /graphql errors, and suppress retries
+ * when the caller's AbortSignal is already aborted.
+ */
+function postThrottlingPlugin(octokit: Octokit): void {
+  octokit.hook.wrap("request", async (request, options) => {
+    const reqOpts = (
+      options as { request?: { retryCount?: number; retries?: number; signal?: AbortSignal } }
+    ).request;
+    const priorRetryCount = reqOpts?.retryCount;
+    try {
+      return await request(options);
+    } catch (err) {
+      if (err && typeof err === "object" && _syntheticResponseErrors.has(err)) {
+        delete (err as { response?: unknown }).response;
+        _syntheticResponseErrors.delete(err);
+      }
+      if (reqOpts && priorRetryCount !== undefined) {
+        reqOpts.retryCount = Math.max(reqOpts.retryCount ?? 0, priorRetryCount);
+      }
+      if (reqOpts?.signal?.aborted) {
+        reqOpts.retries = 0;
+      }
+      throw err;
+    }
+  });
+}
+
+const GitHubOctokit = Octokit.plugin(
+  preThrottlingPlugin,
+  throttling,
+  postThrottlingPlugin,
+  retry,
+  paginateRest
+);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -148,14 +226,56 @@ export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
 
 // ── Client factory ───────────────────────────────────────────────────────────
 
+/**
+ * Returns a signal that aborts with the reason of whichever input signal aborts first.
+ * Falls back to manual listener wiring where AbortSignal.any is unavailable
+ * (Safari < 17.4, Chrome < 116, Firefox < 124); the fallback detaches its remaining
+ * listeners once any input fires.
+ */
+function anyAbortSignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  const listeners: Array<[AbortSignal, () => void]> = [];
+  const detach = () => {
+    for (const [s, l] of listeners) s.removeEventListener("abort", l);
+    listeners.length = 0;
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      detach();
+      break;
+    }
+    const onAbort = () => {
+      controller.abort(s.reason);
+      detach();
+    };
+    listeners.push([s, onAbort]);
+    s.addEventListener("abort", onAbort, { once: true });
+  }
+  return controller.signal;
+}
+
 export function createGitHubClient(authToken: string): GitHubOctokitInstance {
+  const boundedFetch: typeof fetch = (url, init) => {
+    const baseFetch = globalThis.fetch;
+    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = init?.signal
+      ? anyAbortSignal([init.signal, timeoutSignal])
+      : timeoutSignal;
+    return baseFetch(url, { ...init, signal });
+  };
+
   const client = new GitHubOctokit({
     auth: authToken,
     userAgent: "github-tracker",
+    request: {
+      fetch: boundedFetch,
+    },
     throttle: {
       onRateLimit: (
         retryAfter: number,
-        options: { method: string; url: string },
+        options: { method: string; url: string; request?: { signal?: AbortSignal } },
         _octokit: GitHubOctokitInstance,
         retryCount: number
       ) => {
@@ -163,11 +283,15 @@ export function createGitHubClient(authToken: string): GitHubOctokitInstance {
           `[github] Rate limit hit for ${options.method} ${options.url}. Retry after ${retryAfter}s.`
         );
         pushNotification("rate-limit", `Rate limit hit — retrying in ${retryAfter}s`, "warning", true);
-        return retryCount < 1;
+        return (
+          retryCount < 1 &&
+          retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC &&
+          !options.request?.signal?.aborted
+        );
       },
       onSecondaryRateLimit: (
         retryAfter: number,
-        options: { method: string; url: string },
+        options: { method: string; url: string; request?: { signal?: AbortSignal } },
         _octokit: GitHubOctokitInstance,
         retryCount: number
       ) => {
@@ -175,7 +299,11 @@ export function createGitHubClient(authToken: string): GitHubOctokitInstance {
           `[github] Secondary rate limit for ${options.method} ${options.url}. Retry after ${retryAfter}s.`
         );
         pushNotification("rate-limit", `Secondary rate limit — retrying in ${retryAfter}s. Consider reducing tracked repos.`, "warning", true);
-        return retryCount < 1;
+        return (
+          retryCount < 1 &&
+          retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC &&
+          !options.request?.signal?.aborted
+        );
       },
     },
     retry: {

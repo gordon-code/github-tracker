@@ -16,6 +16,11 @@ export interface AppNotification {
   severity: NotificationSeverity;
   read: boolean;
   action?: NotificationAction;
+  silentToast?: boolean;
+}
+
+export interface PushNotificationOptions {
+  silentToast?: boolean;
 }
 
 export function isSafeInternalHref(href: string): boolean {
@@ -49,12 +54,14 @@ export function pushNotification(
   message: string,
   severity: NotificationSeverity,
   retryable = false,
-  action?: NotificationAction
+  action?: NotificationAction,
+  options?: PushNotificationOptions
 ): void {
   // Record source in cycle tracking even for no-ops
   if (_cycleTracking) _cycleTracking.add(source);
 
   const safeAction = action && isSafeInternalHref(action.href) ? action : undefined;
+  const silentToast = options?.silentToast;
 
   setNotifications((prev) => {
     const existing = prev.find((n) => n.source === source);
@@ -71,7 +78,16 @@ export function pushNotification(
       return prev
         .map((n) =>
           n.source === source
-            ? { ...n, message, severity, retryable, action: safeAction, read: false, timestamp: Date.now() }
+            ? {
+                ...n,
+                message,
+                severity,
+                retryable,
+                action: safeAction,
+                read: false,
+                timestamp: Date.now(),
+                silentToast,
+              }
             : n
         )
         .slice(-MAX_NOTIFICATIONS);
@@ -88,6 +104,7 @@ export function pushNotification(
         severity,
         read: false,
         ...(safeAction ? { action: safeAction } : {}),
+        ...(silentToast ? { silentToast: true } : {}),
       },
     ].slice(-MAX_NOTIFICATIONS);
   });

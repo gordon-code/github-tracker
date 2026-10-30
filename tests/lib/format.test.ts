@@ -592,6 +592,19 @@ describe("canApprovePR", () => {
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: "conflict" }), "reviewer")).toBe(true);
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: null }), "reviewer")).toBe(true);
   });
+
+  it("returns false while checkStatusStale is true and true once checkStatusStale is false", () => {
+    const base = {
+      nodeId: "PR_kwDOtest0001",
+      headSha: validSha,
+      userLogin: "author",
+      reviewDecision: "REVIEW_REQUIRED" as const,
+    };
+
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: null, checkStatusStale: true }), "reviewer")).toBe(false);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "success", checkStatusStale: true }), "reviewer")).toBe(false);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: null, checkStatusStale: false }), "reviewer")).toBe(true);
+  });
 });
 
 describe("canMarkPRReady", () => {

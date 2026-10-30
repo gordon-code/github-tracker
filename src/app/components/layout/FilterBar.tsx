@@ -4,6 +4,7 @@ import { config } from "../../stores/config";
 import { viewState, setGlobalFilter } from "../../stores/view";
 import { Tooltip } from "../shared/Tooltip";
 import SortDropdown, { type SortOption } from "../shared/SortDropdown";
+import { PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../../shared/types";
 
 interface FilterBarProps {
   isRefreshing?: boolean;
@@ -14,6 +15,7 @@ interface FilterBarProps {
   sortDirection?: "asc" | "desc";
   onSortChange?: (field: string, direction: "asc" | "desc") => void;
   hideOrgRepo?: boolean;
+  partialSync?: boolean;
 }
 
 export default function FilterBar(props: FilterBarProps) {
@@ -126,10 +128,35 @@ export default function FilterBar(props: FilterBarProps) {
 
       <div class="flex-1" />
 
+      <Show when={props.partialSync}>
+        <Tooltip content={PR_ENRICHMENT_DEGRADED_MESSAGE} focusable>
+          <span
+            data-testid="partial-sync-indicator"
+            role="status"
+            class="text-xs text-warning flex items-center gap-1"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-3.5 w-3.5 shrink-0"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            <span>Partial sync</span>
+          </span>
+        </Tooltip>
+      </Show>
+
       <Show when={updatedLabel()}>
         <span
           class={`text-xs text-base-content/50 transition-opacity duration-1000 ${
-            props.isRefreshing || labelVisible() ? "opacity-100" : "opacity-0"
+            props.isRefreshing || labelVisible() || props.partialSync ? "opacity-100" : "opacity-0"
           }`}
         >
           {updatedLabel()}

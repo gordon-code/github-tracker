@@ -3,10 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   fetchDashboardIssueBodies,
   GRAPHQL_BODY_FETCH_TIMEOUT_MS,
+  BODY_FETCH_BATCH_SIZE,
+  BODY_FETCH_NOTIFICATION_THRESHOLD,
+  MIN_SPLIT_BATCH_SIZE,
+  resetPREnrichmentCache,
+  resetBodyFetchFailures,
   GraphqlFetchTimeoutError,
 } from "../../src/app/services/api";
 import { getClient } from "../../src/app/services/github";
-import { pushNotification } from "../../src/app/lib/errors";
+import { pushNotification, dismissNotificationBySource } from "../../src/app/lib/errors";
 import { captureException } from "@sentry/solid";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -26,6 +31,7 @@ vi.mock("../../src/app/services/github", () => ({
 
 vi.mock("../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
+  dismissNotificationBySource: vi.fn(),
   pushError: vi.fn(),
   getErrors: vi.fn().mockReturnValue([]),
   dismissError: vi.fn(),
@@ -41,8 +47,7 @@ vi.mock("@sentry/solid", () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// NODES_BATCH_SIZE is 100 (internal to api.ts — confirmed from fetchPREnrichment usage)
-const NODES_BATCH_SIZE = 100;
+const NODES_BATCH_SIZE = BODY_FETCH_BATCH_SIZE;
 
 function makeRateLimit() {
   return { cost: 1, limit: 5000, remaining: 4999, resetAt: "2026-01-01T01:00:00Z" };
@@ -58,6 +63,7 @@ function makeOctokit(graphqlImpl: (query: string, variables: unknown) => Promise
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetPREnrichmentCache();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -245,12 +251,12 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
   });
 
   it("Promise.allSettled: second batch succeeds even if first batch throws", async () => {
-    let callCount = 0;
     const ids = Array.from({ length: NODES_BATCH_SIZE + 1 }, (_, i) => `N_${i}`);
     const octokit = makeOctokit(async (_query: string, variables: unknown) => {
-      callCount++;
       const { ids: batchIds } = variables as { ids: string[] };
-      if (callCount === 1) throw new Error("first batch failed");
+      if (batchIds.some((id) => id !== `N_${BODY_FETCH_BATCH_SIZE}`)) {
+        throw new Error("first batch failed");
+      }
       return { nodes: batchIds.map((id) => ({ id, body: `body-${id}` })) };
     });
 
@@ -261,24 +267,153 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
     expect(result.bodies.get(`N_${NODES_BATCH_SIZE}`)).toBe(`body-N_${NODES_BATCH_SIZE}`);
     expect(result.failedIds.size).toBe(NODES_BATCH_SIZE);
   });
+
+  it("exports GRAPHQL_BODY_FETCH_TIMEOUT_MS === 45_000, BODY_FETCH_BATCH_SIZE === 25, and BODY_FETCH_NOTIFICATION_THRESHOLD === 3", () => {
+    expect(GRAPHQL_BODY_FETCH_TIMEOUT_MS).toBe(45_000);
+    expect(BODY_FETCH_BATCH_SIZE).toBe(25);
+    expect(BODY_FETCH_NOTIFICATION_THRESHOLD).toBe(3);
+  });
+
+  it("recursively binary-splits a 25-node batch (25 -> [12, 13] -> [6, 6] / [6, 7]) on retryable failure, recovering healthy siblings and capturing Sentry once", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const poisonId = "N_14"; // in second half (indices 12..24 -> leaf 12..17 of size 6)
+      const observedRetries: Array<number | undefined> = [];
+
+      const octokit = makeOctokit(async (_query: string, variables: unknown) => {
+        const { ids: batchIds, request } = variables as {
+          ids: string[];
+          request?: { retries?: number };
+        };
+        observedRetries.push(request?.retries);
+        if (batchIds.includes(poisonId)) {
+          const err = Object.assign(new Error("502 Bad Gateway"), { status: 502 });
+          throw err;
+        }
+        return {
+          nodes: batchIds.map((id) => ({ id, body: `body-${id}` })),
+        };
+      });
+
+      const result = await fetchDashboardIssueBodies(octokit, ids);
+
+      // Splittable (> 6) top-level batch and split sub-batches all use retries: 0 so 502/504 splits immediately
+      expect(observedRetries.every((r) => r === 0)).toBe(true);
+
+      // Non-splittable (<= 6) top-level batch uses retries: 1
+      observedRetries.length = 0;
+      await fetchDashboardIssueBodies(octokit, ["N_0"]);
+      expect(observedRetries).toEqual([1]);
+
+      // 25 -> [0..11 (12 ok), 12..24 (13 fail)] -> [12..17 (6 fail leaf), 18..24 (7 ok)]
+      // 19 healthy nodes recovered, 6 leaf nodes in failedIds
+      expect(result.bodies.size).toBe(19);
+      expect(result.failedIds.size).toBe(6);
+      expect(result.failedIds.has(poisonId)).toBe(true);
+      expect(result.bodies.get("N_0")).toBe("body-N_0");
+      expect(result.bodies.get("N_24")).toBe("body-N_24");
+      expect(captureException).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("short-circuits without binary splitting when batch fails with a non-retryable 403 status", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const octokit = makeOctokit(async () => {
+        throw Object.assign(new Error("Forbidden"), { status: 403 });
+      });
+
+      const result = await fetchDashboardIssueBodies(octokit, ids);
+
+      expect(octokit.graphql).toHaveBeenCalledTimes(1);
+      expect(result.bodies.size).toBe(0);
+      expect(result.failedIds.size).toBe(BODY_FETCH_BATCH_SIZE);
+      expect(captureException).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    [
+      "status-500 RequestError with a TypeError cause",
+      () => Object.assign(new Error("Failed to fetch", { cause: new TypeError("Failed to fetch") }), { status: 500 }),
+    ],
+    ["bare TypeError", () => new TypeError("Failed to fetch")],
+  ])(
+    "binary-splits a batch that fails with 'Failed to fetch' (CORS-masked gateway 502/504) as a %s",
+    async (_label, makeError) => {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const batchSizes: number[] = [];
+      const octokit = makeOctokit(async (_query: string, variables: unknown) => {
+        const batchIds = (variables as { ids: string[] }).ids;
+        batchSizes.push(batchIds.length);
+        if (batchIds.length > MIN_SPLIT_BATCH_SIZE) throw makeError();
+        return { nodes: batchIds.map((id) => ({ id, body: `body-${id}` })), rateLimit: null };
+      });
+
+      const result = await fetchDashboardIssueBodies(octokit, ids);
+
+      expect(batchSizes).toContain(12);
+      expect(batchSizes).toContain(13);
+      expect(result.bodies.size).toBe(BODY_FETCH_BATCH_SIZE);
+      expect(result.failedIds.size).toBe(0);
+    }
+  );
+
+  it("salvages resolved nodes from partial err.data.nodes before computing remainingIds", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ids = Array.from({ length: 10 }, (_, i) => `N_${i}`);
+      const octokit = makeOctokit(async (_query: string, variables: unknown) => {
+        const { ids: batchIds } = variables as { ids: string[] };
+        if (batchIds.length === 10) {
+          // 6 of the 10 nodes resolved in partial err.data.nodes; only 4 remain (<= MIN_SPLIT_BATCH_SIZE = 6)
+          throw Object.assign(new Error("Partial GraphQL failure"), {
+            status: 502,
+            data: {
+              nodes: batchIds.slice(0, 6).map((id) => ({ id, body: `salvaged-${id}` })),
+            },
+          });
+        }
+        return { nodes: [] };
+      });
+
+      const result = await fetchDashboardIssueBodies(octokit, ids);
+
+      // Because 6 nodes were salvaged, remainingIds had length 4 (<= 6), so no split retry was needed
+      expect(octokit.graphql).toHaveBeenCalledTimes(1);
+      expect(result.bodies.size).toBe(6);
+      expect(result.bodies.get("N_0")).toBe("salvaged-N_0");
+      expect(result.bodies.get("N_5")).toBe("salvaged-N_5");
+      expect([...result.failedIds]).toEqual(["N_6", "N_7", "N_8", "N_9"]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("fetchDashboardIssueBodies — hung request timeout", () => {
-  it("times out a never-resolving batch, warns, reports to Sentry, and notifies the user", async () => {
+  it("times out a never-resolving batch, warns, reports to Sentry on each failure, and notifies with silentToast only after 3 consecutive failures (dismissing on recovery)", async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const octokit = makeOctokit(() => new Promise(() => {}));
       vi.mocked(getClient).mockReturnValue(octokit);
 
-      const resultPromise = fetchDashboardIssueBodies(octokit, ["N_1"]);
+      // Failure 1: records failedIds & Sentry, but does NOT push notification (< 3 threshold)
+      const p1 = fetchDashboardIssueBodies(octokit, ["N_1"]);
       await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
-      const result = await resultPromise;
+      const result1 = await p1;
 
-      expect(result.bodies).toBeInstanceOf(Map);
-      expect(result.bodies.size).toBe(0);
-      expect(result.failedIds.has("N_1")).toBe(true);
-      expect(warnSpy).toHaveBeenCalled();
+      expect(result1.bodies).toBeInstanceOf(Map);
+      expect(result1.bodies.size).toBe(0);
+      expect(result1.failedIds.has("N_1")).toBe(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(captureException).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "GraphqlFetchTimeoutError",
@@ -289,11 +424,41 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       const capturedErr = vi.mocked(captureException).mock.calls[0]?.[0];
       expect(capturedErr).toBeInstanceOf(GraphqlFetchTimeoutError);
       expect((capturedErr as Error).name).toBe("GraphqlFetchTimeoutError");
+      expect(pushNotification).not.toHaveBeenCalled();
+
+      // Failure 2: still below threshold (2 < 3)
+      const p2 = fetchDashboardIssueBodies(octokit, ["N_1"]);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      await p2;
+      expect(pushNotification).not.toHaveBeenCalled();
+
+      // Failure 3: reaches BODY_FETCH_NOTIFICATION_THRESHOLD (3) -> pushes silent drawer warning
+      const p3 = fetchDashboardIssueBodies(octokit, ["N_1"]);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      await p3;
+      expect(pushNotification).toHaveBeenCalledTimes(1);
       expect(pushNotification).toHaveBeenCalledWith(
         "dashboardBodies",
         expect.stringContaining("could not be loaded"),
-        "warning"
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
       );
+
+      // Subsequent recovery resets failure counter and dismisses notification by source
+      const healthyOctokit = makeOctokit(async () => ({
+        nodes: [{ id: "N_1", body: "recovered body" }],
+      }));
+      vi.mocked(getClient).mockReturnValue(healthyOctokit);
+      const recovered = await fetchDashboardIssueBodies(healthyOctokit, ["N_1"]);
+      expect(recovered.failedIds.size).toBe(0);
+      expect(dismissNotificationBySource).toHaveBeenCalledWith("dashboardBodies");
+
+      // And resetBodyFetchFailures("dashboardBodies") also dismisses directly when invoked
+      vi.mocked(dismissNotificationBySource).mockClear();
+      resetBodyFetchFailures("dashboardBodies");
+      expect(dismissNotificationBySource).toHaveBeenCalledWith("dashboardBodies");
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();
@@ -315,6 +480,39 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalled();
       expect(pushNotification).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a hung multi-node batch on timeout and marks every id failed without binary-splitting", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const requests: Array<{ signal?: AbortSignal; retries?: number }> = [];
+      const octokit = makeOctokit((_query: string, variables: unknown) => {
+        const { request } = variables as { request?: { signal?: AbortSignal; retries?: number } };
+        requests.push(request ?? {});
+        return new Promise(() => {});
+      });
+      vi.mocked(getClient).mockReturnValue(null);
+
+      const resultPromise = fetchDashboardIssueBodies(octokit, ids);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      const result = await resultPromise;
+
+      expect(octokit.graphql).toHaveBeenCalledTimes(1);
+      expect(requests[0].retries).toBe(0);
+      expect(requests[0].signal?.aborted).toBe(true);
+      expect(result.bodies.size).toBe(0);
+      expect([...result.failedIds]).toEqual(ids);
+      expect(captureException).toHaveBeenCalledTimes(1);
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(GraphqlFetchTimeoutError),
+        { tags: { source: "dashboardBodies" } }
+      );
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();

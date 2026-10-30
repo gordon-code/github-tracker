@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@solidjs/testing-library";
+import { render, screen, fireEvent } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import FilterBar from "../../../src/app/components/layout/FilterBar";
+import { PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../../src/shared/types";
 
 // Mock view store
 vi.mock("../../../src/app/stores/view", () => ({
@@ -201,5 +202,45 @@ describe("FilterBar", () => {
     render(() => <FilterBar {...defaultSortProps} hideOrgRepo={false} />);
     screen.getByLabelText("Filter by organization");
     screen.getByLabelText("Filter by repository");
+  });
+
+  it("renders partial-sync-indicator with 'Partial sync' label and accessible tooltip when partialSync={true}", () => {
+    const tenSecondsAgo = new Date(Date.now() - 10_000);
+    render(() => (
+      <FilterBar {...defaultSortProps} lastRefreshedAt={tenSecondsAgo} partialSync={true} />
+    ));
+
+    const indicator = screen.getByTestId("partial-sync-indicator");
+    expect(indicator).toBeDefined();
+    expect(indicator.getAttribute("role")).toBe("status");
+    expect(indicator.textContent).toContain("Partial sync");
+
+    // Updated timestamp label stays visible past 8s fade-out while partialSync is active
+    vi.advanceTimersByTime(10_000);
+    const updatedSpan = screen.getByText(/Updated \d+[sm] ago/);
+    expect(updatedSpan.className).toContain("opacity-100");
+
+    // Hovering the indicator shows the degraded-enrichment explanation tooltip
+    const tooltipTrigger = indicator.parentElement!;
+    expect(tooltipTrigger.classList.contains("inline-flex")).toBe(true);
+    // Keyboard users can reach the explanation via Tab
+    expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
+    fireEvent.pointerEnter(tooltipTrigger);
+    vi.advanceTimersByTime(300);
+    const tooltipContent = document.querySelector('[role="tooltip"]');
+    expect(tooltipContent?.hasAttribute("data-expanded")).toBe(true);
+    expect(tooltipContent?.textContent).toBe(PR_ENRICHMENT_DEGRADED_MESSAGE);
+    fireEvent.pointerLeave(tooltipTrigger);
+    // Cover the 100ms closeDelay and Kobalte's 300ms globalSkipDelayTimeout
+    vi.advanceTimersByTime(300);
+  });
+
+  it("does not render partial-sync-indicator when partialSync is false or omitted", () => {
+    const { unmount } = render(() => <FilterBar {...defaultSortProps} partialSync={false} />);
+    expect(screen.queryByTestId("partial-sync-indicator")).toBeNull();
+    unmount();
+
+    render(() => <FilterBar {...defaultSortProps} />);
+    expect(screen.queryByTestId("partial-sync-indicator")).toBeNull();
   });
 });

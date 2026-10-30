@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
-import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, type ApiRequestInfo } from "../../src/app/services/github";
+import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
+import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
 
 // ── createGitHubClient ───────────────────────────────────────────────────────
 
@@ -311,6 +312,202 @@ describe("createGitHubClient", () => {
         variables: ["PR_kwDOtest42"] as unknown as Record<string, unknown>,
       })
     ).rejects.toThrow(/Write operation blocked/);
+  });
+
+  it("attaches per-attempt AbortSignal.timeout(REQUEST_TIMEOUT_MS) and composes caller signal via AbortSignal.any without retrying caller aborts", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const anySpy = vi.spyOn(AbortSignal, "any");
+
+    const client = createGitHubClient("test-token");
+    const receivedSignals: Array<AbortSignal | null | undefined> = [];
+
+    const mockFetch = vi.fn().mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      receivedSignals.push(init?.signal);
+      return new Response(
+        JSON.stringify({ data: { viewer: { login: "octocat" } } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      await client.graphql("{ viewer { login } }");
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+      expect(receivedSignals).toHaveLength(1);
+      expect(receivedSignals[0]).toBeInstanceOf(AbortSignal);
+
+      // Now pass a caller AbortController signal and abort it while fetch is in flight
+      const controller = new AbortController();
+      mockFetch.mockReset();
+      mockFetch.mockImplementation(
+        (_url: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const sig = init?.signal;
+            if (sig?.aborted) {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+              return;
+            }
+            sig?.addEventListener(
+              "abort",
+              () => {
+                reject(new DOMException("The operation was aborted.", "AbortError"));
+              },
+              { once: true }
+            );
+            queueMicrotask(() => controller.abort());
+          })
+      );
+
+      const pending = client.graphql("{ viewer { login } }", {
+        request: { signal: controller.signal },
+      });
+
+      await expect(pending).rejects.toThrow(/aborted/i);
+      expect(anySpy).toHaveBeenCalled();
+      // Caller-initiated abort must set retries = 0 so plugin-retry does not schedule retries
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      timeoutSpy.mockRestore();
+      anySpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("composes caller and per-attempt timeout signals without AbortSignal.any (older browsers)", async () => {
+    const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+    Object.defineProperty(AbortSignal, "any", { value: undefined, configurable: true, writable: true });
+    const timeoutA = new AbortController();
+    const timeoutB = new AbortController();
+    let timeoutCalls = 0;
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => (timeoutCalls++ === 0 ? timeoutA.signal : timeoutB.signal));
+
+    const client = createGitHubClient("test-token");
+    const receivedSignals: AbortSignal[] = [];
+    const mockFetch = vi.fn().mockImplementation(
+      (_url: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const sig = init!.signal!;
+          receivedSignals.push(sig);
+          sig.addEventListener("abort", () => reject(sig.reason), { once: true });
+        })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      // Caller abort propagates through the fallback-composed signal
+      const caller = new AbortController();
+      const pendingCaller = client.graphql("{ viewer { login } }", {
+        request: { signal: caller.signal },
+      });
+      // plugin-throttling's write group spaces GraphQL starts by up to 1s
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1), { timeout: 2_500 });
+      expect(receivedSignals[0]).not.toBe(caller.signal);
+      expect(receivedSignals[0]).not.toBe(timeoutA.signal);
+      caller.abort(new DOMException("The operation was aborted.", "AbortError"));
+      await expect(pendingCaller).rejects.toThrow(/aborted/i);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Per-attempt timeout propagates while the caller signal stays live
+      const caller2 = new AbortController();
+      const removeSpy = vi.spyOn(caller2.signal, "removeEventListener");
+      const pendingTimeout = client.graphql("{ viewer { login } }", {
+        request: { signal: caller2.signal, retries: 0 },
+      });
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2), { timeout: 2_500 });
+      timeoutB.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      await expect(pendingTimeout).rejects.toThrow(/timeout/i);
+      expect(caller2.signal.aborted).toBe(false);
+      expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    } finally {
+      timeoutSpy.mockRestore();
+      if (anyDescriptor) Object.defineProperty(AbortSignal, "any", anyDescriptor);
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+
+  it("returns an already-aborted signal without AbortSignal.any when an input signal is already aborted", async () => {
+    const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+    Object.defineProperty(AbortSignal, "any", { value: undefined, configurable: true, writable: true });
+    const timeoutController = new AbortController();
+    const timeoutReason = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    timeoutController.abort(timeoutReason);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutController.signal);
+
+    const client = createGitHubClient("test-token");
+    const caller = new AbortController();
+    const removeSpy = vi.spyOn(caller.signal, "removeEventListener");
+    let receivedSignal: AbortSignal | undefined;
+    const mockFetch = vi.fn().mockImplementation((_url: RequestInfo | URL, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined;
+      return Promise.reject(receivedSignal?.reason);
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      await expect(
+        client.graphql("{ viewer { login } }", { request: { signal: caller.signal, retries: 0 } })
+      ).rejects.toThrow(/timeout/i);
+      expect(receivedSignal?.aborted).toBe(true);
+      expect(receivedSignal?.reason).toBe(timeoutReason);
+      // The listener attached to the still-live caller signal is detached immediately
+      expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(caller.signal.aborted).toBe(false);
+    } finally {
+      timeoutSpy.mockRestore();
+      if (anyDescriptor) Object.defineProperty(AbortSignal, "any", anyDescriptor);
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+
+  it("rejects /graphql network and timeout errors with undefined response and without plugin-throttling headers TypeError", async () => {
+    const client = createGitHubClient("test-token");
+
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+      );
+
+      let caughtNetworkErr: unknown;
+      try {
+        await client.graphql("{ viewer { login } }", { request: { retries: 0 } });
+      } catch (err) {
+        caughtNetworkErr = err;
+      }
+
+      expect(caughtNetworkErr).toBeInstanceOf(Error);
+      expect((caughtNetworkErr as Error).message).toMatch(/Failed to fetch/);
+      expect((caughtNetworkErr as Error).message).not.toMatch(
+        /Cannot read properties of undefined/
+      );
+      expect((caughtNetworkErr as { response?: unknown }).response).toBeUndefined();
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockRejectedValue(
+          new DOMException("The operation was aborted due to timeout", "TimeoutError")
+        )
+      );
+
+      let caughtTimeoutErr: unknown;
+      try {
+        await client.graphql("{ viewer { login } }", { request: { retries: 0 } });
+      } catch (err) {
+        caughtTimeoutErr = err;
+      }
+
+      expect(caughtTimeoutErr).toBeInstanceOf(Error);
+      expect((caughtTimeoutErr as Error).message).toMatch(/timeout/i);
+      expect((caughtTimeoutErr as Error).message).not.toMatch(
+        /Cannot read properties of undefined/
+      );
+      expect((caughtTimeoutErr as { response?: unknown }).response).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -1101,5 +1298,424 @@ describe("fetchRateLimitDetails — signal updates with client override", () => 
     expect(getCoreRateLimit()!.remaining).toBe(3000);
     expect(getGraphqlRateLimit()!.remaining).toBe(2500);
     expect(mockClient.request).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── createGitHubClient — retryCount quadratic backoff ────────────────────────
+// Placed at the end of the file so fake-timer Date.now() advancement does not
+// shift the shared Bottleneck group's _nextRequest ahead of subsequent real-timer tests.
+
+describe("createGitHubClient — retryCount quadratic backoff", () => {
+  it("preserves options.request.retryCount across /graphql retries with quadratic backoff (1s then 4s)", async () => {
+    vi.useFakeTimers();
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", mockFetch);
+
+    let promise: Promise<unknown> | undefined;
+    try {
+      // Advance fake clock past any residual Bottleneck write-limiter minTime (1000ms)
+      // recorded by preceding real-timer /graphql tests.
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      let caughtErr: unknown;
+      promise = client
+        .graphql("{ viewer { login } }", { request: { retries: 2 } })
+        .catch((err: unknown) => {
+          caughtErr = err;
+        });
+
+      // Initial attempt runs at t=0
+      await vi.advanceTimersByTimeAsync(50);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Retry 1 (retryCount 0 -> 1) runs after 1s quadratic backoff + Bottleneck write spacing
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Verify retry 2 has NOT fired 1.5s after retry 1 (would have fired at +1s if retryCount was reset to 0)
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Advance remaining time for retry 2's 4s quadratic backoff (retryCount 1 -> 2)
+      await vi.advanceTimersByTimeAsync(3_500);
+      await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(caughtErr).toBeInstanceOf(Error);
+      expect((caughtErr as Error).message).toMatch(/Failed to fetch/);
+      expect((caughtErr as { response?: unknown }).response).toBeUndefined();
+    } finally {
+      if (promise) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        await promise;
+      }
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ── createGitHubClient — preThrottlingPlugin abort & rate-limit retry bounds ─
+// Placed at the end of the file after retryCount quadratic backoff so fake-timer
+// clock advancement on Bottleneck's shared limiters does not affect real-timer suites.
+
+describe("createGitHubClient — preThrottlingPlugin abort handling and rate-limit retry bounds", () => {
+  // Maintain a monotonically increasing fake-clock cursor across tests in this suite
+  // so Bottleneck's module-scoped limiters (_nextRequest shifted by earlier fake-timer tests)
+  // never see Date.now() move backwards when a new test starts.
+  let fakeTimeCursor = Date.now() + 30_000;
+
+  async function settleWithTimers<T>(
+    promise: Promise<T>,
+    advanceMs = 2_000
+  ): Promise<{ value?: T; error?: unknown }> {
+    let settled: { value?: T; error?: unknown } = {};
+    const wrapped = (async () => {
+      try {
+        settled = { value: await promise };
+      } catch (error) {
+        settled = { error };
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(advanceMs);
+    await wrapped;
+    return settled;
+  }
+
+  beforeEach(() => {
+    clearNotifications();
+  });
+
+  afterEach(() => {
+    fakeTimeCursor = Math.max(fakeTimeCursor, Date.now()) + 10_000;
+    clearNotifications();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("exports MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC === 15", () => {
+    expect(MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC).toBe(15);
+  });
+
+  it("rejects immediately without calling fetch when client.graphql is called with an already-aborted AbortSignal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+
+    // 1. Default abort reason (DOMException AbortError)
+    const controller1 = new AbortController();
+    controller1.abort();
+    const reqOpts1: { signal: AbortSignal; retries?: number } = {
+      signal: controller1.signal,
+      retries: 2,
+    };
+
+    const { error: caught1 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts1 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught1).toBeInstanceOf(Error);
+    expect((caught1 as Error).name).toBe("AbortError");
+    expect((caught1 as { response?: unknown }).response).toBeUndefined();
+
+    // 2. Custom Error abort reason
+    const controller2 = new AbortController();
+    const customReason = new Error("Custom caller timeout");
+    controller2.abort(customReason);
+    const reqOpts2: { signal: AbortSignal; retries?: number } = {
+      signal: controller2.signal,
+      retries: 2,
+    };
+
+    const { error: caught2 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts2 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught2).toBe(customReason);
+    expect((caught2 as { response?: unknown }).response).toBeUndefined();
+
+    // 3. Non-Error primitive abort reason falls back to DOMException AbortError
+    const controller3 = new AbortController();
+    controller3.abort("non-error-reason");
+    const reqOpts3: { signal: AbortSignal; retries?: number } = {
+      signal: controller3.signal,
+      retries: 2,
+    };
+
+    const { error: caught3 } = await settleWithTimers(
+      client.graphql("{ viewer { login } }", { request: reqOpts3 }),
+      2_000
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(caught3).toBeInstanceOf(DOMException);
+    expect((caught3 as DOMException).name).toBe("AbortError");
+    expect((caught3 as { response?: unknown }).response).toBeUndefined();
+  });
+
+  it("aborts a second concurrent client.graphql request queued behind Bottleneck's 1000ms state.write spacing without invoking fetch for the second call", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const controller1 = new AbortController();
+    const controller2 = new AbortController();
+    const reqOpts2: { signal: AbortSignal; retries?: number } = {
+      signal: controller2.signal,
+      retries: 2,
+    };
+
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      // Abort req2 while req1 is executing fetch and req2 is queued in Bottleneck's 1000ms state.write limiter
+      controller2.abort();
+      return new Response(
+        JSON.stringify({ data: { viewer: { login: "octocat" } } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const req1 = client.graphql("{ viewer { login } }", {
+      request: { signal: controller1.signal },
+    });
+
+    let caught2: unknown;
+    const req2 = client
+      .graphql("{ viewer { login } }", {
+        request: reqOpts2,
+      })
+      .catch((err: unknown) => {
+        caught2 = err;
+      });
+
+    // Advance past Bottleneck's 1000ms state.write minTime spacing while both promises are pending
+    await vi.advanceTimersByTimeAsync(2_500);
+    await Promise.all([req1, req2]);
+
+    // Fetch was only invoked for req1; req2 was aborted in preThrottlingPlugin before fetch
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(caught2).toBeInstanceOf(Error);
+    expect((caught2 as Error).name).toBe("AbortError");
+    expect((caught2 as { response?: unknown }).response).toBeUndefined();
+  });
+
+  it("onRateLimit retries once when retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC and signal is not aborted, and skips inline retry when retryAfter > 15s or signal is aborted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      // Case 1: retryAfter <= 15s (e.g. reset = now, so retryAfter = 1s) and !signal.aborted -> retries once and succeeds
+      let callCount1 = 0;
+      const mockFetch1 = vi.fn().mockImplementation(async () => {
+        callCount1++;
+        if (callCount1 === 1) {
+          const resetNow = Math.floor(Date.now() / 1000);
+          return new Response(
+            JSON.stringify({ message: "API rate limit exceeded" }),
+            {
+              status: 403,
+              headers: {
+                "content-type": "application/json",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": String(resetNow),
+              },
+            }
+          );
+        }
+        return new Response(JSON.stringify({ login: "octocat" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch1);
+
+      const { value: res1, error: err1 } = await settleWithTimers(
+        client.request("GET /user"),
+        3_000
+      );
+      expect(err1).toBeUndefined();
+      expect(res1?.status).toBe(200);
+      expect(mockFetch1).toHaveBeenCalledTimes(2);
+      expect(getNotifications().some((n) => n.source === "rate-limit" && /Rate limit hit/.test(n.message))).toBe(true);
+
+      clearNotifications();
+
+      // Case 2: retryAfter > 15s (e.g. reset = now + 60s, so retryAfter = 61s) -> pushes warning but returns false (no inline retry)
+      const reset60 = Math.floor(Date.now() / 1000) + 60;
+      const mockFetch2 = vi.fn().mockImplementation(async () =>
+        new Response(
+          JSON.stringify({ message: "API rate limit exceeded" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(reset60),
+            },
+          }
+        )
+      );
+      vi.stubGlobal("fetch", mockFetch2);
+
+      const { error: err2 } = await settleWithTimers(
+        client.request("GET /user"),
+        2_000
+      );
+      expect(err2).toBeInstanceOf(Error);
+      expect((err2 as Error).message).toMatch(/API rate limit exceeded/);
+      expect(mockFetch2).toHaveBeenCalledTimes(1);
+      expect(getNotifications().some((n) => n.source === "rate-limit" && /Rate limit hit — retrying in 61s/.test(n.message))).toBe(true);
+
+      clearNotifications();
+
+      // Case 3: retryAfter <= 15s, but caller signal aborts before onRateLimit runs -> returns false (no inline retry)
+      const controller3 = new AbortController();
+      const mockFetch3 = vi.fn().mockImplementation(async () => {
+        controller3.abort();
+        const resetNow = Math.floor(Date.now() / 1000);
+        return new Response(
+          JSON.stringify({ message: "API rate limit exceeded" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(resetNow),
+            },
+          }
+        );
+      });
+      vi.stubGlobal("fetch", mockFetch3);
+
+      const { error: err3 } = await settleWithTimers(
+        client.request("GET /user", { request: { signal: controller3.signal } }),
+        2_000
+      );
+      expect(err3).toBeInstanceOf(Error);
+      expect((err3 as Error).message).toMatch(/API rate limit exceeded/);
+      expect(mockFetch3).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("onSecondaryRateLimit retries once when retryAfter <= MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC and signal is not aborted, and skips inline retry when retryAfter > 15s or signal is aborted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fakeTimeCursor);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const client = createGitHubClient("test-token");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      // Case 1: retryAfter = 5s (<= 15s) and !signal.aborted -> retries once and succeeds
+      let callCount1 = 0;
+      const mockFetch1 = vi.fn().mockImplementation(async () => {
+        callCount1++;
+        if (callCount1 === 1) {
+          return new Response(
+            JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+            {
+              status: 403,
+              headers: {
+                "content-type": "application/json",
+                "retry-after": "5",
+              },
+            }
+          );
+        }
+        return new Response(JSON.stringify({ login: "octocat" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      vi.stubGlobal("fetch", mockFetch1);
+
+      const { value: res1, error: err1 } = await settleWithTimers(
+        client.request("GET /user"),
+        6_000
+      );
+      expect(err1).toBeUndefined();
+      expect(res1?.status).toBe(200);
+      expect(mockFetch1).toHaveBeenCalledTimes(2);
+      expect(
+        getNotifications().some(
+          (n) => n.source === "rate-limit" && /Secondary rate limit — retrying in 5s/.test(n.message)
+        )
+      ).toBe(true);
+
+      clearNotifications();
+
+      // Case 2: retryAfter = 60s (> 15s) -> pushes warning but returns false (no 60s inline sleep)
+      const mockFetch2 = vi.fn().mockImplementation(async () =>
+        new Response(
+          JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "60",
+            },
+          }
+        )
+      );
+      vi.stubGlobal("fetch", mockFetch2);
+
+      const { error: err2 } = await settleWithTimers(
+        client.request("GET /user"),
+        2_000
+      );
+      expect(err2).toBeInstanceOf(Error);
+      expect((err2 as Error).message).toMatch(/secondary rate limit/i);
+      expect(mockFetch2).toHaveBeenCalledTimes(1);
+      expect(
+        getNotifications().some(
+          (n) => n.source === "rate-limit" && /Secondary rate limit — retrying in 60s/.test(n.message)
+        )
+      ).toBe(true);
+
+      clearNotifications();
+
+      // Case 3: retryAfter = 5s (<= 15s), but caller signal aborts before onSecondaryRateLimit runs -> returns false
+      const controller3 = new AbortController();
+      const mockFetch3 = vi.fn().mockImplementation(async () => {
+        controller3.abort();
+        return new Response(
+          JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+          {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+            },
+          }
+        );
+      });
+      vi.stubGlobal("fetch", mockFetch3);
+
+      const { error: err3 } = await settleWithTimers(
+        client.request("GET /user", { request: { signal: controller3.signal } }),
+        2_000
+      );
+      expect(err3).toBeInstanceOf(Error);
+      expect((err3 as Error).message).toMatch(/secondary rate limit/i);
+      expect(mockFetch3).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

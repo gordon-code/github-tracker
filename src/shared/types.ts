@@ -49,6 +49,11 @@ export interface CheckStatus {
 export type AutoMergeMethod = "MERGE" | "SQUASH" | "REBASE";
 export type ViewerReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
 
+export const PR_ENRICHMENT_NOTIFICATION_SOURCE = "pr-enrichment";
+export const PR_ENRICHMENT_DEGRADED_MESSAGE =
+  "Some pull request details could not be loaded — showing cached data where available";
+export const DASHBOARD_BODIES_STORAGE_KEY = "github-tracker:dashboard-bodies";
+
 export interface PullRequest {
   id: number;
   number: number;
@@ -84,6 +89,14 @@ export interface PullRequest {
   starCount?: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;
+  /**
+   * True when CI check status for the PR's current revision is unverified: set by
+   * the lightweight backfill fallback (no check rollup), a failed fork rollup
+   * lookup, or carried-forward enrichment whose revision changed or was already
+   * stale. Cleared by a hot-poll status update or a successful backfill; while set, the PR is hot-polled
+   * and approve/mergeable gating treats CI as unknown.
+   */
+  checkStatusStale?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;
   /** PR body — fetched on demand for dependency update type detection */

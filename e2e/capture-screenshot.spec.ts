@@ -127,7 +127,7 @@ const heavyPRNodes = [
     changedFiles: 8,
     comments: { totalCount: 6 },
     reviewThreads: { totalCount: 1 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    statusCheckRollup: { state: "SUCCESS" },
   },
   {
     databaseId: 100002,
@@ -145,7 +145,7 @@ const heavyPRNodes = [
     changedFiles: 4,
     comments: { totalCount: 12 },
     reviewThreads: { totalCount: 3 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    statusCheckRollup: { state: "SUCCESS" },
   },
   {
     databaseId: 100003,
@@ -160,7 +160,7 @@ const heavyPRNodes = [
     changedFiles: 31,
     comments: { totalCount: 2 },
     reviewThreads: { totalCount: 0 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+    statusCheckRollup: { state: "PENDING" },
   },
   {
     databaseId: 100004,
@@ -178,7 +178,7 @@ const heavyPRNodes = [
     changedFiles: 3,
     comments: { totalCount: 1 },
     reviewThreads: { totalCount: 0 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    statusCheckRollup: { state: "SUCCESS" },
   },
   {
     databaseId: 100005,
@@ -193,7 +193,7 @@ const heavyPRNodes = [
     changedFiles: 14,
     comments: { totalCount: 8 },
     reviewThreads: { totalCount: 2 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+    statusCheckRollup: { state: "FAILURE" },
   },
   {
     databaseId: 100006,
@@ -208,7 +208,7 @@ const heavyPRNodes = [
     changedFiles: 6,
     comments: { totalCount: 0 },
     reviewThreads: { totalCount: 0 },
-    commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    statusCheckRollup: null,
   },
 ];
 
@@ -802,7 +802,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 12, deletions: 8, changedFiles: 2,
       comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     },
     {
       // webpack → mergeable (CI success, review required but not approved)
@@ -815,7 +815,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 45, deletions: 12, changedFiles: 3,
       comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     },
     {
       // typescript → needs-action (CI failure)
@@ -828,7 +828,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 3, deletions: 3, changedFiles: 1,
       comments: { totalCount: 2 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+      statusCheckRollup: { state: "FAILURE" },
     },
     {
       // react monorepo → needs-action (CI pending)
@@ -841,7 +841,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 89, deletions: 34, changedFiles: 8,
       comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+      statusCheckRollup: { state: "PENDING" },
     },
     {
       // axios → pending-rebase (has "rebase" label, CI success)
@@ -854,7 +854,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 18, deletions: 6, changedFiles: 2,
       comments: { totalCount: 1 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     },
     {
       // @types/node → stale (updatedAt 20 days ago)
@@ -867,7 +867,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 2, deletions: 2, changedFiles: 1,
       comments: { totalCount: 0 }, reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+      statusCheckRollup: { state: "PENDING" },
     },
     {
       // eslint → stale (updatedAt 35 days ago, major bump)
@@ -880,7 +880,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 0, nodes: [] },
       additions: 312, deletions: 145, changedFiles: 18,
       comments: { totalCount: 5 }, reviewThreads: { totalCount: 1 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+      statusCheckRollup: { state: "FAILURE" },
     },
   ];
 
@@ -932,7 +932,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 1, nodes: [{ author: { login: "msmith" } }] },
       additions: 312, deletions: 47, changedFiles: 8,
       comments: { totalCount: 6 }, reviewThreads: { totalCount: 1 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     },
     {
       databaseId: 100002,
@@ -943,7 +943,7 @@ test("capture dependencies screenshot", async ({ page }) => {
       latestReviews: { totalCount: 1, nodes: [{ author: { login: "jdoe" } }] },
       additions: 89, deletions: 23, changedFiles: 4,
       comments: { totalCount: 12 }, reviewThreads: { totalCount: 3 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     },
   ];
 

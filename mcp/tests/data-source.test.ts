@@ -207,6 +207,35 @@ describe("OctokitDataSource", () => {
       }));
     });
 
+    it("excludes archived repositories from PR, issue, and summary searches", async () => {
+      setCachedConfig({
+        selectedRepos: [{ owner: "myorg", name: "myrepo", fullName: "myorg/myrepo" }],
+        trackedUsers: [],
+        upstreamRepos: [],
+        monitoredRepos: [],
+        enableActions: false,
+      });
+      const responses = new Map<string, unknown>([
+        ["GET /user", makeUserResponse()],
+        ["GET /search/issues", makeSearchResponse([])],
+      ]);
+      const octokit = makeMockOctokit(responses);
+      const ds = new OctokitDataSource(octokit);
+
+      await ds.getOpenPRs("myorg/myrepo");
+      await ds.getOpenPRs("myorg/myrepo", "needs_review");
+      await ds.getOpenIssues("myorg/myrepo");
+      await ds.getDashboardSummary("involves_me");
+
+      const searchQueries = (octokit.request as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([route]) => route === "GET /search/issues")
+        .map(([, params]) => (params as { q: string }).q);
+      expect(searchQueries.length).toBeGreaterThanOrEqual(6);
+      for (const q of searchQueries) {
+        expect(q).toContain("archived:false");
+      }
+    });
+
     it("returns empty array when config has no repos and no explicit repo", async () => {
       // setCachedConfig with empty selectedRepos → resolveRepos returns []
       setCachedConfig({ selectedRepos: [], trackedUsers: [], upstreamRepos: [], monitoredRepos: [], enableActions: true });

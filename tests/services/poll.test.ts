@@ -1,12 +1,22 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
-import { createPollCoordinator, type DashboardData } from "../../src/app/services/poll";
+import {
+  createPollCoordinator,
+  processBackfillErrors,
+  resetPollState,
+  WAKE_GRACE_MS,
+  ONLINE_RECOVERY_GRACE_MS,
+  type DashboardData,
+} from "../../src/app/services/poll";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../src/shared/types";
 import * as githubMod from "../../src/app/services/github";
 import * as githubStatusMod from "../../src/app/services/github-status";
+import { makePullRequest } from "../helpers/factories";
 
-// Mock pushError so we can spy on it
+// Mock pushError and pushNotification so we can spy on them
 const mockPushError = vi.fn();
+const mockPushNotification = vi.fn();
 const mockDismissNotificationBySource = vi.fn();
 const mockStartCycleTracking = vi.fn();
 const mockEndCycleTracking = vi.fn(() => new Set<string>());
@@ -19,7 +29,7 @@ vi.mock("../../src/app/lib/errors", () => ({
   dismissNotificationBySource: (source: string) => mockDismissNotificationBySource(source),
   startCycleTracking: () => mockStartCycleTracking(),
   endCycleTracking: () => mockEndCycleTracking(),
-  pushNotification: vi.fn(),
+  pushNotification: (...args: unknown[]) => mockPushNotification(...args),
   clearNotifications: vi.fn(),
   resetNotificationState: vi.fn(),
   addMutedSource: vi.fn(),
@@ -95,13 +105,21 @@ function setDocumentVisible(visible: boolean) {
 describe("createPollCoordinator", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    // Start with document visible
+    resetPollState();
+    // Start with document visible and browser online
     Object.defineProperty(document, "visibilityState", {
       value: "visible",
       writable: true,
       configurable: true,
     });
-    // Reset new mock functions
+    Object.defineProperty(navigator, "onLine", {
+      value: true,
+      writable: true,
+      configurable: true,
+    });
+    // Reset mock functions
+    mockPushError.mockClear();
+    mockPushNotification.mockClear();
     mockDismissNotificationBySource.mockClear();
     mockStartCycleTracking.mockClear();
     mockEndCycleTracking.mockClear().mockReturnValue(new Set<string>());
@@ -182,12 +200,15 @@ describe("createPollCoordinator", () => {
       // Advance time past 2 minutes while hidden
       vi.advanceTimersByTime(130_000); // 2 min 10 sec
 
-      // Restore visibility
+      // Restore visibility — catch-up waits WAKE_GRACE_MS (2_000ms)
       setDocumentVisible(true);
       await flushPromises();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
-      // Should have triggered at least a catch-up fetch on re-visible
-      // (background polls may also have fired if interval < hidden duration)
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
+      await flushPromises();
+
+      // Should have triggered a catch-up fetch after WAKE_GRACE_MS
       expect(fetchAll.mock.calls.length).toBeGreaterThanOrEqual(callsAfterInit + 1);
       dispose();
     });
@@ -239,8 +260,12 @@ describe("createPollCoordinator", () => {
       // No polls while hidden
       expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
 
-      // Restore visibility — catch-up fetch fires + timer resets
+      // Restore visibility — timer resets immediately, catch-up fires after WAKE_GRACE_MS
       setDocumentVisible(true);
+      await flushPromises();
+      expect(fetchAll.mock.calls.length).toBe(callsAfterInit);
+
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
       await flushPromises();
 
       const callsAfterRevisible = fetchAll.mock.calls.length;
@@ -251,7 +276,7 @@ describe("createPollCoordinator", () => {
       await Promise.resolve();
       expect(fetchAll.mock.calls.length).toBe(callsAfterRevisible);
 
-      // Advance another 31s (61s from reset) — timer fires
+      // Advance another 31s (past 60s from reset) — timer fires
       vi.advanceTimersByTime(31_000);
       await flushPromises();
       expect(fetchAll.mock.calls.length).toBeGreaterThan(callsAfterRevisible);
@@ -641,5 +666,475 @@ describe("createPollCoordinator", () => {
       expect(fetchGitHubStatusSpy).toHaveBeenCalledTimes(2);
       dispose();
     });
+  });
+
+  it("threads force = false on automatic polls and force = true on manualRefresh()", async () => {
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(fetchAll).toHaveBeenLastCalledWith(false);
+
+      coordinator.manualRefresh();
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+      expect(fetchAll).toHaveBeenLastCalledWith(true);
+      dispose();
+    });
+  });
+
+  it("cancels pending wake grace timer on re-hide (preserving hiddenAt), manualRefresh(), and destroy()", async () => {
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Hide > 2m, become visible, then re-hide within WAKE_GRACE_MS
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(500);
+      setDocumentVisible(false);
+
+      // Advancing past WAKE_GRACE_MS while hidden does not fire catch-up
+      vi.advanceTimersByTime(WAKE_GRACE_MS + 1_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Becoming visible again still remembers the >2m hiddenAt obligation
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // manualRefresh() during wake grace window cancels pending wake timer
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(500);
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+      expect(fetchAll).toHaveBeenLastCalledWith(true);
+
+      // Elapsing the remainder of WAKE_GRACE_MS must NOT fire a duplicate fetch
+      vi.advanceTimersByTime(WAKE_GRACE_MS + 500);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      // destroy() during wake grace window cancels pending wake timer
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(500);
+      coordinator.destroy();
+      vi.advanceTimersByTime(WAKE_GRACE_MS + 500);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      dispose();
+    });
+  });
+
+  it("skips automatic polls and wake catch-up while navigator.onLine === false and recovers after ONLINE_RECOVERY_GRACE_MS on 'online' event", async () => {
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Go offline
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+
+      // Interval tick while offline is skipped
+      vi.advanceTimersByTime(95_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Wake catch-up while offline is also skipped
+      setDocumentVisible(false);
+      vi.advanceTimersByTime(130_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Restore online state and fire window 'online' event
+      Object.defineProperty(navigator, "onLine", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("online"));
+
+      // Does not fire before ONLINE_RECOVERY_GRACE_MS (1_500ms)
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS - 100);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // Manual refresh (force = true) still runs even if navigator.onLine is false
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      dispose();
+    });
+  });
+
+  it("implements 3-Tier backfill-batch-* escalation, retains Tier 1 across search failures only while PRs are degraded, and auto-dismisses on clean poll", async () => {
+    const enrichedPR = makePullRequest({ id: 1, enriched: true, checkStatus: "success" });
+    const unenrichedPR = makePullRequest({ id: 2, enriched: false, checkStatus: null });
+    const backfillErr = {
+      repo: "backfill-batch-1/1",
+      statusCode: null,
+      message: "Failed to fetch",
+      retryable: true,
+    };
+
+    let nextResult: DashboardData = {
+      issues: [],
+      pullRequests: [enrichedPR],
+      workflowRuns: [],
+      errors: [backfillErr],
+    };
+    const fetchAll = vi.fn(async () => nextResult);
+
+    await createRoot(async (dispose) => {
+      // Poll 1 (failure #1 with all PRs enriched via cache/fallback): Tier 0 silent
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+
+      // Poll 2 (failure #2 with all PRs enriched): Tier 0 silent
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+
+      // Poll 3 (failure #3 consecutive): escalates to Tier 1 silentToast warning
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      // Poll 4: light-search total failure (pullRequests: [], errors: [light-batch-1/1])
+      // Surfaces 'light-batch-1/1' via pushError; with no degraded PRs on screen the
+      // 'pr-enrichment' warning is not re-pushed (cycle tracking then dismisses it)
+      mockPushNotification.mockClear();
+      mockPushError.mockClear();
+      mockGetNotifications.mockReturnValue([
+        {
+          id: "n-pr",
+          source: PR_ENRICHMENT_NOTIFICATION_SOURCE,
+          message: PR_ENRICHMENT_DEGRADED_MESSAGE,
+          timestamp: Date.now(),
+          retryable: true,
+          severity: "warning",
+          read: false,
+          silentToast: true,
+        },
+      ]);
+      mockEndCycleTracking.mockReturnValue(
+        new Set(["light-batch-1/1", PR_ENRICHMENT_NOTIFICATION_SOURCE])
+      );
+      nextResult = {
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [{ repo: "light-batch-1/1", statusCode: 500, message: "Server Error", retryable: true }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).toHaveBeenCalledWith("light-batch-1/1", "Server Error", true);
+      expect(mockPushNotification).not.toHaveBeenCalled();
+
+      // Partial light-search failure with only enriched PRs: warning not re-pushed either
+      mockPushError.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [{ repo: "light-batch-2/2", statusCode: 502, message: "Bad Gateway", retryable: true }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).toHaveBeenCalledWith("light-batch-2/2", "Bad Gateway", true);
+      expect(mockPushNotification).not.toHaveBeenCalled();
+
+      // Partial light-search failure that leaves a degraded PR: retains Tier 1 'pr-enrichment'
+      mockPushNotification.mockClear();
+      mockPushError.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR, unenrichedPR],
+        workflowRuns: [],
+        errors: [{ repo: "light-batch-2/2", statusCode: 502, message: "Bad Gateway", retryable: true }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).toHaveBeenCalledWith("light-batch-2/2", "Bad Gateway", true);
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+      expect(mockDismissNotificationBySource).not.toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE
+      );
+
+      // Poll 5: clean poll with enriched PRs resets streak and auto-dismisses 'pr-enrichment'
+      mockPushNotification.mockClear();
+      mockPushError.mockClear();
+      mockEndCycleTracking.mockReturnValue(new Set());
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+      expect(mockDismissNotificationBySource).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE
+      );
+
+      // Poll 6: cold-start failure #1 with an unenriched PR (enriched: false) escalates immediately to Tier 1
+      mockGetNotifications.mockReturnValue([]);
+      mockDismissNotificationBySource.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [unenrichedPR],
+        workflowRuns: [],
+        errors: [backfillErr],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      // Poll 7: reset streak, then verify failure #1 with checkStatusStale: true also escalates immediately to Tier 1
+      resetPollState();
+      mockPushNotification.mockClear();
+      const stalePR = makePullRequest({
+        id: 3,
+        repoFullName: "owner/repo",
+        enriched: true,
+        checkStatus: null,
+        checkStatusStale: true,
+      });
+      nextResult = {
+        issues: [],
+        pullRequests: [stalePR],
+        workflowRuns: [],
+        errors: [backfillErr],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      // Poll 8: reset streak, then verify failure #1 with a non-retryable backfill error escalates immediately to Tier 1
+      resetPollState();
+      mockPushNotification.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [{ ...backfillErr, statusCode: 403, retryable: false }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        PR_ENRICHMENT_DEGRADED_MESSAGE,
+        "warning",
+        true,
+        undefined,
+        { silentToast: true }
+      );
+
+      dispose();
+    });
+  });
+
+  it("defers online recovery fetch when tab is hidden and catches up after WAKE_GRACE_MS on tab focus", async () => {
+    await createRoot(async (dispose) => {
+      const fetchAll = vi.fn().mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      const coordinator = createPollCoordinator(() => 300, fetchAll);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Go offline and trigger an interval tick while offline so the 'online' listener registers
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      vi.advanceTimersByTime(360_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Hide tab (< 2m) before online recovery fires
+      setDocumentVisible(false);
+      Object.defineProperty(navigator, "onLine", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      // Should NOT fetch while hidden, but should backdate hiddenAt
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+
+      // Become visible 5 seconds later (< 2m since last hide, but backdated by online recovery)
+      vi.advanceTimersByTime(5_000);
+      setDocumentVisible(true);
+      vi.advanceTimersByTime(WAKE_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // Go offline again, fire 'online', then flap back to offline before ONLINE_RECOVERY_GRACE_MS elapses
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      vi.advanceTimersByTime(360_000);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      // Still offline -> did not fetch, but re-registered 'online' listener
+      expect(fetchAll).toHaveBeenCalledTimes(2);
+
+      // Now genuinely come back online -> second 'online' event triggers recovery fetch
+      Object.defineProperty(navigator, "onLine", {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("online"));
+      vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
+      await flushPromises();
+      expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+});
+
+describe("processBackfillErrors", () => {
+  const backfillErr = { repo: "backfill-batch-1/1", statusCode: null, message: "Failed to fetch", retryable: true };
+  const enrichedPR = makePullRequest({ id: 1, enriched: true, checkStatus: "success" });
+  const degradedArgs = [
+    PR_ENRICHMENT_NOTIFICATION_SOURCE,
+    PR_ENRICHMENT_DEGRADED_MESSAGE,
+    "warning",
+    true,
+    undefined,
+    { silentToast: true },
+  ] as const;
+
+  beforeEach(() => {
+    resetPollState();
+    mockPushNotification.mockClear();
+    mockGetNotifications.mockClear().mockReturnValue([]);
+  });
+
+  it("resets the consecutive-failure streak on a clean poll", () => {
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(processBackfillErrors([], [enrichedPR])).toEqual([]);
+    // Without the reset this would be failure #3 and escalate.
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps the streak on an unfiltered-batch search error and re-pushes an active warning only while a PR is degraded", () => {
+    const stalePR = makePullRequest({ id: 2, enriched: true, checkStatus: null, checkStatusStale: true });
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+
+    mockGetNotifications.mockReturnValue([
+      {
+        id: "n-pr",
+        source: PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        message: PR_ENRICHMENT_DEGRADED_MESSAGE,
+        timestamp: Date.now(),
+        retryable: true,
+        severity: "warning",
+        read: false,
+        silentToast: true,
+      },
+    ]);
+    const unfilteredErr = { repo: "unfiltered-batch-1/1", statusCode: 502, message: "Bad Gateway", retryable: true };
+    // Every PR fully enriched: the active warning is not kept alive by the search error
+    expect(processBackfillErrors([unfilteredErr], [enrichedPR])).toEqual([unfilteredErr]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+    // A degraded PR on screen: the active warning is re-pushed
+    processBackfillErrors([unfilteredErr], [enrichedPR, stalePR]);
+    expect(mockPushNotification).toHaveBeenCalledWith(...degradedArgs);
+
+    // Streak was kept at 2, so the next backfill failure is #3 and escalates.
+    mockPushNotification.mockClear();
+    mockGetNotifications.mockReturnValue([]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).toHaveBeenCalledWith(...degradedArgs);
   });
 });
