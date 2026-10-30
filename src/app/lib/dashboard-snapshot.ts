@@ -10,6 +10,11 @@ const RECORD_KEY = "current";
 export const MAX_SNAPSHOT_ITEMS = 5_000;
 export const DEBOUNCE_MS = 5_000;
 
+// Bump only for breaking item-schema changes (renames, type changes); records with a
+// different version are discarded on load. Additive optional fields don't require a
+// bump — missing fields deserialize as undefined.
+const SNAPSHOT_VERSION = 1;
+
 try {
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem?.("github-tracker:dashboard");
@@ -26,7 +31,7 @@ export interface DashboardSnapshotState {
 }
 
 export interface DashboardSnapshot extends DashboardSnapshotState {
-  _v: 1;
+  _v: typeof SNAPSHOT_VERSION;
   login: string;
   savedAt: number;
 }
@@ -41,11 +46,14 @@ interface SnapshotDB {
 let dbPromise: Promise<IDBPDatabase<SnapshotDB>> | null = null;
 let _writeToken = 0;
 let _sizeWarned = false;
+// Set once an over-cap write has queued the stored-record delete; cleared by the
+// next under-cap write so repeated over-cap writes don't queue redundant deletes.
+let _discardQueued = false;
 let _pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let _pendingMode: "immediate" | "debounced" | null = null;
 let _pendingPayload: DashboardSnapshot | null = null;
 let _pendingToken = 0;
-let _inFlightWrite: Promise<void> | null = null;
+let _inFlightMutation: Promise<void> | null = null;
 
 function getDb(): Promise<IDBPDatabase<SnapshotDB>> {
   if (!dbPromise) {
@@ -103,7 +111,7 @@ export async function loadSnapshot(login: string): Promise<DashboardSnapshot | n
       return null;
     }
     const record = raw as Record<string, unknown>;
-    if (record._v !== 1) {
+    if (record._v !== SNAPSHOT_VERSION) {
       return null;
     }
     if (
@@ -141,7 +149,7 @@ export async function loadSnapshot(login: string): Promise<DashboardSnapshot | n
     }
 
     return {
-      _v: 1,
+      _v: SNAPSHOT_VERSION,
       login: record.login,
       savedAt: typeof record.savedAt === "number" ? record.savedAt : 0,
       issues: record.issues as Issue[],
@@ -171,6 +179,43 @@ async function performWrite(payload: DashboardSnapshot, token: number): Promise<
   }
 }
 
+async function performDelete(token: number): Promise<void> {
+  if (token !== _writeToken) return;
+  try {
+    const db = await getDb();
+    if (token !== _writeToken) return;
+    await db.delete(STORE_NAME, RECORD_KEY);
+  } catch (err) {
+    console.warn("[dashboard-snapshot] Failed to discard dashboard snapshot:", err);
+  }
+}
+
+// Serializes IDB mutations so each runs after the previously queued one settles.
+function enqueueMutation(task: () => Promise<void>): Promise<void> {
+  const previousMutation = _inFlightMutation;
+  const mutationPromise = (async () => {
+    if (previousMutation) {
+      await previousMutation;
+    }
+    await task();
+  })().finally(() => {
+    if (_inFlightMutation === mutationPromise) {
+      _inFlightMutation = null;
+    }
+  });
+  _inFlightMutation = mutationPromise;
+  return mutationPromise;
+}
+
+function cancelPendingWrite(): void {
+  if (_pendingTimer !== null) {
+    clearTimeout(_pendingTimer);
+    _pendingTimer = null;
+  }
+  _pendingMode = null;
+  _pendingPayload = null;
+}
+
 function flushPending(): Promise<void> {
   if (_pendingTimer !== null) {
     clearTimeout(_pendingTimer);
@@ -181,21 +226,9 @@ function flushPending(): Promise<void> {
   const token = _pendingToken;
   _pendingPayload = null;
   if (!payload || token !== _writeToken) {
-    return _inFlightWrite ?? Promise.resolve();
+    return _inFlightMutation ?? Promise.resolve();
   }
-  const previousWrite = _inFlightWrite;
-  const writePromise = (async () => {
-    if (previousWrite) {
-      await previousWrite;
-    }
-    await performWrite(payload, token);
-  })().finally(() => {
-    if (_inFlightWrite === writePromise) {
-      _inFlightWrite = null;
-    }
-  });
-  _inFlightWrite = writePromise;
-  return writePromise;
+  return enqueueMutation(() => performWrite(payload, token));
 }
 
 export function writeSnapshot(
@@ -212,15 +245,24 @@ export function writeSnapshot(
     if (!_sizeWarned) {
       _sizeWarned = true;
       console.warn(
-        `[dashboard-snapshot] Snapshot exceeds ${MAX_SNAPSHOT_ITEMS} items (${totalItems}); skipping write`,
+        `[dashboard-snapshot] Snapshot exceeds ${MAX_SNAPSHOT_ITEMS} items (${totalItems}); skipping write and discarding stored snapshot`,
       );
+    }
+    // Drop any queued under-cap payload and remove the stored record so a reload
+    // never restores data older than the current dashboard.
+    cancelPendingWrite();
+    if (!_discardQueued) {
+      _discardQueued = true;
+      const deleteToken = _writeToken;
+      void enqueueMutation(() => performDelete(deleteToken));
     }
     return;
   }
 
+  _discardQueued = false;
   const capturedToken = _writeToken;
   _pendingPayload = {
-    _v: 1,
+    _v: SNAPSHOT_VERSION,
     login,
     savedAt: Date.now(),
     issues: state.issues,
@@ -263,17 +305,13 @@ export function flushSnapshot(): Promise<void> {
 /**
  * Clears any pending or persisted dashboard snapshot.
  * Invariant: only called from the auth.ts paths that also increment identityEpoch
- * (clearAuth, expireToken, clearIdentityData).
+ * (clearAuth, expireToken, clearIdentityData, and the cross-tab identity-switch reload).
  */
 export function clearSnapshot(): Promise<void> {
-  if (_pendingTimer !== null) {
-    clearTimeout(_pendingTimer);
-    _pendingTimer = null;
-  }
-  _pendingMode = null;
-  _pendingPayload = null;
+  cancelPendingWrite();
   _writeToken++;
   _sizeWarned = false;
+  _discardQueued = false;
 
   if (typeof indexedDB === "undefined") {
     return Promise.resolve();

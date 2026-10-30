@@ -98,9 +98,10 @@ let capturedOnHotData:
       prUpdates: Map<number, HotPRStatusUpdate>,
       runUpdates: Map<number, HotWorkflowRunUpdate>,
       generation: number,
+      epoch: number,
     ) => void)
   | null = null;
-let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[]) => void) | null = null;
+let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[], epoch: number) => void) | null = null;
 
 let DashboardPage: typeof import("../../../src/app/components/dashboard/DashboardPage").default;
 let pollService: typeof import("../../../src/app/services/poll");
@@ -384,6 +385,7 @@ describe("render stability — keyed reconcile store writes and stable group ide
         errors: [],
       },
       ["owner/repo-a"],
+      0,
     );
 
     expect(document.querySelector('[data-repo-group="owner/repo-a"]')).toBe(groupANode);
@@ -468,6 +470,7 @@ describe("render stability — keyed reconcile store writes and stable group ide
         errors: [],
       },
       ["owner/repo-a"],
+      0,
     );
 
     expect(document.querySelector('[data-repo-group="owner/repo-a"]')).toBe(repoGroupNode);

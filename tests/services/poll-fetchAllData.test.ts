@@ -465,66 +465,6 @@ describe("fetchAllData — upstream repos and tracked users", () => {
   });
 });
 
-// ── DashboardPage fine-grained merge: surfacedBy preserved ────────────────────
-
-describe("DashboardPage pollFetch — fine-grained merge preserves surfacedBy", () => {
-  it("surfacedBy is copied into the store during the canMerge path", () => {
-    // Test the canMerge loop logic directly (same code as DashboardPage.tsx pollFetch).
-    // Using Record<string, unknown> to avoid the 'never' collapse from conflicting
-    // enriched: false vs enriched: true literal types.
-    type MutablePR = Record<string, unknown> & { id: number };
-
-    const pr: MutablePR = {
-      id: 5001,
-      surfacedBy: ["mainuser", "trackeduser"],
-      enriched: false,
-    };
-
-    const enriched: MutablePR = {
-      id: 5001,
-      headSha: "abc123",
-      assigneeLogins: [],
-      reviewerLogins: [],
-      checkStatus: "success",
-      additions: 5,
-      deletions: 2,
-      changedFiles: 1,
-      comments: 0,
-      reviewThreads: 0,
-      totalReviewCount: 0,
-      enriched: true,
-      nodeId: "PR_node_5001",
-      surfacedBy: ["mainuser", "trackeduser"],
-    };
-
-    const state = { pullRequests: [pr] };
-    const enrichedMap = new Map([[5001, enriched]]);
-
-    // Simulate the canMerge loop from DashboardPage.tsx
-    for (let i = 0; i < state.pullRequests.length; i++) {
-      const e = enrichedMap.get(state.pullRequests[i].id)!;
-      const p = state.pullRequests[i];
-      p["headSha"] = e["headSha"];
-      p["assigneeLogins"] = e["assigneeLogins"];
-      p["reviewerLogins"] = e["reviewerLogins"];
-      p["checkStatus"] = e["checkStatus"];
-      p["additions"] = e["additions"];
-      p["deletions"] = e["deletions"];
-      p["changedFiles"] = e["changedFiles"];
-      p["comments"] = e["comments"];
-      p["reviewThreads"] = e["reviewThreads"];
-      p["totalReviewCount"] = e["totalReviewCount"];
-      p["enriched"] = e["enriched"];
-      p["nodeId"] = e["nodeId"];
-      p["surfacedBy"] = e["surfacedBy"];
-    }
-
-    expect(state.pullRequests[0]["surfacedBy"]).toEqual(["mainuser", "trackeduser"]);
-    expect(state.pullRequests[0]["enriched"]).toBe(true);
-    expect(state.pullRequests[0]["checkStatus"]).toBe("success");
-  });
-});
-
 // ── 401 propagation from Promise.allSettled ───────────────────────────────────
 
 describe("fetchAllData — 401 propagation from allSettled", () => {

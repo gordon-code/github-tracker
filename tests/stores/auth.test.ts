@@ -43,6 +43,25 @@ Object.defineProperty(globalThis, "localStorage", {
 // Each describe block uses vi.resetModules() + dynamic import to get clean signal state.
 // Tests that seed localStorage must do so BEFORE the dynamic import.
 
+// auth.ts registers a module-scope "storage" listener on every (re-)import, and
+// some tests import more than one instance. Track them all and detach after each
+// test so listeners from earlier instances don't react to later cross-tab events.
+const storageListeners = new Set<EventListenerOrEventListenerObject>();
+const originalAddEventListener = window.addEventListener.bind(window);
+window.addEventListener = ((
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+) => {
+  if (type === "storage") storageListeners.add(listener);
+  originalAddEventListener(type, listener, options);
+}) as typeof window.addEventListener;
+
+afterEach(() => {
+  for (const listener of storageListeners) window.removeEventListener("storage", listener);
+  storageListeners.clear();
+});
+
 describe("setAuth / token signal", () => {
   let mod: typeof import("../../src/app/stores/auth");
 
@@ -479,10 +498,8 @@ describe("cross-tab auth sync", () => {
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
     // Safe default fetch stub for every test in this describe block. auth.ts
-    // registers its "storage" listener as a module-level side effect; the
-    // afterEach below detaches it via `_resetAuthStorageListenerForTests()`, so
-    // within this describe each `vi.resetModules()` + re-import swaps the listener
-    // rather than piling new ones onto the shared happy-dom `window`. The stub still guards the
+    // registers its "storage" listener as a module-level side effect (detached
+    // after each test by the file-level listener tracker). The stub guards the
     // current test's own listener: its cross-tab branch fires an un-awaited
     // `/user` fetch that, without a stub, would hit the real network and abort
     // on teardown (throwing unhandled AbortError/ERR_INVALID_STATE). Individual
@@ -497,7 +514,6 @@ describe("cross-tab auth sync", () => {
     // still-active mock rather than racing `vi.unstubAllGlobals()` below and
     // falling through to the real fetch.
     await new Promise((r) => setTimeout(r, 50));
-    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1277,10 +1293,6 @@ describe("cross-tab Jira auth sync", () => {
   });
 
   afterEach(() => {
-    // Detach this test's module-scope "storage" listener so re-imports don't
-    // accumulate listeners on the shared window (same reason as the GitHub
-    // cross-tab describe above).
-    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1532,7 +1544,6 @@ describe("identityEpoch and clearSnapshot integration", () => {
 
   afterEach(async () => {
     await new Promise((r) => setTimeout(r, 50));
-    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1568,13 +1579,16 @@ describe("identityEpoch and clearSnapshot integration", () => {
     expect(replaceMock).toHaveBeenCalledWith("/login");
   });
 
-  it("cross-tab token change to a different identity increments identityEpoch() before reload", async () => {
+  it("cross-tab token change to a different identity increments identityEpoch() and clears the snapshot before reload", async () => {
     mod.setAuthFromPat("ghs_old", { login: "alice", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" });
+    mockClearSnapshot.mockClear();
     const beforeEpoch = mod.identityEpoch();
     let epochAtReload = -1;
+    let snapshotClearsAtReload = -1;
 
     const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {
       epochAtReload = mod.identityEpoch();
+      snapshotClearsAtReload = mockClearSnapshot.mock.calls.length;
     });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -1592,10 +1606,13 @@ describe("identityEpoch and clearSnapshot integration", () => {
     expect(reloadSpy).toHaveBeenCalledOnce();
     expect(epochAtReload).toBe(beforeEpoch + 1);
     expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(snapshotClearsAtReload).toBe(1);
+    expect(mockClearSnapshot).toHaveBeenCalledOnce();
   });
 
-  it("same-user token rotation does NOT increment identityEpoch()", async () => {
+  it("same-user token rotation does NOT increment identityEpoch() or clear the snapshot", async () => {
     mod.setAuthFromPat("ghs_old", { login: "alice", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" });
+    mockClearSnapshot.mockClear();
     const beforeEpoch = mod.identityEpoch();
     const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -1613,6 +1630,7 @@ describe("identityEpoch and clearSnapshot integration", () => {
 
     expect(reloadSpy).not.toHaveBeenCalled();
     expect(mod.identityEpoch()).toBe(beforeEpoch);
+    expect(mockClearSnapshot).not.toHaveBeenCalled();
   });
 
   it("clearIdentityData() invokes clearSnapshot() synchronously before clearCache() resolves, awaits both, and survives either rejecting", async () => {

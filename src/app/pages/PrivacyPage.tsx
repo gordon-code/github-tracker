@@ -31,7 +31,10 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>IndexedDB</strong> — cached API responses with ETags to
-              reduce GitHub API usage. Cleared on logout.
+              reduce GitHub API usage, and a snapshot of your dashboard (issues,
+              pull requests, and workflow runs) so it appears instantly on reload.
+              Cleared on logout; the dashboard snapshot is also cleared when your
+              access token expires.
             </li>
           </ul>
 

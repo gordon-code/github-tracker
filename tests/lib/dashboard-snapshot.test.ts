@@ -35,6 +35,25 @@ function makeSampleState(overrides?: Partial<DashboardSnapshotState>): Dashboard
   };
 }
 
+// Re-imports the module with a fresh DB connection whose `put` calls are counted
+// (and, when `gate` is given, held until it resolves).
+async function installPutCounter(gate?: Promise<void>): Promise<() => number> {
+  vi.resetModules();
+  const idb = await import("idb");
+  let putCount = 0;
+  vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+    const db = await idbHoisted.realOpenDB(...args);
+    const origPut = db.put.bind(db);
+    vi.spyOn(db, "put").mockImplementation((async (...putArgs: Parameters<typeof origPut>) => {
+      putCount++;
+      if (gate) await gate;
+      return origPut(...putArgs);
+    }) as typeof db.put);
+    return db;
+  });
+  return () => putCount;
+}
+
 describe("dashboard-snapshot", () => {
   beforeEach(async () => {
     vi.useRealTimers();
@@ -171,19 +190,7 @@ describe("dashboard-snapshot", () => {
   });
 
   it("coalesces 5 debounced writes into 1 IDB put", async () => {
-    vi.resetModules();
-    const idb = await import("idb");
-    let putCount = 0;
-
-    vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
-      const db = await idbHoisted.realOpenDB(...args);
-      const origPut = db.put.bind(db);
-      vi.spyOn(db, "put").mockImplementation((async (...putArgs: Parameters<typeof origPut>) => {
-        putCount++;
-        return origPut(...putArgs);
-      }) as typeof db.put);
-      return db;
-    });
+    const putCount = await installPutCounter();
 
     const { writeSnapshot, loadSnapshot, DEBOUNCE_MS } = await import(
       "../../src/app/lib/dashboard-snapshot"
@@ -201,12 +208,12 @@ describe("dashboard-snapshot", () => {
     }
 
     // 5 * 1000ms elapsed, last write still needs ~4000ms to fire
-    expect(putCount).toBe(0);
+    expect(putCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
     vi.useRealTimers();
     await vi.waitFor(() => {
-      expect(putCount).toBe(1);
+      expect(putCount()).toBe(1);
     });
 
     const snap = await loadSnapshot("alice");
@@ -233,6 +240,65 @@ describe("dashboard-snapshot", () => {
     const snap = await loadSnapshot("alice");
     expect(snap).not.toBeNull();
     expect(snap!.issues[0]?.id).toBe(42);
+  });
+
+  it("keeps a pending immediate timer when a debounced write arrives before it fires, committing the latest payload once", async () => {
+    const putCount = await installPutCounter();
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 1, title: "Immediate" })] }),
+      "alice",
+      "immediate",
+    );
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Debounced" })] }),
+      "alice",
+      "debounced",
+    );
+
+    // The debounced call reuses the pending 0ms timer instead of rescheduling at DEBOUNCE_MS
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(10);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(putCount()).toBe(1);
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap?.issues.map((i) => i.id)).toEqual([2]);
+  });
+
+  it("replaces a pending debounced timer when an immediate write arrives, committing on the next macrotask once", async () => {
+    const putCount = await installPutCounter();
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 1, title: "Debounced" })] }),
+      "alice",
+      "debounced",
+    );
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Immediate" })] }),
+      "alice",
+      "immediate",
+    );
+
+    // The DEBOUNCE_MS timer is cleared; only the 0ms timer remains
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Advance only past setTimeout(0), not DEBOUNCE_MS
+    await vi.advanceTimersByTimeAsync(10);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(putCount()).toBe(1);
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap?.issues.map((i) => i.id)).toEqual([2]);
   });
 
   it("cancels a pending debounced write when clearSnapshot() runs before debounce elapses", async () => {
@@ -304,6 +370,98 @@ describe("dashboard-snapshot", () => {
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exceeds 5000 items"));
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("queues one stored-snapshot delete per over-cap streak, re-arming after an under-cap write", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.resetModules();
+    const idb = await import("idb");
+    let deleteCount = 0;
+    vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+      const db = await idbHoisted.realOpenDB(...args);
+      const origDelete = db.delete.bind(db);
+      vi.spyOn(db, "delete").mockImplementation(async (...deleteArgs: Parameters<typeof origDelete>) => {
+        deleteCount++;
+        return origDelete(...deleteArgs);
+      });
+      return db;
+    });
+    const { writeSnapshot, flushSnapshot, MAX_SNAPSHOT_ITEMS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+    const oversized = makeSampleState({
+      issues: Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) => makeIssue({ id: i + 1 })),
+    });
+
+    writeSnapshot(oversized, "alice", "immediate");
+    writeSnapshot(oversized, "alice", "immediate");
+    writeSnapshot(oversized, "alice", "debounced");
+    await flushSnapshot();
+    expect(deleteCount).toBe(1);
+
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+    await flushSnapshot();
+    writeSnapshot(oversized, "alice", "immediate");
+    await flushSnapshot();
+    expect(deleteCount).toBe(2);
+  });
+
+  it("orders the over-cap discard after an under-cap put that is already in flight", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let releasePut!: () => void;
+    const putGate = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    const putCount = await installPutCounter(putGate);
+    const { writeSnapshot, flushSnapshot, loadSnapshot, MAX_SNAPSHOT_ITEMS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+
+    writeSnapshot(makeSampleState(), "alice", "debounced");
+    const inFlight = flushSnapshot();
+    await vi.waitFor(() => expect(putCount()).toBe(1));
+
+    const oversizedIssues = Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) =>
+      makeIssue({ id: i + 1 }),
+    );
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+
+    releasePut();
+    await inFlight;
+    await flushSnapshot();
+
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("discards the stored snapshot and any pending under-cap write when a later write exceeds MAX_SNAPSHOT_ITEMS", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { writeSnapshot, flushSnapshot, loadSnapshot, MAX_SNAPSHOT_ITEMS, DEBOUNCE_MS } =
+      await import("../../src/app/lib/dashboard-snapshot");
+
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+    await flushSnapshot();
+    expect(await loadSnapshot("alice")).not.toBeNull();
+
+    const oversizedIssues = Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) =>
+      makeIssue({ id: i + 1 }),
+    );
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Pending" })] }),
+      "alice",
+      "debounced",
+    );
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+
+    // The pending debounced timer is cancelled and no new timer is scheduled
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1_000);
+    vi.useRealTimers();
+    await flushSnapshot();
+
     expect(await loadSnapshot("alice")).toBeNull();
   });
 
