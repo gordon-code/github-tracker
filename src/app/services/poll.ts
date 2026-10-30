@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/solid";
 import { getClient, fetchRateLimitDetails } from "./github";
 import { fetchGitHubStatus } from "./github-status";
 import { config } from "../stores/config";
-import { user, onAuthCleared, expireToken } from "../stores/auth";
+import { user, onAuthCleared, expireToken, identityEpoch } from "../stores/auth";
 import { checkAndResetIfExpired } from "./api-usage";
 import {
   fetchIssuesAndPullRequests,
@@ -53,6 +53,13 @@ export interface PollCoordinator {
   lastRefreshAt: () => Date | null;
   manualRefresh: () => void;
   destroy: () => void;
+}
+
+export class StaleIdentityError extends Error {
+  constructor() {
+    super("Stale identity");
+    this.name = "StaleIdentityError";
+  }
 }
 
 // ── Hot poll state ────────────────────────────────────────────────────────────
@@ -484,6 +491,12 @@ export function createPollCoordinator(
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
     } catch (err) {
+      if (
+        err instanceof StaleIdentityError ||
+        (err instanceof Error && err.name === "StaleIdentityError")
+      ) {
+        return;
+      }
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
       Sentry.captureException(err, { tags: { source: "poll-cycle" } });
       pushError("poll", message, true);
@@ -833,7 +846,8 @@ export function createHotPollCoordinator(
   onHotData: (
     prUpdates: Map<number, HotPRStatusUpdate>,
     runUpdates: Map<number, HotWorkflowRunUpdate>,
-    generation: number
+    generation: number,
+    epoch: number
   ) => void,
   options?: {
     onStart?: (prDbIds: ReadonlySet<number>, runIds: ReadonlySet<number>) => void;
@@ -893,6 +907,7 @@ export function createHotPollCoordinator(
       return;
     }
 
+    const cycleEpoch = identityEpoch();
     startedCycle = true;
     options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
     try {
@@ -906,7 +921,7 @@ export function createHotPollCoordinator(
         dismissNotificationBySource("hot-poll");
       }
       if (prUpdates.size > 0 || runUpdates.size > 0) {
-        onHotData(prUpdates, runUpdates, generation);
+        onHotData(prUpdates, runUpdates, generation, cycleEpoch);
       }
     } catch (err) {
       if (isUnauthorizedError(err)) {
@@ -1108,7 +1123,7 @@ export function createEventsPollCoordinator(
   getUsername: () => string,
   getTrackedRepoNames: () => Set<string>,
   isFullRefreshing: () => boolean,
-  onTargetedData: (data: DashboardData, affectedRepos: string[]) => void,
+  onTargetedData: (data: DashboardData, affectedRepos: string[], epoch: number) => void,
 ): { destroy: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let chainGeneration = 0;
@@ -1153,6 +1168,8 @@ export function createEventsPollCoordinator(
       return;
     }
 
+    const cycleEpoch = identityEpoch();
+
     try {
       const { events, changed } = await fetchUserEvents(octokit, username);
       if (myGeneration !== chainGeneration) return;
@@ -1194,7 +1211,7 @@ export function createEventsPollCoordinator(
       }
 
       const affectedRepos = [...repoSummaries.values()].map((s) => s.repoFullName);
-      onTargetedData(data, affectedRepos);
+      onTargetedData(data, affectedRepos, cycleEpoch);
       consecutiveFailures = 0;
     } catch (err) {
       consecutiveFailures++;
