@@ -226,12 +226,42 @@ export function onApiRequest(cb: (info: ApiRequestInfo) => void): void {
 
 // ── Client factory ───────────────────────────────────────────────────────────
 
+/**
+ * Returns a signal that aborts with the reason of whichever input signal aborts first.
+ * Falls back to manual listener wiring where AbortSignal.any is unavailable
+ * (Safari < 17.4, Chrome < 116, Firefox < 124); the fallback detaches its remaining
+ * listeners once any input fires.
+ */
+function anyAbortSignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  const listeners: Array<[AbortSignal, () => void]> = [];
+  const detach = () => {
+    for (const [s, l] of listeners) s.removeEventListener("abort", l);
+    listeners.length = 0;
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      detach();
+      break;
+    }
+    const onAbort = () => {
+      controller.abort(s.reason);
+      detach();
+    };
+    listeners.push([s, onAbort]);
+    s.addEventListener("abort", onAbort, { once: true });
+  }
+  return controller.signal;
+}
+
 export function createGitHubClient(authToken: string): GitHubOctokitInstance {
   const boundedFetch: typeof fetch = (url, init) => {
     const baseFetch = globalThis.fetch;
     const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const signal = init?.signal
-      ? AbortSignal.any([init.signal, timeoutSignal])
+      ? anyAbortSignal([init.signal, timeoutSignal])
       : timeoutSignal;
     return baseFetch(url, { ...init, signal });
   };

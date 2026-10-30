@@ -373,6 +373,95 @@ describe("createGitHubClient", () => {
     }
   });
 
+  it("composes caller and per-attempt timeout signals without AbortSignal.any (older browsers)", async () => {
+    const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+    Object.defineProperty(AbortSignal, "any", { value: undefined, configurable: true, writable: true });
+    const timeoutA = new AbortController();
+    const timeoutB = new AbortController();
+    let timeoutCalls = 0;
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => (timeoutCalls++ === 0 ? timeoutA.signal : timeoutB.signal));
+
+    const client = createGitHubClient("test-token");
+    const receivedSignals: AbortSignal[] = [];
+    const mockFetch = vi.fn().mockImplementation(
+      (_url: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const sig = init!.signal!;
+          receivedSignals.push(sig);
+          sig.addEventListener("abort", () => reject(sig.reason), { once: true });
+        })
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      // Caller abort propagates through the fallback-composed signal
+      const caller = new AbortController();
+      const pendingCaller = client.graphql("{ viewer { login } }", {
+        request: { signal: caller.signal },
+      });
+      // plugin-throttling's write group spaces GraphQL starts by up to 1s
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1), { timeout: 2_500 });
+      expect(receivedSignals[0]).not.toBe(caller.signal);
+      expect(receivedSignals[0]).not.toBe(timeoutA.signal);
+      caller.abort(new DOMException("The operation was aborted.", "AbortError"));
+      await expect(pendingCaller).rejects.toThrow(/aborted/i);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Per-attempt timeout propagates while the caller signal stays live
+      const caller2 = new AbortController();
+      const removeSpy = vi.spyOn(caller2.signal, "removeEventListener");
+      const pendingTimeout = client.graphql("{ viewer { login } }", {
+        request: { signal: caller2.signal, retries: 0 },
+      });
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2), { timeout: 2_500 });
+      timeoutB.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      await expect(pendingTimeout).rejects.toThrow(/timeout/i);
+      expect(caller2.signal.aborted).toBe(false);
+      expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    } finally {
+      timeoutSpy.mockRestore();
+      if (anyDescriptor) Object.defineProperty(AbortSignal, "any", anyDescriptor);
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+
+  it("returns an already-aborted signal without AbortSignal.any when an input signal is already aborted", async () => {
+    const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+    Object.defineProperty(AbortSignal, "any", { value: undefined, configurable: true, writable: true });
+    const timeoutController = new AbortController();
+    const timeoutReason = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    timeoutController.abort(timeoutReason);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutController.signal);
+
+    const client = createGitHubClient("test-token");
+    const caller = new AbortController();
+    const removeSpy = vi.spyOn(caller.signal, "removeEventListener");
+    let receivedSignal: AbortSignal | undefined;
+    const mockFetch = vi.fn().mockImplementation((_url: RequestInfo | URL, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined;
+      return Promise.reject(receivedSignal?.reason);
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    try {
+      await expect(
+        client.graphql("{ viewer { login } }", { request: { signal: caller.signal, retries: 0 } })
+      ).rejects.toThrow(/timeout/i);
+      expect(receivedSignal?.aborted).toBe(true);
+      expect(receivedSignal?.reason).toBe(timeoutReason);
+      // The listener attached to the still-live caller signal is detached immediately
+      expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(caller.signal.aborted).toBe(false);
+    } finally {
+      timeoutSpy.mockRestore();
+      if (anyDescriptor) Object.defineProperty(AbortSignal, "any", anyDescriptor);
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+
   it("rejects /graphql network and timeout errors with undefined response and without plugin-throttling headers TypeError", async () => {
     const client = createGitHubClient("test-token");
 
