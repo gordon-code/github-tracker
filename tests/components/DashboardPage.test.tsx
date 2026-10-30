@@ -656,47 +656,94 @@ describe("DashboardPage — onAuthCleared integration", () => {
 });
 
 describe("DashboardPage — scroll preservation on poll refresh", () => {
-  // MOCK INVARIANT: fetchAllData is mocked via vi.fn() and never calls its
-  // onLightData callback, so phaseOneFired is always false inside pollFetch().
-  // This means every poll cycle takes the withScrollLock branch (not the
-  // fine-grained produce() path). If fetchAllData is ever changed to invoke
-  // onLightData in tests, phaseOneFired will become true and withScrollLock
-  // will NOT be called, silently breaking this test.
-  //
-  // window.scrollTo is the correct behavioral proxy for withScrollLock:
-  // withScrollLock captures scrollY then calls window.scrollTo(0, y) after
-  // the setter. Asserting scrollTo was called with the saved position is
-  // equivalent to asserting withScrollLock ran and completed successfully.
-  it("preserves scroll position when setDashboardData replaces arrays", async () => {
-    const issues = [makeIssue({ id: 1, title: "Scroll test issue" })];
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues,
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
+  // With keyed reconcile(items, { key: "id", merge: true }) and repo groups keyed
+  // by repoFullName, store writes update items in place without replacing DOM
+  // nodes. Asserting that the repo group and row DOM nodes survive both full-poll
+  // and targeted refreshes directly verifies the invariant that previously required
+  // withScrollLock(window.scrollTo) compensation.
+  it("preserves issue row and repo group DOM nodes when a poll refresh returns fresh arrays", async () => {
+    viewStore.setAllExpanded("issues", true);
+    let pollCount = 0;
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => {
+      pollCount++;
+      return Promise.resolve({
+        issues: [
+          makeIssue({
+            id: 1,
+            number: 1,
+            title: "Scroll test issue",
+            repoFullName: "owner/repo",
+            comments: pollCount,
+          }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
     });
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      screen.getByText("owner/repo");
+      screen.getByText("Scroll test issue");
     });
 
-    // Simulate user scrolled down
-    document.documentElement.scrollTop = 500;
-    vi.spyOn(window, "scrollTo");
+    const groupNodeBefore = document.querySelector('[data-repo-group="owner/repo"]');
+    const rowNodeBefore = screen.getByText("Scroll test issue").closest('[role="listitem"]');
+    expect(groupNodeBefore).not.toBeNull();
+    expect(rowNodeBefore).not.toBeNull();
 
-    // Trigger a second poll (subsequent refresh — the path that uses withScrollLock).
-    // phaseOneFired is false (mock never calls onLightData), so withScrollLock
-    // wraps the full atomic setDashboardData replacement and restores scroll.
     if (capturedFetchAll) {
       await capturedFetchAll();
     }
 
-    // window.scrollTo(0, 500) is the observable side-effect of withScrollLock
-    // saving and restoring the pre-update scroll position.
-    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
-    vi.restoreAllMocks();
-    document.documentElement.scrollTop = 0;
+    const groupNodeAfter = document.querySelector('[data-repo-group="owner/repo"]');
+    const rowNodeAfter = screen.getByText("Scroll test issue").closest('[role="listitem"]');
+    expect(groupNodeAfter).toBe(groupNodeBefore);
+    expect(rowNodeAfter).toBe(rowNodeBefore);
+  });
+
+  it("preserves issue row and repo group DOM nodes across a targeted refresh", async () => {
+    viewStore.setAllExpanded("issues", true);
+    vi.mocked(pollService.fetchAllData).mockImplementation(() =>
+      Promise.resolve({
+        issues: [
+          makeIssue({ id: 1, number: 1, title: "Targeted issue", repoFullName: "owner/repo", comments: 1 }),
+          makeIssue({ id: 2, number: 2, title: "Unaffected issue", repoFullName: "owner/other", comments: 1 }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      }),
+    );
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("Targeted issue");
+      screen.getByText("Unaffected issue");
+    });
+
+    const targetedRowBefore = screen.getByText("Targeted issue").closest('[role="listitem"]');
+    const unaffectedRowBefore = screen.getByText("Unaffected issue").closest('[role="listitem"]');
+    expect(targetedRowBefore).not.toBeNull();
+    expect(unaffectedRowBefore).not.toBeNull();
+
+    expect(capturedOnTargetedData).not.toBeNull();
+    capturedOnTargetedData!(
+      {
+        issues: [
+          makeIssue({ id: 1, number: 1, title: "Targeted issue", repoFullName: "owner/repo", comments: 5 }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/repo"],
+    );
+
+    const targetedRowAfter = screen.getByText("Targeted issue").closest('[role="listitem"]');
+    const unaffectedRowAfter = screen.getByText("Unaffected issue").closest('[role="listitem"]');
+    expect(targetedRowAfter).toBe(targetedRowBefore);
+    expect(unaffectedRowAfter).toBe(unaffectedRowBefore);
   });
 });
 
