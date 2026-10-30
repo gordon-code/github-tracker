@@ -7176,6 +7176,89 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
   });
 
+  it("preserves optimistic approval across pollFetch when updatedAt advances on the same headSha while search index lags on reviewDecision", async () => {
+    const user = userEvent.setup();
+    const validSha = "c1c2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 712,
+          number: 712,
+          title: "PR with same-SHA updatedAt bump after approval",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO712",
+          headSha: validSha,
+          updatedAt: "2026-10-30T10:00:00Z",
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #712 PR with same-SHA updatedAt bump after approval"),
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    // Subsequent poll returns the same headSha with a newer updatedAt (from the approval itself)
+    // while GitHub's search index still lags at REVIEW_REQUIRED
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 712,
+          number: 712,
+          title: "PR with same-SHA updatedAt bump after approval",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO712",
+          headSha: validSha,
+          updatedAt: "2026-10-30T10:01:00Z",
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await capturedFetchAll!();
+
+    // The Approve button must stay hidden because headSha did not change
+    expect(
+      screen.queryByLabelText("Approve #712 PR with same-SHA updatedAt bump after approval"),
+    ).toBeNull();
+  });
+
   it("does not write snapshot or commit when mark-PR-ready started before logout resolves after logout", async () => {
     const user = userEvent.setup();
     let resolveMarkReady!: (val: unknown) => void;

@@ -474,17 +474,11 @@ async function pollFetch(force = false): Promise<DashboardData> {
     setHasFetchedFresh(true);
     const now = new Date();
     const currentLogin = user()?.login ?? "";
-    const previousPRs = unwrap(dashboardData.pullRequests);
-    const previousPRById = new Map<number, PullRequest>(previousPRs.map((pr) => [pr.id, pr]));
     const pullRequests = fallbackToPreviousEnrichment(
-      previousPRs,
+      unwrap(dashboardData.pullRequests),
       data.pullRequests,
     );
     for (const pr of pullRequests) {
-      const existingPr = previousPRById.get(pr.id);
-      if (existingPr && hasRevisionChanged(existingPr, pr)) {
-        recentlyApprovedPRs.delete(pr.id);
-      }
       applyRecentReadyGuard(pr);
       applyRecentApprovalGuard(pr, currentLogin);
     }
@@ -593,9 +587,6 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[], epoch 
       pr.surfacedBy = [...new Set([...(pr.surfacedBy ?? []), ...oldSb])];
     }
     const existingPr = existingPRById.get(pr.id);
-    if (existingPr && hasRevisionChanged(existingPr, pr)) {
-      recentlyApprovedPRs.delete(pr.id);
-    }
     if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
       const revisionChanged = hasRevisionChanged(existingPr, pr);
       Object.assign(pr, pickEnrichmentFields(existingPr));
