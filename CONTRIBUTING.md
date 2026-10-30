@@ -22,6 +22,8 @@ In production, provision `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET` as Worker sec
 
 The repo uses a pnpm workspace: the root package is the SolidJS SPA; `mcp/` is a separate package (`github-tracker-mcp`) built with tsup. Running `pnpm install` at the root installs both.
 
+`pnpm-workspace.yaml` sets `minimumReleaseAge: 10080`, so dependency resolution only picks package versions published at least 7 days ago. pnpm applies this to every resolution, including lockfile regeneration (Renovate's lockfile maintenance runs pnpm with this workspace config), which keeps `pnpm-lock.yaml` installable under local supply-chain cooldowns of up to 7 days. If an install reports `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`, the lockfile was produced without this policy — regenerate it rather than relaxing the policy.
+
 To run the MCP server in standalone mode, set `GITHUB_TOKEN` before starting:
 
 ```bash

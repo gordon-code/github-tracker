@@ -7,3 +7,8 @@ allowBuilds:
   workerd: true
 
 strictDepBuilds: false
+
+# Resolve only package versions published at least 7 days ago (minutes), so
+# lockfile maintenance and CI never pin versions newer than local supply-chain
+# cooldowns allow.
+minimumReleaseAge: 10080
