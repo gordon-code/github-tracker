@@ -172,3 +172,19 @@ export function detectReorderedRepos(
   }
   return moved;
 }
+
+export function groupKeys(groups: readonly { repoFullName: string }[]): string[] {
+  return groups.map((g) => g.repoFullName);
+}
+
+export function indexGroups<G extends { repoFullName: string }>(groups: readonly G[]): Map<string, G> {
+  return new Map(groups.map((g) => [g.repoFullName, g]));
+}
+
+export function arraysShallowEqual<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
