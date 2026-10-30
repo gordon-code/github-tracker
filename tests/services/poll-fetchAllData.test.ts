@@ -23,6 +23,7 @@ vi.mock("../../src/app/stores/config", () => ({
 vi.mock("../../src/app/stores/auth", () => ({
   user: vi.fn(() => ({ login: "octocat", avatar_url: "https://github.com/images/error/octocat_happy.gif", name: "Octocat" })),
   onAuthCleared: vi.fn(),
+  identityEpoch: vi.fn(() => 0),
 }));
 
 // Mock the fetch functions (combined issues+PRs and workflow runs)

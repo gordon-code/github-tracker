@@ -60,10 +60,12 @@ vi.mock("../../src/app/stores/config", () => ({
   },
 }));
 
+const mockIdentityEpoch = vi.fn(() => 0);
 vi.mock("../../src/app/stores/auth", () => ({
   user: vi.fn(() => null),
   onAuthCleared: vi.fn(),
   expireToken: vi.fn(),
+  identityEpoch: () => mockIdentityEpoch(),
 }));
 
 // Import AFTER mocks are set up
@@ -709,7 +711,12 @@ describe("createHotPollCoordinator", () => {
       createHotPollCoordinator(() => 30, onHotData);
       // First cycle fires after 30s
       await vi.advanceTimersByTimeAsync(30_000);
-      expect(onHotData).toHaveBeenCalled();
+      expect(onHotData).toHaveBeenCalledWith(
+        expect.any(Map),
+        expect.any(Map),
+        expect.any(Number),
+        0,
+      );
       dispose();
     });
   });

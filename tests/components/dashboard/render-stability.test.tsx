@@ -38,6 +38,13 @@ vi.mock("../../../src/app/stores/auth", () => ({
   identityEpoch: () => 0,
 }));
 
+vi.mock("../../../src/app/lib/dashboard-snapshot", () => ({
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../../src/app/services/jira-client", () => ({
   JiraClient: vi.fn(),
   JiraProxyClient: vi.fn(),
@@ -145,6 +152,12 @@ beforeEach(async () => {
     seedHotSetsFromTargeted: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
+    StaleIdentityError: class StaleIdentityError extends Error {
+      constructor() {
+        super("Stale identity");
+        this.name = "StaleIdentityError";
+      }
+    },
   }));
 
   const dashboardModule = await import("../../../src/app/components/dashboard/DashboardPage");

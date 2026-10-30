@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { z } from "zod";
 import * as Sentry from "@sentry/solid";
 import { clearCache } from "./cache";
+import { clearSnapshot } from "../lib/dashboard-snapshot";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 import { pushNotification } from "../lib/errors";
@@ -58,6 +59,18 @@ export function isAuthenticated(): boolean {
 }
 
 export { user };
+
+let _identityEpoch = 0;
+
+/**
+ * Monotonically increasing counter tracking identity boundaries.
+ * Invariant: Every increment of _identityEpoch is followed by either the
+ * onAuthCleared callbacks (which reset module-level fetch flags) or a full
+ * page reload. Never increment on same-user token rotation.
+ */
+export function identityEpoch(): number {
+  return _identityEpoch;
+}
 
 // ── Jira auth signals ────────────────────────────────────────────────────────
 
@@ -261,11 +274,14 @@ export async function clearIdentityData(): Promise<void> {
   localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
   localStorage.removeItem?.(DEP_META_STORAGE_KEY);
   localStorage.removeItem?.(DASHBOARD_BODIES_STORAGE_KEY);
+  _identityEpoch++;
   // Synchronous per-identity resets first (matches the ordering the identity-
   // switch branch has always had: callbacks complete before the awaited work).
   for (const cb of _onClearCallbacks) {
     try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw during identity data clear:", e); }
   }
+  const snapshotClear = clearSnapshot();
+  snapshotClear?.catch?.(() => {});
   // IndexedDB cache clear — AWAITED so callers can sequence work strictly after it
   // (prevents a new identity rendering the previous identity's cached data).
   try {
@@ -273,6 +289,11 @@ export async function clearIdentityData(): Promise<void> {
   } catch (err) {
     console.warn("[auth] Cache clear failed during identity data clear:", err);
     Sentry.captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
+  }
+  try {
+    await snapshotClear;
+  } catch (err) {
+    console.warn("[auth] failed to clear dashboard snapshot:", err);
   }
 }
 
@@ -302,10 +323,14 @@ export function clearAuth(): void {
     localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
     _setToken(null);
     setUser(null);
-    // Clear IndexedDB cache to prevent data leakage between users
+    _identityEpoch++;
+    // Clear IndexedDB cache and snapshot to prevent data leakage between users
     clearCache().catch((err) => {
       console.warn("[auth] Cache clear failed during logout:", err);
       Sentry.captureException(err, { tags: { source: "auth-logout-cache-clear" } });
+    });
+    void clearSnapshot()?.catch((err: unknown) => {
+      console.warn("[auth] failed to clear dashboard snapshot:", err);
     });
     // Run registered cleanup callbacks (e.g., poll state reset)
     for (const cb of _onClearCallbacks) {
@@ -317,8 +342,8 @@ export function clearAuth(): void {
   }
 }
 
-/** Clear only the auth token. Preserves all user data (config, view state, dashboard
- *  cache) so the same user's preferences and cached data survive re-authentication.
+/** Clear the auth token and dashboard snapshot/cache while preserving user
+ *  preferences (config and view state) so they survive re-authentication.
  *  Used when a token becomes invalid (expired PAT, revoked OAuth) — NOT for explicit
  *  logout. Full data wipe (cross-user data isolation) is handled by clearAuth()
  *  which is reserved for explicit user actions (Sign out, Reset all).
@@ -333,6 +358,10 @@ export function expireToken(): void {
   localStorage.removeItem(DASHBOARD_BODIES_STORAGE_KEY);
   _setToken(null);
   setUser(null);
+  _identityEpoch++;
+  void clearSnapshot()?.catch((err: unknown) => {
+    console.warn("[auth] failed to clear dashboard snapshot:", err);
+  });
   _onClearCallbacks.forEach((cb) => { try { cb(); } catch (e) { console.warn("[auth] callback failed during expireToken:", e); } });
   console.info("[auth] token expired (dashboard cache cleared)");
 }
@@ -485,6 +514,7 @@ function handleAuthStorage(e: StorageEvent): void {
             // while still rendering a previous identity's config/view/cached
             // data. Reload instead so it re-initializes cleanly from what the
             // active tab already persisted.
+            _identityEpoch++;
             crossTabReload.reloadForIdentitySwitch();
           }
         }

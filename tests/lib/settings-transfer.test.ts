@@ -6,6 +6,12 @@ import type { z } from "zod";
 vi.mock("../../src/app/stores/cache", () => ({
   clearCache: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@sentry/solid", () => ({
   captureException: vi.fn(),
   captureMessage: vi.fn(),

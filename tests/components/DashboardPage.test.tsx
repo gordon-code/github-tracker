@@ -25,14 +25,25 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 // Mock auth store — capture onAuthCleared callbacks so qa-4 can invoke them
+let mockIdentityEpochValue = 0;
+let mockUserValue: { login: string; avatar_url: string; name: string | null } | null = {
+  login: "testuser",
+  avatar_url: "",
+  name: "Test User",
+};
 const authClearCallbacks: (() => void)[] = [];
 vi.mock("../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   expireToken: vi.fn(),
   token: () => "fake-token",
-  user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+  user: () => mockUserValue,
   isAuthenticated: () => true,
-  onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+  onAuthCleared: vi.fn((cb: () => void) => {
+    authClearCallbacks.push(() => {
+      mockIdentityEpochValue++;
+      cb();
+    });
+  }),
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
   DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
   jiraAuth: vi.fn(() => null),
@@ -40,6 +51,14 @@ vi.mock("../../src/app/stores/auth", () => ({
   setJiraAuth: vi.fn(),
   clearJiraAuth: vi.fn(),
   ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+  identityEpoch: () => mockIdentityEpochValue,
+}));
+
+vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../src/app/services/jira-client", () => ({
@@ -100,9 +119,10 @@ let capturedOnHotData: ((
   prUpdates: Map<number, HotPRStatusUpdate>,
   runUpdates: Map<number, HotWorkflowRunUpdate>,
   generation: number,
+  epoch?: number,
 ) => void) | null = null;
 // capturedOnTargetedData is populated by the createEventsPollCoordinator mock
-let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[]) => void) | null = null;
+let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[], epoch?: number) => void) | null = null;
 
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
@@ -115,10 +135,13 @@ let viewStore: typeof import("../../src/app/stores/view");
 let configStore: typeof import("../../src/app/stores/config");
 let githubService: typeof import("../../src/app/services/github");
 let errorsLib: typeof import("../../src/app/lib/errors");
+let snapshotLib: typeof import("../../src/app/lib/dashboard-snapshot");
+let notificationsLib: typeof import("../../src/app/lib/notifications");
 
 beforeEach(async () => {
-  // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
   localStorage.clear?.();
+  mockIdentityEpochValue = 0;
+  mockUserValue = { login: "testuser", avatar_url: "", name: "Test User" };
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
   // Mutate in place (not reassign) to preserve the reference captured by vi.mock
@@ -128,6 +151,28 @@ beforeEach(async () => {
   // vi.doMock (not vi.mock) is the correct API for dynamic re-registration
   // after vi.resetModules(). vi.mock inside beforeEach is hoisted and will
   // become a hard error in a future Vitest version.
+  vi.doMock("../../src/app/stores/auth", () => ({
+    clearAuth: vi.fn(),
+    expireToken: vi.fn(),
+    token: () => "fake-token",
+    user: () => mockUserValue,
+    isAuthenticated: () => true,
+    onAuthCleared: vi.fn((cb: () => void) => {
+      authClearCallbacks.push(() => {
+        mockIdentityEpochValue++;
+        cb();
+      });
+    }),
+    DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+    DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+    jiraAuth: vi.fn(() => null),
+    isJiraAuthenticated: vi.fn(() => false),
+    setJiraAuth: vi.fn(),
+    clearJiraAuth: vi.fn(),
+    ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+    identityEpoch: () => mockIdentityEpochValue,
+  }));
+
   vi.doMock("../../src/app/services/poll", () => ({
     fetchAllData: vi.fn().mockResolvedValue({
       issues: [],
@@ -165,6 +210,12 @@ beforeEach(async () => {
     seedHotSetsFromTargeted: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
+    StaleIdentityError: class StaleIdentityError extends Error {
+      constructor() {
+        super("Stale identity");
+        this.name = "StaleIdentityError";
+      }
+    },
   }));
 
   // Re-import with fresh module instances
@@ -178,6 +229,8 @@ beforeEach(async () => {
   configStore = await import("../../src/app/stores/config");
   githubService = await import("../../src/app/services/github");
   errorsLib = await import("../../src/app/lib/errors");
+  snapshotLib = await import("../../src/app/lib/dashboard-snapshot");
+  notificationsLib = await import("../../src/app/lib/notifications");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -191,6 +244,14 @@ beforeEach(async () => {
   vi.mocked(errorsLib.pushNotification).mockClear();
   vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
   vi.mocked(errorsLib.getNotifications).mockReturnValue([]);
+  vi.mocked(snapshotLib.loadSnapshot).mockReset().mockResolvedValue(null);
+  vi.mocked(snapshotLib.writeSnapshot).mockReset();
+  vi.mocked(snapshotLib.flushSnapshot).mockReset().mockResolvedValue(undefined);
+  vi.mocked(snapshotLib.clearSnapshot).mockReset().mockResolvedValue(undefined);
+  vi.mocked(notificationsLib.detectNewItems)
+    .mockReset()
+    .mockReturnValue({ issues: [], pullRequests: [], workflowRuns: [] });
+  vi.mocked(notificationsLib.dispatchNotifications).mockReset();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -2756,6 +2817,7 @@ describe("DashboardPage — pruneJiraCustomOrder on refresh", () => {
       setJiraAuth: vi.fn(),
       clearJiraAuth: vi.fn(),
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
@@ -3313,6 +3375,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: mockClearJiraAuth,
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     class MockJiraApiError extends Error {
@@ -3420,6 +3483,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: mockClearJiraAuth,
       ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+      identityEpoch: () => 0,
     }));
 
     const mockSearchJql = vi.fn().mockRejectedValue(new Error("Jira auth cleared during token refresh"));
@@ -3542,6 +3606,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: vi.fn(),
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     const mockSearchJql = vi.fn().mockResolvedValue({
@@ -5165,11 +5230,11 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
       expect(pollService.rebuildHotSets).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(localStorage.getItem("github-tracker:dashboard")).not.toBeNull();
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
     vi.mocked(pollService.rebuildHotSets).mockClear();
-    localStorage.removeItem("github-tracker:dashboard");
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
 
     // Second poll cycle: prEnrichment batch fails and returns enriched: false
     const unenrichedPR = makePullRequest({
@@ -5216,19 +5281,23 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
     );
 
     await waitFor(() => {
-      const raw = localStorage.getItem("github-tracker:dashboard");
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!) as { pullRequests: Array<Record<string, unknown>> };
-      expect(parsed.pullRequests).toHaveLength(1);
-      expect(parsed.pullRequests[0]).toMatchObject({
-        id: 501,
-        nodeId: "PR_kwDOtest0501",
-        enriched: true,
-        checkStatus: "pending",
-        autoMergeMethod: "SQUASH",
-        assigneeLogins: ["alice"],
-        reviewerLogins: ["bob"],
-      });
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pullRequests: [
+            expect.objectContaining({
+              id: 501,
+              nodeId: "PR_kwDOtest0501",
+              enriched: true,
+              checkStatus: "pending",
+              autoMergeMethod: "SQUASH",
+              assigneeLogins: ["alice"],
+              reviewerLogins: ["bob"],
+            }),
+          ],
+        }),
+        "testuser",
+        "immediate",
+      );
     });
   });
 });
@@ -5745,8 +5814,15 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     const { unmount } = render(() => <DashboardPage />);
     await waitFor(() => expect(graphqlSpy1).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      // Wait for both the deferred setTimeout write of github-tracker:dashboard and github-tracker:dashboard-bodies
-      expect(localStorage.getItem("github-tracker:dashboard")).not.toBeNull();
+      // Wait for both writeSnapshot and github-tracker:dashboard-bodies persistence
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issues: [expect.objectContaining({ nodeId: "DASH_PERSIST_1" })],
+          pullRequests: [expect.objectContaining({ id: 901 })],
+        }),
+        "testuser",
+        "immediate",
+      );
       const storedRaw = localStorage.getItem("github-tracker:dashboard-bodies");
       expect(storedRaw).not.toBeNull();
       const stored = JSON.parse(storedRaw!) as Record<string, { updatedAt: string; deps: Array<{ packageName: string }> }>;
@@ -5757,7 +5833,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     });
     unmount();
 
-    // Simulate reload: reset modules while keeping localStorage intact (both dashboard cache and dashboard-bodies cache)
+    // Simulate reload: reset modules while keeping localStorage intact and seeding loadSnapshot
     vi.resetModules();
     authClearCallbacks.length = 0;
 
@@ -5792,8 +5868,19 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       seedHotSetsFromTargeted: vi.fn(),
       clearHotSets: vi.fn(),
       getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
     }));
 
+    const freshSnapshot = await import("../../src/app/lib/dashboard-snapshot");
+    vi.mocked(freshSnapshot.loadSnapshot).mockResolvedValue({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [dashIssue],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      lastRefreshedAt: new Date("2026-04-01T00:00:00Z"),
+    });
     const freshGithub = await import("../../src/app/services/github");
     vi.mocked(freshGithub.getClient).mockReturnValue(
       { graphql: graphqlSpy2 } as unknown as ReturnType<typeof freshGithub.getClient>
@@ -5801,9 +5888,10 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
 
     render(() => <freshDashMod.default />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeDefined());
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
     // Pre-refresh assertion: before fetchAllData resolves (and before the { defer: true } dashboardBodies effect runs),
-    // seedCachedDashboardBodies() has already hydrated abandonedDepsMap and dashboardIssueUrls at module load
+    // seedCachedDashboardBodies() has already hydrated abandonedDepsMap and dashboardIssueUrls when loadSnapshot resolved in onMount
     await waitFor(() => {
       expect(screen.getByText(/abandoned/i)).toBeDefined();
     });
@@ -6132,28 +6220,6 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
 
   it("suppresses the Dependencies 'Checking status' badge while the dashboard is still loading from a cached snapshot", async () => {
     const user = userEvent.setup();
-    // Snapshot without lastRefreshedAt: pollFetch keeps `loading: true` until the first fetch resolves
-    localStorage.setItem(
-      "github-tracker:dashboard",
-      JSON.stringify({
-        _v: 2,
-        issues: [],
-        pullRequests: [
-          makePullRequest({
-            id: 970,
-            nodeId: "PR_DEP_970",
-            repoFullName: "owner/repo",
-            title: "Bump lodash from 4.17.20 to 4.17.21",
-            userLogin: "dependabot[bot]",
-            headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
-            enriched: false,
-            checkStatus: null,
-            updatedAt: new Date().toISOString(),
-          }),
-        ],
-        workflowRuns: [],
-      })
-    );
 
     vi.resetModules();
     vi.doMock("../../src/app/services/poll", () => ({
@@ -6161,7 +6227,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
         void fetchAll().catch(() => {});
         return {
-          isRefreshing: () => false,
+          isRefreshing: () => true,
           lastRefreshAt: () => null,
           manualRefresh: vi.fn(),
           destroy: vi.fn(),
@@ -6173,10 +6239,34 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       seedHotSetsFromTargeted: vi.fn(),
       clearHotSets: vi.fn(),
       getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
     }));
+    const freshSnapshot = await import("../../src/app/lib/dashboard-snapshot");
+    vi.mocked(freshSnapshot.loadSnapshot).mockResolvedValue({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 970,
+          nodeId: "PR_DEP_970",
+          repoFullName: "owner/repo",
+          title: "Bump lodash from 4.17.20 to 4.17.21",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
+          enriched: false,
+          checkStatus: null,
+          updatedAt: new Date().toISOString(),
+        }),
+      ],
+      workflowRuns: [],
+      lastRefreshedAt: null,
+    });
     const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
 
     render(() => <freshDashMod.default />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeDefined());
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
     await waitFor(() => expect(document.getElementById("dep-group-needs-action")).not.toBeNull());
     expect(screen.queryByText("Checking status")).toBeNull();
@@ -6839,5 +6929,425 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         ],
       })
     );
+  });
+});
+
+// ── Task 5 (C5): Identity-scoped dashboard snapshot and identityEpoch guards ──
+
+describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", () => {
+  it("(a) does not apply a cached snapshot belonging to alice when current user() is bob", async () => {
+    mockUserValue = { login: "bob", avatar_url: "", name: "Bob" };
+    // Simulate loadSnapshot's login check returning null when stored record is for 'alice'
+    const storedForAlice = {
+      _v: 1 as const,
+      login: "alice",
+      savedAt: Date.now(),
+      issues: [makeIssue({ id: 701, title: "Alice private issue", repoFullName: "alice/secret" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date("2026-10-30T10:00:00Z"),
+    };
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(async (login: string) =>
+      storedForAlice.login.toLowerCase() === login.toLowerCase() ? storedForAlice : null,
+    );
+    // Keep initial poll pending so only snapshot hydration could populate the store
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => new Promise<DashboardData>(() => {}));
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(snapshotLib.loadSnapshot).toHaveBeenCalledWith("bob"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.queryByText("alice/secret")).toBeNull();
+    const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+    expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
+  });
+
+  it("(b) discards snapshot result if it resolves after phase-1 onLightData has already committed real data", async () => {
+    let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    vi.mocked(pollService.fetchAllData).mockImplementation((onLightData) => {
+      onLightData?.({
+        issues: [makeIssue({ id: 702, title: "Fresh Phase 1 Issue", repoFullName: "owner/fresh-repo" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      return new Promise<DashboardData>(() => {});
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(screen.getByText("owner/fresh-repo")).toBeDefined());
+
+    // Now resolve the slower snapshot read with stale data — must be ignored because realDataCommitted is true
+    resolveSnapshot({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now() - 60_000,
+      issues: [makeIssue({ id: 703, title: "Stale Snapshot Issue", repoFullName: "owner/stale-repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date(Date.now() - 60_000),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.getByText("owner/fresh-repo")).toBeDefined();
+    expect(screen.queryByText("owner/stale-repo")).toBeNull();
+  });
+
+  it("(c) does not call loadSnapshot on Settings -> Dashboard remount when data is already present", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeIssue({ id: 704, title: "Committed Issue", repoFullName: "owner/committed" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const { unmount } = render(() => <DashboardPage />);
+    await waitFor(() => expect(screen.getByText("owner/committed")).toBeDefined());
+    expect(snapshotLib.loadSnapshot).toHaveBeenCalledTimes(1);
+
+    // Unmount (navigate to Settings) and remount DashboardPage without resetting module state
+    unmount();
+    vi.mocked(snapshotLib.loadSnapshot).mockClear();
+
+    render(() => <DashboardPage />);
+    expect(screen.getByText("owner/committed")).toBeDefined();
+    expect(snapshotLib.loadSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("(d) throws StaleIdentityError when a poll started before logout resolves after identity clear + new user, leaving store empty, skipping writeSnapshot/notifications/errors, and setting loading to false", async () => {
+    let resolvePoll!: (data: DashboardData) => void;
+    vi.mocked(pollService.fetchAllData).mockImplementation(
+      () =>
+        new Promise<DashboardData>((resolve) => {
+          resolvePoll = resolve;
+        }),
+    );
+
+    // Wire createPollCoordinator to exercise StaleIdentityError handling like real doFetch
+    let coordinatorCaughtError: unknown = null;
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      capturedFetchAll = fetchAll;
+      void (async () => {
+        try {
+          const data = await fetchAll();
+          const newItems = notificationsLib.detectNewItems(data);
+          notificationsLib.dispatchNotifications(newItems, configStore.config);
+        } catch (err) {
+          coordinatorCaughtError = err;
+          if (err instanceof Error && err.name === "StaleIdentityError") {
+            return;
+          }
+          errorsLib.pushError("poll", err instanceof Error ? err.message : "Unknown error", true);
+        }
+      })();
+      return {
+        isRefreshing: () => false,
+        lastRefreshAt: () => null,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedFetchAll).not.toBeNull());
+
+    // Simulate clearIdentityData() + switching to a new user while poll is in flight
+    for (const cb of authClearCallbacks) cb();
+    mockUserValue = { login: "newuser", avatar_url: "", name: "New User" };
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Resolve the old user's in-flight poll
+    resolvePoll({
+      issues: [makeIssue({ id: 705, title: "Old user issue", repoFullName: "olduser/private" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(coordinatorCaughtError).toBeInstanceOf(Error);
+    expect((coordinatorCaughtError as Error).name).toBe("StaleIdentityError");
+    expect(screen.queryByText("olduser/private")).toBeNull();
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+    expect(notificationsLib.dispatchNotifications).not.toHaveBeenCalled();
+    expect(errorsLib.pushError).not.toHaveBeenCalled();
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+    // Skeleton loading is false (empty state rendered rather than skeleton)
+    expect(screen.getByText(/No open issues/i)).toBeDefined();
+  });
+
+  it("(e) drops a targeted refresh whose events cycle started before clearAuth", async () => {
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Events cycle captures epoch BEFORE clearAuth runs
+    const staleCycleEpoch = authStore.identityEpoch();
+
+    // Auth cleared before targeted data arrives
+    for (const cb of authClearCallbacks) cb();
+
+    capturedOnTargetedData!(
+      {
+        issues: [makeIssue({ id: 706, title: "Stale targeted issue", repoFullName: "owner/stale-targeted" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/stale-targeted"],
+      staleCycleEpoch,
+    );
+
+    expect(screen.queryByText("owner/stale-targeted")).toBeNull();
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("(f) does not write snapshot or commit when PR approval started before logout resolves after logout", async () => {
+    const user = userEvent.setup();
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    let resolveApprove!: (val: unknown) => void;
+    const graphqlMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveApprove = resolve;
+        }),
+    );
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 707,
+          number: 707,
+          title: "PR to approve before logout",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO707",
+          headSha: validSha,
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #707 PR to approve before logout"),
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Logout occurs while approvePullRequest is in flight
+    for (const cb of authClearCallbacks) cb();
+
+    // Now resolve the in-flight approval
+    resolveApprove({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("(g) discards an in-flight snapshot load if clearAuth() runs before loadSnapshot resolves", async () => {
+    let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => new Promise<DashboardData>(() => {}));
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(snapshotLib.loadSnapshot).toHaveBeenCalledWith("testuser"));
+
+    // Logout while loadSnapshot is still in flight
+    for (const cb of authClearCallbacks) cb();
+
+    resolveSnapshot({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [makeIssue({ id: 708, title: "Pre-logout cached issue", repoFullName: "owner/pre-logout" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.queryByText("owner/pre-logout")).toBeNull();
+    const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+    expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
+  });
+
+  it("(h) resets _fetchingDashboardBodies and _fetchingDepBodies after an in-flight fetch when same-user token rotation does not bump identityEpoch", async () => {
+    const [lastRefreshAtSig, setLastRefreshAtSig] = createSignal<Date | null>(null);
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      const wrappedFetchAll = async () => {
+        const res = await fetchAll();
+        setLastRefreshAtSig(new Date());
+        return res;
+      };
+      capturedFetchAll = wrappedFetchAll;
+      void wrappedFetchAll().catch(() => {});
+      return {
+        isRefreshing: () => false,
+        lastRefreshAt: lastRefreshAtSig,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+
+    let resolveDashBody1!: (val: unknown) => void;
+    let resolveDepBody1!: (val: unknown) => void;
+    let dashCallCount = 0;
+    let depCallCount = 0;
+
+    const client1 = {
+      graphql: vi.fn().mockImplementation((query: string) => {
+        if (query.includes("databaseId")) {
+          depCallCount++;
+          if (depCallCount === 1) {
+            return new Promise((resolve) => {
+              resolveDepBody1 = resolve;
+            });
+          }
+          return Promise.resolve({
+            nodes: [
+              {
+                id: "PR_ROTATE_2",
+                databaseId: 710,
+                body: "| Package | Change |\n| --- | --- |\n| pkg-b | `1.0.0` -> `1.1.0` |",
+              },
+            ],
+            rateLimit: null,
+          });
+        }
+        dashCallCount++;
+        if (dashCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveDashBody1 = resolve;
+          });
+        }
+        return Promise.resolve({
+          nodes: [{ id: "DASH_ROTATE_2", body: "" }],
+          rateLimit: null,
+        });
+      }),
+    };
+    const client2 = { graphql: client1.graphql };
+    vi.mocked(githubService.getClient).mockReturnValue(
+      client1 as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          id: 709,
+          number: 709,
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_ROTATE_1",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          updatedAt: "2026-04-01T00:00:00Z",
+        }),
+      ],
+      pullRequests: [
+        makePullRequest({
+          id: 709,
+          nodeId: "PR_ROTATE_1",
+          repoFullName: "owner/repo",
+          title: "Update dependency pkg-a",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/pkg-a",
+          enriched: true,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(dashCallCount).toBe(1);
+      expect(depCallCount).toBe(1);
+    });
+
+    // Simulate same-user token rotation while both body fetches are in flight:
+    // getClient() swaps to client2, but identityEpoch() is NOT incremented!
+    vi.mocked(githubService.getClient).mockReturnValue(
+      client2 as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    // Resolve the in-flight fetches — they bail on `getClient() !== octokit` but their
+    // `finally` blocks still reset `_fetchingDashboardBodies` and `_fetchingDepBodies`
+    // because `authGen === identityEpoch()`.
+    resolveDashBody1({ nodes: [], rateLimit: null });
+    resolveDepBody1({ nodes: [], rateLimit: null });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Next poll cycle with new items must be able to trigger both body fetches again
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          id: 710,
+          number: 710,
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_ROTATE_2",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          updatedAt: "2026-04-02T00:00:00Z",
+        }),
+      ],
+      pullRequests: [
+        makePullRequest({
+          id: 710,
+          nodeId: "PR_ROTATE_2",
+          repoFullName: "owner/repo",
+          title: "Update dependency pkg-b",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/pkg-b",
+          enriched: true,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await capturedFetchAll!();
+    await waitFor(() => {
+      expect(dashCallCount).toBe(2);
+      expect(depCallCount).toBe(2);
+    });
   });
 });
