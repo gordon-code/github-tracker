@@ -263,7 +263,7 @@ export class OctokitDataSource implements DataSource {
     const batchResults = await Promise.allSettled(
       batches.map((batch) => {
         const repoFilter = batch.map((r) => `repo:${r.owner}/${r.name}`).join("+");
-        const q = `is:pr+is:open+${userQualifier}+${repoFilter}`;
+        const q = `is:pr+is:open+archived:false+${userQualifier}+${repoFilter}`;
         return this.octokit.request("GET /search/issues", { q, per_page: 100 }).then(({ data }) => {
           const items = (data as { items: SearchItem[] }).items ?? [];
           const prs: PullRequest[] = [];
@@ -314,7 +314,7 @@ export class OctokitDataSource implements DataSource {
     const batchResults = await Promise.allSettled(
       batches.map((batch) => {
         const repoFilter = batch.map((r) => `repo:${r.owner}/${r.name}`).join("+");
-        const q = `is:issue+is:open+involves:${login}+${repoFilter}`;
+        const q = `is:issue+is:open+archived:false+involves:${login}+${repoFilter}`;
         return this.octokit.request("GET /search/issues", { q, per_page: 100 }).then(({ data }) => {
           const items = (data as { items: SearchItem[] }).items ?? [];
           const issues: Issue[] = [];
@@ -468,9 +468,9 @@ export class OctokitDataSource implements DataSource {
     const approvedUnmergedCount = 0;
 
     const [prResult, issueResult, reviewResult] = await Promise.allSettled([
-      this.octokit.request("GET /search/issues", { q: `is:pr+is:open${involvesPart}+${repoFilter}`, per_page: 1 }),
-      this.octokit.request("GET /search/issues", { q: `is:issue+is:open${involvesPart}+${repoFilter}`, per_page: 1 }),
-      this.octokit.request("GET /search/issues", { q: `is:pr+is:open+review-requested:${login}+${repoFilter}`, per_page: 1 }),
+      this.octokit.request("GET /search/issues", { q: `is:pr+is:open+archived:false${involvesPart}+${repoFilter}`, per_page: 1 }),
+      this.octokit.request("GET /search/issues", { q: `is:issue+is:open+archived:false${involvesPart}+${repoFilter}`, per_page: 1 }),
+      this.octokit.request("GET /search/issues", { q: `is:pr+is:open+archived:false+review-requested:${login}+${repoFilter}`, per_page: 1 }),
     ]);
 
     if (prResult.status === "fulfilled") {
