@@ -34,9 +34,9 @@
     "node": "v26.12.1"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "ws": "8.22.0",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@octokit/core": "7.0.8",
@@ -47,6 +47,6 @@
     "tsup": "8.5.1",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   }
 }
