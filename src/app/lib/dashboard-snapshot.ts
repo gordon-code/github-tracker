@@ -80,6 +80,18 @@ function getDb(): Promise<IDBPDatabase<SnapshotDB>> {
   return dbPromise;
 }
 
+function isValidKeyedArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item !== null &&
+        typeof item === "object" &&
+        typeof (item as Record<string, unknown>).id === "number",
+    )
+  );
+}
+
 export async function loadSnapshot(login: string): Promise<DashboardSnapshot | null> {
   if (typeof indexedDB === "undefined" || !login) {
     return null;
@@ -104,9 +116,9 @@ export async function loadSnapshot(login: string): Promise<DashboardSnapshot | n
       return null;
     }
     if (
-      !Array.isArray(record.issues) ||
-      !Array.isArray(record.pullRequests) ||
-      !Array.isArray(record.workflowRuns)
+      !isValidKeyedArray(record.issues) ||
+      !isValidKeyedArray(record.pullRequests) ||
+      !isValidKeyedArray(record.workflowRuns)
     ) {
       return null;
     }
