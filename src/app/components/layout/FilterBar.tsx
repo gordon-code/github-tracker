@@ -129,7 +129,7 @@ export default function FilterBar(props: FilterBarProps) {
       <div class="flex-1" />
 
       <Show when={props.partialSync}>
-        <Tooltip content={PR_ENRICHMENT_DEGRADED_MESSAGE}>
+        <Tooltip content={PR_ENRICHMENT_DEGRADED_MESSAGE} focusable>
           <span
             data-testid="partial-sync-indicator"
             role="status"

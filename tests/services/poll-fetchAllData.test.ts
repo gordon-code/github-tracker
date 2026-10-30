@@ -32,6 +32,7 @@ vi.mock("../../src/app/services/api", () => ({
   resetEmptyActionRepos: vi.fn(),
   resetPREnrichmentCache: vi.fn(),
   invalidatePREnrichmentCacheForRepos: vi.fn(),
+  setPREnrichmentCacheRefreshInterval: vi.fn(),
   isUnauthorizedError: (err: unknown) => {
     if (typeof err !== "object" || err === null) return false;
     const e = err as { status?: unknown; response?: { status?: unknown } };
@@ -147,7 +148,12 @@ describe("fetchAllData — first call", () => {
 
     await fetchAllData();
 
-    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", undefined, [], [], false);
+    expect(fetchIssuesAndPullRequests).toHaveBeenCalledWith(mockOctokit, config.selectedRepos, "octocat", {
+      onLightData: undefined,
+      trackedUsers: [],
+      monitoredRepos: [],
+      force: false,
+    });
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
       config.selectedRepos,
@@ -371,7 +377,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
 
     // 5th argument to fetchIssuesAndPullRequests should be trackedUsers
     const callArgs = vi.mocked(fetchIssuesAndPullRequests).mock.calls[0];
-    expect(callArgs[4]).toEqual(trackedUsers);
+    expect(callArgs[3]?.trackedUsers).toEqual(trackedUsers);
   });
 
   it("empty upstreamRepos and trackedUsers produces identical behavior (backward compat)", async () => {
@@ -404,10 +410,7 @@ describe("fetchAllData — upstream repos and tracked users", () => {
       mockOctokit,
       selectedRepos,
       "octocat",
-      undefined,
-      [],
-      [],
-      false
+      { onLightData: undefined, trackedUsers: [], monitoredRepos: [], force: false }
     );
     expect(fetchWorkflowRuns).toHaveBeenCalledWith(
       mockOctokit,
@@ -818,7 +821,7 @@ describe("fetchAllData — parallel execution", () => {
     await promise;
   });
 
-  it("passes force = true as the 7th argument to fetchIssuesAndPullRequests and invalidates repo enrichment cache on fetchTargetedRepoData", async () => {
+  it("passes force: true in the fetchIssuesAndPullRequests options and invalidates repo enrichment cache on fetchTargetedRepoData", async () => {
     vi.resetModules();
 
     const { getClient } = await import("../../src/app/services/github");
@@ -840,10 +843,7 @@ describe("fetchAllData — parallel execution", () => {
       mockOctokit,
       config.selectedRepos,
       "octocat",
-      undefined,
-      [],
-      [],
-      true
+      { onLightData: undefined, trackedUsers: [], monitoredRepos: [], force: true }
     );
 
     const repoSummaries = new Map([
@@ -862,5 +862,58 @@ describe("fetchAllData — parallel execution", () => {
 
     await fetchTargetedRepoData(repoSummaries);
     expect(invalidatePREnrichmentCacheForRepos).toHaveBeenCalledWith(["octocat/Hello-World"]);
+  });
+
+  it("syncs the enrichment cache TTL from config.refreshInterval before fetching issues/PRs in fetchAllData and fetchTargetedRepoData", async () => {
+    vi.resetModules();
+
+    const { getClient } = await import("../../src/app/services/github");
+    const {
+      fetchIssuesAndPullRequests,
+      fetchWorkflowRuns,
+      setPREnrichmentCacheRefreshInterval,
+    } = await import("../../src/app/services/api");
+    const { config } = await import("../../src/app/stores/config");
+    const mutableConfig = config as { refreshInterval?: number };
+    const mockOctokit = makeMockOctokit();
+    vi.mocked(getClient).mockReturnValue(mockOctokit as unknown as ReturnType<typeof getClient>);
+    vi.mocked(fetchIssuesAndPullRequests).mockResolvedValue(emptyIssuesAndPrsResult);
+    vi.mocked(fetchWorkflowRuns).mockResolvedValue(emptyRunResult);
+
+    const { fetchAllData, fetchTargetedRepoData } = await import("../../src/app/services/poll");
+
+    try {
+      mutableConfig.refreshInterval = 600;
+      await fetchAllData();
+      expect(setPREnrichmentCacheRefreshInterval).toHaveBeenCalledWith(600);
+      expect(vi.mocked(setPREnrichmentCacheRefreshInterval).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(fetchIssuesAndPullRequests).mock.invocationCallOrder[0],
+      );
+
+      vi.mocked(setPREnrichmentCacheRefreshInterval).mockClear();
+      vi.mocked(fetchIssuesAndPullRequests).mockClear();
+      mutableConfig.refreshInterval = 120;
+      await fetchTargetedRepoData(
+        new Map([
+          [
+            "octocat/Hello-World",
+            {
+              repoFullName: "octocat/Hello-World",
+              eventTypes: new Set(["PullRequestEvent"]),
+              hasIssueActivity: false,
+              hasPRActivity: true,
+              hasWorkflowActivity: false,
+              latestEventAt: new Date().toISOString(),
+            },
+          ],
+        ]),
+      );
+      expect(setPREnrichmentCacheRefreshInterval).toHaveBeenCalledWith(120);
+      expect(vi.mocked(setPREnrichmentCacheRefreshInterval).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(fetchIssuesAndPullRequests).mock.invocationCallOrder[0],
+      );
+    } finally {
+      delete mutableConfig.refreshInterval;
+    }
   });
 });

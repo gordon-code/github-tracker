@@ -140,7 +140,8 @@ export function formatStarCount(count: number): string {
 
 /**
  * Returns true when the authenticated user can approve the given PR from a row action:
- * - PR is OPEN, enriched, not a draft, CI checks are not failing, and has a valid GraphQL nodeId + headSha
+ * - PR is OPEN, enriched, not a draft, CI checks are not failing, CI check status is not stale
+ *   (`checkStatusStale`), and has a valid GraphQL nodeId + headSha
  * - Authenticated user is not the PR author (case-insensitive)
  * - Viewer has not already approved the PR without a fresh review request
  *   (`!(viewerLatestReviewState === "APPROVED" && !viewerReviewRequested)`)
@@ -151,7 +152,7 @@ export function canApprovePR(pr: PullRequest, userLogin: string): boolean {
   if (!userLogin || !pr.nodeId || !pr.headSha) return false;
   if (pr.enriched === false) return false;
   if (pr.state !== "OPEN" || pr.draft) return false;
-  if (pr.checkStatus === "failure") return false;
+  if (pr.checkStatus === "failure" || pr.checkStatusStale) return false;
   if (pr.userLogin.toLowerCase() === userLogin.toLowerCase()) return false;
   if (pr.viewerLatestReviewState === "APPROVED" && !pr.viewerReviewRequested) return false;
   return pr.reviewDecision === "REVIEW_REQUIRED" || pr.viewerReviewRequested === true;

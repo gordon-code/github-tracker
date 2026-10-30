@@ -77,7 +77,7 @@ function makeHeavyPRNode(databaseId: number, _nodeId?: string) {
     changedFiles: 5,
     comments: { totalCount: 3 },
     reviewThreads: { totalCount: 2 },
-    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+    statusCheckRollup: { state: "SUCCESS" },
     autoMergeRequest: null as { mergeMethod: string } | null,
     viewerLatestReview: null as { state: string } | null,
     viewerLatestReviewRequest: null as { id: string } | null,
@@ -373,10 +373,10 @@ describe("onLightData callback (progressive rendering)", () => {
       octokit as unknown as OctokitLike,
       repos,
       "testuser",
-      (data) => {
+      { onLightData: (data) => {
         callOrder.push("onLightData");
         lightDataReceived = data;
-      },
+      } },
     );
 
     // onLightData fires after light query but before heavy backfill
@@ -576,11 +576,7 @@ describe("fetchPREnrichment mergeStateStatus UNSTABLE override", () => {
           changedFiles: 1,
           comments: { totalCount: 0 },
           reviewThreads: { totalCount: 0 },
-          commits: {
-            nodes: rollupState
-              ? [{ commit: { statusCheckRollup: { state: rollupState } } }]
-              : [],
-          },
+          statusCheckRollup: rollupState ? { state: rollupState } : null,
         }],
         rateLimit: { limit: 5000, remaining: 4999, resetAt: new Date(Date.now() + 3600000).toISOString() },
       })),
@@ -781,6 +777,68 @@ describe("fallbackToPreviousEnrichment", () => {
     expect(result[2].headSha).toBe("prevsha3");
     expect(result[2].checkStatusStale).toBeUndefined();
   });
+
+  it("clears checkStatus and keeps checkStatusStale: true for an unenriched PR whose prior enrichment was itself check-stale at the same revision", () => {
+    const previous = [
+      makePullRequest({
+        id: 1,
+        enriched: true,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "prevsha1",
+        checkStatus: "success",
+        checkStatusStale: true,
+        additions: 42,
+      }),
+    ];
+    const next = [
+      makePullRequest({
+        id: 1,
+        enriched: false,
+        updatedAt: "2026-04-20T10:00:00Z",
+        headSha: "",
+        checkStatus: null,
+        additions: 0,
+      }),
+    ];
+
+    const [result] = fallbackToPreviousEnrichment(previous, next);
+
+    expect(result.enriched).toBe(true);
+    expect(result.additions).toBe(42);
+    expect(result.headSha).toBe("");
+    expect(result.checkStatus).toBeNull();
+    expect(result.checkStatusStale).toBe(true);
+  });
+
+  it("falls back to updatedAt for check-stale enriched PRs when either headSha is empty", () => {
+    const previous = [
+      makePullRequest({ id: 1, enriched: true, headSha: "", updatedAt: "2026-04-20T10:00:00Z", checkStatus: "failure" }),
+      makePullRequest({ id: 2, enriched: true, headSha: "", updatedAt: "2026-04-20T10:00:00Z", checkStatus: "success" }),
+      makePullRequest({ id: 3, enriched: true, headSha: "prevsha3", updatedAt: "2026-04-20T10:00:00Z", checkStatus: "success" }),
+    ];
+    const next = [
+      // Both headShas empty, same updatedAt -> same revision
+      makePullRequest({ id: 1, enriched: true, headSha: "", updatedAt: "2026-04-20T10:00:00Z", checkStatus: null, checkStatusStale: true }),
+      // Both headShas empty, updatedAt moved -> revision changed
+      makePullRequest({ id: 2, enriched: true, headSha: "", updatedAt: "2026-04-20T10:05:00Z", checkStatus: null, checkStatusStale: true }),
+      // Only next headSha empty, same updatedAt -> same revision
+      makePullRequest({ id: 3, enriched: true, headSha: "", updatedAt: "2026-04-20T10:00:00Z", checkStatus: null, checkStatusStale: true }),
+    ];
+
+    const result = fallbackToPreviousEnrichment(previous, next);
+
+    expect(result[0].headSha).toBe("");
+    expect(result[0].checkStatus).toBe("failure");
+    expect(result[0].checkStatusStale).toBe(false);
+
+    expect(result[1].headSha).toBe("");
+    expect(result[1].checkStatus).toBeNull();
+    expect(result[1].checkStatusStale).toBe(true);
+
+    expect(result[2].headSha).toBe("");
+    expect(result[2].checkStatus).toBe("success");
+    expect(result[2].checkStatusStale).toBe(false);
+  });
 });
 
 describe("pickEnrichmentFields", () => {
@@ -921,8 +979,7 @@ describe("Phase 1 prReviewReq -> Phase 2 mergeEnrichment team review request pre
       octokit as unknown as OctokitLike,
       repos,
       "TestUser",
-      undefined,
-      [{ login: "teammate", avatarUrl: "https://github.com/teammate.png", name: "Teammate", type: "user" }],
+      { trackedUsers: [{ login: "teammate", avatarUrl: "https://github.com/teammate.png", name: "Teammate", type: "user" }] },
     );
     expect(result.pullRequests).toHaveLength(1);
     const pr = result.pullRequests[0];

@@ -86,7 +86,7 @@ export function pushNotification(
                 action: safeAction,
                 read: false,
                 timestamp: Date.now(),
-                ...(silentToast !== undefined ? { silentToast } : { silentToast: undefined }),
+                silentToast,
               }
             : n
         )

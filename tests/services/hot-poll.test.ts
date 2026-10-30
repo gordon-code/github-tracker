@@ -143,7 +143,7 @@ describe("fetchHotPRStatus", () => {
         state: "OPEN",
         mergeStateStatus: "CLEAN",
         reviewDecision: "APPROVED",
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        statusCheckRollup: { state: "SUCCESS" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -164,7 +164,7 @@ describe("fetchHotPRStatus", () => {
         state: "OPEN",
         mergeStateStatus: "DIRTY",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        statusCheckRollup: { state: "SUCCESS" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -180,7 +180,7 @@ describe("fetchHotPRStatus", () => {
         state: "OPEN",
         mergeStateStatus: "UNSTABLE",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        statusCheckRollup: { state: "SUCCESS" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -196,7 +196,7 @@ describe("fetchHotPRStatus", () => {
         state: "OPEN",
         mergeStateStatus: "UNSTABLE",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+        statusCheckRollup: { state: "PENDING" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -218,7 +218,7 @@ describe("fetchHotPRStatus", () => {
           autoMergeRequest: { mergeMethod: "REBASE" },
           viewerLatestReview: { state: "APPROVED" },
           viewerLatestReviewRequest: { id: "RR_kwDOtest46" },
-          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+          statusCheckRollup: { state: "SUCCESS" },
         },
         {
           databaseId: 47,
@@ -228,7 +228,7 @@ describe("fetchHotPRStatus", () => {
           autoMergeRequest: null,
           viewerLatestReview: null,
           viewerLatestReviewRequest: null,
-          commits: { nodes: [] },
+          statusCheckRollup: null,
         },
       ],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -257,7 +257,7 @@ describe("fetchHotPRStatus", () => {
           isDraft: false,
           mergeStateStatus: "CLEAN",
           reviewDecision: "REVIEW_REQUIRED",
-          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+          statusCheckRollup: { state: "SUCCESS" },
         },
         {
           databaseId: 49,
@@ -265,14 +265,14 @@ describe("fetchHotPRStatus", () => {
           isDraft: true,
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
-          commits: { nodes: [] },
+          statusCheckRollup: null,
         },
         {
           databaseId: 50,
           state: "OPEN",
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
-          commits: { nodes: [] },
+          statusCheckRollup: null,
         },
       ],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -287,7 +287,7 @@ describe("fetchHotPRStatus", () => {
     expect(results.get(50)!.draft).toBeUndefined();
   });
 
-  it("parses direct node.statusCheckRollup.state, propagates node.updatedAt into HotPRStatusUpdate, and handles null/missing node.commits safely", async () => {
+  it("parses direct node.statusCheckRollup.state, propagates node.updatedAt into HotPRStatusUpdate, and maps null/missing node.statusCheckRollup to a null checkStatus", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [
         {
@@ -304,21 +304,19 @@ describe("fetchHotPRStatus", () => {
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
           statusCheckRollup: null,
-          commits: null,
         },
         {
           databaseId: 53,
           state: "OPEN",
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
-          commits: { nodes: null },
         },
         {
           databaseId: 54,
           state: "OPEN",
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
-          commits: { nodes: [null] },
+          statusCheckRollup: null,
         },
         {
           databaseId: 55,
@@ -326,7 +324,6 @@ describe("fetchHotPRStatus", () => {
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
           statusCheckRollup: { state: "FAILURE" },
-          commits: { nodes: [{ commit: null }] },
         },
       ],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -587,7 +584,7 @@ describe("fetchHotData", () => {
         state: "OPEN",
         mergeStateStatus: "CLEAN",
         reviewDecision: "APPROVED",
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        statusCheckRollup: { state: "SUCCESS" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -619,7 +616,7 @@ describe("fetchHotData", () => {
         isDraft: false,
         mergeStateStatus: "CLEAN",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        statusCheckRollup: null,
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1168,7 +1165,7 @@ describe("fetchHotPRStatus null/missing nodes", () => {
           state: "OPEN",
           mergeStateStatus: "CLEAN",
           reviewDecision: null,
-          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+          statusCheckRollup: { state: "SUCCESS" },
         },
       ],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -1182,8 +1179,8 @@ describe("fetchHotPRStatus null/missing nodes", () => {
   it("skips nodes with null databaseId", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [
-        { databaseId: null, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [] } },
-        { databaseId: 77, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
+        { databaseId: null, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: null },
+        { databaseId: 77, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "PENDING" } },
       ],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1202,7 +1199,7 @@ describe("fetchHotPRStatus edge cases", () => {
         state: "OPEN",
         mergeStateStatus: "BEHIND",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+        statusCheckRollup: { state: "SUCCESS" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1213,7 +1210,9 @@ describe("fetchHotPRStatus edge cases", () => {
 
   it("returns partial results and hadErrors when one batch fails", async () => {
     let callCount = 0;
-    const octokit = makeOctokit(undefined, () => {
+    const batchSizes: number[] = [];
+    const octokit = makeOctokit(undefined, (...args: unknown[]) => {
+      batchSizes.push((args[1] as { ids: string[] }).ids.length);
       callCount++;
       if (callCount === 1) {
         return Promise.resolve({
@@ -1222,7 +1221,7 @@ describe("fetchHotPRStatus edge cases", () => {
             state: "OPEN",
             mergeStateStatus: "CLEAN",
             reviewDecision: null,
-            commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+            statusCheckRollup: { state: "PENDING" },
           }],
           rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
         });
@@ -1230,13 +1229,34 @@ describe("fetchHotPRStatus edge cases", () => {
       return Promise.reject(new Error("rate limited"));
     });
 
-    // Need >100 node IDs to trigger 2 batches
+    // Hot status batches use HEAVY_BACKFILL_BATCH_SIZE (25), matching the heavy backfill
     const nodeIds = Array.from({ length: 101 }, (_, i) => `PR_${i}`);
     const { results, hadErrors } = await fetchHotPRStatus(octokit as never, nodeIds);
-    // First batch succeeded with 1 result, second batch failed
+    expect(batchSizes).toEqual([25, 25, 25, 25, 1]);
+    // First batch succeeded with 1 result, the remaining batches failed
     expect(results.size).toBe(1);
     expect(results.get(1)).toBeDefined();
     expect(hadErrors).toBe(true);
+  });
+
+  it("salvages resolved nodes from a rejected batch's partial data and skips errored node indices", async () => {
+    const octokit = makeOctokit(undefined, () =>
+      Promise.reject(Object.assign(new Error("Something went wrong while executing your query"), {
+        data: {
+          nodes: [
+            { databaseId: 11, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" } },
+            { databaseId: 12, state: "OPEN", mergeStateStatus: "UNKNOWN", reviewDecision: null, statusCheckRollup: null },
+          ],
+          rateLimit: { limit: 5000, remaining: 4990, resetAt: "2026-01-01T00:00:00Z" },
+        },
+        errors: [{ message: "timedout", path: ["nodes", 1, "statusCheckRollup"] }],
+      })));
+
+    const { results, hadErrors } = await fetchHotPRStatus(octokit as never, ["PR_ok", "PR_errored"]);
+    expect(hadErrors).toBe(true);
+    expect(results.size).toBe(1);
+    expect(results.get(11)!.checkStatus).toBe("success");
+    expect(results.has(12)).toBe(false);
   });
 
   it("throws (does not swallow into hadErrors) when a batch rejects with 401", async () => {
@@ -1345,8 +1365,8 @@ describe("fetchHotData eviction edge cases", () => {
         // First fetch: PR 1 resolved (success), PR 2 still pending
         return Promise.resolve({
           nodes: [
-            { databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
-            { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } },
+            { databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" } },
+            { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "PENDING" } },
           ],
           rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
         });
@@ -1354,7 +1374,7 @@ describe("fetchHotData eviction edge cases", () => {
       // Second fetch: only PR 2 should be queried
       return Promise.resolve({
         nodes: [
-          { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } },
+          { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" } },
         ],
         rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
       });
@@ -1390,7 +1410,7 @@ describe("fetchHotData eviction edge cases", () => {
         state: "MERGED",
         mergeStateStatus: "CLEAN",
         reviewDecision: "APPROVED",
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+        statusCheckRollup: { state: "PENDING" },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1419,7 +1439,7 @@ describe("fetchHotData eviction edge cases", () => {
         state: "CLOSED",
         mergeStateStatus: "CLEAN",
         reviewDecision: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        statusCheckRollup: null,
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1472,7 +1492,7 @@ describe("fetchHotData hadErrors", () => {
         headers: {},
       }),
       () => Promise.resolve({
-        nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] } }],
+        nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "PENDING" } }],
         rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
       }),
     );
@@ -1626,7 +1646,7 @@ describe("fetchHotPRStatus updateGraphqlRateLimit", () => {
   it("calls updateGraphqlRateLimit when response includes rateLimit", async () => {
     const { updateGraphqlRateLimit } = await import("../../src/app/services/github");
     const octokit = makeOctokit(undefined, () => Promise.resolve({
-      nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] } }],
+      nodes: [{ databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" } }],
       rateLimit: { limit: 5000, remaining: 4200, resetAt: "2026-01-01T01:00:00Z" },
     }));
 

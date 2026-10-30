@@ -4,7 +4,7 @@ import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
-import { REPO_CAP } from "../../shared/types";
+import { REPO_CAP, PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../shared/types";
 import type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
 // ── Re-exports from shared/types (backward compat for existing importers) ─────
@@ -106,6 +106,7 @@ function extractRejectionError(reason: unknown): { statusCode: number | null; me
   return { statusCode, message };
 }
 
+
 /**
  * Extracts partial data from a GraphqlResponseError for search queries.
  * Only matches responses containing a `search` key (issues/PRs search shape).
@@ -123,6 +124,16 @@ function extractSearchPartialData<T>(err: unknown): T | null {
     return err.data as T;
   }
   return null;
+}
+
+/**
+ * Returns `err.data` (partial data GitHub sent alongside GraphQL errors) when
+ * the rejection carries a data object, otherwise null.
+ */
+function extractPartialGraphqlData<T>(err: unknown): Partial<T> | null {
+  return err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
+    ? err.data
+    : null;
 }
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -458,13 +469,6 @@ interface HotPRStatusNode {
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
   statusCheckRollup?: { state: string } | null;
-  commits?: {
-    nodes?: ({
-      commit?: {
-        statusCheckRollup?: { state: string } | null;
-      } | null;
-    } | null)[] | null;
-  } | null;
 }
 
 interface HotPRStatusResponse {
@@ -511,13 +515,6 @@ interface GraphQLHeavyPRNode {
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
   statusCheckRollup?: { state: string } | null;
-  commits?: {
-    nodes?: ({
-      commit?: {
-        statusCheckRollup?: { state: string } | null;
-      } | null;
-    } | null)[] | null;
-  } | null;
 }
 
 interface LightCombinedSearchResponse {
@@ -544,10 +541,14 @@ interface HeavyBackfillResponse {
   rateLimit?: GraphQLRateLimit;
 }
 
-// Max node IDs per nodes() query (GitHub limit)
-const NODES_BATCH_SIZE = 100;
 export const HEAVY_BACKFILL_BATCH_SIZE = 25;
 export const MIN_SPLIT_BATCH_SIZE = 6;
+/**
+ * Number of failed top-level heavy backfill batches, with no heavy node resolved
+ * yet in the same fetchPREnrichment call, after which failing batches skip
+ * binary splitting and go straight to the light fallback.
+ */
+export const SPLIT_SUPPRESSION_BATCH_THRESHOLD = 2;
 
 // ── GraphQL search functions ──────────────────────────────────────────────────
 
@@ -737,9 +738,7 @@ async function runForkPRFallback(
         }
       }
     } catch (err) {
-      const errDataRaw = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-        ? err.data as Record<string, unknown>
-        : null;
+      const errDataRaw = extractPartialGraphqlData<Record<string, unknown>>(err);
       if (errDataRaw?.rateLimit) {
         updateGraphqlRateLimit(errDataRaw.rateLimit as GraphQLRateLimit);
       }
@@ -864,9 +863,7 @@ async function executeLightCombinedQuery(
       request: { apiSource: source },
     });
   } catch (err) {
-    const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-      ? err.data as Partial<LightCombinedSearchResponse>
-      : null;
+    const partial = extractPartialGraphqlData<LightCombinedSearchResponse>(err);
     if (partial && (partial.issues || partial.prInvolves || partial.prReviewReq)) {
       response = {
         issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
@@ -991,9 +988,11 @@ async function graphqlLightCombinedSearch(
 
   await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
-    const issueQ = `is:issue is:open involves:${userLogin} ${repoQualifiers}`;
-    const prInvQ = `is:pr is:open involves:${userLogin} ${repoQualifiers}`;
-    const prRevQ = `is:pr is:open review-requested:${userLogin} ${repoQualifiers}`;
+    // archived:false drops items from repos archived since they were selected
+    // (archived repos are read-only, so their PRs can't be acted on).
+    const issueQ = `is:issue is:open archived:false involves:${userLogin} ${repoQualifiers}`;
+    const prInvQ = `is:pr is:open archived:false involves:${userLogin} ${repoQualifiers}`;
+    const prRevQ = `is:pr is:open archived:false review-requested:${userLogin} ${repoQualifiers}`;
     const batchLabel = `light-batch-${chunkIdx + 1}/${chunks.length}`;
 
     try {
@@ -1035,8 +1034,8 @@ async function graphqlUnfilteredSearch(
 
   await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
-    const issueQ = `is:issue is:open ${repoQualifiers}`;
-    const prQ = `is:pr is:open ${repoQualifiers}`;
+    const issueQ = `is:issue is:open archived:false ${repoQualifiers}`;
+    const prQ = `is:pr is:open archived:false ${repoQualifiers}`;
     const batchLabel = `unfiltered-batch-${chunkIdx + 1}/${chunks.length}`;
 
     try {
@@ -1048,9 +1047,7 @@ async function graphqlUnfilteredSearch(
           request: { apiSource: "unfilteredSearch" },
         });
       } catch (err) {
-        const partial = (err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object")
-          ? err.data as Partial<UnfilteredSearchResponse>
-          : null;
+        const partial = extractPartialGraphqlData<UnfilteredSearchResponse>(err);
         if (partial && (partial.issues || partial.prs)) {
           response = {
             issues: partial.issues ?? { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
@@ -1133,21 +1130,8 @@ export interface PREnrichmentData {
   viewerLatestReviewState: ViewerReviewState | null;
 }
 
-function extractRollupState(node: {
-  statusCheckRollup?: { state: string } | null;
-  commits?: {
-    nodes?: ({
-      commit?: {
-        statusCheckRollup?: { state: string } | null;
-      } | null;
-    } | null)[] | null;
-  } | null;
-}): string | null {
-  return (
-    node.statusCheckRollup?.state ??
-    node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state ??
-    null
-  );
+function extractRollupState(node: { statusCheckRollup?: { state: string } | null }): string | null {
+  return node.statusCheckRollup?.state ?? null;
 }
 
 function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PREnrichmentData {
@@ -1217,10 +1201,41 @@ function extractErroredNodeIndices(err: unknown): ReadonlySet<number> {
   return indices;
 }
 
+/** ApiError.repo prefix for phase-2 PR enrichment (backfill) batch failures. */
+const BACKFILL_ERROR_PREFIX = "backfill-batch-";
+
+export function isBackfillError(e: Pick<ApiError, "repo">): boolean {
+  return e.repo.startsWith(BACKFILL_ERROR_PREFIX);
+}
+
+/** True when any PR lacks enrichment or has unverified CI check status. */
+export function hasDegradedEnrichment(
+  prs: readonly Pick<PullRequest, "enriched" | "checkStatusStale">[],
+): boolean {
+  return prs.some((pr) => pr.enriched === false || pr.checkStatusStale === true);
+}
+
+/** Pushes the persistent, toast-silent "PR details degraded" warning. */
+export function pushEnrichmentDegraded(): void {
+  pushNotification(
+    PR_ENRICHMENT_NOTIFICATION_SOURCE,
+    PR_ENRICHMENT_DEGRADED_MESSAGE,
+    "warning",
+    true,
+    undefined,
+    { silentToast: true },
+  );
+}
+
 /**
  * Phase 2: fetches heavy PR fields using `nodes(ids: [...])` query.
- * Chunks requests into 25-node batches, recursively splits failing batches in half
- * down to MIN_SPLIT_BATCH_SIZE, and falls back to LIGHT_PR_BACKFILL_QUERY on leaf failures.
+ * Chunks requests into HEAVY_BACKFILL_BATCH_SIZE batches, recursively splits batches
+ * that fail with a retryable error in half down to MIN_SPLIT_BATCH_SIZE, and falls back
+ * to LIGHT_PR_BACKFILL_QUERY on leaf failures. Retryable failures include browser
+ * `TypeError: Failed to fetch`, which is how CORS-masked GitHub gateway 502/504 timeouts
+ * surface. Once SPLIT_SUPPRESSION_BATCH_THRESHOLD batches have failed in this call without
+ * any heavy node resolving, failing batches skip splitting and go straight to the light
+ * fallback, so a broad outage costs about one heavy and one light request per batch.
  * Returns enrichment data keyed by databaseId.
  */
 export async function fetchPREnrichment(
@@ -1233,10 +1248,14 @@ export async function fetchPREnrichment(
   if (nodeIds.length === 0) return { enrichments, errors };
 
   const batches = chunkArray(nodeIds, HEAVY_BACKFILL_BATCH_SIZE);
+  let heavyNodesResolved = 0;
+  let failedBatchCount = 0;
   await Promise.allSettled(
     batches.map(async (batch, batchIdx) => {
       const resolvedNodeIds = new Set<string>();
+      const batchLabel = `${batchIdx + 1}/${batches.length}`;
       let batchErrorPushed = false;
+      let batchFailed = false;
 
       const ingestBackfillPayload = (
         payload: Partial<HeavyBackfillResponse> | null | undefined,
@@ -1251,15 +1270,24 @@ export async function fetchPREnrichment(
           for (const [idx, node] of payload.nodes.entries()) {
             if (!node || node.databaseId == null || erroredIndices?.has(idx)) continue;
             enrichments.set(node.databaseId, mapHeavyPRNode(node, isLightFallback));
+            if (!isLightFallback) heavyNodesResolved++;
             if (node.id) resolvedNodeIds.add(node.id);
           }
         }
       };
 
-      const extractPartialBackfillData = (err: unknown): Partial<HeavyBackfillResponse> | null =>
-        err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
-          ? err.data
-          : null;
+      const reportBatchFailure = (
+        err: unknown,
+        statusCode: number | null,
+        message: string,
+        retryable: boolean,
+      ): void => {
+        if (batchErrorPushed) return;
+        batchErrorPushed = true;
+        console.warn(`[api] PR enrichment batch ${batchLabel} failed:`, err);
+        Sentry.captureException(err, { tags: { source: "prEnrichment" } });
+        errors.push({ repo: `${BACKFILL_ERROR_PREFIX}${batchLabel}`, statusCode, message, retryable });
+      };
 
       const fetchBatchWithSplit = async (batchIds: string[]): Promise<void> => {
         try {
@@ -1274,7 +1302,7 @@ export async function fetchPREnrichment(
           ingestBackfillPayload(response, false);
         } catch (err) {
           ingestBackfillPayload(
-            extractPartialBackfillData(err),
+            extractPartialGraphqlData<HeavyBackfillResponse>(err),
             false,
             extractErroredNodeIndices(err),
           );
@@ -1282,25 +1310,23 @@ export async function fetchPREnrichment(
           const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
           if (remainingIds.length === 0) return;
 
+          if (!batchFailed) {
+            batchFailed = true;
+            failedBatchCount++;
+          }
+
           const { statusCode, message } = extractRejectionError(err);
           const retryable = statusCode === null || statusCode >= 500;
 
           if (!retryable) {
-            if (!batchErrorPushed) {
-              batchErrorPushed = true;
-              console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
-              Sentry.captureException(err, { tags: { source: "prEnrichment" } });
-              errors.push({
-                repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
-                statusCode,
-                message,
-                retryable: false,
-              });
-            }
+            reportBatchFailure(err, statusCode, message, false);
             return;
           }
 
-          if (remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
+          const canSplit =
+            heavyNodesResolved > 0 || failedBatchCount < SPLIT_SUPPRESSION_BATCH_THRESHOLD;
+
+          if (canSplit && remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
             const mid = Math.floor(remainingIds.length / 2);
             await Promise.allSettled([
               fetchBatchWithSplit(remainingIds.slice(0, mid)),
@@ -1309,22 +1335,12 @@ export async function fetchPREnrichment(
             return;
           }
 
-          if (batchIds.length > MIN_SPLIT_BATCH_SIZE && remainingIds.length < batchIds.length) {
+          if (canSplit && batchIds.length > MIN_SPLIT_BATCH_SIZE && remainingIds.length < batchIds.length) {
             await fetchBatchWithSplit(remainingIds);
             return;
           }
 
-          if (!batchErrorPushed) {
-            batchErrorPushed = true;
-            console.warn(`[api] PR enrichment batch ${batchIdx + 1}/${batches.length} failed:`, err);
-            Sentry.captureException(err, { tags: { source: "prEnrichment" } });
-            errors.push({
-              repo: `backfill-batch-${batchIdx + 1}/${batches.length}`,
-              statusCode,
-              message,
-              retryable: true,
-            });
-          }
+          reportBatchFailure(err, statusCode, message, true);
 
           try {
             const lightResponse = await octokit.graphql<HeavyBackfillResponse>(LIGHT_PR_BACKFILL_QUERY, {
@@ -1334,7 +1350,7 @@ export async function fetchPREnrichment(
             ingestBackfillPayload(lightResponse, true);
           } catch (lightErr) {
             ingestBackfillPayload(
-              extractPartialBackfillData(lightErr),
+              extractPartialGraphqlData<HeavyBackfillResponse>(lightErr),
               true,
               extractErroredNodeIndices(lightErr),
             );
@@ -1406,7 +1422,8 @@ export interface NodeBodiesFetchResult<K, V> {
  * field (e.g. issue/PR body text) for a set of node IDs. Chunks ids into
  * BODY_FETCH_BATCH_SIZE batches, races each sub-batch via raceWithTimeout,
  * salvages partial err.data.nodes on error, recursively binary-splits retryable
- * batch failures down to MIN_SPLIT_BATCH_SIZE, and reports failures via
+ * batch failures (5xx, GraphQL errors, or `Failed to fetch`; not a raceWithTimeout
+ * abort) down to MIN_SPLIT_BATCH_SIZE, and reports failures via
  * console.warn + Sentry (capped at once per top-level batch) + a silent
  * Notification Drawer warning after BODY_FETCH_NOTIFICATION_THRESHOLD
  * consecutive failing calls for a source.
@@ -1436,11 +1453,6 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
     console.debug(`[api] ${source} batch started (${batch.length} ids) at ${batchStart}`);
     const resolvedNodeIds = new Set<string>();
     let batchErrorPushed = false;
-
-    const extractPartialBodyData = (err: unknown): Partial<NodeBodiesResponse<TNode>> | null =>
-      err && typeof err === "object" && "data" in err && err.data && typeof err.data === "object"
-        ? err.data
-        : null;
 
     const ingestBodyPayload = (
       payload: Partial<NodeBodiesResponse<TNode>> | null | undefined,
@@ -1482,7 +1494,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
         );
         ingestBodyPayload(response, batchIds);
       } catch (err) {
-        ingestBodyPayload(extractPartialBodyData(err));
+        ingestBodyPayload(extractPartialGraphqlData<NodeBodiesResponse<TNode>>(err));
 
         const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
         if (remainingIds.length === 0) return;
@@ -1642,6 +1654,36 @@ export function pickEnrichmentFields(source: EnrichmentFields): EnrichmentFields
   };
 }
 
+type RevisionFields = Pick<PullRequest, "headSha" | "updatedAt">;
+
+/**
+ * True when two snapshots of a PR are at the same revision: compares headSha
+ * when both are known, otherwise falls back to updatedAt.
+ */
+export function isSameRevision(a: RevisionFields, b: RevisionFields): boolean {
+  return a.headSha && b.headSha ? a.headSha === b.headSha : a.updatedAt === b.updatedAt;
+}
+
+/**
+ * True when a PR may have moved to a new revision: updatedAt differs, or both
+ * headShas are known and differ.
+ */
+export function hasRevisionChanged(a: RevisionFields, b: RevisionFields): boolean {
+  return a.updatedAt !== b.updatedAt || (Boolean(a.headSha) && Boolean(b.headSha) && a.headSha !== b.headSha);
+}
+
+/**
+ * Clears a PR's headSha and check status and sets checkStatusStale, so CI is
+ * treated as unverified until the hot poll or the next backfill resolves the
+ * current revision. Mutates and returns `pr`.
+ */
+export function markCheckStatusStale<T extends Pick<PullRequest, "headSha" | "checkStatus" | "checkStatusStale">>(pr: T): T {
+  pr.headSha = "";
+  pr.checkStatus = null;
+  pr.checkStatusStale = true;
+  return pr;
+}
+
 /**
  * Merges phase 2 enrichment data into light PRs. Returns enriched PR array.
  * Also detects fork PRs for the statusCheckRollup fallback.
@@ -1699,14 +1741,8 @@ export function fallbackToPreviousEnrichment(
     if (pr.enriched !== false) {
       if (pr.checkStatusStale) {
         const prev = previousMap.get(pr.id);
-        if (prev && prev.enriched !== false && !prev.checkStatusStale) {
-          const sameRevision =
-            prev.headSha && pr.headSha
-              ? prev.headSha === pr.headSha
-              : prev.updatedAt === pr.updatedAt;
-          if (sameRevision) {
-            return { ...pr, checkStatus: prev.checkStatus, checkStatusStale: false };
-          }
+        if (prev && prev.enriched !== false && !prev.checkStatusStale && isSameRevision(prev, pr)) {
+          return { ...pr, checkStatus: prev.checkStatus, checkStatusStale: false };
         }
         return { ...pr, checkStatus: null, checkStatusStale: true };
       }
@@ -1714,18 +1750,8 @@ export function fallbackToPreviousEnrichment(
     }
     const prev = previousMap.get(pr.id);
     if (!prev || prev.enriched === false) return pr;
-    const revisionChanged =
-      prev.updatedAt !== pr.updatedAt ||
-      (Boolean(prev.headSha) && Boolean(pr.headSha) && prev.headSha !== pr.headSha);
-    if (revisionChanged || prev.checkStatusStale) {
-      return {
-        ...pr,
-        ...pickEnrichmentFields(prev),
-        headSha: "",
-        checkStatus: null,
-        checkStatusStale: true,
-        enriched: true,
-      };
+    if (hasRevisionChanged(prev, pr) || prev.checkStatusStale) {
+      return markCheckStatusStale({ ...pr, ...pickEnrichmentFields(prev), enriched: true });
     }
     return {
       ...pr,
@@ -1735,9 +1761,25 @@ export function fallbackToPreviousEnrichment(
   });
 }
 
-// ── Settled-PR enrichment cache (3-minute TTL) ───────────────────────────────
+// ── Settled-PR enrichment cache (TTL = refresh interval + 60s, min 3 minutes) ─
 
-export const ENRICHMENT_CACHE_TTL_MS = 3 * 60 * 1000;
+/** Floor for the settled-PR enrichment cache TTL; also applies when auto-refresh is off. */
+export const MIN_ENRICHMENT_CACHE_TTL_MS = 3 * 60 * 1000;
+/** Added to the refresh interval so the next scheduled poll (±30s jitter) lands inside the TTL. */
+const ENRICHMENT_CACHE_TTL_MARGIN_MS = 60 * 1000;
+
+let _enrichmentCacheTtlMs = MIN_ENRICHMENT_CACHE_TTL_MS;
+
+/**
+ * Sets the settled-PR enrichment cache TTL to the full-refresh interval plus
+ * ENRICHMENT_CACHE_TTL_MARGIN_MS, floored at MIN_ENRICHMENT_CACHE_TTL_MS, so an
+ * entry written by one scheduled poll is still valid on the next one. An
+ * interval of 0 (auto-refresh off) uses the floor.
+ */
+export function setPREnrichmentCacheRefreshInterval(refreshIntervalSec: number): void {
+  const derivedMs = refreshIntervalSec > 0 ? refreshIntervalSec * 1000 + ENRICHMENT_CACHE_TTL_MARGIN_MS : 0;
+  _enrichmentCacheTtlMs = Math.max(MIN_ENRICHMENT_CACHE_TTL_MS, derivedMs);
+}
 
 interface CachedPREnrichment {
   userLogin: string;
@@ -1816,6 +1858,14 @@ function mergeTrackedUserResults(
   }
 }
 
+export interface FetchIssuesAndPRsOptions {
+  onLightData?: (data: FetchIssuesAndPRsResult) => void;
+  trackedUsers?: TrackedUser[];
+  monitoredRepos?: RepoRef[];
+  /** Bypasses the settled-PR enrichment cache. */
+  force?: boolean;
+}
+
 /**
  * Fetches open issues and PRs using a two-phase approach:
  * - Phase 1 (light): minimal fields for immediate rendering
@@ -1832,11 +1882,9 @@ export async function fetchIssuesAndPullRequests(
   octokit: ReturnType<typeof getClient>,
   repos: RepoRef[],
   userLogin: string,
-  onLightData?: (data: FetchIssuesAndPRsResult) => void,
-  trackedUsers?: TrackedUser[],
-  monitoredRepos?: RepoRef[],
-  force = false,
+  options: FetchIssuesAndPRsOptions = {},
 ): Promise<FetchIssuesAndPRsResult> {
+  const { onLightData, trackedUsers, monitoredRepos, force = false } = options;
   if (!octokit) throw new Error("No GitHub client available");
 
   const cacheGen = _enrichmentCacheGen;
@@ -1871,7 +1919,7 @@ export async function fetchIssuesAndPullRequests(
       cached.updatedAt === pr.updatedAt &&
       !cached.enrichment.checkStatusStale &&
       cached.enrichment.checkStatus !== "pending" &&
-      Date.now() - cached.fetchedAt < ENRICHMENT_CACHE_TTL_MS
+      Date.now() - cached.fetchedAt < _enrichmentCacheTtlMs
     ) {
       return cached.enrichment;
     }
@@ -2057,7 +2105,7 @@ export async function fetchIssuesAndPullRequests(
     const polledRepoSet = new Set(repos.map((r) => r.fullName.toLowerCase()));
     const activeNodeIds = allErrors.length === 0 ? new Set(nodeIdMap.values()) : null;
     for (const [nodeId, entry] of _prEnrichmentCache) {
-      if (now - entry.fetchedAt >= ENRICHMENT_CACHE_TTL_MS) {
+      if (now - entry.fetchedAt >= _enrichmentCacheTtlMs) {
         _prEnrichmentCache.delete(nodeId);
       } else if (
         activeNodeIds &&
@@ -2385,7 +2433,8 @@ export interface HotPRStatusUpdate {
 /**
  * Fetches current status fields (check status, review decision, state) for a
  * batch of PR node IDs using the nodes() GraphQL query. Returns a map keyed
- * by databaseId. Uses Promise.allSettled per batch for error resilience.
+ * by databaseId. Uses Promise.allSettled per batch and salvages resolved nodes
+ * from a failed batch's partial data (skipping errored node indices).
  */
 export async function fetchHotPRStatus(
   octokit: GitHubOctokit,
@@ -2395,16 +2444,17 @@ export async function fetchHotPRStatus(
   const results = new Map<number, HotPRStatusUpdate>();
   if (nodeIds.length === 0) return { results, hadErrors: false };
 
-  const batches = chunkArray(nodeIds, NODES_BATCH_SIZE);
+  // Same batch size as heavy backfill: HOT_PR_STATUS_QUERY requests the same
+  // mergeStateStatus + statusCheckRollup fields that time out at larger batch sizes.
+  const batches = chunkArray(nodeIds, HEAVY_BACKFILL_BATCH_SIZE);
   let hadErrors = false;
-  const settled = await Promise.allSettled(batches.map(async (batch) => {
-    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch, request: { apiSource: "hotPRStatus" } });
-    if (response.rateLimit) {
-      updateGraphqlRateLimit(response.rateLimit);
-    }
-
-    for (const node of response.nodes) {
-      if (!node || node.databaseId == null) continue;
+  const ingestHotNodes = (
+    nodes: readonly (HotPRStatusNode | null)[] | undefined,
+    erroredIndices?: ReadonlySet<number>,
+  ): void => {
+    if (!Array.isArray(nodes)) return;
+    for (const [idx, node] of nodes.entries()) {
+      if (!node || node.databaseId == null || erroredIndices?.has(idx)) continue;
 
       const checkStatus = applyMergeStateOverride(
         node.mergeStateStatus,
@@ -2424,6 +2474,14 @@ export async function fetchHotPRStatus(
         viewerLatestReviewState: mapViewerReviewState(node.viewerLatestReview?.state),
       });
     }
+  };
+
+  const settled = await Promise.allSettled(batches.map(async (batch) => {
+    const response = await octokit.graphql<HotPRStatusResponse>(HOT_PR_STATUS_QUERY, { ids: batch, request: { apiSource: "hotPRStatus" } });
+    if (response.rateLimit) {
+      updateGraphqlRateLimit(response.rateLimit);
+    }
+    ingestHotNodes(response.nodes);
   }));
 
   for (const s of settled) {
@@ -2435,13 +2493,13 @@ export async function fetchHotPRStatus(
       if (options?.reportToSentry) {
         Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
       }
-      const reason = s.reason;
-      const partialErr = (reason && typeof reason === "object" && "data" in reason && reason.data && typeof reason.data === "object")
-        ? reason.data as Partial<HotPRStatusResponse>
-        : null;
+      // Salvage nodes GraphQL resolved before the batch errored so stale/pending
+      // PRs in a partially failing batch still get a status this cycle.
+      const partialErr = extractPartialGraphqlData<HotPRStatusResponse>(s.reason);
       if (partialErr?.rateLimit) {
         updateGraphqlRateLimit(partialErr.rateLimit);
       }
+      ingestHotNodes(partialErr?.nodes, extractErroredNodeIndices(s.reason));
     }
   }
 

@@ -4372,7 +4372,7 @@ describe("DashboardPage — PR approval integration", () => {
     expect(screen.getByText("Changes")).toBeTruthy();
   });
 
-  it("blocks approval and pushes a warning notification when pr.checkStatusStale is true, then allows approval once hot-poll clears checkStatusStale", async () => {
+  it("hides the Approve button while pr.checkStatusStale is true, then shows it and allows approval once hot-poll clears checkStatusStale", async () => {
     const user = userEvent.setup();
     const graphqlMock = vi.fn().mockResolvedValue({
       addPullRequestReview: {
@@ -4420,23 +4420,15 @@ describe("DashboardPage — PR approval integration", () => {
     await waitFor(() => screen.getByText("owner/repo"));
     await user.click(screen.getByText("owner/repo"));
 
-    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
-    // Step 1: Enter confirmation mode
-    await user.click(approveBtn);
-    expect(approveBtn.textContent).toBe("Confirm?");
-
-    // Step 2: Confirm approval while checkStatusStale === true -> blocked by runtime guard
-    await user.click(approveBtn);
+    // While checkStatusStale === true, canApprovePR hides the Approve button entirely
+    await waitFor(() => expect(screen.getByText("Review needed")).toBeTruthy());
+    expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
     expect(graphqlMock).not.toHaveBeenCalled();
-    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
-      "approve-pr:42",
-      "Cannot approve owner/repo#42 while CI check status is unavailable",
-      "warning"
-    );
-    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(
+      vi.mocked(errorsLib.pushNotification).mock.calls.some(([source]) => source === "approve-pr:42")
+    ).toBe(false);
 
     // Hot poll clears checkStatusStale and updates checkStatus to "success"
-    vi.mocked(errorsLib.pushNotification).mockClear();
     capturedOnHotData!(
       new Map([
         [
@@ -4915,6 +4907,183 @@ describe("DashboardPage — Mark PR ready integration", () => {
 });
 
 // ── Fallback PR Enrichment Propagation ───────────────────────────────────────
+
+describe("DashboardPage — PR mutation enrichment cache eviction", () => {
+  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+  const approveResponse = {
+    addPullRequestReview: {
+      pullRequestReview: { state: "APPROVED", pullRequest: { reviewDecision: "APPROVED" } },
+    },
+    rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+  };
+  const markReadyResponse = {
+    markPullRequestReadyForReview: { pullRequest: { isDraft: false, reviewDecision: "REVIEW_REQUIRED" } },
+    rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+  };
+
+  // DashboardPage imports the real api module (fresh per vi.resetModules in beforeEach);
+  // fetchAllData is mocked, so the cache itself is exercised in api.test.ts.
+  async function spyOnEvict() {
+    const apiModule = await import("../../src/app/services/api");
+    return vi.spyOn(apiModule, "evictPREnrichmentCacheNode");
+  }
+
+  async function renderWithPR(pr: ReturnType<typeof makePullRequest>) {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [pr],
+      workflowRuns: [],
+      errors: [],
+    });
+    const user = userEvent.setup();
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+    return user;
+  }
+
+  const makeApprovablePR = () =>
+    makePullRequest({
+      id: 42,
+      number: 42,
+      title: "Fix race condition",
+      repoFullName: "owner/repo",
+      userLogin: "otheruser",
+      state: "OPEN",
+      draft: false,
+      enriched: true,
+      nodeId: "PR_kwDOtest0042",
+      headSha: validSha,
+      reviewDecision: "REVIEW_REQUIRED",
+      checkStatus: "success",
+    });
+
+  const makeDraftPR = () =>
+    makePullRequest({
+      id: 77,
+      number: 77,
+      title: "Ship draft feature",
+      repoFullName: "owner/repo",
+      userLogin: "testuser",
+      state: "OPEN",
+      draft: true,
+      enriched: true,
+      nodeId: "PR_kwDOtest0077",
+      reviewDecision: null,
+      checkStatus: "success",
+    });
+
+  it("evicts the PR's enrichment cache entry after a successful approval", async () => {
+    const evictSpy = await spyOnEvict();
+    const graphqlMock = vi.fn().mockResolvedValue(approveResponse);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const user = await renderWithPR(makeApprovablePR());
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => expect(evictSpy).toHaveBeenCalledWith("PR_kwDOtest0042"));
+    expect(evictSpy).toHaveBeenCalledOnce();
+  });
+
+  it("does not evict the cache entry when approval fails", async () => {
+    const evictSpy = await spyOnEvict();
+    const forbiddenErr = Object.assign(new Error("Resource not accessible by personal access token"), {
+      status: 403,
+      errors: [{ type: "FORBIDDEN", message: "Resource not accessible by personal access token" }],
+    });
+    const graphqlMock = vi.fn().mockRejectedValue(forbiddenErr);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const user = await renderWithPR(makeApprovablePR());
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => {
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        expect.stringContaining("lacks Pull Requests write permission"),
+        "error"
+      );
+    });
+    expect(evictSpy).not.toHaveBeenCalled();
+  });
+
+  it("evicts the PR's enrichment cache entry after a successful mark-ready", async () => {
+    const evictSpy = await spyOnEvict();
+    const graphqlMock = vi.fn().mockResolvedValue(markReadyResponse);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const user = await renderWithPR(makeDraftPR());
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() => expect(evictSpy).toHaveBeenCalledWith("PR_kwDOtest0077"));
+    expect(evictSpy).toHaveBeenCalledOnce();
+  });
+
+  it("does not evict the cache entry when the GitHub client changes while mark-ready is in flight", async () => {
+    const evictSpy = await spyOnEvict();
+    const otherClient = { graphql: vi.fn() } as unknown as ReturnType<typeof githubService.getClient>;
+    const graphqlMock = vi.fn().mockImplementation(async () => {
+      vi.mocked(githubService.getClient).mockReturnValue(otherClient);
+      return markReadyResponse;
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const user = await renderWithPR(makeDraftPR());
+    const draftBtn = await waitFor(() => screen.getByLabelText("Mark #77 Ship draft feature ready for review"));
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+    // Handler finished: in-flight state cleared (button re-enabled) and the PR is still a draft
+    // because the swapped-client early return skips the store update.
+    await waitFor(() => {
+      const btn = screen.getByLabelText("Mark #77 Ship draft feature ready for review") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    expect(evictSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not evict the cache entry when the GitHub client changes while approval is in flight", async () => {
+    const evictSpy = await spyOnEvict();
+    const otherClient = { graphql: vi.fn() } as unknown as ReturnType<typeof githubService.getClient>;
+    const graphqlMock = vi.fn().mockImplementation(async () => {
+      vi.mocked(githubService.getClient).mockReturnValue(otherClient);
+      return approveResponse;
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    const user = await renderWithPR(makeApprovablePR());
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+    // Handler finished: in-flight state cleared, and the review decision was not updated
+    await waitFor(() => {
+      const btn = screen.getByLabelText("Approve #42 Fix race condition") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(evictSpy).not.toHaveBeenCalled();
+  });
+});
 
 describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets and localStorage", () => {
   it("retains fallback-merged enrichment in rebuildHotSets and localStorage when a second poll cycle returns enriched: false on a previously-enriched PR", async () => {
@@ -5608,20 +5777,26 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     expect(localStorage.getItem("github-tracker:dashboard-bodies")).toBeNull();
   });
 
-  it("ignores corrupt or invalid entries in 'github-tracker:dashboard-bodies' without throwing and re-fetches uncached issues", async () => {
-    // Seed corrupt and invalid shapes into localStorage before importing DashboardPage
+  it("drops a 'github-tracker:dashboard-bodies' entry with invalid deps even when updatedAt matches, keeps valid entries, and re-fetches only the invalid issue", async () => {
+    const user = userEvent.setup();
     localStorage.setItem(
       "github-tracker:dashboard-bodies",
       JSON.stringify({
-        DASH_CORRUPT_1: { updatedAt: 12345, deps: [] }, // non-string updatedAt
-        DASH_CORRUPT_2: { updatedAt: "2026-04-01T00:00:00Z", deps: [{ datasource: "", packageName: "axios", lastUpdated: "2020-01-01" }] }, // empty datasource
-        prototype: { updatedAt: "2026-04-01T00:00:00Z", deps: [] }, // disallowed key
+        DASH_VALID: {
+          updatedAt: "2026-04-01T00:00:00Z",
+          deps: [{ datasource: "npm", packageName: "axios", lastUpdated: "2020-01-01" }],
+        },
+        // updatedAt matches the live issue, so only entry validation (empty datasource) can force the re-fetch
+        DASH_CORRUPT: {
+          updatedAt: "2026-04-01T00:00:00Z",
+          deps: [{ datasource: "", packageName: "lodash", lastUpdated: "2020-01-01" }],
+        },
       })
     );
 
     vi.resetModules();
     const graphqlSpy = vi.fn().mockResolvedValue({
-      nodes: [{ id: "DASH_CORRUPT_1", body: "" }],
+      nodes: [{ id: "DASH_CORRUPT", body: "" }],
       rateLimit: null,
     });
 
@@ -5633,13 +5808,33 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
             number: 17,
             title: "Dependency Dashboard",
             userLogin: "renovate[bot]",
-            nodeId: "DASH_CORRUPT_1",
+            nodeId: "DASH_VALID",
             repoFullName: "owner/repo",
             state: "OPEN",
             updatedAt: "2026-04-01T00:00:00Z",
           }),
+          makeIssue({
+            id: 18,
+            number: 18,
+            title: "Dependency Dashboard",
+            userLogin: "renovate[bot]",
+            nodeId: "DASH_CORRUPT",
+            repoFullName: "owner/other",
+            state: "OPEN",
+            updatedAt: "2026-04-01T00:00:00Z",
+          }),
         ],
-        pullRequests: [depPRInRepo()],
+        pullRequests: [
+          depPRInRepo(),
+          makePullRequest({
+            id: 902,
+            nodeId: "PR_DEP_902",
+            repoFullName: "owner/other",
+            title: "Bump lodash from 4.17.20 to 4.17.21",
+            userLogin: "dependabot[bot]",
+            headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
+          }),
+        ],
         workflowRuns: [],
         errors: [],
       }),
@@ -5673,8 +5868,79 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     );
     const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
 
-    expect(() => render(() => <freshDashMod.default />)).not.toThrow();
+    render(() => <freshDashMod.default />);
     await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    const [, variables] = graphqlSpy.mock.calls[0] as [string, { ids: string[] }];
+    expect(variables.ids).toEqual(["DASH_CORRUPT"]);
+
+    // Valid cached entry still drives the owner/repo badge; the dropped corrupt entry
+    // (lodash) does not mark the owner/other PR abandoned.
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => expect(screen.getAllByText("Abandoned")).toHaveLength(1));
+  });
+
+  describe("loadDashboardBodyCache", () => {
+    const KEY = "github-tracker:dashboard-bodies";
+    const validDep = { datasource: "npm", packageName: "axios", lastUpdated: "2020-01-01" };
+    const validEntry = { updatedAt: "2026-04-01T00:00:00Z", deps: [validDep] };
+    let loadDashboardBodyCache: typeof import("../../src/app/components/dashboard/DashboardPage").loadDashboardBodyCache;
+
+    beforeEach(async () => {
+      ({ loadDashboardBodyCache } = await import("../../src/app/components/dashboard/DashboardPage"));
+    });
+
+    it.each(["{bad json", "[]", "42", "null", '"str"'])("returns an empty map for invalid or non-object root %s", (raw) => {
+      localStorage.setItem(KEY, raw);
+      expect(loadDashboardBodyCache().size).toBe(0);
+    });
+
+    it("keeps valid entries, drops each invalid entry independently, and strips unknown fields", () => {
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          DASH_OK: { ...validEntry, extra: "x", deps: [{ ...validDep, extra: 1 }] },
+          DASH_NUM_UPDATED_AT: { updatedAt: 12345, deps: [] },
+          DASH_EMPTY_UPDATED_AT: { updatedAt: "", deps: [] },
+          DASH_LONG_UPDATED_AT: { updatedAt: "x".repeat(65), deps: [] },
+          DASH_EMPTY_DATASOURCE: { ...validEntry, deps: [{ ...validDep, datasource: "" }] },
+          DASH_LONG_PACKAGE: { ...validEntry, deps: [{ ...validDep, packageName: "a".repeat(513) }] },
+          DASH_DEPS_NOT_ARRAY: { ...validEntry, deps: {} },
+          DASH_DEP_IS_ARRAY: { ...validEntry, deps: [[]] },
+          DASH_TOO_MANY_DEPS: { ...validEntry, deps: Array.from({ length: 201 }, () => validDep) },
+          DASH_ENTRY_IS_ARRAY: [],
+          ["k".repeat(129)]: validEntry,
+          constructor: validEntry,
+          prototype: validEntry,
+        })
+      );
+      const map = loadDashboardBodyCache();
+      expect([...map.keys()]).toEqual(["DASH_OK"]);
+      expect(map.get("DASH_OK")).toEqual(validEntry);
+    });
+
+    it("ignores an own __proto__ key", () => {
+      localStorage.setItem(KEY, `{"__proto__":${JSON.stringify(validEntry)},"DASH_OK":${JSON.stringify(validEntry)}}`);
+      expect([...loadDashboardBodyCache().keys()]).toEqual(["DASH_OK"]);
+    });
+
+    it("accepts boundary-length values and truncates to the first 500 valid entries", () => {
+      const boundary = {
+        updatedAt: "x".repeat(64),
+        deps: Array.from({ length: 200 }, () => ({
+          datasource: "d".repeat(128),
+          packageName: "p".repeat(512),
+          lastUpdated: "l".repeat(64),
+        })),
+      };
+      const obj: Record<string, unknown> = { ["k".repeat(128)]: boundary, DASH_BAD: { updatedAt: 1, deps: [] } };
+      for (let i = 0; i < 500; i++) obj[`DASH_${i}`] = validEntry;
+      localStorage.setItem(KEY, JSON.stringify(obj));
+      const map = loadDashboardBodyCache();
+      expect(map.size).toBe(500);
+      expect(map.get("k".repeat(128))).toEqual(boundary);
+      expect(map.has("DASH_498")).toBe(true);
+      expect(map.has("DASH_499")).toBe(false);
+    });
   });
 
   it("defers depBodies GraphQL fetch during onLightData while all PRs have enriched === false and isRefreshing() is true, then fetches when enrichment completes", async () => {
@@ -5764,6 +6030,109 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     });
 
     await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it("suppresses the Dependencies 'Checking status' badge on light PRs while enrichment is pending, then shows it for PRs still unenriched after the refresh", async () => {
+    const user = userEvent.setup();
+    const [isRefreshingSig, setIsRefreshingSig] = createSignal(true);
+    let resolveFullFetch: ((data: DashboardData) => void) | null = null;
+    const lightDepPR = () =>
+      makePullRequest({
+        id: 960,
+        nodeId: "PR_DEP_960",
+        repoFullName: "owner/repo",
+        title: "Bump lodash from 4.17.20 to 4.17.21",
+        userLogin: "dependabot[bot]",
+        headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
+        enriched: false,
+        checkStatus: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+    vi.mocked(pollService.fetchAllData).mockImplementation((onLightData) => {
+      onLightData?.({ issues: [], pullRequests: [lightDepPR()], workflowRuns: [], errors: [] });
+      return new Promise<DashboardData>((resolve) => {
+        resolveFullFetch = resolve;
+      });
+    });
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+      const wrappedFetchAll = async () => {
+        setIsRefreshingSig(true);
+        try {
+          const res = await fetchAll();
+          setLastRefreshAt(new Date());
+          return res;
+        } finally {
+          setIsRefreshingSig(false);
+        }
+      };
+      capturedFetchAll = wrappedFetchAll;
+      void wrappedFetchAll().catch(() => {});
+      return { isRefreshing: isRefreshingSig, lastRefreshAt, manualRefresh: vi.fn(), destroy: vi.fn() };
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => expect(document.getElementById("dep-group-needs-action")).not.toBeNull());
+    // Light results set loading: false, but enrichment is still pending — no badge flash
+    expect(screen.queryByText("Checking status")).toBeNull();
+
+    // Full fetch resolves with the PR still unenriched (degraded) and isRefreshing → false
+    resolveFullFetch!({ issues: [], pullRequests: [lightDepPR()], workflowRuns: [], errors: [] });
+    await waitFor(() => expect(screen.getAllByText("Checking status")).toHaveLength(1));
+  });
+
+  it("suppresses the Dependencies 'Checking status' badge while the dashboard is still loading from a cached snapshot", async () => {
+    const user = userEvent.setup();
+    // Snapshot without lastRefreshedAt: pollFetch keeps `loading: true` until the first fetch resolves
+    localStorage.setItem(
+      "github-tracker:dashboard",
+      JSON.stringify({
+        _v: 2,
+        issues: [],
+        pullRequests: [
+          makePullRequest({
+            id: 970,
+            nodeId: "PR_DEP_970",
+            repoFullName: "owner/repo",
+            title: "Bump lodash from 4.17.20 to 4.17.21",
+            userLogin: "dependabot[bot]",
+            headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
+            enriched: false,
+            checkStatus: null,
+            updatedAt: new Date().toISOString(),
+          }),
+        ],
+        workflowRuns: [],
+      })
+    );
+
+    vi.resetModules();
+    vi.doMock("../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockImplementation(() => new Promise<DashboardData>(() => {})),
+      createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+        void fetchAll().catch(() => {});
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        };
+      }),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+    }));
+    const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
+
+    render(() => <freshDashMod.default />);
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => expect(document.getElementById("dep-group-needs-action")).not.toBeNull());
+    expect(screen.queryByText("Checking status")).toBeNull();
   });
 });
 

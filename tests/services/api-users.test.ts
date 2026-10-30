@@ -86,7 +86,7 @@ function makeSearchPage(repoNames: string[], hasNextPage = false) {
         changedFiles: 0,
         reviewThreads: { totalCount: 0 },
         latestReviews: { totalCount: 0, nodes: [] },
-        commits: { nodes: [] },
+        statusCheckRollup: null,
       })),
     },
     rateLimit: { remaining: 4990, resetAt: "2024-01-01T01:00:00Z" },
@@ -517,7 +517,7 @@ function makeBackfillResponse(databaseIds: number[] = []) {
       changedFiles: 1,
       comments: { totalCount: 0 },
       reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
     })),
     rateLimit: { remaining: 4980, resetAt: "2024-01-01T01:00:00Z" },
   };
@@ -565,7 +565,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined, [makeTrackedUser("trackeduser")]
+      octokit as never, [repo], "mainuser", { trackedUsers: [makeTrackedUser("trackeduser")] }
     );
 
     expect(result.issues).toHaveLength(1);
@@ -601,7 +601,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined, [makeTrackedUser("trackeduser")]
+      octokit as never, [repo], "mainuser", { trackedUsers: [makeTrackedUser("trackeduser")] }
     );
 
     expect(result.issues).toHaveLength(2);
@@ -644,8 +644,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined,
-      [makeTrackedUser("usera"), makeTrackedUser("userb")]
+      octokit as never, [repo], "mainuser", { trackedUsers: [makeTrackedUser("usera"), makeTrackedUser("userb")] }
     );
 
     const shared = result.issues.find((i) => i.id === sharedId);
@@ -673,7 +672,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined, []
+      octokit as never, [repo], "mainuser", { trackedUsers: [] }
     );
 
     expect(result.issues).toHaveLength(1);
@@ -701,7 +700,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined, [makeTrackedUser("trackeduser")]
+      octokit as never, [repo], "mainuser", { trackedUsers: [makeTrackedUser("trackeduser")] }
     );
 
     // Main user's issue is still returned
@@ -733,7 +732,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "mainuser", undefined, [makeTrackedUser("trackeduser")]
+      octokit as never, [repo], "mainuser", { trackedUsers: [makeTrackedUser("trackeduser")] }
     );
 
     expect(result.pullRequests).toHaveLength(1);
@@ -754,8 +753,7 @@ describe("multi-user search", () => {
       octokit as never,
       [], // empty repos — tracked user searches are also repo-scoped
       "mainuser",
-      undefined,
-      [makeTrackedUser("trackeduser")]
+      { trackedUsers: [makeTrackedUser("trackeduser")] }
     );
 
     expect(result.issues).toEqual([]);
@@ -777,7 +775,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [repo], "MainUser", undefined, [makeTrackedUser("TrackedUser")]
+      octokit as never, [repo], "MainUser", { trackedUsers: [makeTrackedUser("TrackedUser")] }
     );
 
     expect(result.issues[0].surfacedBy).toEqual(["mainuser", "trackeduser"]);
@@ -800,8 +798,7 @@ describe("multi-user search", () => {
       octokit as never,
       [repo],
       "mainuser",
-      (data) => { lightDataSurfacedBy = data.issues[0]?.surfacedBy; },
-      []
+      { onLightData: (data) => { lightDataSurfacedBy = data.issues[0]?.surfacedBy; }, trackedUsers: [] }
     );
 
     // surfacedBy must be set when onLightData fires
@@ -815,7 +812,7 @@ describe("multi-user search", () => {
     );
 
     const result = await fetchIssuesAndPullRequests(
-      octokit as never, [], "mainuser", undefined, []
+      octokit as never, [], "mainuser", { trackedUsers: [] }
     );
 
     expect(result.issues).toEqual([]);

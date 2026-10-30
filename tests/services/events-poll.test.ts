@@ -62,6 +62,7 @@ vi.mock("../../src/app/services/api", () => ({
   resetEmptyActionRepos: vi.fn(),
   resetPREnrichmentCache: vi.fn(),
   invalidatePREnrichmentCacheForRepos: (...args: unknown[]) => mockInvalidatePREnrichmentCacheForRepos(...args),
+  setPREnrichmentCacheRefreshInterval: vi.fn(),
 }));
 
 import { fetchHotPRStatus, fetchWorkflowRunById } from "../../src/app/services/api";
@@ -177,7 +178,7 @@ describe("fetchTargetedRepoData", () => {
     expect(calledRepos).toContainEqual(expect.objectContaining({ owner: "owner", name: "repo-a" }));
   });
 
-  it("forwards config.trackedUsers and config.monitoredRepos as 5th and 6th arguments to fetchIssuesAndPullRequests", async () => {
+  it("forwards config.trackedUsers and config.monitoredRepos in the fetchIssuesAndPullRequests options", async () => {
     const octokit = makeOctokit();
     mockGetClient.mockReturnValue(octokit);
     const { config } = await import("../../src/app/stores/config");
@@ -199,9 +200,7 @@ describe("fetchTargetedRepoData", () => {
         octokit,
         [{ owner: "owner", name: "repo-a", fullName: "owner/repo-a" }],
         "",
-        undefined,
-        trackedUsers,
-        monitoredRepos,
+        { trackedUsers, monitoredRepos },
       );
     } finally {
       (config as { trackedUsers: unknown[]; monitoredRepos: unknown[] }).trackedUsers = [];

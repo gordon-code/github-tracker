@@ -13,12 +13,17 @@ import {
   discoverUpstreamRepos,
   fetchIssuesAndPullRequests,
   fallbackToPreviousEnrichment,
+  isSameRevision,
+  hasRevisionChanged,
+  markCheckStatusStale,
   resetPREnrichmentCache,
   invalidatePREnrichmentCacheForRepos,
   evictPREnrichmentCacheNode,
   HEAVY_BACKFILL_BATCH_SIZE,
   MIN_SPLIT_BATCH_SIZE,
-  ENRICHMENT_CACHE_TTL_MS,
+  SPLIT_SUPPRESSION_BATCH_THRESHOLD,
+  MIN_ENRICHMENT_CACHE_TTL_MS,
+  setPREnrichmentCacheRefreshInterval,
   type RepoRef,
 } from "../../src/app/services/api";
 import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION } from "../../src/app/services/github";
@@ -850,9 +855,7 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
       octokit as never,
       [],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
     expect(result.issues).toEqual([]);
     expect(result.pullRequests).toEqual([]);
@@ -882,9 +885,7 @@ describe("fetchIssuesAndPullRequests — monitoredRepos", () => {
       octokit as never,
       [monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
 
     // Unfiltered queries should not contain 'involves:'
@@ -935,9 +936,8 @@ describe("fetchIssuesAndPullRequests — all repos monitored (edge case)", () =>
       octokit as never,
       [repo],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
+      // all repos monitored
+      { monitoredRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }] }
     );
 
     // Items returned from unfiltered search
@@ -1030,9 +1030,7 @@ describe("fetchIssuesAndPullRequests — cross-feature: monitored repo + bot tra
       octokit as never,
       [normalRepo, monitoredRepo],
       "octocat",
-      undefined,
-      [botUser],
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { trackedUsers: [botUser], monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
 
     // Both issues are present (no dedup since different IDs)
@@ -1131,9 +1129,7 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       octokit as never,
       [monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
 
     // Partial issue data recovered
@@ -1168,9 +1164,7 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       octokit as never,
       [monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
 
     // No results recovered
@@ -1231,9 +1225,7 @@ describe("fetchIssuesAndPullRequests — unfiltered search error handling", () =
       octokit as never,
       [monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [{ owner: "org", name: "monitored", fullName: "org/monitored" }]
+      { monitoredRepos: [{ owner: "org", name: "monitored", fullName: "org/monitored" }] }
     );
 
     // PR data recovered from partial response
@@ -1272,9 +1264,8 @@ describe("fetchIssuesAndPullRequests — all monitored + tracked users skips inv
       octokit as never,
       [repo],
       "octocat",
-      undefined,
-      [botUser],
-      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
+      // all repos monitored
+      { trackedUsers: [botUser], monitoredRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }] }
     );
 
     // No involves: queries for tracked user (since normalRepos is empty, tracked search is skipped)
@@ -1317,9 +1308,8 @@ describe("fetchIssuesAndPullRequests — onLightData suppression when all monito
       octokit as never,
       [repo],
       "octocat",
-      onLightData,
-      undefined,
-      [{ owner: "org", name: "repo1", fullName: "org/repo1" }]  // all repos monitored
+      // all repos monitored
+      { onLightData, monitoredRepos: [{ owner: "org", name: "repo1", fullName: "org/repo1" }] }
     );
 
     // onLightData NOT called (main user search skipped, unfiltered results come after)
@@ -1422,7 +1412,7 @@ describe("fetchPREnrichment — autoMergeMethod and viewer review fields", () =>
             changedFiles: 1,
             comments: { totalCount: 0 },
             reviewThreads: { totalCount: 0 },
-            commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+            statusCheckRollup: { state: "SUCCESS" },
             autoMergeRequest: { mergeMethod: "SQUASH" },
             viewerLatestReview: { state: "CHANGES_REQUESTED" },
             viewerLatestReviewRequest: { id: "RR_kwDOtest101" },
@@ -1440,7 +1430,7 @@ describe("fetchPREnrichment — autoMergeMethod and viewer review fields", () =>
             changedFiles: 1,
             comments: { totalCount: 0 },
             reviewThreads: { totalCount: 0 },
-            commits: { nodes: [] },
+            statusCheckRollup: null,
             autoMergeRequest: { mergeMethod: "MERGE" },
             viewerLatestReview: { state: "APPROVED" },
             viewerLatestReviewRequest: null,
@@ -1458,7 +1448,7 @@ describe("fetchPREnrichment — autoMergeMethod and viewer review fields", () =>
             changedFiles: 1,
             comments: { totalCount: 0 },
             reviewThreads: { totalCount: 0 },
-            commits: { nodes: [] },
+            statusCheckRollup: null,
             autoMergeRequest: { mergeMethod: "REBASE" },
             viewerLatestReview: { state: "UNKNOWN_STATE" },
             viewerLatestReviewRequest: null,
@@ -1476,7 +1466,7 @@ describe("fetchPREnrichment — autoMergeMethod and viewer review fields", () =>
             changedFiles: 1,
             comments: { totalCount: 0 },
             reviewThreads: { totalCount: 0 },
-            commits: { nodes: [] },
+            statusCheckRollup: null,
             autoMergeRequest: { mergeMethod: "INVALID" },
             viewerLatestReview: null,
             viewerLatestReviewRequest: null,
@@ -1684,7 +1674,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
       changedFiles: 2,
       comments: { totalCount: 1 },
       reviewThreads: { totalCount: 0 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
       autoMergeRequest: null,
       viewerLatestReview: null,
       viewerLatestReviewRequest: null,
@@ -1733,7 +1723,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
         callBatchSizes.push(ids.length);
         allRetriesFlags.push(vars.request?.retries);
         if (ids.length > MIN_SPLIT_BATCH_SIZE) {
-          throw new TypeError("Failed to fetch");
+          throw Object.assign(new Error("Bad Gateway"), { status: 502 });
         }
         return {
           nodes: ids.map((id) => {
@@ -1757,6 +1747,160 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(callBatchSizes).toContain(25);
     expect(callBatchSizes).toContain(12);
     expect(callBatchSizes).toContain(13);
+  });
+
+  it.each([
+    [
+      "status-500 RequestError with a TypeError cause",
+      () => Object.assign(new Error("Failed to fetch", { cause: new TypeError("Failed to fetch") }), { status: 500 }),
+    ],
+    ["bare TypeError", () => new TypeError("Failed to fetch")],
+  ])(
+    "splits a batch that fails with 'Failed to fetch' (CORS-masked gateway 502/504) as a %s",
+    async (_label, makeError) => {
+      const heavySizes: number[] = [];
+      const octokit = makeOctokit(
+        async () => ({ data: {} }),
+        async (query: string, variables?: unknown) => {
+          const ids = (variables as { ids: string[] }).ids;
+          if (query.includes("statusCheckRollup")) {
+            heavySizes.push(ids.length);
+            if (ids.length > MIN_SPLIT_BATCH_SIZE) throw makeError();
+          }
+          return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+        }
+      );
+
+      const nodeIds = Array.from({ length: 25 }, (_, i) => `PR_${i + 1}`);
+      const { enrichments, errors } = await fetchPREnrichment(octokit as never, nodeIds);
+
+      expect(heavySizes).toContain(12);
+      expect(heavySizes).toContain(13);
+      expect(enrichments.size).toBe(25);
+      expect(enrichments.get(1)?.checkStatusStale).toBeFalsy();
+      expect(errors).toEqual([]);
+    }
+  );
+
+  it("still splits when the heavy request hit the per-attempt fetch timeout (TimeoutError cause)", async () => {
+    const callBatchSizes: number[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables?: unknown) => {
+        const ids = (variables as { ids: string[] }).ids;
+        callBatchSizes.push(ids.length);
+        if (ids.length > MIN_SPLIT_BATCH_SIZE) {
+          throw Object.assign(
+            new Error("signal timed out", { cause: new DOMException("signal timed out", "TimeoutError") }),
+            { status: 500 },
+          );
+        }
+        return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+      }
+    );
+
+    const nodeIds = Array.from({ length: 25 }, (_, i) => `PR_${i + 1}`);
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, nodeIds);
+
+    expect(callBatchSizes).toContain(12);
+    expect(callBatchSizes).toContain(13);
+    expect(enrichments.size).toBe(25);
+    expect(errors).toEqual([]);
+  });
+
+  it("stops splitting once SPLIT_SUPPRESSION_BATCH_THRESHOLD batches have failed with no heavy node resolved", async () => {
+    expect(SPLIT_SUPPRESSION_BATCH_THRESHOLD).toBe(2);
+    const heavySizes: number[] = [];
+    const lightSizes: number[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const ids = (variables as { ids: string[] }).ids;
+        if (query.includes("statusCheckRollup")) {
+          heavySizes.push(ids.length);
+          throw Object.assign(new Error("Bad Gateway"), { status: 502 });
+        }
+        lightSizes.push(ids.length);
+        return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+      }
+    );
+
+    const nodeIds = Array.from({ length: 75 }, (_, i) => `PR_${i + 1}`);
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, nodeIds);
+
+    // Batch 1 fails first and splits once (12/13); batches 2 and 3 reach the threshold and
+    // go straight to light, as do batch 1's halves. No second-level splits occur.
+    expect(heavySizes.filter((n) => n === 25)).toHaveLength(3);
+    expect(heavySizes.filter((n) => n < 12)).toEqual([]);
+    expect(heavySizes).toHaveLength(5);
+    expect(lightSizes).toHaveLength(4);
+    expect(lightSizes.reduce((a, b) => a + b, 0)).toBe(75);
+    expect(enrichments.size).toBe(75);
+    expect(errors).toHaveLength(3);
+    expect(errors.every((e) => e.retryable)).toBe(true);
+  });
+
+  it("keeps splitting failing batches once any heavy node has resolved in the same call", async () => {
+    const heavySizes: number[] = [];
+    const lightSizes: number[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const ids = (variables as { ids: string[] }).ids;
+        if (query.includes("statusCheckRollup")) {
+          heavySizes.push(ids.length);
+          // Batch 1 (PR_1..PR_25) succeeds; batches 2 and 3 fail until split down to <= 6
+          const inFirstBatch = Number(ids[0].replace("PR_", "")) <= 25;
+          if (!inFirstBatch && ids.length > MIN_SPLIT_BATCH_SIZE) {
+            throw Object.assign(new Error("Bad Gateway"), { status: 502 });
+          }
+          return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+        }
+        lightSizes.push(ids.length);
+        return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+      }
+    );
+
+    const nodeIds = Array.from({ length: 75 }, (_, i) => `PR_${i + 1}`);
+    const { enrichments, errors } = await fetchPREnrichment(octokit as never, nodeIds);
+
+    // Batch 3 is the second failing batch but still splits because batch 1 resolved heavy nodes
+    expect(heavySizes.filter((n) => n < 12).length).toBeGreaterThan(0);
+    expect(lightSizes).toEqual([]);
+    expect(enrichments.size).toBe(75);
+    expect(errors).toEqual([]);
+  });
+
+  it("does not count light-fallback nodes as resolved heavy nodes when deciding whether to split", async () => {
+    const batch3HeavySizes: number[] = [];
+    let lightCalls = 0;
+    let releaseBatch3!: () => void;
+    const batch3Released = new Promise<void>((resolve) => { releaseBatch3 = resolve; });
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const ids = (variables as { ids: string[] }).ids;
+        if (query.includes("statusCheckRollup")) {
+          if (ids.includes("PR_51")) {
+            batch3HeavySizes.push(ids.length);
+            // Hold batch 3's failure until batches 1-2 have fallen back to light and been ingested
+            await batch3Released;
+          }
+          throw Object.assign(new Error("Bad Gateway"), { status: 502 });
+        }
+        lightCalls++;
+        // Batch 1 splits once (2 light leaves) and batch 2 goes straight to light: 3 light calls
+        if (lightCalls === 3) setTimeout(releaseBatch3, 0);
+        return { nodes: ids.map((id) => buildHeavyNode(Number(id.replace("PR_", "")), id)) };
+      }
+    );
+
+    const nodeIds = Array.from({ length: 75 }, (_, i) => `PR_${i + 1}`);
+    const { enrichments } = await fetchPREnrichment(octokit as never, nodeIds);
+
+    expect(lightCalls).toBe(4);
+    expect(batch3HeavySizes).toEqual([25]);
+    expect(enrichments.size).toBe(75);
   });
 
   it("short-circuits immediately without splitting or calling LIGHT_PR_BACKFILL_QUERY when a batch fails with a non-retryable 401/403 status", async () => {
@@ -1908,7 +2052,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
                   autoMergeRequest: null,
                   viewerLatestReview: null,
                   viewerLatestReviewRequest: null,
-                  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+                  statusCheckRollup: { state: "SUCCESS" },
                 },
                 {
                   id: "PR_node_2",
@@ -1927,7 +2071,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
                   autoMergeRequest: null,
                   viewerLatestReview: null,
                   viewerLatestReviewRequest: null,
-                  commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+                  statusCheckRollup: { state: "SUCCESS" },
                 },
               ],
             },
@@ -2009,7 +2153,6 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
               viewerLatestReview: null,
               viewerLatestReviewRequest: null,
               statusCheckRollup: { state: "FAILURE" },
-              commits: { nodes: null },
             },
             {
               id: "PR_direct_success",
@@ -2088,9 +2231,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
               nodes: [
                 ...ids.slice(0, 8).map((id, idx) =>
                   buildHeavyNode(idx + 1, id, {
-                    statusCheckRollup: { state: "SUCCESS" },
-                    commits: undefined,
-                  })
+                    statusCheckRollup: { state: "SUCCESS" },                  })
                 ),
                 {
                   id: "PR_9",
@@ -2106,9 +2247,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
                   changedFiles: 1,
                   comments: { totalCount: 0 },
                   reviewThreads: { totalCount: 0 },
-                  statusCheckRollup: null,
-                  commits: { nodes: null },
-                },
+                  statusCheckRollup: null,                },
               ],
             },
           });
@@ -2119,9 +2258,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
           nodes: [
             buildHeavyNode(9, "PR_9", {
               headRefOid: "sha-9-fresh",
-              statusCheckRollup: { state: "FAILURE" },
-              commits: undefined,
-            }),
+              statusCheckRollup: { state: "FAILURE" },            }),
           ],
         };
       }
@@ -2199,9 +2336,9 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
   });
 });
 
-// ── fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache ─────────
+// ── fetchIssuesAndPullRequests — settled-PR enrichment cache ─────────────────
 
-describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", () => {
+describe("fetchIssuesAndPullRequests — settled-PR enrichment cache", () => {
   function makeLightPR(overrides: Record<string, unknown> = {}) {
     return {
       id: "PR_kwDOcache42",
@@ -2238,7 +2375,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       changedFiles: 3,
       comments: { totalCount: 2 },
       reviewThreads: { totalCount: 1 },
-      commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      statusCheckRollup: { state: "SUCCESS" },
       autoMergeRequest: null,
       viewerLatestReview: { state: "APPROVED" },
       viewerLatestReviewRequest: null,
@@ -2246,7 +2383,40 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
     };
   }
 
-  it("serves settled PRs (including settled fork PRs) from cache within 3 minutes without re-running HEAVY_PR_BACKFILL_QUERY or fork check", async () => {
+  it("excludes archived repos from every repo-scoped search query (involves, review-requested, monitored)", async () => {
+    const searchQueries: string[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) return { nodes: [makeHeavyPR()] };
+        for (const key of ["issueQ", "prInvQ", "prRevQ", "prQ"]) {
+          if (typeof vars[key] === "string") searchQueries.push(vars[key]);
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [makeLightPR()] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prs: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+    const monitoredRepo: RepoRef = { owner: "org", name: "monitored", fullName: "org/monitored" };
+
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo, monitoredRepo], "octocat", {
+      monitoredRepos: [monitoredRepo],
+    });
+
+    // 3 light-search queries (issues, involves, review-requested) + 2 unfiltered (issues, prs)
+    expect(searchQueries.length).toBeGreaterThanOrEqual(5);
+    expect(searchQueries.some((q) => q.includes("review-requested:octocat"))).toBe(true);
+    expect(searchQueries.some((q) => q.includes("repo:org/monitored") && !q.includes("involves:"))).toBe(true);
+    for (const q of searchQueries) {
+      expect(q).toContain("archived:false");
+    }
+  });
+
+  it("serves settled PRs (including settled fork PRs) from cache within the TTL without re-running HEAVY_PR_BACKFILL_QUERY or fork check", async () => {
     let heavyCalls = 0;
     let forkCalls = 0;
 
@@ -2261,7 +2431,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
             nodes: [
               makeHeavyPR({
                 headRepository: { owner: { login: "fork-owner" }, nameWithOwner: "fork-owner/Hello-World" },
-                commits: { nodes: [] },
+                statusCheckRollup: null,
               }),
             ],
           };
@@ -2291,7 +2461,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
     expect(res1.pullRequests[0].enriched).toBe(true);
     expect(res1.pullRequests[0].checkStatus).toBe("success");
 
-    // Poll 2 within 3m with identical updatedAt and userLogin: hits cache, skips heavy backfill and fork check
+    // Poll 2 within the TTL with identical updatedAt and userLogin: hits cache, skips heavy backfill and fork check
     const res2 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
     expect(heavyCalls).toBe(1);
     expect(forkCalls).toBe(1);
@@ -2335,7 +2505,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       expect(heavyCalls).toBe(1);
 
       // 1. force = true bypasses cache
-      await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat", undefined, undefined, undefined, true);
+      await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat", { force: true });
       expect(heavyCalls).toBe(2);
 
       // 2. invalidatePREnrichmentCacheForRepos evicts repo entries
@@ -2353,8 +2523,8 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
       expect(heavyCalls).toBe(5);
 
-      // 5. 3-minute TTL expiration triggers re-fetch
-      vi.advanceTimersByTime(ENRICHMENT_CACHE_TTL_MS + 1);
+      // 5. TTL expiration (default 3-minute floor) triggers re-fetch
+      vi.advanceTimersByTime(MIN_ENRICHMENT_CACHE_TTL_MS + 1);
       await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
       expect(heavyCalls).toBe(6);
 
@@ -2385,7 +2555,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
             return {
               nodes: [
                 makeHeavyPR({
-                  commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+                  statusCheckRollup: { state: "PENDING" },
                 }),
               ],
             };
@@ -2458,7 +2628,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
             nodes: [
               makeHeavyPR({
                 headRepository: { owner: { login: "contributor" }, nameWithOwner: "contributor/Hello-World" },
-                commits: { nodes: [] },
+                statusCheckRollup: null,
               }),
             ],
           };
@@ -2617,9 +2787,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       octokit as never,
       [testRepo, monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [monitoredRepo]
+      { monitoredRepos: [monitoredRepo] }
     );
     expect(heavyCalls).toBe(2);
 
@@ -2628,9 +2796,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       octokit as never,
       [testRepo, monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [monitoredRepo]
+      { monitoredRepos: [monitoredRepo] }
     );
     expect(heavyCalls).toBe(2);
 
@@ -2639,9 +2805,7 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
       octokit as never,
       [monitoredRepo],
       "octocat",
-      undefined,
-      undefined,
-      [monitoredRepo]
+      { monitoredRepos: [monitoredRepo] }
     );
     expect(heavyCalls).toBe(2);
 
@@ -2658,5 +2822,159 @@ describe("fetchIssuesAndPullRequests — 3-minute settled-PR enrichment cache", 
     includeMainPr = true;
     await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
     expect(heavyCalls).toBe(3);
+  });
+
+  it("derives the TTL from the refresh interval (interval + 60s, floored at 3 minutes) so settled PRs survive the next scheduled poll", async () => {
+    vi.useFakeTimers();
+    let heavyCalls = 0;
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          heavyCalls++;
+          return { nodes: [makeHeavyPR()] };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [makeLightPR()] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+    const poll = () => fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+
+    try {
+      // Default 300s interval → 360s TTL
+      setPREnrichmentCacheRefreshInterval(300);
+      await poll();
+      expect(heavyCalls).toBe(1);
+
+      // Next scheduled poll at the maximum jittered interval (300s + 30s) hits the cache
+      vi.advanceTimersByTime(330_000);
+      await poll();
+      expect(heavyCalls).toBe(1);
+
+      // At interval + 60s the entry has expired
+      vi.advanceTimersByTime(30_000);
+      await poll();
+      expect(heavyCalls).toBe(2);
+
+      // Short intervals and auto-refresh off (0) fall back to the 3-minute floor
+      for (const intervalSec of [60, 0]) {
+        setPREnrichmentCacheRefreshInterval(intervalSec);
+        resetPREnrichmentCache();
+        const before = heavyCalls;
+        await poll();
+        expect(heavyCalls).toBe(before + 1);
+        vi.advanceTimersByTime(MIN_ENRICHMENT_CACHE_TTL_MS - 1);
+        await poll();
+        expect(heavyCalls).toBe(before + 1);
+        vi.advanceTimersByTime(1);
+        await poll();
+        expect(heavyCalls).toBe(before + 2);
+      }
+    } finally {
+      setPREnrichmentCacheRefreshInterval(0);
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips cache writes when the cache generation changes or the client is swapped while the backfill is in flight", async () => {
+    const githubModule = await import("../../src/app/services/github");
+    let heavyCalls = 0;
+    let holdHeavy = false;
+    const releaseHeavy: Array<() => void> = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          heavyCalls++;
+          if (holdHeavy) {
+            await new Promise<void>((resolve) => releaseHeavy.push(resolve));
+          }
+          return { nodes: [makeHeavyPR()] };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [makeLightPR()] },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+    const poll = () => fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+
+    // Starts a poll, waits until its heavy backfill is pending, runs `interrupt`, then resolves the backfill
+    const pollWithInterrupt = async (interrupt: () => void) => {
+      holdHeavy = true;
+      const callsBefore = heavyCalls;
+      const pending = poll();
+      await vi.waitFor(() => expect(heavyCalls).toBe(callsBefore + 1));
+      interrupt();
+      holdHeavy = false;
+      releaseHeavy.shift()!();
+      const res = await pending;
+      expect(res.pullRequests[0].enriched).toBe(true);
+    };
+
+    // 1. evictPREnrichmentCacheNode while the backfill is in flight: the result is not cached
+    await pollWithInterrupt(() => evictPREnrichmentCacheNode("PR_kwDOcache42"));
+    await poll();
+    expect(heavyCalls).toBe(2);
+    // Control: an uninterrupted poll's result is cached
+    await poll();
+    expect(heavyCalls).toBe(2);
+
+    // 2. invalidatePREnrichmentCacheForRepos while the backfill is in flight
+    resetPREnrichmentCache();
+    await pollWithInterrupt(() => invalidatePREnrichmentCacheForRepos(["octocat/Hello-World"]));
+    await poll();
+    expect(heavyCalls).toBe(4);
+
+    // 3. Client swapped (logout / re-auth) while the backfill is in flight
+    resetPREnrichmentCache();
+    const getClientSpy = vi.spyOn(githubModule, "getClient");
+    try {
+      await pollWithInterrupt(() => {
+        getClientSpy.mockReturnValue(makeOctokit(async () => ({ data: {} })) as never);
+      });
+    } finally {
+      getClientSpy.mockRestore();
+    }
+    await poll();
+    expect(heavyCalls).toBe(6);
+
+    // 4. getClient() returning the polling octokit permits the write
+    resetPREnrichmentCache();
+    const sameClientSpy = vi.spyOn(githubModule, "getClient").mockReturnValue(octokit as never);
+    try {
+      await poll();
+      await poll();
+    } finally {
+      sameClientSpy.mockRestore();
+    }
+    expect(heavyCalls).toBe(7);
+  });
+});
+
+describe("revision helpers", () => {
+  it("isSameRevision compares headSha when both known, else updatedAt", () => {
+    expect(isSameRevision({ headSha: "a", updatedAt: "t1" }, { headSha: "a", updatedAt: "t2" })).toBe(true);
+    expect(isSameRevision({ headSha: "a", updatedAt: "t1" }, { headSha: "b", updatedAt: "t1" })).toBe(false);
+    expect(isSameRevision({ headSha: "", updatedAt: "t1" }, { headSha: "b", updatedAt: "t1" })).toBe(true);
+    expect(isSameRevision({ headSha: "", updatedAt: "t1" }, { headSha: "b", updatedAt: "t2" })).toBe(false);
+  });
+
+  it("hasRevisionChanged flags an updatedAt change or differing known headShas", () => {
+    expect(hasRevisionChanged({ headSha: "a", updatedAt: "t1" }, { headSha: "a", updatedAt: "t2" })).toBe(true);
+    expect(hasRevisionChanged({ headSha: "a", updatedAt: "t1" }, { headSha: "b", updatedAt: "t1" })).toBe(true);
+    expect(hasRevisionChanged({ headSha: "", updatedAt: "t1" }, { headSha: "b", updatedAt: "t1" })).toBe(false);
+  });
+
+  it("markCheckStatusStale clears headSha/checkStatus and sets the stale flag in place", () => {
+    const pr = makePullRequest({ headSha: "abc", checkStatus: "success", checkStatusStale: false });
+    expect(markCheckStatusStale(pr)).toBe(pr);
+    expect(pr).toMatchObject({ headSha: "", checkStatus: null, checkStatusStale: true });
   });
 });

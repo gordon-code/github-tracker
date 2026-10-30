@@ -89,7 +89,13 @@ export interface PullRequest {
   starCount?: number;
   /** False when only light fields are loaded (phase 1); true/undefined when fully enriched */
   enriched?: boolean;
-  /** True when enriched via the lightweight backfill query (omitting CI check rollup) */
+  /**
+   * True when CI check status for the PR's current revision is unverified: set by
+   * the lightweight backfill fallback (no check rollup), a failed fork rollup
+   * lookup, or carried-forward enrichment whose revision changed or was already
+   * stale. Cleared by a hot-poll status update or a successful backfill; while set, the PR is hot-polled
+   * and approve/mergeable gating treats CI as unknown.
+   */
   checkStatusStale?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;

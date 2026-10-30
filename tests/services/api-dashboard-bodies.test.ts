@@ -5,6 +5,7 @@ import {
   GRAPHQL_BODY_FETCH_TIMEOUT_MS,
   BODY_FETCH_BATCH_SIZE,
   BODY_FETCH_NOTIFICATION_THRESHOLD,
+  MIN_SPLIT_BATCH_SIZE,
   resetPREnrichmentCache,
   resetBodyFetchFailures,
   GraphqlFetchTimeoutError,
@@ -337,6 +338,33 @@ describe("fetchDashboardIssueBodies — GraphQL error handling", () => {
     }
   });
 
+  it.each([
+    [
+      "status-500 RequestError with a TypeError cause",
+      () => Object.assign(new Error("Failed to fetch", { cause: new TypeError("Failed to fetch") }), { status: 500 }),
+    ],
+    ["bare TypeError", () => new TypeError("Failed to fetch")],
+  ])(
+    "binary-splits a batch that fails with 'Failed to fetch' (CORS-masked gateway 502/504) as a %s",
+    async (_label, makeError) => {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const batchSizes: number[] = [];
+      const octokit = makeOctokit(async (_query: string, variables: unknown) => {
+        const batchIds = (variables as { ids: string[] }).ids;
+        batchSizes.push(batchIds.length);
+        if (batchIds.length > MIN_SPLIT_BATCH_SIZE) throw makeError();
+        return { nodes: batchIds.map((id) => ({ id, body: `body-${id}` })), rateLimit: null };
+      });
+
+      const result = await fetchDashboardIssueBodies(octokit, ids);
+
+      expect(batchSizes).toContain(12);
+      expect(batchSizes).toContain(13);
+      expect(result.bodies.size).toBe(BODY_FETCH_BATCH_SIZE);
+      expect(result.failedIds.size).toBe(0);
+    }
+  );
+
   it("salvages resolved nodes from partial err.data.nodes before computing remainingIds", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -452,6 +480,39 @@ describe("fetchDashboardIssueBodies — hung request timeout", () => {
       expect(warnSpy).toHaveBeenCalled();
       expect(captureException).toHaveBeenCalled();
       expect(pushNotification).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a hung multi-node batch on timeout and marks every id failed without binary-splitting", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ids = Array.from({ length: BODY_FETCH_BATCH_SIZE }, (_, i) => `N_${i}`);
+      const requests: Array<{ signal?: AbortSignal; retries?: number }> = [];
+      const octokit = makeOctokit((_query: string, variables: unknown) => {
+        const { request } = variables as { request?: { signal?: AbortSignal; retries?: number } };
+        requests.push(request ?? {});
+        return new Promise(() => {});
+      });
+      vi.mocked(getClient).mockReturnValue(null);
+
+      const resultPromise = fetchDashboardIssueBodies(octokit, ids);
+      await vi.advanceTimersByTimeAsync(GRAPHQL_BODY_FETCH_TIMEOUT_MS);
+      const result = await resultPromise;
+
+      expect(octokit.graphql).toHaveBeenCalledTimes(1);
+      expect(requests[0].retries).toBe(0);
+      expect(requests[0].signal?.aborted).toBe(true);
+      expect(result.bodies.size).toBe(0);
+      expect([...result.failedIds]).toEqual(ids);
+      expect(captureException).toHaveBeenCalledTimes(1);
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(GraphqlFetchTimeoutError),
+        { tags: { source: "dashboardBodies" } }
+      );
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();

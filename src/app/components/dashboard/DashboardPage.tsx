@@ -1,5 +1,6 @@
 import { createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, unwrap } from "solid-js/store";
+import { z } from "zod";
 import Header from "../layout/Header";
 import TabBar, { type TabId } from "../layout/TabBar";
 import FilterBar from "../layout/FilterBar";
@@ -14,8 +15,8 @@ import DependenciesTab from "./DependenciesTab";
 import { isDependencyPr, expandBotLogins, needsBodyFallback, parseRenovateBody, type VersionInfo } from "../../lib/dependency-detection";
 import { isRepoExcludedFromDependencies } from "../../lib/dependency-exclusion";
 import { findDashboardIssues, parseAbandonedSection, resetAbandonedPatternCache, type AbandonedDependency } from "../../lib/dependency-dashboard";
-import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode, resetBodyFetchFailures } from "../../services/api";
-import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE, DASHBOARD_BODIES_STORAGE_KEY } from "../../../shared/types";
+import { fetchDashboardIssueBodies, fetchDepPRBodies, fallbackToPreviousEnrichment, pickEnrichmentFields, isSameRevision, hasRevisionChanged, markCheckStatusStale, isBackfillError, hasDegradedEnrichment, pushEnrichmentDegraded, approvePullRequest, markPullRequestReady, evictPREnrichmentCacheNode, resetBodyFetchFailures } from "../../services/api";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, DASHBOARD_BODIES_STORAGE_KEY } from "../../../shared/types";
 import type { SortOption } from "../shared/SortDropdown";
 import type { Issue, PullRequest, WorkflowRun, HotPRStatusUpdate } from "../../services/api";
 import { fetchOrgs } from "../../services/api";
@@ -177,45 +178,41 @@ function persistDepMeta(meta: ReadonlyMap<number, VersionInfo>): void {
 }
 
 const MAX_DASHBOARD_BODY_CACHE_ENTRIES = 500;
+const MAX_DASHBOARD_BODY_CACHE_KEY_LENGTH = 128;
+const MAX_ABANDONED_DEPS_PER_ENTRY = 200;
+const MAX_DATASOURCE_LENGTH = 128;
+const MAX_PACKAGE_NAME_LENGTH = 512;
+const MAX_TIMESTAMP_LENGTH = 64;
 const DISALLOWED_CACHE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-interface CachedDashboardBodyEntry {
-  updatedAt: string;
-  deps: AbandonedDependency[];
-}
+const AbandonedDependencySchema = z.object({
+  datasource: z.string().min(1).max(MAX_DATASOURCE_LENGTH),
+  packageName: z.string().min(1).max(MAX_PACKAGE_NAME_LENGTH),
+  lastUpdated: z.string().min(1).max(MAX_TIMESTAMP_LENGTH),
+});
 
-function isValidAbandonedDep(val: unknown): val is AbandonedDependency {
-  if (!val || typeof val !== "object" || Array.isArray(val)) return false;
-  const d = val as Record<string, unknown>;
-  return (
-    typeof d.datasource === "string" &&
-    d.datasource.length > 0 &&
-    d.datasource.length <= 128 &&
-    typeof d.packageName === "string" &&
-    d.packageName.length > 0 &&
-    d.packageName.length <= 512 &&
-    typeof d.lastUpdated === "string" &&
-    d.lastUpdated.length > 0 &&
-    d.lastUpdated.length <= 64
-  );
-}
+const CachedDashboardBodyEntrySchema = z.object({
+  updatedAt: z.string().min(1).max(MAX_TIMESTAMP_LENGTH),
+  deps: z.array(AbandonedDependencySchema).max(MAX_ABANDONED_DEPS_PER_ENTRY),
+});
 
-function loadDashboardBodyCache(): Map<string, CachedDashboardBodyEntry> {
+type CachedDashboardBodyEntry = z.infer<typeof CachedDashboardBodyEntrySchema>;
+
+// Root is validated loosely so one corrupt entry does not discard the rest of the cache.
+const DashboardBodyCacheRootSchema = z.record(z.string(), z.unknown());
+
+export function loadDashboardBodyCache(): Map<string, CachedDashboardBodyEntry> {
   try {
     const raw = localStorage.getItem?.(DASHBOARD_BODIES_STORAGE_KEY);
     if (!raw) return new Map();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    const root = DashboardBodyCacheRootSchema.safeParse(JSON.parse(raw) as unknown);
+    if (!root.success) return new Map();
     const map = new Map<string, CachedDashboardBodyEntry>();
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(root.data)) {
       if (map.size >= MAX_DASHBOARD_BODY_CACHE_ENTRIES) break;
-      if (!k || k.length > 128 || DISALLOWED_CACHE_KEYS.has(k)) continue;
-      if (!v || typeof v !== "object" || Array.isArray(v)) continue;
-      const entry = v as Record<string, unknown>;
-      if (typeof entry.updatedAt !== "string" || entry.updatedAt.length === 0 || entry.updatedAt.length > 64) continue;
-      if (!Array.isArray(entry.deps) || entry.deps.length > 200) continue;
-      if (!entry.deps.every(isValidAbandonedDep)) continue;
-      map.set(k, { updatedAt: entry.updatedAt, deps: entry.deps });
+      if (!k || k.length > MAX_DASHBOARD_BODY_CACHE_KEY_LENGTH || DISALLOWED_CACHE_KEYS.has(k)) continue;
+      const entry = CachedDashboardBodyEntrySchema.safeParse(v);
+      if (entry.success) map.set(k, entry.data);
     }
     return map;
   } catch {
@@ -519,9 +516,7 @@ async function pollFetch(force = false): Promise<DashboardData> {
             const regressing = e.enriched === false && pr.enriched !== false;
             if (!regressing) {
               const sameRevision =
-                pr.enriched !== false &&
-                !pr.checkStatusStale &&
-                (pr.headSha && e.headSha ? pr.headSha === e.headSha : pr.updatedAt === e.updatedAt);
+                pr.enriched !== false && !pr.checkStatusStale && isSameRevision(pr, e);
               const prevCheckStatus = pr.checkStatus;
               Object.assign(pr, pickEnrichmentFields(e));
               pr.checkStatusStale = e.checkStatusStale;
@@ -537,17 +532,11 @@ async function pollFetch(force = false): Promise<DashboardData> {
               pr.draft = e.draft;
               pr.enriched = e.enriched;
             } else {
-              const revisionChanged =
-                pr.updatedAt !== e.updatedAt ||
-                (Boolean(pr.headSha) && Boolean(e.headSha) && pr.headSha !== e.headSha);
+              const revisionChanged = hasRevisionChanged(pr, e);
               pr.updatedAt = e.updatedAt;
               pr.reviewDecision = e.reviewDecision;
               pr.draft = e.draft;
-              if (revisionChanged || pr.checkStatusStale) {
-                pr.headSha = "";
-                pr.checkStatus = null;
-                pr.checkStatusStale = true;
-              }
+              if (revisionChanged || pr.checkStatusStale) markCheckStatusStale(pr);
             }
             pr.nodeId = e.nodeId;
             pr.surfacedBy = e.surfacedBy;
@@ -692,24 +681,16 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }
     const existingPr = existingPRById.get(pr.id);
     if (existingPr && pr.enriched === false && existingPr.enriched !== false) {
-      const revisionChanged =
-        existingPr.updatedAt !== pr.updatedAt ||
-        (Boolean(existingPr.headSha) && Boolean(pr.headSha) && existingPr.headSha !== pr.headSha);
+      const revisionChanged = hasRevisionChanged(existingPr, pr);
       Object.assign(pr, pickEnrichmentFields(existingPr));
       pr.enriched = existingPr.enriched;
       if (revisionChanged || existingPr.checkStatusStale) {
-        pr.headSha = "";
-        pr.checkStatus = null;
-        pr.checkStatusStale = true;
+        markCheckStatusStale(pr);
       } else {
         pr.checkStatusStale = existingPr.checkStatusStale;
       }
     } else if (existingPr && pr.checkStatusStale && existingPr.enriched !== false && !existingPr.checkStatusStale) {
-      const sameRevision =
-        existingPr.headSha && pr.headSha
-          ? existingPr.headSha === pr.headSha
-          : existingPr.updatedAt === pr.updatedAt;
-      if (sameRevision) {
+      if (isSameRevision(existingPr, pr)) {
         pr.checkStatus = existingPr.checkStatus;
         pr.checkStatusStale = false;
       } else {
@@ -752,30 +733,22 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     }));
   });
 
-  const targetedBackfillErrors = data.errors.filter((e) => e.repo.startsWith("backfill-batch-"));
+  const targetedBackfillErrors = data.errors.filter(isBackfillError);
   for (const err of data.errors) {
-    if (!err.repo.startsWith("backfill-batch-")) {
+    if (!isBackfillError(err)) {
       pushError(err.repo, err.message, err.retryable);
     }
   }
   if (
     targetedBackfillErrors.length > 0 &&
-    (targetedBackfillErrors.some((e) => !e.retryable) ||
-      data.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true))
+    (targetedBackfillErrors.some((e) => !e.retryable) || hasDegradedEnrichment(data.pullRequests))
   ) {
     _targetedPushedEnrichmentDegraded = true;
-    pushNotification(
-      PR_ENRICHMENT_NOTIFICATION_SOURCE,
-      PR_ENRICHMENT_DEGRADED_MESSAGE,
-      "warning",
-      true,
-      undefined,
-      { silentToast: true }
-    );
+    pushEnrichmentDegraded();
   } else if (
     _targetedPushedEnrichmentDegraded &&
     targetedBackfillErrors.length === 0 &&
-    !dashboardData.pullRequests.some((pr) => pr.enriched === false || pr.checkStatusStale === true)
+    !hasDegradedEnrichment(dashboardData.pullRequests)
   ) {
     _targetedPushedEnrichmentDegraded = false;
     dismissNotificationBySource(PR_ENRICHMENT_NOTIFICATION_SOURCE);
@@ -1627,6 +1600,15 @@ export default function DashboardPage() {
     { defer: true }
   ));
 
+  // True between a full refresh's light PR results (all `enriched: false`) and
+  // its enrichment results.
+  const awaitingEnrichment = createMemo(
+    () =>
+      dashboardData.pullRequests.length > 0 &&
+      dashboardData.pullRequests.every((pr) => pr.enriched === false) &&
+      Boolean(_coordinator()?.isRefreshing())
+  );
+
   // Fetch PR bodies for dependency PRs where title parsing can't determine update type.
   // Parses bodies immediately into VersionInfo and persists to localStorage so
   // classification survives page refresh without visual jank.
@@ -1635,17 +1617,14 @@ export default function DashboardPage() {
     const meta = depMeta();
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
-    const allUnenriched =
-      dashboardData.pullRequests.length > 0 &&
-      dashboardData.pullRequests.every((pr) => pr.enriched === false);
-    const isRefreshing = Boolean(_coordinator()?.isRefreshing());
+    const enrichmentPending = awaitingEnrichment();
     if (_fetchingDepBodies) {
       console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;
     }
     const octokit = getClient();
     if (!octokit) return;
-    if (allUnenriched && isRefreshing) return;
+    if (enrichmentPending) return;
 
     const now = Date.now();
 
@@ -1807,14 +1786,6 @@ export default function DashboardPage() {
   async function handleApprovePR(pr: PullRequest): Promise<void> {
     const currentLogin = userLogin();
     if (!canApprovePR(pr, currentLogin)) return;
-    if (pr.checkStatusStale) {
-      pushNotification(
-        `approve-pr:${pr.id}`,
-        `Cannot approve ${pr.repoFullName}#${pr.number} while CI check status is unavailable`,
-        "warning"
-      );
-      return;
-    }
     if (approvingPRIds().has(pr.id)) return;
     const client = getClient();
     if (!client || !pr.nodeId || !pr.headSha) return;
@@ -1948,7 +1919,7 @@ export default function DashboardPage() {
   }
 
   const isPartialSync = createMemo(() =>
-    (getNotifications?.() ?? []).some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
+    getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
   );
 
   return (
@@ -2033,6 +2004,7 @@ export default function DashboardPage() {
                   pullRequests={visibleDependencyPullRequests()}
                   depMeta={depMeta()}
                   loading={dashboardData.loading}
+                  enrichmentPending={dashboardData.loading || awaitingEnrichment()}
                   abandonedDepsMap={abandonedDepsMap()}
                   dashboardIssueUrls={dashboardIssueUrls()}
                   hotPollingPRIds={hotPollingPRIds()}

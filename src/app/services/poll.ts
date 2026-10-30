@@ -16,18 +16,21 @@ import {
   type PullRequest,
   type WorkflowRun,
   type ApiError,
+  type FetchIssuesAndPRsOptions,
   type HotPRStatusUpdate,
   type HotWorkflowRunUpdate,
   resetEmptyActionRepos,
   resetPREnrichmentCache,
   invalidatePREnrichmentCacheForRepos,
+  setPREnrichmentCacheRefreshInterval,
+  isBackfillError,
+  hasDegradedEnrichment,
+  pushEnrichmentDegraded,
 } from "./api";
 import { fetchUserEvents, parseRepoEvents, resetEventsState, type RepoEventSummary } from "./events";
-import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../shared/types";
-export { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE };
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE } from "../../shared/types";
 import { detectNewItems, dispatchNotifications, _resetNotificationState } from "../lib/notifications";
 import {
-  pushNotification,
   pushError,
   getNotifications,
   dismissNotificationBySource,
@@ -89,52 +92,44 @@ export function clearHotSets(): void {
 export const WAKE_GRACE_MS = 2_000;
 export const ONLINE_RECOVERY_GRACE_MS = 1_500;
 
+/** Consecutive cycles with a backfill batch failure before the degraded-enrichment
+ * warning is shown even when every PR still has carried-forward enrichment. */
+const BACKFILL_FAILURE_NOTIFICATION_THRESHOLD = 3;
+
 let _consecutiveBackfillFailures = 0;
 
 export function processBackfillErrors(
   errors: ApiError[],
   pullRequests: PullRequest[],
 ): ApiError[] {
-  const backfillErrors = errors.filter((e) => e.repo.startsWith("backfill-batch-"));
-  const otherErrors = errors.filter((e) => !e.repo.startsWith("backfill-batch-"));
+  const backfillErrors = errors.filter(isBackfillError);
+  const otherErrors = errors.filter((e) => !isBackfillError(e));
 
   if (backfillErrors.length > 0) {
     _consecutiveBackfillFailures++;
-    const hasUnenrichedPR = pullRequests.some(
-      (pr) => pr.enriched === false || pr.checkStatusStale === true,
-    );
-    const hasNonRetryable = backfillErrors.some((e) => !e.retryable);
-    if (hasNonRetryable || _consecutiveBackfillFailures >= 3 || hasUnenrichedPR) {
-      pushNotification(
-        PR_ENRICHMENT_NOTIFICATION_SOURCE,
-        PR_ENRICHMENT_DEGRADED_MESSAGE,
-        "warning",
-        true,
-        undefined,
-        { silentToast: true },
-      );
+    if (
+      backfillErrors.some((e) => !e.retryable) ||
+      _consecutiveBackfillFailures >= BACKFILL_FAILURE_NOTIFICATION_THRESHOLD ||
+      hasDegradedEnrichment(pullRequests)
+    ) {
+      pushEnrichmentDegraded();
     }
   } else {
-    const hasPhase1SearchError = otherErrors.some(
-      (e) =>
-        e.repo.startsWith("light-batch-") ||
-        e.repo.startsWith("unfiltered-batch-") ||
-        e.repo === "pr-pagination",
+    // Light/unfiltered search failures (pagination follow-ups report under the
+    // same batch label) leave PRs missing, so they don't reset the streak. They
+    // keep an active warning alive only while some PR is still degraded; the
+    // search failure itself is surfaced through its own error entry.
+    const hasSearchError = otherErrors.some(
+      (e) => e.repo.startsWith("light-batch-") || e.repo.startsWith("unfiltered-batch-"),
     );
-    if (!hasPhase1SearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
+    if (!hasSearchError && (pullRequests.length > 0 || otherErrors.length === 0)) {
       _consecutiveBackfillFailures = 0;
     } else if (
-      _consecutiveBackfillFailures >= 3 ||
-      getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
+      hasDegradedEnrichment(pullRequests) &&
+      (_consecutiveBackfillFailures >= BACKFILL_FAILURE_NOTIFICATION_THRESHOLD ||
+        getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE))
     ) {
-      pushNotification(
-        PR_ENRICHMENT_NOTIFICATION_SOURCE,
-        PR_ENRICHMENT_DEGRADED_MESSAGE,
-        "warning",
-        true,
-        undefined,
-        { silentToast: true },
-      );
+      pushEnrichmentDegraded();
     }
   }
 
@@ -274,22 +269,31 @@ export async function fetchAllData(
 
   const trackedUsers = config.trackedUsers ?? [];
   const monitoredRepos = config.monitoredRepos ?? [];
+  setPREnrichmentCacheRefreshInterval(config.refreshInterval);
 
   // Issues + PRs use a two-phase approach: light query first (phase 1),
   // then heavy backfill (phase 2). Workflow runs use REST core.
   // All streams run in parallel (GraphQL 5000 pts/hr + REST core 5000/hr).
   // Note: monitoredRepos are NOT added to combinedRepos for workflow runs —
   // Actions fetches are already per selectedRepo.
+  // Phase 1: forward light issues + PRs to the caller (no workflow runs yet)
+  const forwardLightData: FetchIssuesAndPRsOptions["onLightData"] = onLightData
+    ? (lightData) =>
+        onLightData({
+          issues: lightData.issues,
+          pullRequests: lightData.pullRequests,
+          workflowRuns: [],
+          errors: lightData.errors,
+        })
+    : undefined;
+
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, onLightData ? (lightData) => {
-      // Phase 1: fire callback with light issues + PRs (no workflow runs yet)
-      onLightData({
-        issues: lightData.issues,
-        pullRequests: lightData.pullRequests,
-        workflowRuns: [],
-        errors: lightData.errors,
-      });
-    } : undefined, trackedUsers, monitoredRepos, force),
+    fetchIssuesAndPullRequests(octokit, combinedRepos, userLogin, {
+      onLightData: forwardLightData,
+      trackedUsers,
+      monitoredRepos,
+      force,
+    }),
     config.enableActions
       ? fetchWorkflowRuns(octokit, selectedRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),
@@ -921,12 +925,13 @@ export async function fetchTargetedRepoData(
         .filter((r): r is NonNullable<typeof r> => r !== null)
     : [];
 
+  setPREnrichmentCacheRefreshInterval(config.refreshInterval);
   invalidatePREnrichmentCacheForRepos(targetRepos.map((r) => r.fullName));
 
   const trackedUsers = config.trackedUsers ?? [];
   const monitoredRepos = config.monitoredRepos ?? [];
   const [issuesAndPrsResult, runResult] = await Promise.allSettled([
-    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin, undefined, trackedUsers, monitoredRepos),
+    fetchIssuesAndPullRequests(octokit, targetRepos, userLogin, { trackedUsers, monitoredRepos }),
     workflowRepos.length > 0
       ? fetchWorkflowRuns(octokit, workflowRepos, config.maxWorkflowsPerRepo, config.maxRunsPerWorkflow)
       : Promise.resolve({ workflowRuns: [] as WorkflowRun[], errors: [] as ApiError[] }),

@@ -89,7 +89,7 @@ To replace your token later (e.g., after expiration or rotation), go to **Settin
 
 ### Repository Selection
 
-After signing in, the onboarding wizard asks you to select repositories to track. Search by name or browse by organization. Forked repositories are displayed with a muted name and a `Fork` badge so you can distinguish them from source repositories at a glance. Archived repositories are automatically excluded from the list (and removed from your selection if a previously tracked repository is archived on GitHub). You can change your selection at any time in **Settings > Repositories**.
+After signing in, the onboarding wizard asks you to select repositories to track. Search by name or browse by organization. Forked repositories are displayed with a muted name and a `Fork` badge so you can distinguish them from source repositories at a glance. Archived repositories are automatically excluded from the list. If a tracked repository is later archived on GitHub, its issues and PRs disappear from the dashboard on the next refresh (and are removed from your Tracked items), and the repository is removed from your selection the next time you open the repository list. You can change your selection at any time in **Settings > Repositories**.
 
 ### Organization Access
 
@@ -237,7 +237,7 @@ Draft PRs authored by other users render as a read-only indicator.
 
 #### Inline Approve Action
 
-Open, non-draft pull requests not authored by you show an **Approve** button next to the pull request title on hover when branch protection requires a review (`Review needed`) or when a review has been requested of you or your team (unless you have already approved the PR without a fresh re-request). The **Approve** button is hidden when CI checks are failing (`checkStatus === "failure"`).
+Open, non-draft pull requests not authored by you show an **Approve** button next to the pull request title on hover when branch protection requires a review (`Review needed`) or when a review has been requested of you or your team (unless you have already approved the PR without a fresh re-request). The **Approve** button is hidden when CI checks are failing (`checkStatus === "failure"`) or while the app is still re-fetching the PR's CI check status after a partial sync (`checkStatusStale`); it reappears once the next refresh or hot poll restores the check status.
 
 Approval uses a two-step inline confirmation to prevent accidental clicks:
 1. Click **Approve** once to arm confirmation (**Confirm?**, or **Confirm (auto)** when auto-merge is enabled on the PR). The confirmation state resets automatically after 4 seconds, on Escape, or when focus leaves the button.
@@ -331,6 +331,8 @@ Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups
 | **Needs Action** | Failing or running CI checks, check status still being fetched by the app, merge conflicts, draft PR, or changes requested — rows display explicit reason badges (`Failing checks`, `Merge conflict`, `Checks running`, `Checking status`, `Draft`, `Changes`) |
 | **Stale** | PR has not been updated in over 14 days — may need a rebase or manual review |
 
+Reason badges reflect each PR's current state, so the same badges also appear on rows in the **Pending Rebase** and **Stale** groups. On initial load, and during a refresh in which no PR's details have loaded yet, `Checking status` is withheld on dependency PRs without details, to avoid a flash of the badge on every row.
+
 Within each group, PRs are sorted by repository name, then update category (maintenance, pin, digest, patch, minor, major), then update date.
 
 ### Abandoned Dependencies
@@ -403,9 +405,9 @@ Upstream repos are included in Issues and Pull Requests fetches but excluded fro
 
 The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the toolbar.
 
-PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches with automatic binary splitting (`25 → 12 → 6`) and a lightweight fallback query if GitHub's GraphQL API is slow. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches with adaptive binary splitting (`25 → 12 → 6`). Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for up to 3 minutes across automatic polls (and invalidated automatically when repository events or PR actions occur). Clicking the manual **Refresh** button always bypasses this cache.
+PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches. If GitHub's GraphQL API is slow, returns a server error, or the request fails outright (`Failed to fetch`, which is how GitHub gateway timeouts appear in the browser), a failing batch is split in half repeatedly until batches are 6 PRs or fewer, then a lightweight fallback query fills in everything except CI check and merge-conflict status. Once a second batch in the same refresh fails before any PR's full details have loaded, later failing batches skip splitting and go straight to the fallback. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches and split failing batches the same way (except after the 45-second safety timeout); any items still failing are retried once a 5-minute cooldown passes. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for your refresh interval plus one minute (at least 3 minutes), so a settled PR skips the enrichment query on the next automatic poll and is re-fetched on the one after (the cache is also invalidated automatically when repository events or PR actions occur). Changes that don't update a PR's `updatedAt` — such as a CI re-run, or a merge conflict caused by new commits on its base branch — aren't picked up while the cached entry is valid, so such a PR can show its previous check or merge status (including the **Approve** button) for up to about two refresh intervals. Clicking the manual **Refresh** button always bypasses this cache.
 
-When partial PR enrichment degradation persists across 3 consecutive polls (or affects newly discovered PRs on initial load where no cached enrichment is available), a subtle amber **Partial sync** indicator appears next to the Refresh button while retaining cached PR details. If a PR's commit (`headSha`) or `updatedAt` timestamp changed during a degraded backfill, its previous commit's check status is cleared (`checkStatusStale`) rather than carried forward onto the new commit, and is automatically resolved on the next hot-poll cycle.
+A subtle amber **Partial sync** indicator appears next to the Refresh button, while cached PR details are retained, when PR enrichment fails during a refresh and either leaves any PR without details or with unverified CI check status, or is rejected outright by GitHub (for example, a permissions error); otherwise it appears once enrichment failures persist across 3 consecutive polls. PRs whose CI check status couldn't be verified — filled in by the lightweight fallback query, changed (new `headSha` or `updatedAt`) during a degraded backfill, or forks whose CI lookup failed — have their check status cleared (`checkStatusStale`) rather than carried forward: they show `Checking status`, hide **Approve**, and are resolved automatically by the next hot-poll cycle or successful refresh. The indicator clears on the next full refresh whose PR enrichment succeeds, unless a search failure in that refresh leaves a PR still in this unverified state.
 
 Setting the interval to **Off** disables automatic polling; manual refresh still works.
 
@@ -456,7 +458,7 @@ When you return to a tab that has been hidden for more than 2 minutes, the dashb
 
 The bell icon in the header opens the notification drawer, which shows API errors, rate limit warnings, and other system messages. Notifications are dismissed automatically when the underlying condition clears on the next poll cycle.
 
-Transient single-cycle PR enrichment blips are absorbed silently when cached PR details are available. When PR enrichment degradation persists across 3 consecutive polls (or leaves newly discovered PRs unenriched on initial load), a silent warning entry is logged to the Notification Drawer without popping a disruptive toast. Dependency PR and Renovate Dashboard body fetches similarly use 25-node batches with adaptive binary splitting (`25 → 12 → 6`) and log a silent warning to the Notification Drawer only after 3 consecutive failing fetch cycles. For notifications that do trigger a toast, repeated identical toasts for the same source are rate-limited to once per 15 minutes.
+Transient single-cycle PR enrichment blips are absorbed silently when cached PR details are available. Under the same conditions that show the **Partial sync** indicator (see [Full Refresh](#full-refresh)), a silent warning entry is logged to the Notification Drawer without popping a disruptive toast. Dependency PR and Renovate Dashboard body fetches similarly use 25-node batches with adaptive binary splitting and log a silent warning to the Notification Drawer only after 3 consecutive failing fetch cycles. For notifications that do trigger a toast, repeated identical toasts for the same source are rate-limited to once per 15 minutes.
 
 ### GitHub Outage Notifications
 
@@ -492,7 +494,7 @@ The Tracked tab lets you pin issues and PRs into a personal TODO list that you c
 
 **Reordering:** Use the chevron buttons on the left side of each row to move items up or down. Items slide smoothly into their new position.
 
-**Auto-removal:** When a tracked issue is closed or a tracked PR is merged, it is automatically removed from the list. Closure is detected by absence from the `is:open` poll results. For PRs detected as closed by the hot poll, removal happens within seconds. Auto-removal is suspended when the API returns errors (e.g., rate limiting) to prevent false pruning.
+**Auto-removal:** When a tracked issue is closed or a tracked PR is merged, it is automatically removed from the list. Closure is detected by absence from the `is:open` poll results, so items from a selected repository that is archived or deleted on GitHub (or that you lose access to) are also removed. For PRs detected as closed by the hot poll, removal happens within seconds. Auto-removal is suspended when the API returns errors (e.g., rate limiting) to prevent false pruning.
 
 **Relationship to other features:** The Tracked tab bypasses the org/repo filter — it always shows all your pinned items regardless of which repo filter is active. Ignoring an item from the Issues or Pull Requests tab also removes it from the tracked list. The tracked list is preserved when tracking is disabled and restored when re-enabled.
 

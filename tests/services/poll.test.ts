@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 import {
   createPollCoordinator,
+  processBackfillErrors,
   resetPollState,
   WAKE_GRACE_MS,
   ONLINE_RECOVERY_GRACE_MS,
-  PR_ENRICHMENT_NOTIFICATION_SOURCE,
-  PR_ENRICHMENT_DEGRADED_MESSAGE,
   type DashboardData,
 } from "../../src/app/services/poll";
+import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../src/shared/types";
 import * as githubMod from "../../src/app/services/github";
 import * as githubStatusMod from "../../src/app/services/github-status";
 import { makePullRequest } from "../helpers/factories";
@@ -801,7 +801,7 @@ describe("createPollCoordinator", () => {
     });
   });
 
-  it("implements 3-Tier backfill-batch-* escalation, retains Tier 1 across light-search total failure, and auto-dismisses on clean poll", async () => {
+  it("implements 3-Tier backfill-batch-* escalation, retains Tier 1 across search failures only while PRs are degraded, and auto-dismisses on clean poll", async () => {
     const enrichedPR = makePullRequest({ id: 1, enriched: true, checkStatus: "success" });
     const unenrichedPR = makePullRequest({ id: 2, enriched: false, checkStatus: null });
     const backfillErr = {
@@ -847,7 +847,8 @@ describe("createPollCoordinator", () => {
       );
 
       // Poll 4: light-search total failure (pullRequests: [], errors: [light-batch-1/1])
-      // Must retain Tier 1 'pr-enrichment' and surface 'light-batch-1/1' via pushError
+      // Surfaces 'light-batch-1/1' via pushError; with no degraded PRs on screen the
+      // 'pr-enrichment' warning is not re-pushed (cycle tracking then dismisses it)
       mockPushNotification.mockClear();
       mockPushError.mockClear();
       mockGetNotifications.mockReturnValue([
@@ -874,25 +875,27 @@ describe("createPollCoordinator", () => {
       coordinator.manualRefresh();
       await flushPromises();
       expect(mockPushError).toHaveBeenCalledWith("light-batch-1/1", "Server Error", true);
-      expect(mockPushNotification).toHaveBeenCalledWith(
-        PR_ENRICHMENT_NOTIFICATION_SOURCE,
-        PR_ENRICHMENT_DEGRADED_MESSAGE,
-        "warning",
-        true,
-        undefined,
-        { silentToast: true }
-      );
-      expect(mockDismissNotificationBySource).not.toHaveBeenCalledWith(
-        PR_ENRICHMENT_NOTIFICATION_SOURCE
-      );
+      expect(mockPushNotification).not.toHaveBeenCalled();
 
-      // Partial light-search failure (pullRequests: [enrichedPR], errors: [light-batch-2/2])
-      // Must ALSO retain Tier 1 'pr-enrichment' even when a surviving light batch returned cached PRs
-      mockPushNotification.mockClear();
+      // Partial light-search failure with only enriched PRs: warning not re-pushed either
       mockPushError.mockClear();
       nextResult = {
         issues: [],
         pullRequests: [enrichedPR],
+        workflowRuns: [],
+        errors: [{ repo: "light-batch-2/2", statusCode: 502, message: "Bad Gateway", retryable: true }],
+      };
+      coordinator.manualRefresh();
+      await flushPromises();
+      expect(mockPushError).toHaveBeenCalledWith("light-batch-2/2", "Bad Gateway", true);
+      expect(mockPushNotification).not.toHaveBeenCalled();
+
+      // Partial light-search failure that leaves a degraded PR: retains Tier 1 'pr-enrichment'
+      mockPushNotification.mockClear();
+      mockPushError.mockClear();
+      nextResult = {
+        issues: [],
+        pullRequests: [enrichedPR, unenrichedPR],
         workflowRuns: [],
         errors: [{ repo: "light-batch-2/2", statusCode: 502, message: "Bad Gateway", retryable: true }],
       };
@@ -1072,5 +1075,66 @@ describe("createPollCoordinator", () => {
       coordinator.destroy();
       dispose();
     });
+  });
+});
+
+describe("processBackfillErrors", () => {
+  const backfillErr = { repo: "backfill-batch-1/1", statusCode: null, message: "Failed to fetch", retryable: true };
+  const enrichedPR = makePullRequest({ id: 1, enriched: true, checkStatus: "success" });
+  const degradedArgs = [
+    PR_ENRICHMENT_NOTIFICATION_SOURCE,
+    PR_ENRICHMENT_DEGRADED_MESSAGE,
+    "warning",
+    true,
+    undefined,
+    { silentToast: true },
+  ] as const;
+
+  beforeEach(() => {
+    resetPollState();
+    mockPushNotification.mockClear();
+    mockGetNotifications.mockClear().mockReturnValue([]);
+  });
+
+  it("resets the consecutive-failure streak on a clean poll", () => {
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(processBackfillErrors([], [enrichedPR])).toEqual([]);
+    // Without the reset this would be failure #3 and escalate.
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps the streak on an unfiltered-batch search error and re-pushes an active warning only while a PR is degraded", () => {
+    const stalePR = makePullRequest({ id: 2, enriched: true, checkStatus: null, checkStatusStale: true });
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+
+    mockGetNotifications.mockReturnValue([
+      {
+        id: "n-pr",
+        source: PR_ENRICHMENT_NOTIFICATION_SOURCE,
+        message: PR_ENRICHMENT_DEGRADED_MESSAGE,
+        timestamp: Date.now(),
+        retryable: true,
+        severity: "warning",
+        read: false,
+        silentToast: true,
+      },
+    ]);
+    const unfilteredErr = { repo: "unfiltered-batch-1/1", statusCode: 502, message: "Bad Gateway", retryable: true };
+    // Every PR fully enriched: the active warning is not kept alive by the search error
+    expect(processBackfillErrors([unfilteredErr], [enrichedPR])).toEqual([unfilteredErr]);
+    expect(mockPushNotification).not.toHaveBeenCalled();
+    // A degraded PR on screen: the active warning is re-pushed
+    processBackfillErrors([unfilteredErr], [enrichedPR, stalePR]);
+    expect(mockPushNotification).toHaveBeenCalledWith(...degradedArgs);
+
+    // Streak was kept at 2, so the next backfill failure is #3 and escalates.
+    mockPushNotification.mockClear();
+    mockGetNotifications.mockReturnValue([]);
+    processBackfillErrors([backfillErr], [enrichedPR]);
+    expect(mockPushNotification).toHaveBeenCalledWith(...degradedArgs);
   });
 });
