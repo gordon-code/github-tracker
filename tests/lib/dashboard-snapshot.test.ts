@@ -68,7 +68,9 @@ describe("dashboard-snapshot", () => {
     const state = makeSampleState();
 
     writeSnapshot(state, "Alice", "immediate");
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
 
     const loaded = await loadSnapshot("alice");
     expect(loaded).not.toBeNull();
@@ -83,7 +85,9 @@ describe("dashboard-snapshot", () => {
   it("returns null on login mismatch", async () => {
     const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
     writeSnapshot(makeSampleState(), "alice", "immediate");
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
 
     const loaded = await loadSnapshot("bob");
     expect(loaded).toBeNull();
@@ -147,6 +151,22 @@ describe("dashboard-snapshot", () => {
     );
     expect(await loadSnapshot("alice")).toBeNull();
 
+    // Corrupt array element (null or missing numeric id)
+    await db.put(
+      STORE_NAME,
+      {
+        _v: 1,
+        login: "alice",
+        savedAt: Date.now(),
+        issues: [null],
+        pullRequests: [],
+        workflowRuns: [],
+        lastRefreshedAt: null,
+      },
+      RECORD_KEY,
+    );
+    expect(await loadSnapshot("alice")).toBeNull();
+
     db.close();
   });
 
@@ -185,9 +205,9 @@ describe("dashboard-snapshot", () => {
 
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
     vi.useRealTimers();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-
-    expect(putCount).toBe(1);
+    await vi.waitFor(() => {
+      expect(putCount).toBe(1);
+    });
 
     const snap = await loadSnapshot("alice");
     expect(snap?.issues.map((i) => i.id)).toEqual([5]);
@@ -206,7 +226,9 @@ describe("dashboard-snapshot", () => {
     // Advance only past setTimeout(0), not 5000ms
     await vi.advanceTimersByTimeAsync(10);
     vi.useRealTimers();
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
 
     const snap = await loadSnapshot("alice");
     expect(snap).not.toBeNull();
@@ -224,7 +246,6 @@ describe("dashboard-snapshot", () => {
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1_000);
     vi.useRealTimers();
     await clearPromise;
-    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(await loadSnapshot("alice")).toBeNull();
   });
@@ -280,11 +301,39 @@ describe("dashboard-snapshot", () => {
 
     writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
     writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
-    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exceeds 5000 items"));
     expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("flushes a pending debounced snapshot when document visibilitychange transitions to hidden (and ignores visible)", async () => {
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 99, title: "Hidden flush" })] }),
+      "alice",
+      "debounced",
+    );
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(async () => {
+      const snap = await loadSnapshot("alice");
+      expect(snap).not.toBeNull();
+      expect(snap!.issues[0]?.id).toBe(99);
+    });
   });
 
   it("pushes a single warning notification and does not throw on IDB quota error", async () => {

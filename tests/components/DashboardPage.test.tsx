@@ -6932,10 +6932,10 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
   });
 });
 
-// ── Task 5 (C5): Identity-scoped dashboard snapshot and identityEpoch guards ──
+// ── Identity-scoped dashboard snapshot and identityEpoch guards ─────────────
 
 describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", () => {
-  it("(a) does not apply a cached snapshot belonging to alice when current user() is bob", async () => {
+  it("does not apply a cached snapshot belonging to alice when current user() is bob", async () => {
     mockUserValue = { login: "bob", avatar_url: "", name: "Bob" };
     // Simulate loadSnapshot's login check returning null when stored record is for 'alice'
     const storedForAlice = {
@@ -6962,7 +6962,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
   });
 
-  it("(b) discards snapshot result if it resolves after phase-1 onLightData has already committed real data", async () => {
+  it("discards snapshot result if it resolves after phase-1 onLightData has already committed real data", async () => {
     let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
     vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
       () =>
@@ -7000,7 +7000,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(screen.queryByText("owner/stale-repo")).toBeNull();
   });
 
-  it("(c) does not call loadSnapshot on Settings -> Dashboard remount when data is already present", async () => {
+  it("does not call loadSnapshot on Settings -> Dashboard remount when data is already present", async () => {
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [makeIssue({ id: 704, title: "Committed Issue", repoFullName: "owner/committed" })],
       pullRequests: [],
@@ -7021,7 +7021,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(snapshotLib.loadSnapshot).not.toHaveBeenCalled();
   });
 
-  it("(d) throws StaleIdentityError when a poll started before logout resolves after identity clear + new user, leaving store empty, skipping writeSnapshot/notifications/errors, and setting loading to false", async () => {
+  it("throws StaleIdentityError when a poll started before logout resolves after identity clear + new user, leaving store empty, skipping writeSnapshot/notifications/errors, and setting loading to false", async () => {
     let resolvePoll!: (data: DashboardData) => void;
     vi.mocked(pollService.fetchAllData).mockImplementation(
       () =>
@@ -7083,7 +7083,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(screen.getByText(/No open issues/i)).toBeDefined();
   });
 
-  it("(e) drops a targeted refresh whose events cycle started before clearAuth", async () => {
+  it("drops a targeted refresh whose events cycle started before clearAuth", async () => {
     render(() => <DashboardPage />);
     await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
     vi.mocked(snapshotLib.writeSnapshot).mockClear();
@@ -7109,7 +7109,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("(f) does not write snapshot or commit when PR approval started before logout resolves after logout", async () => {
+  it("does not write snapshot or commit when PR approval started before logout resolves after logout", async () => {
     const user = userEvent.setup();
     const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
     let resolveApprove!: (val: unknown) => void;
@@ -7176,7 +7176,69 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("(g) discards an in-flight snapshot load if clearAuth() runs before loadSnapshot resolves", async () => {
+  it("does not write snapshot or commit when mark-PR-ready started before logout resolves after logout", async () => {
+    const user = userEvent.setup();
+    let resolveMarkReady!: (val: unknown) => void;
+    const graphqlMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveMarkReady = resolve;
+        }),
+    );
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 711,
+          number: 711,
+          title: "Draft PR to mark ready before logout",
+          repoFullName: "owner/repo",
+          userLogin: "testuser",
+          state: "OPEN",
+          draft: true,
+          enriched: true,
+          nodeId: "PR_kwDO711",
+          headSha: "b1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() =>
+      screen.getByLabelText("Mark #711 Draft PR to mark ready before logout ready for review"),
+    );
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Logout occurs while markPullRequestReady is in flight
+    for (const cb of authClearCallbacks) cb();
+
+    // Resolve the in-flight markPullRequestReady mutation
+    resolveMarkReady({
+      markPullRequestReadyForReview: {
+        pullRequest: { isDraft: false },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("discards an in-flight snapshot load if clearAuth() runs before loadSnapshot resolves", async () => {
     let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
     vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
       () =>
@@ -7208,7 +7270,7 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
     expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
   });
 
-  it("(h) resets _fetchingDashboardBodies and _fetchingDepBodies after an in-flight fetch when same-user token rotation does not bump identityEpoch", async () => {
+  it("resets _fetchingDashboardBodies and _fetchingDepBodies after an in-flight fetch when same-user token rotation does not bump identityEpoch", async () => {
     const [lastRefreshAtSig, setLastRefreshAtSig] = createSignal<Date | null>(null);
     vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
       const wrappedFetchAll = async () => {

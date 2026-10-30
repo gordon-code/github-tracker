@@ -106,9 +106,6 @@ function makeInitialDashboardState(): DashboardStore {
 }
 
 let realDataCommitted = false;
-export function _resetRealDataCommitted(value = false): void {
-  realDataCommitted = value;
-}
 
 const [dashboardData, setDashboardData] = createStore<DashboardStore>(makeInitialDashboardState());
 
@@ -372,7 +369,6 @@ function seedCachedDashboardBodies(): void {
   if (seededAbandoned.size > 0) setAbandonedDepsMap(seededAbandoned);
   if (seededUrls.size > 0) setDashboardIssueUrls(seededUrls);
 }
-seedCachedDashboardBodies();
 const _dashboardBodyFailureCooldown = new Map<string, number>();
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
@@ -492,7 +488,6 @@ async function pollFetch(force = false): Promise<DashboardData> {
       applyRecentReadyGuard(pr);
       applyRecentApprovalGuard(pr, currentLogin);
     }
-    const resolvedPullRequests = pullRequests;
     const filteredRuns = config.enableActions ? data.workflowRuns : [];
     realDataCommitted = true;
     batch(() => {
@@ -506,12 +501,12 @@ async function pollFetch(force = false): Promise<DashboardData> {
     }
     const hotPullRequests =
       recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
-        ? resolvedPullRequests.map((pr) =>
+        ? pullRequests.map((pr) =>
             (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
               ? { ...pr, enriched: true, checkStatus: "pending" as const }
               : pr
           )
-        : resolvedPullRequests;
+        : pullRequests;
     rebuildHotSets({ ...data, pullRequests: hotPullRequests, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted.
@@ -520,7 +515,7 @@ async function pollFetch(force = false): Promise<DashboardData> {
       writeSnapshot(currentSnapshotState(), snapshotLogin, "immediate");
     }
     _targetedPushedEnrichmentDegraded = false;
-    return { ...data, pullRequests: resolvedPullRequests };
+    return { ...data, pullRequests };
   } catch (err) {
     // Handle 401 auth errors
     const status =

@@ -342,7 +342,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 
 ### Rate Limiting Rules
 
-> **Note:** Cloudflare Free plan supports 1 unmanged WAF rate limiting rule with a 10-second period (`60 requests per 10 seconds`) and a 10-second mitigation timeout (`Block for 10 seconds` on Free plan; `Block for 60 seconds` or longer on Pro and above). The Workers Rate Limiting Binding provides additional per-session rate limiting inside the Worker.
+> **Note:** Cloudflare Free plan supports 1 unmanaged WAF rate limiting rule with a 10-second period (`60 requests per 10 seconds`) and a 10-second mitigation timeout (`Block for 10 seconds` on Free plan; `Block for 60 seconds` or longer on Pro and above). The Workers Rate Limiting Binding provides additional per-session rate limiting inside the Worker.
 
 **Rule name:** Rate limit API proxy endpoints
 **Where:** Security → WAF → Rate Limiting Rules
