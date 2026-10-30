@@ -457,7 +457,6 @@ async function pollFetch(force = false): Promise<DashboardData> {
       }
     }, force);
     if (fetchEpoch !== identityEpoch()) {
-      setDashboardData("loading", false);
       throw new StaleIdentityError();
     }
     const hasErrors = data.errors.length > 0;
@@ -511,6 +510,11 @@ async function pollFetch(force = false): Promise<DashboardData> {
     _targetedPushedEnrichmentDegraded = false;
     return { ...data, pullRequests };
   } catch (err) {
+    // A poll started under a previous identity must not touch the current
+    // identity's store, token, or error surfaces.
+    if (fetchEpoch !== identityEpoch()) {
+      throw err instanceof StaleIdentityError ? err : new StaleIdentityError();
+    }
     // Handle 401 auth errors
     const status =
       typeof err === "object" &&
@@ -550,7 +554,7 @@ function persistDashboardSnapshot(): void {
 }
 
 // Mutates data.issues[].surfacedBy and data.pullRequests[].surfacedBy in-place before merging.
-function handleTargetedData(data: DashboardData, affectedRepos: string[], epoch = identityEpoch()): void {
+function handleTargetedData(data: DashboardData, affectedRepos: string[], epoch: number): void {
   if (epoch !== identityEpoch()) return;
   const affectedSet = new Set(affectedRepos.map(r => r.toLowerCase()));
   const currentIssues = unwrap(dashboardData.issues);
@@ -977,13 +981,13 @@ export default function DashboardPage() {
     if (!_hotCoordinator()) {
       _setHotCoordinator(createHotPollCoordinator(
         () => config.hotPollInterval,
-        (prUpdates, runUpdates, fetchGeneration, epoch?: number) => {
+        (prUpdates, runUpdates, fetchGeneration, epoch) => {
           // Guard against stale hot poll results overlapping with a full refresh
           // or an identity change while fetchHotData() was in flight.
           // fetchGeneration was captured BEFORE fetchHotData() started its async work.
           // If a full refresh completed during the fetch, _hotPollGeneration will have
           // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
-          if (fetchGeneration !== getHotPollGeneration() || (epoch ?? identityEpoch()) !== identityEpoch()) return; // stale, discard
+          if (fetchGeneration !== getHotPollGeneration() || epoch !== identityEpoch()) return; // stale, discard
           let terminalPrIds = new Set<number>();
           setDashboardData(produce((state) => {
             const currentLogin = user()?.login ?? "";
@@ -1001,6 +1005,9 @@ export default function DashboardPage() {
           if (terminalPrIds.size > 0) {
             console.info(`[hot-poll] Spliced ${terminalPrIds.size} terminal PR(s) from store`);
           }
+          // Every delivering cycle persists so a reload shows current check/run statuses.
+          // The debounced write costs one structured clone of the store per cycle
+          // (a few ms at ~1000 items) and only fires while hot items are in flight.
           persistDashboardSnapshot();
           // Prune tracked PRs that became closed/merged via hot poll.
           // Full and targeted refreshes reconcile open-only results into the store

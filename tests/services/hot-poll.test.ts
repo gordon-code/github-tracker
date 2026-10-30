@@ -1119,6 +1119,48 @@ describe("createHotPollCoordinator", () => {
     });
   });
 
+  it("ignores a 401 from a cycle started under a previous identity epoch instead of expiring the current token", async () => {
+    const onHotData = vi.fn();
+    let rejectFetch!: (err: unknown) => void;
+    const octokit = makeOctokit(undefined, () =>
+      new Promise((_resolve, reject) => {
+        rejectFetch = reject;
+      }));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+    });
+
+    const { expireToken } = await import("../../src/app/stores/auth");
+    const { pushError } = await import("../../src/app/lib/errors");
+    (expireToken as ReturnType<typeof vi.fn>).mockClear();
+    (pushError as ReturnType<typeof vi.fn>).mockClear();
+    mockLocationReplace.mockClear();
+
+    try {
+      await createRoot(async (dispose) => {
+        createHotPollCoordinator(() => 10, onHotData);
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(rejectFetch).toBeDefined();
+
+        // Identity changes while the cycle's fetch is in flight
+        mockIdentityEpoch.mockImplementation(() => 1);
+        rejectFetch(Object.assign(new Error("Bad credentials"), { status: 401 }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(expireToken).not.toHaveBeenCalled();
+        expect(mockLocationReplace).not.toHaveBeenCalled();
+        expect(pushError).not.toHaveBeenCalledWith("hot-poll", expect.any(String), true);
+        expect(onHotData).not.toHaveBeenCalled();
+        dispose();
+      });
+    } finally {
+      mockIdentityEpoch.mockImplementation(() => 0);
+    }
+  });
+
   it("does not schedule another cycle after a 401 redirect", async () => {
     const onHotData = vi.fn();
     const octokit = makeOctokit(undefined, () =>

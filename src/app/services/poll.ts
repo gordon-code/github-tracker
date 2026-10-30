@@ -479,10 +479,7 @@ export function createPollCoordinator(
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
     } catch (err) {
-      if (
-        err instanceof StaleIdentityError ||
-        (err instanceof Error && err.name === "StaleIdentityError")
-      ) {
+      if (err instanceof StaleIdentityError) {
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
@@ -816,7 +813,8 @@ export function createHotPollCoordinator(
     options?.onStart?.(new Set(_hotPRs.values()), new Set(_hotRuns.keys()));
     try {
       const { prUpdates, runUpdates, generation, hadErrors } = await fetchHotData(consecutiveFailures);
-      if (myGeneration !== chainGeneration) return; // Chain destroyed during fetch
+      // Chain destroyed or identity changed during fetch
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
       if (hadErrors) {
         consecutiveFailures++;
         pushError("hot-poll", "Some status updates failed — retrying with backoff", true);
@@ -828,6 +826,9 @@ export function createHotPollCoordinator(
         onHotData(prUpdates, runUpdates, generation, cycleEpoch);
       }
     } catch (err) {
+      // A cycle started under a previous identity must not expire the current
+      // identity's token or surface errors to it.
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
       if (isUnauthorizedError(err)) {
         // Token invalid — same re-auth path as the full poll (poll.ts throw at
         // fetchAllData) and cross-tab sync (auth.ts storage listener): clear the
