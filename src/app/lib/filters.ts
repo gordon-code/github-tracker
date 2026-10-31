@@ -39,3 +39,15 @@ export function isRunVisible(run: WorkflowRun, opts: ItemFilterOpts): boolean {
   }
   return true;
 }
+
+export function isWorkflowRunWaiting(run: Pick<WorkflowRun, "status" | "conclusion">): boolean {
+  return (
+    run.status === "waiting" ||
+    run.status === "action_required" ||
+    (run.status === "completed" && run.conclusion === "action_required")
+  );
+}
+
+export function isWorkflowRunPending(run: Pick<WorkflowRun, "status">): boolean {
+  return run.status === "queued" || run.status === "pending" || run.status === "requested";
+}

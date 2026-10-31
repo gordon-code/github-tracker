@@ -1750,6 +1750,50 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
     });
   });
 
+  it("conclusion:waiting and conclusion:pending presets count matching workflow runs accurately on actions custom tabs", async () => {
+    configStore.addCustomTab({
+      id: "waitingruns",
+      name: "Waiting Runs",
+      baseType: "actions",
+      orgScope: ["owner"],
+      repoScope: [],
+      filterPreset: { conclusion: "waiting" },
+      exclusive: false,
+    });
+    configStore.addCustomTab({
+      id: "pendingruns",
+      name: "Pending Runs",
+      baseType: "actions",
+      orgScope: ["owner"],
+      repoScope: [],
+      filterPreset: { conclusion: "pending" },
+      exclusive: false,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, status: "waiting", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 21, status: "completed", conclusion: "action_required", isPrRun: false }),
+        makeWorkflowRun({ id: 22, status: "queued", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 23, status: "pending", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 24, status: "requested", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 25, status: "in_progress", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 26, status: "completed", conclusion: "success", isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const waitingTab = screen.getByRole("tab", { name: /Waiting Runs/ });
+      expect(waitingTab.textContent?.replace(/\D+/g, "")).toBe("2");
+      const pendingTab = screen.getByRole("tab", { name: /Pending Runs/ });
+      expect(pendingTab.textContent?.replace(/\D+/g, "")).toBe("3");
+    });
+  });
+
   describe("Jira auth guard", () => {
     it("does not write Jira issues when auth becomes invalid during fetch", async () => {
       let authenticated = true;

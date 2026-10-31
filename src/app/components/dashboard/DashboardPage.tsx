@@ -45,7 +45,7 @@ import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCss
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
-import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
+import { isIssueVisible, isPrVisible, isRunVisible, isWorkflowRunPending, isWorkflowRunWaiting } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
@@ -1380,6 +1380,8 @@ export default function DashboardPage() {
           if (!isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })) return false;
           if (f.conclusion !== "all") {
             if (f.conclusion === "running") { if (w.status !== "in_progress") return false; }
+            else if (f.conclusion === "waiting") { if (!isWorkflowRunWaiting(w)) return false; }
+            else if (f.conclusion === "pending") { if (!isWorkflowRunPending(w)) return false; }
             else if (f.conclusion === "other") { if (w.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(w.conclusion)) return false; }
             else if (w.conclusion !== f.conclusion) return false;
           }

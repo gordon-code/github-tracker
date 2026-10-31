@@ -107,12 +107,56 @@ describe("WorkflowRunRow", () => {
     screen.getByLabelText("In progress");
   });
 
-  it("renders status indicator for queued status", () => {
+  it("renders status indicator and duration for queued status as Pending condition", () => {
     const run = makeWorkflowRun({ status: "queued", conclusion: null });
     render(() => (
       <WorkflowRunRow run={run} onIgnore={() => {}} />
     ));
-    screen.getByLabelText("Queued");
+    screen.getByLabelText("Pending condition");
+    screen.getByText("pending condition");
+  });
+
+  it("renders status indicator and duration for waiting and action_required statuses as Pending action", () => {
+    const waitingRun = makeWorkflowRun({ id: 201, status: "waiting", conclusion: null });
+    const { unmount } = render(() => (
+      <WorkflowRunRow run={waitingRun} onIgnore={() => {}} />
+    ));
+    const icon = screen.getByLabelText("Pending action");
+    expect(icon.getAttribute("class")).toContain("text-amber-500");
+    screen.getByText("pending action");
+    unmount();
+
+    const actionReqRun = makeWorkflowRun({ id: 202, status: "action_required", conclusion: null });
+    const { unmount: unmount2 } = render(() => (
+      <WorkflowRunRow run={actionReqRun} onIgnore={() => {}} />
+    ));
+    screen.getByLabelText("Pending action");
+    screen.getByText("pending action");
+    unmount2();
+
+    const completedActionReqRun = makeWorkflowRun({ id: 203, status: "completed", conclusion: "action_required" });
+    render(() => (
+      <WorkflowRunRow run={completedActionReqRun} onIgnore={() => {}} />
+    ));
+    screen.getByLabelText("Pending action");
+    screen.getByText("pending action");
+  });
+
+  it("renders status indicator and duration for pending and requested statuses as Pending condition", () => {
+    const pendingRun = makeWorkflowRun({ id: 204, status: "pending", conclusion: null });
+    const { unmount } = render(() => (
+      <WorkflowRunRow run={pendingRun} onIgnore={() => {}} />
+    ));
+    screen.getByLabelText("Pending condition");
+    screen.getByText("pending condition");
+    unmount();
+
+    const requestedRun = makeWorkflowRun({ id: 205, status: "requested", conclusion: null });
+    render(() => (
+      <WorkflowRunRow run={requestedRun} onIgnore={() => {}} />
+    ));
+    screen.getByLabelText("Pending condition");
+    screen.getByText("pending condition");
   });
 
   it("calls onIgnore when ignore button clicked", async () => {

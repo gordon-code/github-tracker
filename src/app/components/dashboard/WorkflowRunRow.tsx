@@ -1,5 +1,6 @@
 import { createMemo, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
+import { isWorkflowRunPending, isWorkflowRunWaiting } from "../../lib/filters";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { relativeTime, formatDuration } from "../../lib/format";
 import { Tooltip } from "../shared/Tooltip";
@@ -101,8 +102,28 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
     );
   }
 
-  // queued or unknown → gray clock
-  const label = props.status === "queued" ? "Queued" : "Unknown status";
+  // waiting / action_required → amber pause/action icon
+  if (isWorkflowRunWaiting(props)) {
+    return (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="h-4 w-4 text-amber-500 shrink-0"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        role="img"
+        aria-label="Pending action"
+      >
+        <path
+          fill-rule="evenodd"
+          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
+          clip-rule="evenodd"
+        />
+      </svg>
+    );
+  }
+
+  // queued / pending / requested or unknown → gray clock
+  const label = isWorkflowRunPending(props) ? "Pending condition" : "Unknown status";
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -122,8 +143,10 @@ function StatusIcon(props: { status: string; conclusion: string | null }) {
 }
 
 function durationLabel(run: WorkflowRun): string {
+  if (isWorkflowRunWaiting(run)) return "pending action";
   if (run.status === "completed") return formatDuration(run.runStartedAt, run.completedAt ?? run.updatedAt);
   if (run.status === "in_progress") return "running...";
+  if (isWorkflowRunPending(run)) return "pending condition";
   return "--";
 }
 

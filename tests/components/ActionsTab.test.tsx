@@ -491,4 +491,63 @@ describe("ActionsTab", () => {
       expect(row.classList.contains("animate-shimmer")).toBe(false);
     }
   });
+
+  it("sorts workflows by status priority: failure < waiting < in_progress < queued/pending < success", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "WF-Success", status: "completed", conclusion: "success" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "WF-Pending", status: "queued", conclusion: null }),
+      makeWorkflowRun({ id: 3, repoFullName: "owner/repo", workflowId: 3, name: "WF-Running", status: "in_progress", conclusion: null }),
+      makeWorkflowRun({ id: 4, repoFullName: "owner/repo", workflowId: 4, name: "WF-Waiting", status: "waiting", conclusion: null }),
+      makeWorkflowRun({ id: 5, repoFullName: "owner/repo", workflowId: 5, name: "WF-Failure", status: "completed", conclusion: "failure" }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+
+    const cards = screen.getAllByText(/^WF-/);
+    expect(cards.map((el) => el.textContent)).toEqual([
+      "WF-Failure",
+      "WF-Waiting",
+      "WF-Running",
+      "WF-Pending",
+      "WF-Success",
+    ]);
+  });
+
+  it("displays pending action and pending condition counts in repo-group collapsed summary", () => {
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "Deploy", status: "waiting", conclusion: null }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "E2E", status: "queued", conclusion: null }),
+      makeWorkflowRun({ id: 3, repoFullName: "owner/repo", workflowId: 3, name: "Build", status: "in_progress", conclusion: null }),
+    ];
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    const summaryEl = screen.getByText(/3 workflows/);
+    expect(summaryEl.textContent).toContain("1 running");
+    expect(summaryEl.textContent).toContain("1 pending action");
+    expect(summaryEl.textContent).toContain("1 pending condition");
+  });
+
+  it("filters workflow runs by conclusion='waiting' and conclusion='pending'", async () => {
+    const user = userEvent.setup();
+    const runs = [
+      makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "WF-Wait", status: "waiting", conclusion: null, displayTitle: "waiting-run" }),
+      makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "WF-Pend", status: "queued", conclusion: null, displayTitle: "pending-run" }),
+      makeWorkflowRun({ id: 3, repoFullName: "owner/repo", workflowId: 3, name: "WF-Pass", status: "completed", conclusion: "success", displayTitle: "passing-run" }),
+    ];
+
+    viewStore.setTabFilter("actions", "conclusion", "waiting");
+    render(() => <ActionsTab workflowRuns={runs} />);
+
+    await user.click(screen.getByText("owner/repo"));
+    expect(screen.getAllByText("WF-Wait").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("WF-Pend")).toBeNull();
+    expect(screen.queryByText("WF-Pass")).toBeNull();
+
+    viewStore.setTabFilter("actions", "conclusion", "pending");
+    expect(screen.queryByText("WF-Wait")).toBeNull();
+    expect(screen.getAllByText("WF-Pend").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("WF-Pass")).toBeNull();
+  });
 });
