@@ -538,9 +538,11 @@ describe("ActionsTab", () => {
     const runs = [
       makeWorkflowRun({ id: 1, repoFullName: "owner/repo", workflowId: 1, name: "WF-Wait", status: "waiting", conclusion: null, displayTitle: "waiting-run" }),
       makeWorkflowRun({ id: 2, repoFullName: "owner/repo", workflowId: 2, name: "WF-ActReq", status: "completed", conclusion: "action_required", displayTitle: "actreq-run" }),
-      makeWorkflowRun({ id: 3, repoFullName: "owner/repo", workflowId: 3, name: "WF-Pend", status: "queued", conclusion: null, displayTitle: "pending-run" }),
-      makeWorkflowRun({ id: 4, repoFullName: "owner/repo", workflowId: 4, name: "WF-Req", status: "requested", conclusion: null, displayTitle: "req-run" }),
-      makeWorkflowRun({ id: 5, repoFullName: "owner/repo", workflowId: 5, name: "WF-Pass", status: "completed", conclusion: "success", displayTitle: "passing-run" }),
+      makeWorkflowRun({ id: 3, repoFullName: "owner/repo", workflowId: 3, name: "WF-ActReqStatus", status: "action_required", conclusion: null, displayTitle: "actreq-status-run" }),
+      makeWorkflowRun({ id: 4, repoFullName: "owner/repo", workflowId: 4, name: "WF-Queued", status: "queued", conclusion: null, displayTitle: "queued-run" }),
+      makeWorkflowRun({ id: 5, repoFullName: "owner/repo", workflowId: 5, name: "WF-Pend", status: "pending", conclusion: null, displayTitle: "pending-run" }),
+      makeWorkflowRun({ id: 6, repoFullName: "owner/repo", workflowId: 6, name: "WF-Req", status: "requested", conclusion: null, displayTitle: "req-run" }),
+      makeWorkflowRun({ id: 7, repoFullName: "owner/repo", workflowId: 7, name: "WF-Pass", status: "completed", conclusion: "success", displayTitle: "passing-run" }),
     ];
 
     viewStore.setTabFilter("actions", "conclusion", "waiting");
@@ -549,6 +551,8 @@ describe("ActionsTab", () => {
     await user.click(screen.getByText("owner/repo"));
     expect(screen.getAllByText("WF-Wait").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("WF-ActReq").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("WF-ActReqStatus").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("WF-Queued")).toBeNull();
     expect(screen.queryByText("WF-Pend")).toBeNull();
     expect(screen.queryByText("WF-Req")).toBeNull();
     expect(screen.queryByText("WF-Pass")).toBeNull();
@@ -556,6 +560,8 @@ describe("ActionsTab", () => {
     viewStore.setTabFilter("actions", "conclusion", "pending");
     expect(screen.queryByText("WF-Wait")).toBeNull();
     expect(screen.queryByText("WF-ActReq")).toBeNull();
+    expect(screen.queryByText("WF-ActReqStatus")).toBeNull();
+    expect(screen.getAllByText("WF-Queued").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("WF-Pend").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("WF-Req").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("WF-Pass")).toBeNull();
