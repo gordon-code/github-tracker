@@ -1382,8 +1382,23 @@ export default function DashboardPage() {
             if (f.conclusion === "running") { if (w.status !== "in_progress") return false; }
             else if (f.conclusion === "waiting") { if (!isWorkflowRunWaiting(w)) return false; }
             else if (f.conclusion === "pending") { if (!isWorkflowRunPending(w)) return false; }
-            else if (f.conclusion === "other") { if (w.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(w.conclusion)) return false; }
-            else if (w.conclusion !== f.conclusion) return false;
+            else if (f.conclusion === "other") {
+              if (
+                w.status === "in_progress" ||
+                isWorkflowRunWaiting(w) ||
+                isWorkflowRunPending(w) ||
+                w.conclusion === null ||
+                (KNOWN_CONCLUSIONS as readonly string[]).includes(w.conclusion)
+              ) {
+                return false;
+              }
+            }
+            else if (
+              w.status === "in_progress" ||
+              isWorkflowRunWaiting(w) ||
+              isWorkflowRunPending(w) ||
+              w.conclusion !== f.conclusion
+            ) return false;
           }
           if (f.event !== "all") {
             if (f.event === "other") { if ((KNOWN_EVENTS as readonly string[]).includes(w.event)) return false; }

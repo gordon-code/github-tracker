@@ -175,9 +175,24 @@ export default function ActionsTab(props: ActionsTabProps) {
         } else if (conclusionFilter === "pending") {
           if (!isWorkflowRunPending(run)) return false;
         } else if (conclusionFilter === "other") {
-          if (run.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)) return false;
+          if (
+            run.status === "in_progress" ||
+            isWorkflowRunWaiting(run) ||
+            isWorkflowRunPending(run) ||
+            run.conclusion === null ||
+            (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)
+          ) {
+            return false;
+          }
         } else {
-          if (run.conclusion !== conclusionFilter) return false;
+          if (
+            run.status === "in_progress" ||
+            isWorkflowRunWaiting(run) ||
+            isWorkflowRunPending(run) ||
+            run.conclusion !== conclusionFilter
+          ) {
+            return false;
+          }
         }
       }
 
