@@ -1,8 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { isIssueVisible, isPrVisible, isRunVisible } from "../../src/app/lib/filters";
+import {
+  isIssueVisible,
+  isPrVisible,
+  isRunVisible,
+  isWorkflowRunPending,
+  isWorkflowRunWaiting,
+  matchesActionsConclusionFilter,
+} from "../../src/app/lib/filters";
+import { KNOWN_CONCLUSIONS } from "../../src/app/components/shared/filterTypes";
 import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers/index";
 
-// All three predicates are pure functions — no reactive root or store setup needed.
+// All predicates are pure functions — no reactive root or store setup needed.
 
 describe("isIssueVisible", () => {
   describe("ignoredIds", () => {
@@ -232,5 +240,110 @@ describe("isRunVisible", () => {
       const run = makeWorkflowRun({ repoFullName: "any/repo" });
       expect(isRunVisible(run, { ignoredIds: new Set(), globalFilter: { org: null, repo: null } })).toBe(true);
     });
+  });
+});
+
+describe("isWorkflowRunWaiting", () => {
+  it("returns true for waiting and action_required statuses and completed action_required conclusion", () => {
+    expect(isWorkflowRunWaiting({ status: "waiting", conclusion: null })).toBe(true);
+    expect(isWorkflowRunWaiting({ status: "action_required", conclusion: null })).toBe(true);
+    expect(isWorkflowRunWaiting({ status: "completed", conclusion: "action_required" })).toBe(true);
+  });
+
+  it("returns false for running, pending, and other completed conclusions", () => {
+    expect(isWorkflowRunWaiting({ status: "in_progress", conclusion: null })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "queued", conclusion: null })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "pending", conclusion: null })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "requested", conclusion: null })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "completed", conclusion: "success" })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "completed", conclusion: "failure" })).toBe(false);
+    expect(isWorkflowRunWaiting({ status: "completed", conclusion: null })).toBe(false);
+  });
+});
+
+describe("isWorkflowRunPending", () => {
+  it("returns true for queued, pending, and requested statuses", () => {
+    expect(isWorkflowRunPending({ status: "queued" })).toBe(true);
+    expect(isWorkflowRunPending({ status: "pending" })).toBe(true);
+    expect(isWorkflowRunPending({ status: "requested" })).toBe(true);
+  });
+
+  it("returns false for running, waiting, action_required, and completed statuses", () => {
+    expect(isWorkflowRunPending({ status: "in_progress" })).toBe(false);
+    expect(isWorkflowRunPending({ status: "waiting" })).toBe(false);
+    expect(isWorkflowRunPending({ status: "action_required" })).toBe(false);
+    expect(isWorkflowRunPending({ status: "completed" })).toBe(false);
+  });
+});
+
+describe("matchesActionsConclusionFilter", () => {
+  it("matches all runs when conclusionFilter is 'all'", () => {
+    expect(matchesActionsConclusionFilter({ status: "in_progress", conclusion: null }, "all", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "waiting", conclusion: null }, "all", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "queued", conclusion: null }, "all", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "success" }, "all", KNOWN_CONCLUSIONS)).toBe(true);
+  });
+
+  it("matches only in_progress runs when conclusionFilter is 'running'", () => {
+    expect(matchesActionsConclusionFilter({ status: "in_progress", conclusion: null }, "running", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "waiting", conclusion: null }, "running", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "queued", conclusion: null }, "running", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "success" }, "running", KNOWN_CONCLUSIONS)).toBe(false);
+  });
+
+  it("matches waiting and action_required runs when conclusionFilter is 'waiting'", () => {
+    expect(matchesActionsConclusionFilter({ status: "waiting", conclusion: null }, "waiting", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "action_required", conclusion: null }, "waiting", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "action_required" }, "waiting", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "in_progress", conclusion: null }, "waiting", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "queued", conclusion: null }, "waiting", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "failure" }, "waiting", KNOWN_CONCLUSIONS)).toBe(false);
+  });
+
+  it("matches queued, pending, and requested runs when conclusionFilter is 'pending'", () => {
+    expect(matchesActionsConclusionFilter({ status: "queued", conclusion: null }, "pending", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "pending", conclusion: null }, "pending", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "requested", conclusion: null }, "pending", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "in_progress", conclusion: null }, "pending", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "waiting", conclusion: null }, "pending", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "success" }, "pending", KNOWN_CONCLUSIONS)).toBe(false);
+  });
+
+  it("excludes non-terminal and waiting runs from terminal conclusion filters ('success', 'failure', 'cancelled', 'other')", () => {
+    const nonTerminalRuns = [
+      { status: "in_progress", conclusion: "success" },
+      { status: "in_progress", conclusion: "skipped" },
+      { status: "waiting", conclusion: "failure" },
+      { status: "action_required", conclusion: "cancelled" },
+      { status: "completed", conclusion: "action_required" },
+      { status: "queued", conclusion: "success" },
+      { status: "pending", conclusion: "failure" },
+      { status: "requested", conclusion: "skipped" },
+    ];
+
+    for (const run of nonTerminalRuns) {
+      expect(matchesActionsConclusionFilter(run, "success", KNOWN_CONCLUSIONS)).toBe(false);
+      expect(matchesActionsConclusionFilter(run, "failure", KNOWN_CONCLUSIONS)).toBe(false);
+      expect(matchesActionsConclusionFilter(run, "cancelled", KNOWN_CONCLUSIONS)).toBe(false);
+      expect(matchesActionsConclusionFilter(run, "other", KNOWN_CONCLUSIONS)).toBe(false);
+    }
+  });
+
+  it("matches completed runs against exact terminal conclusion filters ('success', 'failure', 'cancelled')", () => {
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "success" }, "success", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "failure" }, "success", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "failure" }, "failure", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "cancelled" }, "cancelled", KNOWN_CONCLUSIONS)).toBe(true);
+  });
+
+  it("matches completed runs with unknown non-null conclusions under 'other' and excludes KNOWN_CONCLUSIONS including 'action_required'", () => {
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "skipped" }, "other", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "timed_out" }, "other", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "neutral" }, "other", KNOWN_CONCLUSIONS)).toBe(true);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: null }, "other", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "success" }, "other", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "failure" }, "other", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "cancelled" }, "other", KNOWN_CONCLUSIONS)).toBe(false);
+    expect(matchesActionsConclusionFilter({ status: "completed", conclusion: "action_required" }, "other", KNOWN_CONCLUSIONS)).toBe(false);
   });
 });
