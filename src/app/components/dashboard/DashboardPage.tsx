@@ -580,7 +580,7 @@ async function pollFetch(force = false): Promise<DashboardData> {
       recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
         ? resolvedPullRequests.map((pr) =>
             (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
-              ? { ...pr, enriched: true, checkStatus: "pending" as const }
+              ? { ...pr, enriched: true, checkStatus: "running" as const, hotPollPinned: true }
               : pr
           )
         : resolvedPullRequests;
@@ -702,6 +702,8 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     applyRecentApprovalGuard(pr, currentLogin);
   }
 
+  const targetedRuns = config.enableActions ? data.workflowRuns : [];
+
   withScrollLock(() => {
     setDashboardData(produce((state) => {
       // ID-based merge: replace targeted items, keep unaffected + tracked-user-only items
@@ -721,7 +723,6 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
         ),
         ...data.pullRequests,
       ];
-      const targetedRuns = config.enableActions ? data.workflowRuns : [];
       const newRunIds = new Set(targetedRuns.map(r => r.id));
       state.workflowRuns = config.enableActions ? [
         ...state.workflowRuns.filter(r =>
@@ -757,7 +758,15 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
   const newItems = detectNewItems(data);
   dispatchNotifications(newItems, config);
 
-  seedHotSetsFromTargeted(data);
+  const hotTargetedPullRequests =
+    recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
+      ? data.pullRequests.map((pr) =>
+          (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
+            ? { ...pr, enriched: true, checkStatus: "running" as const, hotPollPinned: true }
+            : pr
+        )
+      : data.pullRequests;
+  seedHotSetsFromTargeted({ ...data, pullRequests: hotTargetedPullRequests, workflowRuns: targetedRuns });
   persistDashboardSnapshot();
 }
 
@@ -1825,7 +1834,7 @@ export default function DashboardPage() {
       // even when checkStatus was already "success" prior to approval.
       seedHotSetsFromTargeted({
         issues: [],
-        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "pending" }],
+        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "running", hotPollPinned: true }],
         workflowRuns: [],
         errors: [],
       });
@@ -1894,7 +1903,7 @@ export default function DashboardPage() {
 
       seedHotSetsFromTargeted({
         issues: [],
-        pullRequests: [{ ...pr, nodeId, draft: false, enriched: true, checkStatus: "pending" }],
+        pullRequests: [{ ...pr, nodeId, draft: false, enriched: true, checkStatus: "running", hotPollPinned: true }],
         workflowRuns: [],
         errors: [],
       });
