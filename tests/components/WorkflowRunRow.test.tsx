@@ -134,12 +134,19 @@ describe("WorkflowRunRow", () => {
     screen.getByText("pending action");
     unmount2();
 
-    const completedActionReqRun = makeWorkflowRun({ id: 203, status: "completed", conclusion: "action_required" });
-    render(() => (
+    const completedActionReqRun = makeWorkflowRun({
+      id: 203,
+      status: "completed",
+      conclusion: "action_required",
+      runStartedAt: "2026-03-30T10:00:00Z",
+      completedAt: "2026-03-30T10:05:00Z",
+    });
+    const { unmount: unmount3 } = render(() => (
       <WorkflowRunRow run={completedActionReqRun} onIgnore={() => {}} />
     ));
     screen.getByLabelText("Pending action");
     screen.getByText("pending action");
+    unmount3();
   });
 
   it("renders status indicator and duration for pending and requested statuses as Pending condition", () => {
@@ -152,11 +159,19 @@ describe("WorkflowRunRow", () => {
     unmount();
 
     const requestedRun = makeWorkflowRun({ id: 205, status: "requested", conclusion: null });
-    render(() => (
+    const { unmount: unmount2 } = render(() => (
       <WorkflowRunRow run={requestedRun} onIgnore={() => {}} />
     ));
     screen.getByLabelText("Pending condition");
     screen.getByText("pending condition");
+    unmount2();
+
+    const unknownRun = makeWorkflowRun({ id: 206, status: "unknown", conclusion: null });
+    render(() => (
+      <WorkflowRunRow run={unknownRun} onIgnore={() => {}} />
+    ));
+    screen.getByLabelText("Unknown status");
+    screen.getByText("--");
   });
 
   it("calls onIgnore when ignore button clicked", async () => {
