@@ -15,7 +15,7 @@ import SkeletonRows from "../shared/SkeletonRows";
 import ExpandCollapseButtons from "../shared/ExpandCollapseButtons";
 import { deriveInvolvementRoles } from "../../lib/format";
 import RepoGroupHeader from "../shared/RepoGroupHeader";
-import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, ensureLockedRepoGroups, isUserInvolved } from "../../lib/grouping";
+import { groupByRepo, computePageLayout, slicePageGroups, orderRepoGroups, ensureLockedRepoGroups, isUserInvolved, groupKeys, indexGroups, arraysShallowEqual } from "../../lib/grouping";
 import { createReorderHighlight } from "../../lib/reorderHighlight";
 import RepoLockControls from "../shared/RepoLockControls";
 import RepoGitHubLink from "../shared/RepoGitHubLink";
@@ -204,6 +204,8 @@ export default function IssuesTab(props: IssuesTabProps) {
   const pageGroups = createMemo(() =>
     slicePageGroups(repoGroups(), pageLayout().boundaries, pageCount(), page())
   );
+  const pageGroupKeys = createMemo(() => groupKeys(pageGroups()), undefined, { equals: arraysShallowEqual });
+  const groupIndex = createMemo(() => indexGroups(pageGroups()));
 
   createEffect(() => {
     const max = pageCount() - 1;
@@ -312,14 +314,15 @@ export default function IssuesTab(props: IssuesTabProps) {
       {/* Issue rows + locked stubs */}
       <Show when={(!props.loading || props.issues.length > 0) && pageGroups().length > 0}>
         <div class="divide-y divide-base-300">
-          <For each={pageGroups()}>
-            {(repoGroup) => {
-                const isEmpty = () => repoGroup.items.length === 0;
-                const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup.repoFullName);
+          <For each={pageGroupKeys()}>
+            {(repoName) => {
+                const repoGroup = () => groupIndex().get(repoName) ?? { repoFullName: repoName, items: [] };
+                const isEmpty = () => repoGroup().items.length === 0;
+                const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup().repoFullName);
 
                 const roleSummary = createMemo(() => {
                   const counts: Record<string, number> = {};
-                  for (const item of repoGroup.items) {
+                  for (const item of repoGroup().items) {
                     const m = issueMeta().get(item.id);
                     if (m) {
                       for (const role of m.roles) {
@@ -334,18 +337,18 @@ export default function IssuesTab(props: IssuesTabProps) {
                   <Show
                     when={!isEmpty()}
                     fallback={
-                      <EmptyLockedRepoRow repoFullName={repoGroup.repoFullName} section="issues" tabKey={tabKey()} />
+                      <EmptyLockedRepoRow repoFullName={repoGroup().repoFullName} section="issues" tabKey={tabKey()} />
                     }
                   >
-                    <div class="bg-base-100" data-repo-group={repoGroup.repoFullName}>
+                    <div class="bg-base-100" data-repo-group={repoGroup().repoFullName}>
                       <RepoGroupHeader
-                        repoFullName={repoGroup.repoFullName}
-                        starCount={repoGroup.starCount}
+                        repoFullName={repoGroup().repoFullName}
+                        starCount={repoGroup().starCount}
                         isExpanded={isExpanded()}
-                        isHighlighted={highlightedReposIssues().has(repoGroup.repoFullName)}
-                        onToggle={() => toggleExpandedRepo(tabKey(), repoGroup.repoFullName)}
+                        isHighlighted={highlightedReposIssues().has(repoGroup().repoFullName)}
+                        onToggle={() => toggleExpandedRepo(tabKey(), repoGroup().repoFullName)}
                         badges={
-                          <Show when={monitoredRepoNameSet().has(repoGroup.repoFullName)}>
+                          <Show when={monitoredRepoNameSet().has(repoGroup().repoFullName)}>
                             <Tooltip content="Showing all activity, not just yours" focusable>
                               <span class="badge badge-xs badge-ghost" aria-label="monitoring all activity">Monitoring all</span>
                             </Tooltip>
@@ -353,13 +356,13 @@ export default function IssuesTab(props: IssuesTabProps) {
                         }
                         trailing={
                           <>
-                            <RepoGitHubLink repoFullName={repoGroup.repoFullName} section="issues" />
-                            <RepoLockControls repoFullName={repoGroup.repoFullName} tabKey={tabKey()} />
+                            <RepoGitHubLink repoFullName={repoGroup().repoFullName} section="issues" />
+                            <RepoLockControls repoFullName={repoGroup().repoFullName} tabKey={tabKey()} />
                           </>
                         }
                         collapsedSummary={
                           <span class="ml-auto flex items-center gap-2 text-xs font-normal text-base-content/60">
-                            <span>{repoGroup.items.length} {repoGroup.items.length === 1 ? "issue" : "issues"}</span>
+                            <span>{repoGroup().items.length} {repoGroup().items.length === 1 ? "issue" : "issues"}</span>
                             <For each={roleSummary()}>
                               {([role, count]) => (
                                 <span class={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${
@@ -376,7 +379,7 @@ export default function IssuesTab(props: IssuesTabProps) {
                       />
                       <Show when={isExpanded()}>
                         <div role="list" class="divide-y divide-base-300">
-                          <For each={repoGroup.items}>
+                          <For each={repoGroup().items}>
                             {(issue) => (
                               <div role="listitem" class={
                                 activeFilters().scope === "all" && isInvolvedItem(issue)

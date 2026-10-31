@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock cache.ts so clearAuth() doesn't try to open IndexedDB
+const mockClearCache = vi.fn().mockResolvedValue(undefined);
 vi.mock("../../src/app/stores/cache", () => ({
-  clearCache: vi.fn().mockResolvedValue(undefined),
+  clearCache: (...args: unknown[]) => mockClearCache(...args),
+}));
+
+const mockClearSnapshot = vi.fn().mockResolvedValue(undefined);
+vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
+  clearSnapshot: (...args: unknown[]) => mockClearSnapshot(...args),
 }));
 
 const mockPushNotification = vi.fn();
@@ -36,6 +42,25 @@ Object.defineProperty(globalThis, "localStorage", {
 // auth.ts reads localStorage on import (to initialize token signal from persisted value).
 // Each describe block uses vi.resetModules() + dynamic import to get clean signal state.
 // Tests that seed localStorage must do so BEFORE the dynamic import.
+
+// auth.ts registers a module-scope "storage" listener on every (re-)import, and
+// some tests import more than one instance. Track them all and detach after each
+// test so listeners from earlier instances don't react to later cross-tab events.
+const storageListeners = new Set<EventListenerOrEventListenerObject>();
+const originalAddEventListener = window.addEventListener.bind(window);
+window.addEventListener = ((
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+) => {
+  if (type === "storage") storageListeners.add(listener);
+  originalAddEventListener(type, listener, options);
+}) as typeof window.addEventListener;
+
+afterEach(() => {
+  for (const listener of storageListeners) window.removeEventListener("storage", listener);
+  storageListeners.clear();
+});
 
 describe("setAuth / token signal", () => {
   let mod: typeof import("../../src/app/stores/auth");
@@ -473,10 +498,8 @@ describe("cross-tab auth sync", () => {
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
     // Safe default fetch stub for every test in this describe block. auth.ts
-    // registers its "storage" listener as a module-level side effect; the
-    // afterEach below detaches it via `_resetAuthStorageListenerForTests()`, so
-    // within this describe each `vi.resetModules()` + re-import swaps the listener
-    // rather than piling new ones onto the shared happy-dom `window`. The stub still guards the
+    // registers its "storage" listener as a module-level side effect (detached
+    // after each test by the file-level listener tracker). The stub guards the
     // current test's own listener: its cross-tab branch fires an un-awaited
     // `/user` fetch that, without a stub, would hit the real network and abort
     // on teardown (throwing unhandled AbortError/ERR_INVALID_STATE). Individual
@@ -491,7 +514,6 @@ describe("cross-tab auth sync", () => {
     // still-active mock rather than racing `vi.unstubAllGlobals()` below and
     // falling through to the real fetch.
     await new Promise((r) => setTimeout(r, 50));
-    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1271,10 +1293,6 @@ describe("cross-tab Jira auth sync", () => {
   });
 
   afterEach(() => {
-    // Detach this test's module-scope "storage" listener so re-imports don't
-    // accumulate listeners on the shared window (same reason as the GitHub
-    // cross-tab describe above).
-    mod._resetAuthStorageListenerForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1509,5 +1527,169 @@ describe("setAuthFromPat — identity switch", () => {
     expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBe(
       '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}'
     );
+  });
+});
+
+describe("identityEpoch and clearSnapshot integration", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+
+  beforeEach(async () => {
+    localStorageMock.clear();
+    mockClearCache.mockReset().mockResolvedValue(undefined);
+    mockClearSnapshot.mockReset().mockResolvedValue(undefined);
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: () => Promise.resolve({}) }));
+  });
+
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("clearAuth() calls clearSnapshot() and increments identityEpoch()", () => {
+    const beforeEpoch = mod.identityEpoch();
+    mod.clearAuth();
+    expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("expireToken() calls clearSnapshot() and increments identityEpoch()", () => {
+    const beforeEpoch = mod.identityEpoch();
+    mod.expireToken();
+    expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(mockClearSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("cross-tab auth-key removal calls clearSnapshot() and increments identityEpoch()", () => {
+    const replaceMock = vi.fn();
+    vi.stubGlobal("location", { href: window.location.href, replace: replaceMock });
+    mod.setAuth({ access_token: "ghs_abc" });
+    localStorageMock.removeItem("github-tracker:auth-token");
+
+    const beforeEpoch = mod.identityEpoch();
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: null,
+    }));
+
+    expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(mockClearSnapshot).toHaveBeenCalled();
+    expect(replaceMock).toHaveBeenCalledWith("/login");
+  });
+
+  it("cross-tab token change to a different identity increments identityEpoch() and clears the snapshot before reload", async () => {
+    mod.setAuthFromPat("ghs_old", { login: "alice", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" });
+    mockClearSnapshot.mockClear();
+    const beforeEpoch = mod.identityEpoch();
+    let epochAtReload = -1;
+    let snapshotClearsAtReload = -1;
+
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {
+      epochAtReload = mod.identityEpoch();
+      snapshotClearsAtReload = mockClearSnapshot.mock.calls.length;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "bob", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "Bob" }),
+    }));
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_bob_token",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(reloadSpy).toHaveBeenCalledOnce();
+    expect(epochAtReload).toBe(beforeEpoch + 1);
+    expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(snapshotClearsAtReload).toBe(1);
+    expect(mockClearSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("same-user token rotation does NOT increment identityEpoch() or clear the snapshot", async () => {
+    mod.setAuthFromPat("ghs_old", { login: "alice", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" });
+    mockClearSnapshot.mockClear();
+    const beforeEpoch = mod.identityEpoch();
+    const reloadSpy = vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "ALICE", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" }),
+    }));
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "github-tracker:auth-token",
+      newValue: "ghs_alice_rotated",
+    }));
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(reloadSpy).not.toHaveBeenCalled();
+    expect(mod.identityEpoch()).toBe(beforeEpoch);
+    expect(mockClearSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("clearIdentityData() invokes clearSnapshot() synchronously before clearCache() resolves, awaits both, and survives either rejecting", async () => {
+    const order: string[] = [];
+    let resolveCache!: () => void;
+    let resolveSnapshot!: () => void;
+
+    mockClearCache.mockImplementation(() => {
+      order.push("clearCache:called");
+      return new Promise<void>((resolve) => {
+        resolveCache = () => {
+          order.push("clearCache:resolved");
+          resolve();
+        };
+      });
+    });
+
+    mockClearSnapshot.mockImplementation(() => {
+      order.push("clearSnapshot:called");
+      return new Promise<void>((resolve) => {
+        resolveSnapshot = () => {
+          order.push("clearSnapshot:resolved");
+          resolve();
+        };
+      });
+    });
+
+    const beforeEpoch = mod.identityEpoch();
+    let settled = false;
+    const clearPromise = mod.clearIdentityData().then(() => {
+      settled = true;
+      return undefined;
+    });
+
+    // Both clearSnapshot and clearCache are invoked synchronously before the first await resolves
+    expect(mod.identityEpoch()).toBe(beforeEpoch + 1);
+    expect(order).toEqual(["clearSnapshot:called", "clearCache:called"]);
+    expect(settled).toBe(false);
+
+    resolveCache();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Still waiting on snapshotClear
+    expect(settled).toBe(false);
+
+    resolveSnapshot();
+    await clearPromise;
+    expect(settled).toBe(true);
+    expect(order).toEqual([
+      "clearSnapshot:called",
+      "clearCache:called",
+      "clearCache:resolved",
+      "clearSnapshot:resolved",
+    ]);
+
+    // Survives clearCache rejecting and still awaits clearSnapshot
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockClearCache.mockRejectedValueOnce(new Error("cache error"));
+    mockClearSnapshot.mockRejectedValueOnce(new Error("snapshot error"));
+    await expect(mod.clearIdentityData()).resolves.toBeUndefined();
   });
 });

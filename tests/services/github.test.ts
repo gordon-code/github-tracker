@@ -1,5 +1,12 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+}));
 import { createRoot } from "solid-js";
 import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";

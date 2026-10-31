@@ -50,6 +50,14 @@ vi.mock("../../../src/app/stores/auth", () => ({
   clearJiraConfigFull: vi.fn(),
   ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
   setAuthFromPat: vi.fn(),
+  identityEpoch: () => 0,
+}));
+
+vi.mock("../../../src/app/lib/dashboard-snapshot", () => ({
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@sentry/solid", () => ({
@@ -101,6 +109,12 @@ vi.mock("../../../src/app/services/poll", () => ({
   seedHotSetsFromTargeted: vi.fn(),
   clearHotSets: vi.fn(),
   getHotPollGeneration: vi.fn().mockReturnValue(0),
+  StaleIdentityError: class StaleIdentityError extends Error {
+    constructor() {
+      super("Stale identity");
+      this.name = "StaleIdentityError";
+    }
+  },
 }));
 
 vi.mock("../../../src/app/lib/notifications", () => ({

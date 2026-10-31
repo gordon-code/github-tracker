@@ -79,9 +79,11 @@ vi.mock("../../src/app/stores/config", () => ({
   },
 }));
 
+const mockIdentityEpoch = vi.fn(() => 0);
 vi.mock("../../src/app/stores/auth", () => ({
   user: vi.fn(() => null),
   onAuthCleared: vi.fn(),
+  identityEpoch: () => mockIdentityEpoch(),
 }));
 
 vi.mock("../../src/app/services/api-usage", () => ({
@@ -488,6 +490,11 @@ describe("createEventsPollCoordinator", () => {
     coordinator!.destroy();
 
     expect(onTargetedData).toHaveBeenCalledTimes(1);
+    expect(onTargetedData).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: [], pullRequests: [], workflowRuns: [], errors: [] }),
+      ["owner/repo"],
+      0,
+    );
   });
 
   it("does NOT call onTargetedData when changed=false", async () => {

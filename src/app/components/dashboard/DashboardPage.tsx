@@ -1,5 +1,5 @@
-import { createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
-import { createStore, produce, unwrap } from "solid-js/store";
+import { batch, createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
+import { createStore, produce, reconcile, unwrap } from "solid-js/store";
 import { z } from "zod";
 import Header from "../layout/Header";
 import TabBar, { type TabId } from "../layout/TabBar";
@@ -29,9 +29,11 @@ import {
   clearHotSets,
   getHotPollGeneration,
   fetchAllData,
+  StaleIdentityError,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, DASHBOARD_STORAGE_KEY, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { expireToken, user, onAuthCleared, identityEpoch, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { loadSnapshot, writeSnapshot, type DashboardSnapshotState } from "../../lib/dashboard-snapshot";
 import { JiraApiError } from "../../services/jira-client";
 import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
 import { JIRA_SETTINGS_ACTION, type JiraIssue } from "../../../shared/jira-types";
@@ -43,7 +45,6 @@ import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
-import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
 import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
@@ -86,11 +87,6 @@ const globalSortOptions: SortOption[] = [
 
 // ── Shared dashboard store (module-level to survive navigation) ─────────────
 
-// Bump only for breaking schema changes (renames, type changes). Additive optional
-// fields (e.g., nodeId?: string) don't require a bump — missing fields deserialize
-// as undefined, which consuming code handles gracefully.
-const CACHE_VERSION = 2;
-
 interface DashboardStore {
   issues: Issue[];
   pullRequests: PullRequest[];
@@ -99,42 +95,28 @@ interface DashboardStore {
   lastRefreshedAt: Date | null;
 }
 
-const initialDashboardState: DashboardStore = {
-  issues: [],
-  pullRequests: [],
-  workflowRuns: [],
-  loading: true,
-  lastRefreshedAt: null,
-};
-
-function loadCachedDashboard(): DashboardStore {
-  try {
-    const raw = localStorage.getItem?.(DASHBOARD_STORAGE_KEY);
-    if (!raw) return { ...initialDashboardState };
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // Invalidate cache on schema version mismatch
-    if (parsed._v !== CACHE_VERSION) return { ...initialDashboardState };
-    // Validate expected shape — arrays must be arrays
-    if (!Array.isArray(parsed.issues) || !Array.isArray(parsed.pullRequests) || !Array.isArray(parsed.workflowRuns)) {
-      return { ...initialDashboardState };
-    }
-    return {
-      issues: parsed.issues as Issue[],
-      pullRequests: parsed.pullRequests as PullRequest[],
-      workflowRuns: parsed.workflowRuns as WorkflowRun[],
-      loading: false,
-      lastRefreshedAt: typeof parsed.lastRefreshedAt === "string" ? new Date(parsed.lastRefreshedAt) : null,
-    };
-  } catch {
-    return { ...initialDashboardState };
-  }
+function makeInitialDashboardState(): DashboardStore {
+  return {
+    issues: [],
+    pullRequests: [],
+    workflowRuns: [],
+    loading: true,
+    lastRefreshedAt: null,
+  };
 }
 
-const [dashboardData, setDashboardData] = createStore<DashboardStore>(loadCachedDashboard());
+let realDataCommitted = false;
+
+const [dashboardData, setDashboardData] = createStore<DashboardStore>(makeInitialDashboardState());
 
 function resetDashboardData(): void {
-  setDashboardData({ ...initialDashboardState });
-  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
+  realDataCommitted = false;
+  batch(() => {
+    setDashboardData("issues", reconcile([], KEYED));
+    setDashboardData("pullRequests", reconcile([], KEYED));
+    setDashboardData("workflowRuns", reconcile([], KEYED));
+    setDashboardData(makeInitialDashboardState());
+  });
 }
 
 const [hasFetchedFresh, setHasFetchedFresh] = createSignal(false);
@@ -387,13 +369,10 @@ function seedCachedDashboardBodies(): void {
   if (seededAbandoned.size > 0) setAbandonedDepsMap(seededAbandoned);
   if (seededUrls.size > 0) setDashboardIssueUrls(seededUrls);
 }
-seedCachedDashboardBodies();
 const _dashboardBodyFailureCooldown = new Map<string, number>();
-let _bodyFetchAuthGen = 0;
 
 // Clear dashboard data and stop polling on logout to prevent cross-user data leakage
 onAuthCleared(() => {
-  _bodyFetchAuthGen++;
   _targetedPushedEnrichmentDegraded = false;
   resetDashboardData();
   setHasFetchedFresh(false);
@@ -436,6 +415,7 @@ onAuthCleared(() => {
 });
 
 let _targetedPushedEnrichmentDegraded = false;
+const KEYED = { key: "id", merge: true } as const;
 
 async function pollFetch(force = false): Promise<DashboardData> {
   // Only show skeleton on initial load (no data yet).
@@ -444,26 +424,41 @@ async function pollFetch(force = false): Promise<DashboardData> {
   if (!dashboardData.lastRefreshedAt) {
     setDashboardData("loading", true);
   }
+  const fetchEpoch = identityEpoch();
   try {
     // Two-phase rendering: phase 1 callback fires with light issues + PRs
     // so the UI renders immediately. Phase 2 (enrichment + workflow runs)
     // arrives when fetchAllData resolves.
-    let phaseOneFired = false;
     const data = await fetchAllData((lightData) => {
+      if (fetchEpoch !== identityEpoch()) return;
       // Phase 1: render light issues + PRs immediately — but only on initial
       // load (no cached data). On reload with cached data, the cache already
       // has enriched PRs; replacing them with light PRs would cause a visible
       // flicker (badges disappear then reappear when phase 2 arrives).
       if (dashboardData.pullRequests.length === 0) {
-        phaseOneFired = true;
-        setDashboardData({
-          issues: lightData.issues,
-          pullRequests: lightData.pullRequests,
-          loading: false,
-          lastRefreshedAt: new Date(),
+        realDataCommitted = true;
+        batch(() => {
+          setDashboardData(
+            "issues",
+            reconcile(
+              lightData.issues.map((i) => Object.assign({}, i)),
+              KEYED,
+            ),
+          );
+          setDashboardData(
+            "pullRequests",
+            reconcile(
+              lightData.pullRequests.map((pr) => Object.assign({}, pr)),
+              KEYED,
+            ),
+          );
+          setDashboardData({ loading: false, lastRefreshedAt: new Date() });
         });
       }
     }, force);
+    if (fetchEpoch !== identityEpoch()) {
+      throw new StaleIdentityError();
+    }
     const hasErrors = data.errors.length > 0;
     setLastFetchHadErrors(hasErrors);
 
@@ -478,132 +473,48 @@ async function pollFetch(force = false): Promise<DashboardData> {
     setHasFetchedFresh(true);
     const now = new Date();
     const currentLogin = user()?.login ?? "";
-    for (const pr of data.pullRequests) {
+    const pullRequests = fallbackToPreviousEnrichment(
+      unwrap(dashboardData.pullRequests),
+      data.pullRequests,
+    );
+    for (const pr of pullRequests) {
       applyRecentReadyGuard(pr);
-      if (pr.enriched !== false) {
-        applyRecentApprovalGuard(pr, currentLogin);
-      }
-    }
-
-    let resolvedPullRequests: PullRequest[];
-    if (phaseOneFired) {
-      // Phase 1 fired — use fine-grained merge for the light→enriched
-      // transition. Only update heavy fields to avoid re-rendering the
-      // entire list (light fields haven't changed within this poll cycle).
-      const enrichedMap = new Map<number, PullRequest>();
-      for (const pr of data.pullRequests) enrichedMap.set(pr.id, pr);
-
-      setDashboardData(produce((state) => {
-        state.issues = data.issues;
-        state.workflowRuns = config.enableActions ? data.workflowRuns : [];
-        state.loading = false;
-        state.lastRefreshedAt = now;
-
-        let canMerge = state.pullRequests.length === enrichedMap.size;
-        if (canMerge) {
-          for (let i = 0; i < state.pullRequests.length; i++) {
-            if (!enrichedMap.has(state.pullRequests[i].id)) { canMerge = false; break; }
-          }
-        }
-
-        if (canMerge) {
-          for (let i = 0; i < state.pullRequests.length; i++) {
-            const e = enrichedMap.get(state.pullRequests[i].id)!;
-            const pr = state.pullRequests[i];
-            // A failed backfill batch returns e.enriched === false for PRs it
-            // couldn't reach — don't let that regress a PR that was already
-            // enriched from a prior cycle.
-            const regressing = e.enriched === false && pr.enriched !== false;
-            if (!regressing) {
-              const sameRevision =
-                pr.enriched !== false && !pr.checkStatusStale && isSameRevision(pr, e);
-              const prevCheckStatus = pr.checkStatus;
-              Object.assign(pr, pickEnrichmentFields(e));
-              pr.checkStatusStale = e.checkStatusStale;
-              if (e.checkStatusStale) {
-                if (sameRevision) {
-                  pr.checkStatus = prevCheckStatus;
-                  pr.checkStatusStale = false;
-                } else {
-                  pr.checkStatus = null;
-                }
-              }
-              pr.reviewDecision = e.reviewDecision;
-              pr.draft = e.draft;
-              pr.enriched = e.enriched;
-            } else {
-              const revisionChanged = hasRevisionChanged(pr, e);
-              pr.updatedAt = e.updatedAt;
-              pr.reviewDecision = e.reviewDecision;
-              pr.draft = e.draft;
-              if (revisionChanged || pr.checkStatusStale) markCheckStatusStale(pr);
-            }
-            pr.nodeId = e.nodeId;
-            pr.surfacedBy = e.surfacedBy;
-            pr.starCount = e.starCount;
-            applyRecentReadyGuard(pr);
-            applyRecentApprovalGuard(pr, currentLogin);
-          }
-        } else {
-          state.pullRequests = fallbackToPreviousEnrichment(state.pullRequests, data.pullRequests);
-          for (const pr of state.pullRequests) {
-            applyRecentReadyGuard(pr);
-            applyRecentApprovalGuard(pr, currentLogin);
-          }
-        }
-      }));
-      resolvedPullRequests = unwrap(dashboardData.pullRequests).map((pr) => Object.assign({}, pr));
-    } else {
-      // Phase 1 did NOT fire (cached data existed or subsequent poll).
-      // Full atomic replacement — all fields (light + heavy) may have
-      // changed since the last cycle. Preserve scroll position: SolidJS
-      // DOM updates are synchronous within the setter, so save/restore
-      // around it to prevent scroll reset from <For> DOM rebuild.
-      const pullRequests = fallbackToPreviousEnrichment(unwrap(dashboardData.pullRequests), data.pullRequests);
-      for (const pr of pullRequests) {
-        applyRecentReadyGuard(pr);
-        applyRecentApprovalGuard(pr, currentLogin);
-      }
-      resolvedPullRequests = pullRequests;
-      withScrollLock(() => {
-        setDashboardData({
-          issues: data.issues,
-          pullRequests,
-          workflowRuns: config.enableActions ? data.workflowRuns : [],
-          loading: false,
-          lastRefreshedAt: now,
-        });
-      });
+      applyRecentApprovalGuard(pr, currentLogin);
     }
     const filteredRuns = config.enableActions ? data.workflowRuns : [];
+    realDataCommitted = true;
+    batch(() => {
+      setDashboardData("issues", reconcile(data.issues, KEYED));
+      setDashboardData("pullRequests", reconcile(pullRequests, KEYED));
+      setDashboardData("workflowRuns", reconcile(filteredRuns, KEYED));
+      setDashboardData({ loading: false, lastRefreshedAt: now });
+    });
+    if (_dashboardBodyCache.size > 0 && abandonedDepsMap().size === 0) {
+      seedCachedDashboardBodies();
+    }
     const hotPullRequests =
       recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
-        ? resolvedPullRequests.map((pr) =>
+        ? pullRequests.map((pr) =>
             (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
               ? { ...pr, enriched: true, checkStatus: "pending" as const }
               : pr
           )
-        : resolvedPullRequests;
+        : pullRequests;
     rebuildHotSets({ ...data, pullRequests: hotPullRequests, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
-    // Errors are transient and not persisted. Deferred to avoid blocking paint.
-    const cachePayload = {
-      _v: CACHE_VERSION,
-      issues: data.issues,
-      pullRequests: resolvedPullRequests,
-      workflowRuns: filteredRuns,
-      lastRefreshedAt: now.toISOString(),
-    };
-    setTimeout(() => {
-      try {
-        localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
-      } catch {
-        pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
-      }
-    }, 0);
+    // Errors are transient and not persisted.
+    const snapshotLogin = user()?.login;
+    if (snapshotLogin) {
+      writeSnapshot(currentSnapshotState(), snapshotLogin, "immediate");
+    }
     _targetedPushedEnrichmentDegraded = false;
-    return { ...data, pullRequests: resolvedPullRequests };
+    return { ...data, pullRequests };
   } catch (err) {
+    // A poll started under a previous identity must not touch the current
+    // identity's store, token, or error surfaces.
+    if (fetchEpoch !== identityEpoch()) {
+      throw err instanceof StaleIdentityError ? err : new StaleIdentityError();
+    }
     // Handle 401 auth errors
     const status =
       typeof err === "object" &&
@@ -627,39 +538,39 @@ const [_coordinator, _setCoordinator] = createSignal<ReturnType<typeof createPol
 const [_hotCoordinator, _setHotCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 const [_eventsCoordinator, _setEventsCoordinator] = createSignal<{ destroy: () => void } | null>(null);
 
-function persistDashboardSnapshot(): void {
-  // Capture snapshot eagerly — a concurrent hot poll can mutate the store via produce
-  // between here and the deferred setTimeout write.
-  const snapshot = {
-    _v: CACHE_VERSION,
-    issues: [...dashboardData.issues],
-    pullRequests: [...dashboardData.pullRequests],
-    workflowRuns: [...dashboardData.workflowRuns],
-    lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString() ?? null,
+function currentSnapshotState(): DashboardSnapshotState {
+  return {
+    issues: unwrap(dashboardData.issues),
+    pullRequests: unwrap(dashboardData.pullRequests),
+    workflowRuns: unwrap(dashboardData.workflowRuns),
+    lastRefreshedAt: dashboardData.lastRefreshedAt,
   };
-  setTimeout(() => {
-    try {
-      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Non-fatal
-    }
-  }, 0);
+}
+
+function persistDashboardSnapshot(): void {
+  const login = user()?.login;
+  if (!login) return;
+  writeSnapshot(currentSnapshotState(), login, "debounced");
 }
 
 // Mutates data.issues[].surfacedBy and data.pullRequests[].surfacedBy in-place before merging.
-function handleTargetedData(data: DashboardData, affectedRepos: string[]): void {
+function handleTargetedData(data: DashboardData, affectedRepos: string[], epoch: number): void {
+  if (epoch !== identityEpoch()) return;
   const affectedSet = new Set(affectedRepos.map(r => r.toLowerCase()));
+  const currentIssues = unwrap(dashboardData.issues);
+  const currentPRs = unwrap(dashboardData.pullRequests);
+  const currentRuns = unwrap(dashboardData.workflowRuns);
 
   // Build surfacedBy index from old store items BEFORE the merge
   const oldSurfacedByIssues = new Map<number, string[]>();
-  for (const i of dashboardData.issues) {
+  for (const i of currentIssues) {
     if (affectedSet.has(i.repoFullName.toLowerCase()) && i.surfacedBy?.length) {
       oldSurfacedByIssues.set(i.id, i.surfacedBy);
     }
   }
   const oldSurfacedByPRs = new Map<number, string[]>();
   const existingPRById = new Map<number, PullRequest>();
-  for (const pr of dashboardData.pullRequests) {
+  for (const pr of currentPRs) {
     existingPRById.set(pr.id, pr);
     if (affectedSet.has(pr.repoFullName.toLowerCase()) && pr.surfacedBy?.length) {
       oldSurfacedByPRs.set(pr.id, pr.surfacedBy);
@@ -702,35 +613,38 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     applyRecentApprovalGuard(pr, currentLogin);
   }
 
-  withScrollLock(() => {
-    setDashboardData(produce((state) => {
-      // ID-based merge: replace targeted items, keep unaffected + tracked-user-only items
-      const newIssueIds = new Set(data.issues.map(i => i.id));
-      state.issues = [
-        ...state.issues.filter(i =>
-          !affectedSet.has(i.repoFullName.toLowerCase()) ||
-          !newIssueIds.has(i.id)
-        ),
-        ...data.issues,
-      ];
-      const newPRIds = new Set(data.pullRequests.map(pr => pr.id));
-      state.pullRequests = [
-        ...state.pullRequests.filter(pr =>
-          !affectedSet.has(pr.repoFullName.toLowerCase()) ||
-          !newPRIds.has(pr.id)
-        ),
-        ...data.pullRequests,
-      ];
-      const targetedRuns = config.enableActions ? data.workflowRuns : [];
-      const newRunIds = new Set(targetedRuns.map(r => r.id));
-      state.workflowRuns = config.enableActions ? [
-        ...state.workflowRuns.filter(r =>
-          !affectedSet.has(r.repoFullName.toLowerCase()) ||
-          !newRunIds.has(r.id)
-        ),
-        ...targetedRuns,
-      ] : [];
-    }));
+  // ID-based merge: replace targeted items, keep unaffected + tracked-user-only items
+  const newIssueIds = new Set(data.issues.map(i => i.id));
+  const mergedIssues = [
+    ...currentIssues.filter(i =>
+      !affectedSet.has(i.repoFullName.toLowerCase()) ||
+      !newIssueIds.has(i.id)
+    ),
+    ...data.issues,
+  ];
+  const newPRIds = new Set(data.pullRequests.map(pr => pr.id));
+  const mergedPRs = [
+    ...currentPRs.filter(pr =>
+      !affectedSet.has(pr.repoFullName.toLowerCase()) ||
+      !newPRIds.has(pr.id)
+    ),
+    ...data.pullRequests,
+  ];
+  const targetedRuns = config.enableActions ? data.workflowRuns : [];
+  const newRunIds = new Set(targetedRuns.map(r => r.id));
+  const mergedRuns = config.enableActions ? [
+    ...currentRuns.filter(r =>
+      !affectedSet.has(r.repoFullName.toLowerCase()) ||
+      !newRunIds.has(r.id)
+    ),
+    ...targetedRuns,
+  ] : [];
+
+  realDataCommitted = true;
+  batch(() => {
+    setDashboardData("issues", reconcile(mergedIssues, KEYED));
+    setDashboardData("pullRequests", reconcile(mergedPRs, KEYED));
+    setDashboardData("workflowRuns", reconcile(mergedRuns, KEYED));
   });
 
   const targetedBackfillErrors = data.errors.filter(isBackfillError);
@@ -997,6 +911,8 @@ export default function DashboardPage() {
     // so SolidJS registers them as dependencies even when the guard short-circuits
     const issues = dashboardData.issues;
     const prs = dashboardData.pullRequests;
+    void issues.length;
+    void prs.length;
     if (!config.enableTracking || viewState.trackedItems.length === 0 || !hasFetchedFresh()) return;
     // Never prune when the last fetch had errors (rate limit, network failure, etc.)
     // — the missing items are likely just unfetched, not closed/merged.
@@ -1020,6 +936,29 @@ export default function DashboardPage() {
   });
 
   onMount(() => {
+    if (
+      !realDataCommitted &&
+      dashboardData.issues.length === 0 &&
+      dashboardData.pullRequests.length === 0 &&
+      dashboardData.workflowRuns.length === 0
+    ) {
+      const login = user()?.login;
+      if (login) {
+        const mountEpoch = identityEpoch();
+        void (async () => {
+          const snap = await loadSnapshot(login);
+          if (!snap || mountEpoch !== identityEpoch() || realDataCommitted) return;
+          batch(() => {
+            setDashboardData("issues", reconcile(snap.issues, KEYED));
+            setDashboardData("pullRequests", reconcile(snap.pullRequests, KEYED));
+            setDashboardData("workflowRuns", reconcile(config.enableActions ? snap.workflowRuns : [], KEYED));
+            setDashboardData({ loading: false, lastRefreshedAt: snap.lastRefreshedAt });
+          });
+          seedCachedDashboardBodies();
+        })();
+      }
+    }
+
     if (!_coordinator()) {
       _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
     }
@@ -1042,12 +981,13 @@ export default function DashboardPage() {
     if (!_hotCoordinator()) {
       _setHotCoordinator(createHotPollCoordinator(
         () => config.hotPollInterval,
-        (prUpdates, runUpdates, fetchGeneration) => {
-          // Guard against stale hot poll results overlapping with a full refresh.
+        (prUpdates, runUpdates, fetchGeneration, epoch) => {
+          // Guard against stale hot poll results overlapping with a full refresh
+          // or an identity change while fetchHotData() was in flight.
           // fetchGeneration was captured BEFORE fetchHotData() started its async work.
           // If a full refresh completed during the fetch, _hotPollGeneration will have
           // been incremented by rebuildHotSets(), and fetchGeneration will be stale.
-          if (fetchGeneration !== getHotPollGeneration()) return; // stale, discard
+          if (fetchGeneration !== getHotPollGeneration() || epoch !== identityEpoch()) return; // stale, discard
           let terminalPrIds = new Set<number>();
           setDashboardData(produce((state) => {
             const currentLogin = user()?.login ?? "";
@@ -1064,25 +1004,15 @@ export default function DashboardPage() {
           }));
           if (terminalPrIds.size > 0) {
             console.info(`[hot-poll] Spliced ${terminalPrIds.size} terminal PR(s) from store`);
-            setTimeout(() => {
-              try {
-                const cachePayload = {
-                  _v: CACHE_VERSION,
-                  issues: dashboardData.issues,
-                  pullRequests: dashboardData.pullRequests,
-                  workflowRuns: dashboardData.workflowRuns,
-                  lastRefreshedAt: dashboardData.lastRefreshedAt?.toISOString(),
-                };
-                localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(cachePayload));
-              } catch {
-                pushNotification("localStorage:dashboard", "Dashboard cache write failed — storage may be full", "warning");
-              }
-            }, 0);
           }
+          // Every delivering cycle persists so a reload shows current check/run statuses.
+          // The debounced write costs one structured clone of the store per cycle
+          // (a few ms at ~1000 items) and only fires while hot items are in flight.
+          persistDashboardSnapshot();
           // Prune tracked PRs that became closed/merged via hot poll.
-          // The auto-prune createEffect only fires when the pullRequests array
-          // reference changes (full refresh). Hot poll mutates nested pr.state
-          // in-place via produce(), leaving the array ref unchanged.
+          // Full and targeted refreshes reconcile open-only results into the store
+          // (triggering the auto-prune createEffect via array membership changes),
+          // whereas hot poll receives terminal CLOSED/MERGED status updates directly.
           if (config.enableTracking && viewState.trackedItems.length > 0 && prUpdates.size > 0) {
             const pruneKeys = new Set<string>();
             for (const [prId, update] of prUpdates) {
@@ -1511,7 +1441,7 @@ export default function DashboardPage() {
       const octokit = getClient();
       if (!octokit) return;
       _fetchingDashboardBodies = true;
-      const authGen = _bodyFetchAuthGen;
+      const authGen = identityEpoch();
       void (async () => {
         try {
           const dashboardIssues = findDashboardIssues(dashboardData.issues, trackedBotLogins());
@@ -1556,7 +1486,7 @@ export default function DashboardPage() {
               octokit,
               toFetch.map((di) => di.nodeId)
             );
-            if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
+            if (authGen !== identityEpoch() || getClient() !== octokit) return;
             failedCount = failedIds.size;
             let cacheUpdated = false;
             for (const di of toFetch) {
@@ -1591,7 +1521,9 @@ export default function DashboardPage() {
             setAbandonedDepsMap(newAbandonedMap);
           }
         } finally {
-          if (authGen === _bodyFetchAuthGen) {
+          // Safe: every identityEpoch bump is followed by onAuthCleared (which resets
+          // _fetchingDashboardBodies = false) or a full page reload.
+          if (authGen === identityEpoch()) {
             _fetchingDashboardBodies = false;
           }
         }
@@ -1618,6 +1550,7 @@ export default function DashboardPage() {
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
     const enrichmentPending = awaitingEnrichment();
+    void dashboardData.lastRefreshedAt;
     if (_fetchingDepBodies) {
       console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;
@@ -1650,14 +1583,14 @@ export default function DashboardPage() {
     }
 
     _fetchingDepBodies = true;
-    const authGen = _bodyFetchAuthGen;
+    const authGen = identityEpoch();
     const effectStart = Date.now();
     console.debug(`[dashboard] depBodies effect: fetch started for ${toFetch.length} PRs at ${effectStart}`);
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
         const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
-        if (authGen !== _bodyFetchAuthGen || getClient() !== octokit) return;
+        if (authGen !== identityEpoch() || getClient() !== octokit) return;
         console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
 
         // Record/clear per-PR cooldown so a batch that errored or timed out isn't
@@ -1684,10 +1617,12 @@ export default function DashboardPage() {
         setDepMeta(merged);
         console.debug(`[dashboard] depBodies effect: depMeta updated, size=${merged.size}`);
         setTimeout(() => {
-          if (authGen === _bodyFetchAuthGen) persistDepMeta(merged);
+          if (authGen === identityEpoch()) persistDepMeta(merged);
         }, 0);
       } finally {
-        if (authGen === _bodyFetchAuthGen) {
+        // Safe: every identityEpoch bump is followed by onAuthCleared (which resets
+        // _fetchingDepBodies = false) or a full page reload.
+        if (authGen === identityEpoch()) {
           _fetchingDepBodies = false;
         }
         console.debug(`[dashboard] depBodies effect: guard released after ${Date.now() - effectStart}ms`);
@@ -1798,10 +1733,11 @@ export default function DashboardPage() {
     dismissNotificationBySource(`approve-pr:${pr.id}`);
 
     setApprovingPRIds((prev) => addIdToSet(prev, pr.id));
+    const mutationEpoch = identityEpoch();
 
     try {
       const result = await approvePullRequest(client, nodeId, approvedHeadSha);
-      if (getClient() !== client) return;
+      if (mutationEpoch !== identityEpoch() || getClient() !== client) return;
       evictPREnrichmentCacheNode(pr.nodeId);
 
       const nextDecision: PullRequest["reviewDecision"] =
@@ -1832,7 +1768,7 @@ export default function DashboardPage() {
 
       persistDashboardSnapshot();
     } catch (err) {
-      if (getClient() !== client) return;
+      if (mutationEpoch !== identityEpoch() || getClient() !== client) return;
       if (
         handlePRMutationCommonError(
           err,
@@ -1869,10 +1805,11 @@ export default function DashboardPage() {
     dismissNotificationBySource(`mark-ready-pr:${pr.id}`);
 
     setMarkingReadyPRIds((prev) => addIdToSet(prev, pr.id));
+    const mutationEpoch = identityEpoch();
 
     try {
       const result = await markPullRequestReady(client, nodeId);
-      if (getClient() !== client) return;
+      if (mutationEpoch !== identityEpoch() || getClient() !== client) return;
       evictPREnrichmentCacheNode(pr.nodeId);
 
       recentlyMarkedReadyPRs.set(pr.id, {
@@ -1901,7 +1838,7 @@ export default function DashboardPage() {
 
       persistDashboardSnapshot();
     } catch (err) {
-      if (getClient() !== client) return;
+      if (mutationEpoch !== identityEpoch() || getClient() !== client) return;
       if (
         handlePRMutationCommonError(
           err,

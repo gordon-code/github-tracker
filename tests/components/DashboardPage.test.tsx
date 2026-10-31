@@ -25,14 +25,25 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 // Mock auth store — capture onAuthCleared callbacks so qa-4 can invoke them
+let mockIdentityEpochValue = 0;
+let mockUserValue: { login: string; avatar_url: string; name: string | null } | null = {
+  login: "testuser",
+  avatar_url: "",
+  name: "Test User",
+};
 const authClearCallbacks: (() => void)[] = [];
 vi.mock("../../src/app/stores/auth", () => ({
   clearAuth: vi.fn(),
   expireToken: vi.fn(),
   token: () => "fake-token",
-  user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+  user: () => mockUserValue,
   isAuthenticated: () => true,
-  onAuthCleared: vi.fn((cb: () => void) => { authClearCallbacks.push(cb); }),
+  onAuthCleared: vi.fn((cb: () => void) => {
+    authClearCallbacks.push(() => {
+      mockIdentityEpochValue++;
+      cb();
+    });
+  }),
   DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
   DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
   jiraAuth: vi.fn(() => null),
@@ -40,6 +51,14 @@ vi.mock("../../src/app/stores/auth", () => ({
   setJiraAuth: vi.fn(),
   clearJiraAuth: vi.fn(),
   ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+  identityEpoch: () => mockIdentityEpochValue,
+}));
+
+vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
+  loadSnapshot: vi.fn().mockResolvedValue(null),
+  writeSnapshot: vi.fn(),
+  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+  clearSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../src/app/services/jira-client", () => ({
@@ -100,9 +119,10 @@ let capturedOnHotData: ((
   prUpdates: Map<number, HotPRStatusUpdate>,
   runUpdates: Map<number, HotWorkflowRunUpdate>,
   generation: number,
+  epoch: number,
 ) => void) | null = null;
 // capturedOnTargetedData is populated by the createEventsPollCoordinator mock
-let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[]) => void) | null = null;
+let capturedOnTargetedData: ((data: DashboardData, affectedRepos: string[], epoch: number) => void) | null = null;
 
 // DashboardPage and pollService are imported dynamically after each vi.resetModules()
 // so the module-level _coordinator variable is always fresh (null) per test.
@@ -115,10 +135,13 @@ let viewStore: typeof import("../../src/app/stores/view");
 let configStore: typeof import("../../src/app/stores/config");
 let githubService: typeof import("../../src/app/services/github");
 let errorsLib: typeof import("../../src/app/lib/errors");
+let snapshotLib: typeof import("../../src/app/lib/dashboard-snapshot");
+let notificationsLib: typeof import("../../src/app/lib/notifications");
 
 beforeEach(async () => {
-  // Clear localStorage so loadCachedDashboard doesn't pick up stale data from prior tests
   localStorage.clear?.();
+  mockIdentityEpochValue = 0;
+  mockUserValue = { login: "testuser", avatar_url: "", name: "Test User" };
   // Reset module registry so DashboardPage's module-level _coordinator starts as null
   vi.resetModules();
   // Mutate in place (not reassign) to preserve the reference captured by vi.mock
@@ -128,6 +151,28 @@ beforeEach(async () => {
   // vi.doMock (not vi.mock) is the correct API for dynamic re-registration
   // after vi.resetModules(). vi.mock inside beforeEach is hoisted and will
   // become a hard error in a future Vitest version.
+  vi.doMock("../../src/app/stores/auth", () => ({
+    clearAuth: vi.fn(),
+    expireToken: vi.fn(),
+    token: () => "fake-token",
+    user: () => mockUserValue,
+    isAuthenticated: () => true,
+    onAuthCleared: vi.fn((cb: () => void) => {
+      authClearCallbacks.push(() => {
+        mockIdentityEpochValue++;
+        cb();
+      });
+    }),
+    DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+    DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+    jiraAuth: vi.fn(() => null),
+    isJiraAuthenticated: vi.fn(() => false),
+    setJiraAuth: vi.fn(),
+    clearJiraAuth: vi.fn(),
+    ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+    identityEpoch: () => mockIdentityEpochValue,
+  }));
+
   vi.doMock("../../src/app/services/poll", () => ({
     fetchAllData: vi.fn().mockResolvedValue({
       issues: [],
@@ -165,6 +210,12 @@ beforeEach(async () => {
     seedHotSetsFromTargeted: vi.fn(),
     clearHotSets: vi.fn(),
     getHotPollGeneration: vi.fn().mockReturnValue(0),
+    StaleIdentityError: class StaleIdentityError extends Error {
+      constructor() {
+        super("Stale identity");
+        this.name = "StaleIdentityError";
+      }
+    },
   }));
 
   // Re-import with fresh module instances
@@ -178,6 +229,8 @@ beforeEach(async () => {
   configStore = await import("../../src/app/stores/config");
   githubService = await import("../../src/app/services/github");
   errorsLib = await import("../../src/app/lib/errors");
+  snapshotLib = await import("../../src/app/lib/dashboard-snapshot");
+  notificationsLib = await import("../../src/app/lib/notifications");
 
   mockLocationReplace.mockClear();
   capturedFetchAll = null;
@@ -191,6 +244,14 @@ beforeEach(async () => {
   vi.mocked(errorsLib.pushNotification).mockClear();
   vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
   vi.mocked(errorsLib.getNotifications).mockReturnValue([]);
+  vi.mocked(snapshotLib.loadSnapshot).mockReset().mockResolvedValue(null);
+  vi.mocked(snapshotLib.writeSnapshot).mockReset();
+  vi.mocked(snapshotLib.flushSnapshot).mockReset().mockResolvedValue(undefined);
+  vi.mocked(snapshotLib.clearSnapshot).mockReset().mockResolvedValue(undefined);
+  vi.mocked(notificationsLib.detectNewItems)
+    .mockReset()
+    .mockReturnValue({ issues: [], pullRequests: [], workflowRuns: [] });
+  vi.mocked(notificationsLib.dispatchNotifications).mockReset();
   vi.mocked(pollService.fetchAllData).mockResolvedValue({
     issues: [],
     pullRequests: [],
@@ -656,47 +717,94 @@ describe("DashboardPage — onAuthCleared integration", () => {
 });
 
 describe("DashboardPage — scroll preservation on poll refresh", () => {
-  // MOCK INVARIANT: fetchAllData is mocked via vi.fn() and never calls its
-  // onLightData callback, so phaseOneFired is always false inside pollFetch().
-  // This means every poll cycle takes the withScrollLock branch (not the
-  // fine-grained produce() path). If fetchAllData is ever changed to invoke
-  // onLightData in tests, phaseOneFired will become true and withScrollLock
-  // will NOT be called, silently breaking this test.
-  //
-  // window.scrollTo is the correct behavioral proxy for withScrollLock:
-  // withScrollLock captures scrollY then calls window.scrollTo(0, y) after
-  // the setter. Asserting scrollTo was called with the saved position is
-  // equivalent to asserting withScrollLock ran and completed successfully.
-  it("preserves scroll position when setDashboardData replaces arrays", async () => {
-    const issues = [makeIssue({ id: 1, title: "Scroll test issue" })];
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues,
-      pullRequests: [],
-      workflowRuns: [],
-      errors: [],
+  // With keyed reconcile(items, { key: "id", merge: true }) and repo groups keyed
+  // by repoFullName, store writes update items in place without replacing DOM
+  // nodes, so scroll position is preserved without compensation. These tests assert
+  // that repo group and row DOM nodes survive both full-poll and targeted refreshes.
+  it("preserves issue row and repo group DOM nodes when a poll refresh returns fresh arrays", async () => {
+    viewStore.setAllExpanded("issues", true);
+    let pollCount = 0;
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => {
+      pollCount++;
+      return Promise.resolve({
+        issues: [
+          makeIssue({
+            id: 1,
+            number: 1,
+            title: "Scroll test issue",
+            repoFullName: "owner/repo",
+            comments: pollCount,
+          }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
     });
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      screen.getByText("owner/repo");
+      screen.getByText("Scroll test issue");
     });
 
-    // Simulate user scrolled down
-    document.documentElement.scrollTop = 500;
-    vi.spyOn(window, "scrollTo");
+    const groupNodeBefore = document.querySelector('[data-repo-group="owner/repo"]');
+    const rowNodeBefore = screen.getByText("Scroll test issue").closest('[role="listitem"]');
+    expect(groupNodeBefore).not.toBeNull();
+    expect(rowNodeBefore).not.toBeNull();
 
-    // Trigger a second poll (subsequent refresh — the path that uses withScrollLock).
-    // phaseOneFired is false (mock never calls onLightData), so withScrollLock
-    // wraps the full atomic setDashboardData replacement and restores scroll.
     if (capturedFetchAll) {
       await capturedFetchAll();
     }
 
-    // window.scrollTo(0, 500) is the observable side-effect of withScrollLock
-    // saving and restoring the pre-update scroll position.
-    expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
-    vi.restoreAllMocks();
-    document.documentElement.scrollTop = 0;
+    const groupNodeAfter = document.querySelector('[data-repo-group="owner/repo"]');
+    const rowNodeAfter = screen.getByText("Scroll test issue").closest('[role="listitem"]');
+    expect(groupNodeAfter).toBe(groupNodeBefore);
+    expect(rowNodeAfter).toBe(rowNodeBefore);
+  });
+
+  it("preserves issue row and repo group DOM nodes across a targeted refresh", async () => {
+    viewStore.setAllExpanded("issues", true);
+    vi.mocked(pollService.fetchAllData).mockImplementation(() =>
+      Promise.resolve({
+        issues: [
+          makeIssue({ id: 1, number: 1, title: "Targeted issue", repoFullName: "owner/repo", comments: 1 }),
+          makeIssue({ id: 2, number: 2, title: "Unaffected issue", repoFullName: "owner/other", comments: 1 }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      }),
+    );
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      screen.getByText("Targeted issue");
+      screen.getByText("Unaffected issue");
+    });
+
+    const targetedRowBefore = screen.getByText("Targeted issue").closest('[role="listitem"]');
+    const unaffectedRowBefore = screen.getByText("Unaffected issue").closest('[role="listitem"]');
+    expect(targetedRowBefore).not.toBeNull();
+    expect(unaffectedRowBefore).not.toBeNull();
+
+    expect(capturedOnTargetedData).not.toBeNull();
+    capturedOnTargetedData!(
+      {
+        issues: [
+          makeIssue({ id: 1, number: 1, title: "Targeted issue", repoFullName: "owner/repo", comments: 5 }),
+        ],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/repo"],
+      mockIdentityEpochValue,
+    );
+
+    const targetedRowAfter = screen.getByText("Targeted issue").closest('[role="listitem"]');
+    const unaffectedRowAfter = screen.getByText("Unaffected issue").closest('[role="listitem"]');
+    expect(targetedRowAfter).toBe(targetedRowBefore);
+    expect(unaffectedRowAfter).toBe(unaffectedRowBefore);
   });
 });
 
@@ -733,7 +841,7 @@ describe("DashboardPage — onHotData integration", () => {
       mergeStateStatus: "CLEAN",
       reviewDecision: "APPROVED" as const,
     }]]);
-    capturedOnHotData!(prUpdates, new Map(), 0);
+    capturedOnHotData!(prUpdates, new Map(), 0, mockIdentityEpochValue);
 
     // Expand the repo to verify the StatusDot updated
     await user.click(screen.getByText("owner/repo"));
@@ -794,7 +902,8 @@ describe("DashboardPage — onHotData integration", () => {
         viewerLatestReviewState: null,
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     await waitFor(() => {
@@ -816,7 +925,8 @@ describe("DashboardPage — onHotData integration", () => {
         viewerLatestReviewState: "APPROVED" as const,
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     await waitFor(() => {
@@ -861,7 +971,7 @@ describe("DashboardPage — onHotData integration", () => {
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
     }]]);
-    capturedOnHotData!(prUpdates, new Map(), 999);
+    capturedOnHotData!(prUpdates, new Map(), 999, mockIdentityEpochValue);
 
     // PR should still show pending — stale update was discarded
     expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
@@ -905,7 +1015,7 @@ describe("DashboardPage — onHotData integration", () => {
       updatedAt: "2026-03-29T12:00:00Z",
       completedAt: "2026-03-29T12:00:00Z",
     }]]);
-    capturedOnHotData!(new Map(), runUpdates, 0);
+    capturedOnHotData!(new Map(), runUpdates, 0, mockIdentityEpochValue);
 
     // The store was mutated — the collapsed summary still shows "1 workflow"
     // (the run count doesn't change, only the status), confirming the
@@ -944,7 +1054,7 @@ describe("DashboardPage — onHotData integration", () => {
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
     }]]);
-    capturedOnHotData!(prUpdates, new Map(), 0);
+    capturedOnHotData!(prUpdates, new Map(), 0, mockIdentityEpochValue);
 
     await waitFor(() => {
       expect(screen.queryByText("1 PR")).toBeNull();
@@ -1814,7 +1924,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     await waitFor(() => {
       screen.getByText("2 issues");
@@ -1840,7 +1950,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     await waitFor(() => {
       screen.getByText("1 issue");
@@ -1870,7 +1980,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     // handleTargetedData mutates data items in-place before merging into the store
     expect(targetedPR.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
@@ -1898,7 +2008,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     expect(vi.mocked(notifLib.detectNewItems)).toHaveBeenCalledWith(targetedData);
     expect(vi.mocked(notifLib.dispatchNotifications)).toHaveBeenCalled();
@@ -1923,7 +2033,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
   });
@@ -1952,7 +2062,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     // seedHotSetsFromTargeted is called (additive), NOT rebuildHotSets (full replacement)
     expect(vi.mocked(pollService.rebuildHotSets)).not.toHaveBeenCalled();
@@ -1979,7 +2089,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     await waitFor(() => {
       screen.getByText("2 issues");
@@ -2005,7 +2115,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     await waitFor(() => {
       screen.getByText("1 issue");
@@ -2035,7 +2145,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     // handleTargetedData mutates data items in-place before merging into the store
     expect(targetedPR.surfacedBy).toEqual(expect.arrayContaining(["primary", "tracked-user"]));
@@ -2063,7 +2173,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     expect(vi.mocked(notifLib.detectNewItems)).toHaveBeenCalledWith(targetedData);
     expect(vi.mocked(notifLib.dispatchNotifications)).toHaveBeenCalled();
@@ -2088,7 +2198,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     expect(vi.mocked(pollService.seedHotSetsFromTargeted)).toHaveBeenCalledWith(targetedData);
   });
@@ -2117,7 +2227,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     // seedHotSetsFromTargeted is called (additive), NOT rebuildHotSets (full replacement)
     expect(vi.mocked(pollService.rebuildHotSets)).not.toHaveBeenCalled();
@@ -2161,7 +2271,7 @@ describe("DashboardPage — events poll targeted merge", () => {
       workflowRuns: [],
       errors: [],
     };
-    capturedOnTargetedData?.(targetedData, ["org/repo"]);
+    capturedOnTargetedData?.(targetedData, ["org/repo"], mockIdentityEpochValue);
 
     expect(unenrichedTargetedPR.enriched).toBe(true);
     expect(unenrichedTargetedPR.autoMergeMethod).toBe("SQUASH");
@@ -2709,6 +2819,7 @@ describe("DashboardPage — pruneJiraCustomOrder on refresh", () => {
       setJiraAuth: vi.fn(),
       clearJiraAuth: vi.fn(),
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
@@ -3266,6 +3377,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: mockClearJiraAuth,
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     class MockJiraApiError extends Error {
@@ -3373,6 +3485,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: mockClearJiraAuth,
       ensureJiraTokenValid: vi.fn().mockResolvedValue(false),
+      identityEpoch: () => 0,
     }));
 
     const mockSearchJql = vi.fn().mockRejectedValue(new Error("Jira auth cleared during token refresh"));
@@ -3495,6 +3608,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       setJiraAuth: vi.fn(),
       clearJiraAuth: vi.fn(),
       ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => 0,
     }));
 
     const mockSearchJql = vi.fn().mockResolvedValue({
@@ -3874,7 +3988,8 @@ describe("DashboardPage — PR approval integration", () => {
         viewerReviewRequested: true,
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
     expect(screen.getByText("Approved")).toBeTruthy();
     expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
@@ -3882,7 +3997,8 @@ describe("DashboardPage — PR approval integration", () => {
     // 2. Subsequent targeted poll with stale review state on the same headSha
     capturedOnTargetedData!(
       { issues: [], pullRequests: [makeStalePR()], workflowRuns: [], errors: [] },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(screen.getByText("Approved")).toBeTruthy();
     expect(screen.queryByLabelText("Approve #42 Fix race condition")).toBeNull();
@@ -4044,7 +4160,8 @@ describe("DashboardPage — PR approval integration", () => {
         viewerReviewRequested: true,
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     resolveMutation({
@@ -4447,7 +4564,8 @@ describe("DashboardPage — PR approval integration", () => {
         ],
       ]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     // Retry approval after checkStatusStale is cleared -> succeeds
@@ -4556,7 +4674,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
         reviewDecision: null,
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
     expect(screen.queryByTestId("draft-badge")).toBeNull();
     expect(screen.getByText("Review needed")).toBeTruthy();
@@ -4564,7 +4683,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
     // 2. Subsequent targeted poll reporting stale draft: true within 60s
     capturedOnTargetedData!(
       { issues: [], pullRequests: [makeStaleDraftPR()], workflowRuns: [], errors: [] },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(screen.queryByTestId("draft-badge")).toBeNull();
     expect(screen.getByText("Review needed")).toBeTruthy();
@@ -4606,7 +4726,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
         reviewDecision: "APPROVED",
       }]]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
     expect(screen.queryByTestId("draft-badge")).toBeNull();
     expect(screen.getByText("Approved")).toBeTruthy();
@@ -4908,71 +5029,73 @@ describe("DashboardPage — Mark PR ready integration", () => {
 
 // ── Fallback PR Enrichment Propagation ───────────────────────────────────────
 
-describe("DashboardPage — PR mutation enrichment cache eviction", () => {
-  const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
-  const approveResponse = {
-    addPullRequestReview: {
-      pullRequestReview: { state: "APPROVED", pullRequest: { reviewDecision: "APPROVED" } },
-    },
-    rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
-  };
-  const markReadyResponse = {
-    markPullRequestReadyForReview: { pullRequest: { isDraft: false, reviewDecision: "REVIEW_REQUIRED" } },
-    rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
-  };
+// ── Shared PR mutation fixtures ──────────────────────────────────────────────
 
+const mutationValidSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+const approveResponse = {
+  addPullRequestReview: {
+    pullRequestReview: { state: "APPROVED", pullRequest: { reviewDecision: "APPROVED" } },
+  },
+  rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+};
+const markReadyResponse = {
+  markPullRequestReadyForReview: { pullRequest: { isDraft: false, reviewDecision: "REVIEW_REQUIRED" } },
+  rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-04-20T00:00:00Z" },
+};
+
+async function renderWithPR(pr: ReturnType<typeof makePullRequest>) {
+  vi.mocked(pollService.fetchAllData).mockResolvedValue({
+    issues: [],
+    pullRequests: [pr],
+    workflowRuns: [],
+    errors: [],
+  });
+  const user = userEvent.setup();
+  render(() => <DashboardPage />);
+  await user.click(screen.getByText("Pull Requests"));
+  await waitFor(() => screen.getByText("owner/repo"));
+  await user.click(screen.getByText("owner/repo"));
+  return user;
+}
+
+const makeApprovablePR = () =>
+  makePullRequest({
+    id: 42,
+    number: 42,
+    title: "Fix race condition",
+    repoFullName: "owner/repo",
+    userLogin: "otheruser",
+    state: "OPEN",
+    draft: false,
+    enriched: true,
+    nodeId: "PR_kwDOtest0042",
+    headSha: mutationValidSha,
+    reviewDecision: "REVIEW_REQUIRED",
+    checkStatus: "success",
+  });
+
+const makeDraftPR = () =>
+  makePullRequest({
+    id: 77,
+    number: 77,
+    title: "Ship draft feature",
+    repoFullName: "owner/repo",
+    userLogin: "testuser",
+    state: "OPEN",
+    draft: true,
+    enriched: true,
+    nodeId: "PR_kwDOtest0077",
+    reviewDecision: null,
+    checkStatus: "success",
+  });
+
+describe("DashboardPage — PR mutation enrichment cache eviction", () => {
   // DashboardPage imports the real api module (fresh per vi.resetModules in beforeEach);
   // fetchAllData is mocked, so the cache itself is exercised in api.test.ts.
   async function spyOnEvict() {
     const apiModule = await import("../../src/app/services/api");
     return vi.spyOn(apiModule, "evictPREnrichmentCacheNode");
   }
-
-  async function renderWithPR(pr: ReturnType<typeof makePullRequest>) {
-    vi.mocked(pollService.fetchAllData).mockResolvedValue({
-      issues: [],
-      pullRequests: [pr],
-      workflowRuns: [],
-      errors: [],
-    });
-    const user = userEvent.setup();
-    render(() => <DashboardPage />);
-    await user.click(screen.getByText("Pull Requests"));
-    await waitFor(() => screen.getByText("owner/repo"));
-    await user.click(screen.getByText("owner/repo"));
-    return user;
-  }
-
-  const makeApprovablePR = () =>
-    makePullRequest({
-      id: 42,
-      number: 42,
-      title: "Fix race condition",
-      repoFullName: "owner/repo",
-      userLogin: "otheruser",
-      state: "OPEN",
-      draft: false,
-      enriched: true,
-      nodeId: "PR_kwDOtest0042",
-      headSha: validSha,
-      reviewDecision: "REVIEW_REQUIRED",
-      checkStatus: "success",
-    });
-
-  const makeDraftPR = () =>
-    makePullRequest({
-      id: 77,
-      number: 77,
-      title: "Ship draft feature",
-      repoFullName: "owner/repo",
-      userLogin: "testuser",
-      state: "OPEN",
-      draft: true,
-      enriched: true,
-      nodeId: "PR_kwDOtest0077",
-      reviewDecision: null,
-      checkStatus: "success",
-    });
 
   it("evicts the PR's enrichment cache entry after a successful approval", async () => {
     const evictSpy = await spyOnEvict();
@@ -5085,8 +5208,8 @@ describe("DashboardPage — PR mutation enrichment cache eviction", () => {
   });
 });
 
-describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets and localStorage", () => {
-  it("retains fallback-merged enrichment in rebuildHotSets and localStorage when a second poll cycle returns enriched: false on a previously-enriched PR", async () => {
+describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets and the dashboard snapshot", () => {
+  it("retains fallback-merged enrichment in rebuildHotSets and the immediate writeSnapshot when a second poll cycle returns enriched: false on a previously-enriched PR", async () => {
     const enrichedPR = makePullRequest({
       id: 501,
       number: 501,
@@ -5118,11 +5241,11 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
       expect(pollService.rebuildHotSets).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(localStorage.getItem("github-tracker:dashboard")).not.toBeNull();
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
     vi.mocked(pollService.rebuildHotSets).mockClear();
-    localStorage.removeItem("github-tracker:dashboard");
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
 
     // Second poll cycle: prEnrichment batch fails and returns enriched: false
     const unenrichedPR = makePullRequest({
@@ -5169,19 +5292,23 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
     );
 
     await waitFor(() => {
-      const raw = localStorage.getItem("github-tracker:dashboard");
-      expect(raw).not.toBeNull();
-      const parsed = JSON.parse(raw!) as { pullRequests: Array<Record<string, unknown>> };
-      expect(parsed.pullRequests).toHaveLength(1);
-      expect(parsed.pullRequests[0]).toMatchObject({
-        id: 501,
-        nodeId: "PR_kwDOtest0501",
-        enriched: true,
-        checkStatus: "pending",
-        autoMergeMethod: "SQUASH",
-        assigneeLogins: ["alice"],
-        reviewerLogins: ["bob"],
-      });
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pullRequests: [
+            expect.objectContaining({
+              id: 501,
+              nodeId: "PR_kwDOtest0501",
+              enriched: true,
+              checkStatus: "pending",
+              autoMergeMethod: "SQUASH",
+              assigneeLogins: ["alice"],
+              reviewerLogins: ["bob"],
+            }),
+          ],
+        }),
+        "testuser",
+        "immediate",
+      );
     });
   });
 });
@@ -5698,8 +5825,15 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     const { unmount } = render(() => <DashboardPage />);
     await waitFor(() => expect(graphqlSpy1).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      // Wait for both the deferred setTimeout write of github-tracker:dashboard and github-tracker:dashboard-bodies
-      expect(localStorage.getItem("github-tracker:dashboard")).not.toBeNull();
+      // Wait for both writeSnapshot and github-tracker:dashboard-bodies persistence
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issues: [expect.objectContaining({ nodeId: "DASH_PERSIST_1" })],
+          pullRequests: [expect.objectContaining({ id: 901 })],
+        }),
+        "testuser",
+        "immediate",
+      );
       const storedRaw = localStorage.getItem("github-tracker:dashboard-bodies");
       expect(storedRaw).not.toBeNull();
       const stored = JSON.parse(storedRaw!) as Record<string, { updatedAt: string; deps: Array<{ packageName: string }> }>;
@@ -5710,7 +5844,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     });
     unmount();
 
-    // Simulate reload: reset modules while keeping localStorage intact (both dashboard cache and dashboard-bodies cache)
+    // Simulate reload: reset modules while keeping localStorage intact and seeding loadSnapshot
     vi.resetModules();
     authClearCallbacks.length = 0;
 
@@ -5745,8 +5879,19 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       seedHotSetsFromTargeted: vi.fn(),
       clearHotSets: vi.fn(),
       getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
     }));
 
+    const freshSnapshot = await import("../../src/app/lib/dashboard-snapshot");
+    vi.mocked(freshSnapshot.loadSnapshot).mockResolvedValue({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [dashIssue],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      lastRefreshedAt: new Date("2026-04-01T00:00:00Z"),
+    });
     const freshGithub = await import("../../src/app/services/github");
     vi.mocked(freshGithub.getClient).mockReturnValue(
       { graphql: graphqlSpy2 } as unknown as ReturnType<typeof freshGithub.getClient>
@@ -5754,9 +5899,10 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
     const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
 
     render(() => <freshDashMod.default />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeDefined());
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
     // Pre-refresh assertion: before fetchAllData resolves (and before the { defer: true } dashboardBodies effect runs),
-    // seedCachedDashboardBodies() has already hydrated abandonedDepsMap and dashboardIssueUrls at module load
+    // seedCachedDashboardBodies() has already hydrated abandonedDepsMap and dashboardIssueUrls when loadSnapshot resolved in onMount
     await waitFor(() => {
       expect(screen.getByText(/abandoned/i)).toBeDefined();
     });
@@ -6085,28 +6231,6 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
 
   it("suppresses the Dependencies 'Checking status' badge while the dashboard is still loading from a cached snapshot", async () => {
     const user = userEvent.setup();
-    // Snapshot without lastRefreshedAt: pollFetch keeps `loading: true` until the first fetch resolves
-    localStorage.setItem(
-      "github-tracker:dashboard",
-      JSON.stringify({
-        _v: 2,
-        issues: [],
-        pullRequests: [
-          makePullRequest({
-            id: 970,
-            nodeId: "PR_DEP_970",
-            repoFullName: "owner/repo",
-            title: "Bump lodash from 4.17.20 to 4.17.21",
-            userLogin: "dependabot[bot]",
-            headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
-            enriched: false,
-            checkStatus: null,
-            updatedAt: new Date().toISOString(),
-          }),
-        ],
-        workflowRuns: [],
-      })
-    );
 
     vi.resetModules();
     vi.doMock("../../src/app/services/poll", () => ({
@@ -6114,7 +6238,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       createPollCoordinator: vi.fn().mockImplementation((_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
         void fetchAll().catch(() => {});
         return {
-          isRefreshing: () => false,
+          isRefreshing: () => true,
           lastRefreshAt: () => null,
           manualRefresh: vi.fn(),
           destroy: vi.fn(),
@@ -6126,10 +6250,34 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       seedHotSetsFromTargeted: vi.fn(),
       clearHotSets: vi.fn(),
       getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
     }));
+    const freshSnapshot = await import("../../src/app/lib/dashboard-snapshot");
+    vi.mocked(freshSnapshot.loadSnapshot).mockResolvedValue({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 970,
+          nodeId: "PR_DEP_970",
+          repoFullName: "owner/repo",
+          title: "Bump lodash from 4.17.20 to 4.17.21",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/lodash-4.17.21",
+          enriched: false,
+          checkStatus: null,
+          updatedAt: new Date().toISOString(),
+        }),
+      ],
+      workflowRuns: [],
+      lastRefreshedAt: null,
+    });
     const freshDashMod = await import("../../src/app/components/dashboard/DashboardPage");
 
     render(() => <freshDashMod.default />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Dependencies/ })).toBeDefined());
     await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
     await waitFor(() => expect(document.getElementById("dep-group-needs-action")).not.toBeNull());
     expect(screen.queryByText("Checking status")).toBeNull();
@@ -6137,7 +6285,7 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
 });
 
 describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale restoration, and partial-sync indicator", () => {
-  it("returns resolvedPullRequests with enriched: true from pollFetch on cached backfill failure and suppresses Tier 0 targeted backfill errors while escalating Tier 1 with silentToast: true", async () => {
+  it("returns fallback-merged pullRequests with enriched: true from pollFetch on cached backfill failure and suppresses Tier 0 targeted backfill errors while escalating Tier 1 with silentToast: true", async () => {
     const enrichedPR = makePullRequest({
       id: 601,
       number: 601,
@@ -6203,7 +6351,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         workflowRuns: [],
         errors: [backfillError],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(errorsLib.pushError).not.toHaveBeenCalledWith(
       "backfill-batch-1/1",
@@ -6235,7 +6384,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         workflowRuns: [],
         errors: [backfillError],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(errorsLib.pushError).not.toHaveBeenCalledWith(
       "backfill-batch-1/1",
@@ -6392,7 +6542,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
           },
         ],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
 
     expect(staleTargetedPR.checkStatus).toBe("failure");
@@ -6433,7 +6584,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
           },
         ],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(errorsLib.pushNotification).toHaveBeenCalledWith(
       "pr-enrichment",
@@ -6463,7 +6615,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         ],
       ]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     // Subsequent clean targeted refresh dismisses 'pr-enrichment'
@@ -6484,12 +6637,13 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         workflowRuns: [],
         errors: [],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
     expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("pr-enrichment");
   });
 
-  it("clears stale checkStatus to null and keeps checkStatusStale: true when headSha changes across a degraded pollFetch (phaseOneFired branch) or handleTargetedData", async () => {
+  it("clears stale checkStatus to null and keeps checkStatusStale: true when headSha changes across a degraded pollFetch after a phase-1 light commit or across handleTargetedData", async () => {
     const oldSha = "1111111111111111111111111111111111111111";
     const newSha = "2222222222222222222222222222222222222222";
     const thirdSha = "3333333333333333333333333333333333333333";
@@ -6572,7 +6726,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         ],
       ]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     // Degraded handleTargetedData with a new commit (thirdSha) and checkStatusStale: true
@@ -6596,7 +6751,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         workflowRuns: [],
         errors: [],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
 
     expect(targetedStaleNewCommit.checkStatus).toBeNull();
@@ -6702,7 +6858,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         workflowRuns: [],
         errors: [],
       },
-      ["owner/repo"]
+      ["owner/repo"],
+      mockIdentityEpochValue
     );
 
     expect(targetedRegressedPR.enriched).toBe(true);
@@ -6731,7 +6888,8 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         ],
       ]),
       new Map(),
-      0
+      0,
+      mockIdentityEpochValue
     );
 
     const reApproveBtn = await waitFor(() =>
@@ -6792,5 +6950,783 @@ describe("DashboardPage — 3-Tier backfill-batch-* handling, checkStatusStale r
         ],
       })
     );
+  });
+});
+
+// ── Identity-scoped dashboard snapshot and identityEpoch guards ─────────────
+
+describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", () => {
+  // Wires createPollCoordinator to run fetchAll once like the real doFetch: notify on
+  // success, swallow StaleIdentityError silently, and surface any other error.
+  function mockCoordinatorRunOnce(): { caughtError: () => unknown } {
+    let caughtError: unknown = null;
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      capturedFetchAll = fetchAll;
+      void (async () => {
+        try {
+          const data = await fetchAll();
+          const newItems = notificationsLib.detectNewItems(data);
+          notificationsLib.dispatchNotifications(newItems, configStore.config);
+        } catch (err) {
+          caughtError = err;
+          if (err instanceof pollService.StaleIdentityError) return;
+          errorsLib.pushError("poll", err instanceof Error ? err.message : "Unknown error", true);
+        }
+      })();
+      return {
+        isRefreshing: () => false,
+        lastRefreshAt: () => null,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+    return { caughtError: () => caughtError };
+  }
+
+  it("does not apply a cached snapshot belonging to alice when current user() is bob", async () => {
+    mockUserValue = { login: "bob", avatar_url: "", name: "Bob" };
+    // Simulate loadSnapshot's login check returning null when stored record is for 'alice'
+    const storedForAlice = {
+      _v: 1 as const,
+      login: "alice",
+      savedAt: Date.now(),
+      issues: [makeIssue({ id: 701, title: "Alice private issue", repoFullName: "alice/secret" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date("2026-10-30T10:00:00Z"),
+    };
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(async (login: string) =>
+      storedForAlice.login.toLowerCase() === login.toLowerCase() ? storedForAlice : null,
+    );
+    // Keep initial poll pending so only snapshot hydration could populate the store
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => new Promise<DashboardData>(() => {}));
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(snapshotLib.loadSnapshot).toHaveBeenCalledWith("bob"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.queryByText("alice/secret")).toBeNull();
+    const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+    expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
+  });
+
+  it("discards snapshot result if it resolves after phase-1 onLightData has already committed real data", async () => {
+    let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    vi.mocked(pollService.fetchAllData).mockImplementation((onLightData) => {
+      onLightData?.({
+        issues: [makeIssue({ id: 702, title: "Fresh Phase 1 Issue", repoFullName: "owner/fresh-repo" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      });
+      return new Promise<DashboardData>(() => {});
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(screen.getByText("owner/fresh-repo")).toBeDefined());
+
+    // Now resolve the slower snapshot read with stale data — must be ignored because realDataCommitted is true
+    resolveSnapshot({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now() - 60_000,
+      issues: [makeIssue({ id: 703, title: "Stale Snapshot Issue", repoFullName: "owner/stale-repo" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date(Date.now() - 60_000),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.getByText("owner/fresh-repo")).toBeDefined();
+    expect(screen.queryByText("owner/stale-repo")).toBeNull();
+  });
+
+  it("does not call loadSnapshot on Settings -> Dashboard remount when data is already present", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [makeIssue({ id: 704, title: "Committed Issue", repoFullName: "owner/committed" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const { unmount } = render(() => <DashboardPage />);
+    await waitFor(() => expect(screen.getByText("owner/committed")).toBeDefined());
+    expect(snapshotLib.loadSnapshot).toHaveBeenCalledTimes(1);
+
+    // Unmount (navigate to Settings) and remount DashboardPage without resetting module state
+    unmount();
+    vi.mocked(snapshotLib.loadSnapshot).mockClear();
+
+    render(() => <DashboardPage />);
+    expect(screen.getByText("owner/committed")).toBeDefined();
+    expect(snapshotLib.loadSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("throws StaleIdentityError when a poll started before logout resolves after identity clear + new user, leaving store empty, skipping writeSnapshot/notifications/errors, and not touching loading while the new identity's poll is in flight", async () => {
+    const pollResolvers: Array<(data: DashboardData) => void> = [];
+    vi.mocked(pollService.fetchAllData).mockImplementation(
+      () =>
+        new Promise<DashboardData>((resolve) => {
+          pollResolvers.push(resolve);
+        }),
+    );
+
+    const coordinator = mockCoordinatorRunOnce();
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(pollResolvers).toHaveLength(1));
+
+    // Simulate clearIdentityData() + switching to a new user while poll is in flight
+    for (const cb of authClearCallbacks) cb();
+    mockUserValue = { login: "newuser", avatar_url: "", name: "New User" };
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // The new identity's first poll starts and stays in flight
+    void capturedFetchAll!().catch(() => {});
+    await waitFor(() => expect(pollResolvers).toHaveLength(2));
+
+    // Resolve the old user's in-flight poll
+    pollResolvers[0]({
+      issues: [makeIssue({ id: 705, title: "Old user issue", repoFullName: "olduser/private" })],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    await waitFor(() => expect(coordinator.caughtError()).not.toBeNull());
+
+    expect(coordinator.caughtError()).toBeInstanceOf(pollService.StaleIdentityError);
+    expect(screen.queryByText("olduser/private")).toBeNull();
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+    expect(notificationsLib.dispatchNotifications).not.toHaveBeenCalled();
+    expect(errorsLib.pushError).not.toHaveBeenCalled();
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+    // The skeleton stays up for the new identity's in-flight poll instead of the empty state
+    expect(screen.getByRole("status", { name: "Loading issues" })).toBeDefined();
+    expect(screen.queryByText(/No open issues/i)).toBeNull();
+  });
+
+  it("treats a 401 from a poll started under a previous identity as stale instead of expiring the current token, without touching loading", async () => {
+    const pollRejecters: Array<(err: unknown) => void> = [];
+    vi.mocked(pollService.fetchAllData).mockImplementation(
+      () =>
+        new Promise<DashboardData>((_resolve, reject) => {
+          pollRejecters.push(reject);
+        }),
+    );
+    const coordinator = mockCoordinatorRunOnce();
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(pollRejecters).toHaveLength(1));
+
+    for (const cb of authClearCallbacks) cb();
+    mockUserValue = { login: "newuser", avatar_url: "", name: "New User" };
+
+    // The new identity's first poll starts and stays in flight
+    void capturedFetchAll!().catch(() => {});
+    await waitFor(() => expect(pollRejecters).toHaveLength(2));
+
+    pollRejecters[0](Object.assign(new Error("Bad credentials"), { status: 401 }));
+    await waitFor(() => expect(coordinator.caughtError()).not.toBeNull());
+
+    expect(coordinator.caughtError()).toBeInstanceOf(pollService.StaleIdentityError);
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
+    expect(errorsLib.pushError).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "Loading issues" })).toBeDefined();
+    expect(screen.queryByText(/No open issues/i)).toBeNull();
+  });
+
+  it("drops a targeted refresh whose events cycle started before clearAuth", async () => {
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Events cycle captures epoch BEFORE clearAuth runs
+    const staleCycleEpoch = authStore.identityEpoch();
+
+    // Auth cleared before targeted data arrives
+    for (const cb of authClearCallbacks) cb();
+
+    capturedOnTargetedData!(
+      {
+        issues: [makeIssue({ id: 706, title: "Stale targeted issue", repoFullName: "owner/stale-targeted" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/stale-targeted"],
+      staleCycleEpoch,
+    );
+
+    expect(screen.queryByText("owner/stale-targeted")).toBeNull();
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not write snapshot or commit when PR approval started before logout resolves after logout", async () => {
+    const user = userEvent.setup();
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    let resolveApprove!: (val: unknown) => void;
+    const graphqlMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveApprove = resolve;
+        }),
+    );
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 707,
+          number: 707,
+          title: "PR to approve before logout",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO707",
+          headSha: validSha,
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #707 PR to approve before logout"),
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Logout occurs while approvePullRequest is in flight
+    for (const cb of authClearCallbacks) cb();
+
+    // Now resolve the in-flight approval
+    resolveApprove({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("preserves optimistic approval across pollFetch when updatedAt advances on the same headSha while search index lags on reviewDecision", async () => {
+    const user = userEvent.setup();
+    const validSha = "c1c2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    const graphqlMock = vi.fn().mockResolvedValue({
+      addPullRequestReview: {
+        pullRequestReview: {
+          state: "APPROVED",
+          pullRequest: { reviewDecision: "APPROVED" },
+        },
+      },
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 712,
+          number: 712,
+          title: "PR with same-SHA updatedAt bump after approval",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO712",
+          headSha: validSha,
+          updatedAt: "2026-10-30T10:00:00Z",
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const approveBtn = await waitFor(() =>
+      screen.getByLabelText("Approve #712 PR with same-SHA updatedAt bump after approval"),
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    // Subsequent poll returns the same headSha with a newer updatedAt (from the approval itself)
+    // while GitHub's search index still lags at REVIEW_REQUIRED
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 712,
+          number: 712,
+          title: "PR with same-SHA updatedAt bump after approval",
+          repoFullName: "owner/repo",
+          userLogin: "otheruser",
+          state: "OPEN",
+          draft: false,
+          enriched: true,
+          nodeId: "PR_kwDO712",
+          headSha: validSha,
+          updatedAt: "2026-10-30T10:01:00Z",
+          reviewDecision: "REVIEW_REQUIRED",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await capturedFetchAll!();
+
+    // The Approve button must stay hidden because headSha did not change
+    expect(
+      screen.queryByLabelText("Approve #712 PR with same-SHA updatedAt bump after approval"),
+    ).toBeNull();
+  });
+
+  it("does not write snapshot or commit when mark-PR-ready started before logout resolves after logout", async () => {
+    const user = userEvent.setup();
+    let resolveMarkReady!: (val: unknown) => void;
+    const graphqlMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveMarkReady = resolve;
+        }),
+    );
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlMock } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 711,
+          number: 711,
+          title: "Draft PR to mark ready before logout",
+          repoFullName: "owner/repo",
+          userLogin: "testuser",
+          state: "OPEN",
+          draft: true,
+          enriched: true,
+          nodeId: "PR_kwDO711",
+          headSha: "b1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+          checkStatus: "success",
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+
+    const draftBtn = await waitFor(() =>
+      screen.getByLabelText("Mark #711 Draft PR to mark ready before logout ready for review"),
+    );
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+    await waitFor(() => expect(graphqlMock).toHaveBeenCalledOnce());
+
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Logout occurs while markPullRequestReady is in flight
+    for (const cb of authClearCallbacks) cb();
+
+    // Resolve the in-flight markPullRequestReady mutation
+    resolveMarkReady({
+      markPullRequestReadyForReview: {
+        pullRequest: { isDraft: false },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("writes a debounced snapshot for the current login after a targeted refresh from the current identity", async () => {
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnTargetedData).not.toBeNull());
+    await waitFor(() =>
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(expect.anything(), "testuser", "immediate"),
+    );
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    capturedOnTargetedData!(
+      {
+        issues: [makeIssue({ id: 713, title: "Current targeted issue", repoFullName: "owner/targeted" })],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      },
+      ["owner/targeted"],
+      authStore.identityEpoch(),
+    );
+
+    expect(snapshotLib.writeSnapshot).toHaveBeenCalledTimes(1);
+    expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: [expect.objectContaining({ id: 713 })] }),
+      "testuser",
+      "debounced",
+    );
+  });
+
+  it("writes a debounced snapshot for the current login after a hot poll from the current identity", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 714,
+          number: 714,
+          title: "Hot PR current identity",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          enriched: true,
+          nodeId: "PR_kwDO714",
+          checkStatus: "pending",
+          reviewDecision: null,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnHotData).not.toBeNull());
+    await waitFor(() =>
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(expect.anything(), "testuser", "immediate"),
+    );
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    capturedOnHotData!(
+      new Map([[714, {
+        state: "OPEN" as const,
+        checkStatus: "success" as const,
+        mergeStateStatus: "CLEAN",
+        reviewDecision: null,
+      }]]),
+      new Map(),
+      0,
+      authStore.identityEpoch(),
+    );
+
+    expect(snapshotLib.writeSnapshot).toHaveBeenCalledTimes(1);
+    expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequests: [expect.objectContaining({ id: 714, checkStatus: "success" })],
+      }),
+      "testuser",
+      "debounced",
+    );
+  });
+
+  it("discards a hot poll whose cycle started under a previous identity epoch without mutating the store or writing a snapshot", async () => {
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [
+        makePullRequest({
+          id: 715,
+          number: 715,
+          title: "Hot PR stale epoch",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          enriched: true,
+          nodeId: "PR_kwDO715",
+          checkStatus: "pending",
+          reviewDecision: null,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(capturedOnHotData).not.toBeNull());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Pull Requests"));
+    await waitFor(() => screen.getByText("owner/repo"));
+    await user.click(screen.getByText("owner/repo"));
+    await waitFor(() => expect(screen.getByLabelText("Checks in progress")).toBeTruthy());
+
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+
+    // Hot cycle captures the epoch, then the identity epoch advances before results arrive
+    const staleCycleEpoch = authStore.identityEpoch();
+    mockIdentityEpochValue++;
+
+    capturedOnHotData!(
+      new Map([[715, {
+        state: "OPEN" as const,
+        checkStatus: "success" as const,
+        mergeStateStatus: "CLEAN",
+        reviewDecision: null,
+      }]]),
+      new Map(),
+      0,
+      staleCycleEpoch,
+    );
+
+    expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    expect(screen.queryByLabelText("All checks passed")).toBeNull();
+    expect(snapshotLib.writeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("writes a debounced snapshot for the current login after a successful PR approval", async () => {
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: vi.fn().mockResolvedValue(approveResponse) } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+    const user = await renderWithPR(makeApprovablePR());
+
+    const approveBtn = await waitFor(() => screen.getByLabelText("Approve #42 Fix race condition"));
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+
+    await waitFor(() =>
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pullRequests: [expect.objectContaining({ id: 42, reviewDecision: "APPROVED" })],
+        }),
+        "testuser",
+        "debounced",
+      ),
+    );
+  });
+
+  it("writes a debounced snapshot for the current login after a successful mark-PR-ready", async () => {
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: vi.fn().mockResolvedValue(markReadyResponse) } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+    const user = await renderWithPR(makeDraftPR());
+
+    const draftBtn = await waitFor(() =>
+      screen.getByLabelText("Mark #77 Ship draft feature ready for review"),
+    );
+    vi.mocked(snapshotLib.writeSnapshot).mockClear();
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+
+    await waitFor(() =>
+      expect(snapshotLib.writeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pullRequests: [expect.objectContaining({ id: 77, draft: false })],
+        }),
+        "testuser",
+        "debounced",
+      ),
+    );
+  });
+
+  it("discards an in-flight snapshot load if clearAuth() runs before loadSnapshot resolves", async () => {
+    let resolveSnapshot!: (snap: import("../../src/app/lib/dashboard-snapshot").DashboardSnapshot | null) => void;
+    vi.mocked(snapshotLib.loadSnapshot).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    vi.mocked(pollService.fetchAllData).mockImplementation(() => new Promise<DashboardData>(() => {}));
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(snapshotLib.loadSnapshot).toHaveBeenCalledWith("testuser"));
+
+    // Logout while loadSnapshot is still in flight
+    for (const cb of authClearCallbacks) cb();
+
+    resolveSnapshot({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [makeIssue({ id: 708, title: "Pre-logout cached issue", repoFullName: "owner/pre-logout" })],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: new Date(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(screen.queryByText("owner/pre-logout")).toBeNull();
+    const issuesTab = screen.getByRole("tab", { name: /^Issues/ });
+    expect(issuesTab.textContent?.replace(/\D+/g, "")).toBe("0");
+  });
+
+  it("resets _fetchingDashboardBodies and _fetchingDepBodies after an in-flight fetch when same-user token rotation does not bump identityEpoch", async () => {
+    const [lastRefreshAtSig, setLastRefreshAtSig] = createSignal<Date | null>(null);
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      const wrappedFetchAll = async () => {
+        const res = await fetchAll();
+        setLastRefreshAtSig(new Date());
+        return res;
+      };
+      capturedFetchAll = wrappedFetchAll;
+      void wrappedFetchAll().catch(() => {});
+      return {
+        isRefreshing: () => false,
+        lastRefreshAt: lastRefreshAtSig,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+
+    let resolveDashBody1!: (val: unknown) => void;
+    let resolveDepBody1!: (val: unknown) => void;
+    let dashCallCount = 0;
+    let depCallCount = 0;
+
+    const client1 = {
+      graphql: vi.fn().mockImplementation((query: string) => {
+        if (query.includes("databaseId")) {
+          depCallCount++;
+          if (depCallCount === 1) {
+            return new Promise((resolve) => {
+              resolveDepBody1 = resolve;
+            });
+          }
+          return Promise.resolve({
+            nodes: [
+              {
+                id: "PR_ROTATE_2",
+                databaseId: 710,
+                body: "| Package | Change |\n| --- | --- |\n| pkg-b | `1.0.0` -> `1.1.0` |",
+              },
+            ],
+            rateLimit: null,
+          });
+        }
+        dashCallCount++;
+        if (dashCallCount === 1) {
+          return new Promise((resolve) => {
+            resolveDashBody1 = resolve;
+          });
+        }
+        return Promise.resolve({
+          nodes: [{ id: "DASH_ROTATE_2", body: "" }],
+          rateLimit: null,
+        });
+      }),
+    };
+    const client2 = { graphql: client1.graphql };
+    vi.mocked(githubService.getClient).mockReturnValue(
+      client1 as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          id: 709,
+          number: 709,
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_ROTATE_1",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          updatedAt: "2026-04-01T00:00:00Z",
+        }),
+      ],
+      pullRequests: [
+        makePullRequest({
+          id: 709,
+          nodeId: "PR_ROTATE_1",
+          repoFullName: "owner/repo",
+          title: "Update dependency pkg-a",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/pkg-a",
+          enriched: true,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(dashCallCount).toBe(1);
+      expect(depCallCount).toBe(1);
+    });
+
+    // Simulate same-user token rotation while both body fetches are in flight:
+    // getClient() swaps to client2, but identityEpoch() is NOT incremented!
+    vi.mocked(githubService.getClient).mockReturnValue(
+      client2 as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    // Resolve the in-flight fetches — they bail on `getClient() !== octokit` but their
+    // `finally` blocks still reset `_fetchingDashboardBodies` and `_fetchingDepBodies`
+    // because `authGen === identityEpoch()`.
+    resolveDashBody1({ nodes: [], rateLimit: null });
+    resolveDepBody1({ nodes: [], rateLimit: null });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // Next poll cycle with new items must be able to trigger both body fetches again
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [
+        makeIssue({
+          id: 710,
+          number: 710,
+          title: "Dependency Dashboard",
+          userLogin: "renovate[bot]",
+          nodeId: "DASH_ROTATE_2",
+          repoFullName: "owner/repo",
+          state: "OPEN",
+          updatedAt: "2026-04-02T00:00:00Z",
+        }),
+      ],
+      pullRequests: [
+        makePullRequest({
+          id: 710,
+          nodeId: "PR_ROTATE_2",
+          repoFullName: "owner/repo",
+          title: "Update dependency pkg-b",
+          userLogin: "dependabot[bot]",
+          headRef: "dependabot/npm_and_yarn/pkg-b",
+          enriched: true,
+        }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    await capturedFetchAll!();
+    await waitFor(() => {
+      expect(dashCallCount).toBe(2);
+      expect(depCallCount).toBe(2);
+    });
   });
 });
