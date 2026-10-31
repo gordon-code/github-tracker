@@ -1781,6 +1781,7 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
         makeWorkflowRun({ id: 24, status: "requested", conclusion: null, isPrRun: false }),
         makeWorkflowRun({ id: 25, status: "in_progress", conclusion: null, isPrRun: false }),
         makeWorkflowRun({ id: 26, status: "completed", conclusion: "success", isPrRun: false }),
+        makeWorkflowRun({ id: 27, status: "action_required", conclusion: null, isPrRun: false }),
       ],
       errors: [],
     });
@@ -1788,7 +1789,7 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
     render(() => <DashboardPage />);
     await waitFor(() => {
       const waitingTab = screen.getByRole("tab", { name: /Waiting Runs/ });
-      expect(waitingTab.textContent?.replace(/\D+/g, "")).toBe("2");
+      expect(waitingTab.textContent?.replace(/\D+/g, "")).toBe("3");
       const pendingTab = screen.getByRole("tab", { name: /Pending Runs/ });
       expect(pendingTab.textContent?.replace(/\D+/g, "")).toBe("3");
     });
