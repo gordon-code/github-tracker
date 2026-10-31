@@ -595,6 +595,31 @@ export function createPollCoordinator(
  * is active. Increments the generation counter so stale hot poll results
  * from the previous cycle can be detected and discarded.
  */
+function pruneExpiredHotPRPins(now: number): void {
+  for (const [id, untilMs] of _hotPRPinnedUntil) {
+    if (untilMs <= now) _hotPRPinnedUntil.delete(id);
+  }
+}
+
+function syncHotPRPinAndCheckEligibility(pr: PullRequest, now: number): boolean {
+  const isTerminal = pr.state === "CLOSED" || pr.state === "MERGED";
+  if (!isTerminal && pr.hotPollPinned) {
+    if ((_hotPRPinnedUntil.get(pr.id) ?? 0) <= now) {
+      _hotPRPinnedUntil.set(pr.id, now + HOT_PR_MUTATION_PIN_TTL_MS);
+    }
+  } else if (_hotPRPinnedUntil.has(pr.id)) {
+    _hotPRPinnedUntil.delete(pr.id);
+  }
+
+  return (
+    !isTerminal &&
+    Boolean(pr.enriched && pr.nodeId) &&
+    (pr.checkStatus === "running" ||
+      pr.checkStatusStale === true ||
+      (_hotPRPinnedUntil.get(pr.id) ?? 0) > now)
+  );
+}
+
 export function rebuildHotSets(data: DashboardData): void {
   _hotPollGeneration++;
   _hotPRs.clear();
@@ -602,26 +627,10 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotRuns.clear();
 
   const now = Date.now();
-  for (const [id, untilMs] of _hotPRPinnedUntil) {
-    if (untilMs <= now) _hotPRPinnedUntil.delete(id);
-  }
+  pruneExpiredHotPRPins(now);
 
   for (const pr of data.pullRequests) {
-    if (pr.hotPollPinned) {
-      if ((_hotPRPinnedUntil.get(pr.id) ?? 0) <= now) {
-        _hotPRPinnedUntil.set(pr.id, now + HOT_PR_MUTATION_PIN_TTL_MS);
-      }
-    } else if (_hotPRPinnedUntil.has(pr.id)) {
-      _hotPRPinnedUntil.delete(pr.id);
-    }
-
-    if (
-      pr.enriched &&
-      pr.nodeId &&
-      (pr.checkStatus === "running" ||
-        pr.checkStatusStale === true ||
-        (_hotPRPinnedUntil.get(pr.id) ?? 0) > now)
-    ) {
+    if (syncHotPRPinAndCheckEligibility(pr, now) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;
@@ -996,26 +1005,11 @@ export async function fetchTargetedRepoData(
  */
 export function seedHotSetsFromTargeted(data: DashboardData): void {
   const now = Date.now();
-  for (const [id, untilMs] of _hotPRPinnedUntil) {
-    if (untilMs <= now) _hotPRPinnedUntil.delete(id);
-  }
+  pruneExpiredHotPRPins(now);
 
   for (const pr of data.pullRequests) {
     const isTerminal = pr.state === "CLOSED" || pr.state === "MERGED";
-    if (!isTerminal && pr.hotPollPinned) {
-      if ((_hotPRPinnedUntil.get(pr.id) ?? 0) <= now) {
-        _hotPRPinnedUntil.set(pr.id, now + HOT_PR_MUTATION_PIN_TTL_MS);
-      }
-    } else {
-      _hotPRPinnedUntil.delete(pr.id);
-    }
-
-    const isEligible =
-      !isTerminal &&
-      Boolean(pr.enriched && pr.nodeId) &&
-      (pr.checkStatus === "running" ||
-        pr.checkStatusStale === true ||
-        (_hotPRPinnedUntil.get(pr.id) ?? 0) > now);
+    const isEligible = syncHotPRPinAndCheckEligibility(pr, now);
 
     if (isEligible && pr.nodeId) {
       if (!_hotPRs.has(pr.nodeId) && _hotPRs.size < MAX_HOT_PRS) {

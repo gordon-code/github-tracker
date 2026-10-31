@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, isRepoExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
-import { isRunVisible, isWorkflowRunPending, isWorkflowRunWaiting } from "../../lib/filters";
+import { isRunVisible, isWorkflowRunPending, isWorkflowRunWaiting, matchesActionsConclusionFilter } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -167,33 +167,8 @@ export default function ActionsTab(props: ActionsTabProps) {
     return props.workflowRuns.filter((run) => {
       if (!isRunVisible(run, { ignoredIds, showPrRuns: viewState.showPrRuns, globalFilter })) return false;
 
-      if (conclusionFilter !== "all") {
-        if (conclusionFilter === "running") {
-          if (run.status !== "in_progress") return false;
-        } else if (conclusionFilter === "waiting") {
-          if (!isWorkflowRunWaiting(run)) return false;
-        } else if (conclusionFilter === "pending") {
-          if (!isWorkflowRunPending(run)) return false;
-        } else if (conclusionFilter === "other") {
-          if (
-            run.status === "in_progress" ||
-            isWorkflowRunWaiting(run) ||
-            isWorkflowRunPending(run) ||
-            run.conclusion === null ||
-            (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)
-          ) {
-            return false;
-          }
-        } else {
-          if (
-            run.status === "in_progress" ||
-            isWorkflowRunWaiting(run) ||
-            isWorkflowRunPending(run) ||
-            run.conclusion !== conclusionFilter
-          ) {
-            return false;
-          }
-        }
+      if (!matchesActionsConclusionFilter(run, conclusionFilter, KNOWN_CONCLUSIONS)) {
+        return false;
       }
 
       if (eventFilter !== "all") {
