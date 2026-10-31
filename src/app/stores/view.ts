@@ -61,13 +61,13 @@ export const PullRequestFiltersSchema = z.object({
   role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
   reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
   draft: z.enum(["all", "draft", "ready"]).default("all"),
-  checkStatus: z.enum(["all", "success", "failure", "pending", "conflict", "blocked", "none"]).default("all"),
+  checkStatus: z.enum(["all", "success", "failure", "running", "waiting", "pending", "conflict", "blocked", "none"]).default("all"),
   sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL", "XXL"]).default("all"),
   user: z.enum(["all"]).or(z.string()).default("all"),
 });
 
 export const ActionsFiltersSchema = z.object({
-  conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "other"]).default("all"),
+  conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "waiting", "pending", "other"]).default("all"),
   event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
 });
 

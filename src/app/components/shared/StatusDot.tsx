@@ -23,9 +23,9 @@ const STATUS_CONFIG = {
     pulse: false,
   },
   pending: {
-    bg: "bg-warning",
-    label: "Checks in progress",
-    pulse: true,
+    bg: "border border-warning/80 bg-warning/20",
+    label: "Checks pending condition",
+    pulse: false,
   },
   failure: {
     bg: "bg-red-500",

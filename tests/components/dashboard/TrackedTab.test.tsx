@@ -562,4 +562,77 @@ describe("TrackedTab — auto-merge badge and Approve action", () => {
     expect(onMarkPRReady).toHaveBeenCalledOnce();
     expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
   });
+
+  it("renders 'Pending action' and 'Pending condition' badges and StatusDot labels on tracked PR rows in comfortable and compact density", () => {
+    const runningPR = makePullRequest({
+      id: 940,
+      number: 940,
+      title: "Running Tracked PR",
+      checkStatus: "running",
+      enriched: true,
+    });
+    const waitingPR = makePullRequest({
+      id: 941,
+      number: 941,
+      title: "Waiting Tracked PR",
+      checkStatus: "waiting",
+      enriched: true,
+    });
+    const pendingPR = makePullRequest({
+      id: 942,
+      number: 942,
+      title: "Pending Tracked PR",
+      checkStatus: "pending",
+      enriched: true,
+    });
+    const unenrichedWaitingPR = makePullRequest({
+      id: 943,
+      number: 943,
+      title: "Unenriched Waiting Tracked PR",
+      checkStatus: "waiting",
+      enriched: false,
+    });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 940, number: 940, type: "pullRequest", title: "Running Tracked PR" }),
+        makeTrackedItem({ id: 941, number: 941, type: "pullRequest", title: "Waiting Tracked PR" }),
+        makeTrackedItem({ id: 942, number: 942, type: "pullRequest", title: "Pending Tracked PR" }),
+        makeTrackedItem({ id: 943, number: 943, type: "pullRequest", title: "Unenriched Waiting Tracked PR" }),
+      ],
+    });
+
+    const { unmount } = render(() => (
+      <TrackedTab
+        issues={[]}
+        pullRequests={[runningPR, waitingPR, pendingPR, unenrichedWaitingPR]}
+        userLogin="testuser"
+      />
+    ));
+
+    expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    expect(screen.getByLabelText("Checks pending human action")).toBeTruthy();
+    expect(screen.getByLabelText("Checks pending condition")).toBeTruthy();
+
+    const waitingBadges = screen.getAllByText("Pending action");
+    expect(waitingBadges).toHaveLength(1);
+    expect(waitingBadges[0].className).toContain("badge-warning");
+
+    const pendingBadges = screen.getAllByText("Pending condition");
+    expect(pendingBadges).toHaveLength(1);
+    expect(pendingBadges[0].className).toContain("badge-ghost");
+    unmount();
+
+    setConfig("viewDensity", "compact");
+    render(() => (
+      <TrackedTab
+        issues={[]}
+        pullRequests={[runningPR, waitingPR, pendingPR, unenrichedWaitingPR]}
+        userLogin="testuser"
+      />
+    ));
+
+    expect(screen.getAllByText("Pending action")).toHaveLength(1);
+    expect(screen.getAllByText("Pending condition")).toHaveLength(1);
+  });
 });
