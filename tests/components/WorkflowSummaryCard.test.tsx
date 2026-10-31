@@ -199,7 +199,7 @@ describe("WorkflowSummaryCard", () => {
     const pendingRuns = [
       makeWorkflowRun({ id: 2, status: "queued", conclusion: null }),
     ];
-    const { container: pendingContainer } = render(() => (
+    const { container: pendingContainer, unmount: unmountPending } = render(() => (
       <WorkflowSummaryCard
         workflowName="Queue"
         runs={pendingRuns}
@@ -213,6 +213,30 @@ describe("WorkflowSummaryCard", () => {
     const pendingCountEl = screen.getByLabelText("1 pending condition");
     expect(pendingCountEl.textContent).toBe("1");
     expect(pendingCountEl.className).toContain("text-base-content/60");
+    unmountPending();
+
+    // Mixed waiting + running + pending + success prioritizes amber border accent over yellow/pending/green
+    const mixedRuns = [
+      makeWorkflowRun({ id: 3, status: "completed", conclusion: "action_required" }),
+      makeWorkflowRun({ id: 4, status: "in_progress", conclusion: null }),
+      makeWorkflowRun({ id: 5, status: "pending", conclusion: null }),
+      makeWorkflowRun({ id: 6, status: "completed", conclusion: "success" }),
+    ];
+    const { container: mixedContainer } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="Mixed"
+        runs={mixedRuns}
+        expanded={false}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+      />
+    ));
+    const mixedCard = mixedContainer.firstElementChild as HTMLElement;
+    expect(mixedCard.className).toContain("border-l-amber-500");
+    expect(screen.getByLabelText("1 pending action").textContent).toBe("1");
+    expect(screen.getByLabelText("1 running").textContent).toBe("1");
+    expect(screen.getByLabelText("1 pending condition").textContent).toBe("1");
+    expect(screen.getByLabelText("1 successful").textContent).toBe("1");
   });
 
   it("passes isPolling to WorkflowRunRow when hotPollingRunIds contains run ID", () => {
