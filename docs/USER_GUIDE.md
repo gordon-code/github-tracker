@@ -208,11 +208,13 @@ A small colored dot shows the aggregate CI status for the PR's latest commit:
 |-------|---------|
 | Green (solid) | All checks passed |
 | Yellow (pulsing) | Checks in progress |
+| Amber (solid) | Checks pending human action (e.g., `/ok-to-test` or environment approval) |
+| Yellow (ringed/muted) | Checks pending condition (queued or waiting on branch rules/merge queue) |
 | Red (solid) | Checks failing |
 | Yellow/faded (solid) | Checks blocked by merge conflict |
 | Gray (solid) | No checks |
 
-The dot links to the PR's checks page on GitHub.
+The dot links to the PR's checks page on GitHub. When checks are paused on human action or a pending condition, the PR row also displays an inline `Pending action` or `Pending condition` badge (in both comfortable and compact density across the Pull Requests and Tracked tabs).
 
 #### Review Badges
 
@@ -269,7 +271,7 @@ Shows your involvement in the PR: **Author**, **Reviewer**, **Assignee**, or **I
 | Role | All / Author / Reviewer / Assignee | All |
 | Review | All / Approved / Changes / Needs review / Mergeable | All |
 | Status | All / Draft / Ready | All |
-| Checks | All / Passing / Failing / Pending / Conflict / Blocked / No CI | All |
+| Checks | All / Passing / Failing / Running / Pending action / Pending condition / Conflict / Blocked / No CI | All |
 | Size | All / XS / S / M / L / XL | All |
 | User | All / (tracked user logins) | All (shown when tracked users are configured) |
 
@@ -279,7 +281,7 @@ Shows your involvement in the PR: **Author**, **Reviewer**, **Assignee**, or **I
 
 ### Pull Requests Sorting
 
-Sort by: Repo, Title, Author, Checks, Review, Size, Created, Updated (default: Updated, descending).
+Sort by: Repo, Title, Author, Checks (failing → conflict → pending action → running → pending condition → passing → none), Review, Size, Created, Updated (default: Updated, descending).
 
 ---
 
@@ -289,7 +291,7 @@ The Actions tab is enabled by default. You can disable it in **Settings > GitHub
 
 ### Workflow Grouping
 
-Workflow runs are grouped first by repository, then by workflow name. Each workflow group shows its most recent runs up to the configured limit (default: 3 runs per workflow, up to 5 workflows per repo).
+Workflow runs are grouped first by repository, then by workflow name. Each workflow group shows its most recent runs up to the configured limit (default: 3 runs per workflow, up to 5 workflows per repo). Collapsed repository headers and workflow summary cards display counts and status accents for passing, failing, running, `pending action` (such as deployment or environment approval gates), and `pending condition` (queued, pending, or requested runs), and individual run rows show matching status icons and duration labels (`running...`, `pending action`, `pending condition`).
 
 ### Show PR Runs
 
@@ -299,7 +301,7 @@ By default, runs triggered by pull request events are hidden to reduce noise. To
 
 | Filter | Options | Default |
 |--------|---------|---------|
-| Conclusion | All / Success / Failure / Cancelled / Running / Other | All |
+| Result (Conclusion) | All / Success / Failure / Cancelled / Running / Pending action / Pending condition / Other | All |
 | Event | All / Push / Pull request / Schedule / Workflow dispatch / Other | All |
 
 ---
@@ -328,7 +330,7 @@ Unlike the Pull Requests tab (which groups by repo), the Dependencies tab groups
 |-------|----------|
 | **Mergeable** | CI passing (or no CI configured), not a draft, and no changes requested — ready to review or merge |
 | **Pending Rebase** | PR has the configured rebase label — waiting for the bot to rebase |
-| **Needs Action** | Failing or running CI checks, check status still being fetched by the app, merge conflicts, draft PR, or changes requested — rows display explicit reason badges (`Failing checks`, `Merge conflict`, `Checks running`, `Checking status`, `Draft`, `Changes`) |
+| **Needs Action** | Failing, running, pending-action, or pending-condition CI checks, check status still being fetched by the app, merge conflicts, draft PR, or changes requested — rows display explicit reason badges (`Failing checks`, `Merge conflict`, `Checks running`, `Pending action`, `Pending condition`, `Checking status`, `Draft`, `Changes`) |
 | **Stale** | PR has not been updated in over 14 days — may need a rebase or manual review |
 
 Reason badges reflect each PR's current state, so the same badges also appear on rows in the **Pending Rebase** and **Stale** groups. On initial load, and during a refresh in which no PR's details have loaded yet, `Checking status` is withheld on dependency PRs without details, to avoid a flash of the badge on every row.
@@ -405,7 +407,7 @@ Upstream repos are included in Issues and Pull Requests fetches but excluded fro
 
 The dashboard polls GitHub at a configurable interval (default: **5 minutes**). Each full refresh fetches all issues, PRs, and workflow runs. You can trigger a manual refresh by clicking the refresh button in the toolbar.
 
-PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches. If GitHub's GraphQL API is slow, returns a server error, or the request fails outright (`Failed to fetch`, which is how GitHub gateway timeouts appear in the browser), a failing batch is split in half repeatedly until batches are 6 PRs or fewer, then a lightweight fallback query fills in everything except CI check and merge-conflict status. Once a second batch in the same refresh fails before any PR's full details have loaded, later failing batches skip splitting and go straight to the fallback. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches and split failing batches the same way (except after the 45-second safety timeout); any items still failing are retried once a 5-minute cooldown passes. Settled PR enrichments — where CI checks are not pending and the PR's `updatedAt` timestamp is unchanged — are cached in memory for your refresh interval plus one minute (at least 3 minutes), so a settled PR skips the enrichment query on the next automatic poll and is re-fetched on the one after (the cache is also invalidated automatically when repository events or PR actions occur). Changes that don't update a PR's `updatedAt` — such as a CI re-run, or a merge conflict caused by new commits on its base branch — aren't picked up while the cached entry is valid, so such a PR can show its previous check or merge status (including the **Approve** button) for up to about two refresh intervals. Clicking the manual **Refresh** button always bypasses this cache.
+PR enrichment queries (reviewer lists, CI check rollups, merge conflict status, and line-change counts) run in 25-PR batches. If GitHub's GraphQL API is slow, returns a server error, or the request fails outright (`Failed to fetch`, which is how GitHub gateway timeouts appear in the browser), a failing batch is split in half repeatedly until batches are 6 PRs or fewer, then a lightweight fallback query fills in everything except CI check and merge-conflict status. Once a second batch in the same refresh fails before any PR's full details have loaded, later failing batches skip splitting and go straight to the fallback. Dependency PR and Renovate Dashboard body fetches also run in 25-node batches and split failing batches the same way (except after the 45-second safety timeout); any items still failing are retried once a 5-minute cooldown passes. Settled PR enrichments — where CI checks are in a terminal state (not `running`, `waiting`, or `pending`) and the PR's `updatedAt` timestamp is unchanged — are cached in memory for your refresh interval plus one minute (at least 3 minutes), so a settled PR skips the enrichment query on the next automatic poll and is re-fetched on the one after (the cache is also invalidated automatically when repository events or PR actions occur). Changes that don't update a PR's `updatedAt` — such as a CI re-run, or a merge conflict caused by new commits on its base branch — aren't picked up while the cached entry is valid, so such a PR can show its previous check or merge status (including the **Approve** button) for up to about two refresh intervals. Clicking the manual **Refresh** button always bypasses this cache.
 
 A subtle amber **Partial sync** indicator appears next to the Refresh button, while cached PR details are retained, when PR enrichment fails during a refresh and either leaves any PR without details or with unverified CI check status, or is rejected outright by GitHub (for example, a permissions error); otherwise it appears once enrichment failures persist across 3 consecutive polls. PRs whose CI check status couldn't be verified — filled in by the lightweight fallback query, changed (new `headSha` or `updatedAt`) during a degraded backfill, or forks whose CI lookup failed — have their check status cleared (`checkStatusStale`) rather than carried forward: they show `Checking status`, hide **Approve**, and are resolved automatically by the next hot-poll cycle or successful refresh. The indicator clears on the next full refresh whose PR enrichment succeeds, unless a search failure in that refresh leaves a PR still in this unverified state.
 
@@ -421,8 +423,8 @@ Each full refresh also checks GitHub's own status page for outages affecting Act
 
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
 
-- **PRs with pending or stale (`checkStatusStale`) CI checks** — re-checks status until checks resolve (including PRs whose commit changed during a degraded backfill). For PRs from forks whose CI runs only in the fork, the status is read from the fork's head commit, the same source the full refresh uses.
-- **In-progress workflow runs** — re-checks until the run completes
+- **PRs with actively running (`running`) or stale (`checkStatusStale`) CI checks** — re-checks status until checks leave the running state (plus a 60-second window after an inline `Approve` or `Ready?` action to catch newly triggered workflows; PRs paused in `waiting` or `pending` are not hot-polled). For PRs from forks whose CI runs only in the fork, the status is read from the fork's head commit, the same source the full refresh uses.
+- **In-progress or queued workflow runs** — re-checks until the run completes or pauses on an environment approval gate (`waiting`)
 
 Default interval: **30 seconds** (configurable from 10 to 120 seconds in Settings).
 
