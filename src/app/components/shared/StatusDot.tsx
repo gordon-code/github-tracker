@@ -2,7 +2,7 @@ import { Show } from "solid-js";
 import { Tooltip } from "./Tooltip";
 
 export interface StatusDotProps {
-  status: "success" | "pending" | "failure" | "error" | "conflict" | null;
+  status: "success" | "running" | "waiting" | "pending" | "failure" | "error" | "conflict" | null;
   href?: string;
 }
 
@@ -10,6 +10,16 @@ const STATUS_CONFIG = {
   success: {
     bg: "bg-success",
     label: "All checks passed",
+    pulse: false,
+  },
+  running: {
+    bg: "bg-warning",
+    label: "Checks in progress",
+    pulse: true,
+  },
+  waiting: {
+    bg: "bg-amber-500",
+    label: "Checks pending human action",
     pulse: false,
   },
   pending: {

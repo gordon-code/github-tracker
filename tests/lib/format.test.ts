@@ -578,7 +578,7 @@ describe("canApprovePR", () => {
     expect(canApprovePR(validPr, "")).toBe(false);
   });
 
-  it("returns false when checkStatus is failure and true for success, pending, conflict, or null", () => {
+  it("returns false when checkStatus is failure and true for success, running, waiting, pending, conflict, or null", () => {
     const base = {
       nodeId: "PR_kwDOtest0001",
       headSha: validSha,
@@ -588,6 +588,8 @@ describe("canApprovePR", () => {
 
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: "failure" }), "reviewer")).toBe(false);
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: "success" }), "reviewer")).toBe(true);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "running" }), "reviewer")).toBe(true);
+    expect(canApprovePR(makePullRequest({ ...base, checkStatus: "waiting" }), "reviewer")).toBe(true);
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: "pending" }), "reviewer")).toBe(true);
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: "conflict" }), "reviewer")).toBe(true);
     expect(canApprovePR(makePullRequest({ ...base, checkStatus: null }), "reviewer")).toBe(true);

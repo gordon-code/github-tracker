@@ -3670,7 +3670,7 @@ describe("DashboardPage — PR approval integration", () => {
     expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("approve-pr:42");
     expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith({
       issues: [],
-      pullRequests: [expect.objectContaining({ id: 42, enriched: true, checkStatus: "pending" })],
+      pullRequests: [expect.objectContaining({ id: 42, enriched: true, checkStatus: "running", hotPollPinned: true })],
       workflowRuns: [],
       errors: [],
     });
@@ -4009,7 +4009,7 @@ describe("DashboardPage — PR approval integration", () => {
       nodeId: "PR_kwDOtest0042",
       headSha: validSha,
       reviewDecision: "REVIEW_REQUIRED",
-      checkStatus: "pending",
+      checkStatus: "running",
       viewerReviewRequested: true,
       viewerLatestReviewState: null,
     });
@@ -4036,7 +4036,7 @@ describe("DashboardPage — PR approval integration", () => {
     capturedOnHotData!(
       new Map([[42, {
         state: "OPEN",
-        checkStatus: "pending",
+        checkStatus: "running",
         mergeStateStatus: "BLOCKED",
         reviewDecision: "REVIEW_REQUIRED",
         headSha: newSha,
@@ -4108,7 +4108,7 @@ describe("DashboardPage — PR approval integration", () => {
       nodeId: "PR_kwDOtest0102",
       headSha: validSha,
       reviewDecision: "REVIEW_REQUIRED",
-      checkStatus: "pending",
+      checkStatus: "running",
       autoMergeMethod: null,
       viewerReviewRequested: true,
       viewerLatestReviewState: null,
@@ -4533,7 +4533,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
           nodeId: "PR_kwDOtest0077",
           draft: false,
           enriched: true,
-          checkStatus: "pending",
+          checkStatus: "running",
+          hotPollPinned: true,
         }),
       ],
       workflowRuns: [],
@@ -4551,7 +4552,7 @@ describe("DashboardPage — Mark PR ready integration", () => {
       new Map([[77, {
         state: "OPEN",
         draft: true,
-        checkStatus: "pending",
+        checkStatus: "running",
         mergeStateStatus: "DRAFT",
         reviewDecision: null,
       }]]),
@@ -4562,15 +4563,29 @@ describe("DashboardPage — Mark PR ready integration", () => {
     expect(screen.getByText("Review needed")).toBeTruthy();
 
     // 2. Subsequent targeted poll reporting stale draft: true within 60s
+    vi.mocked(pollService.seedHotSetsFromTargeted).mockClear();
     capturedOnTargetedData!(
       { issues: [], pullRequests: [makeStaleDraftPR()], workflowRuns: [], errors: [] },
       ["owner/repo"]
     );
     expect(screen.queryByTestId("draft-badge")).toBeNull();
     expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequests: [
+          expect.objectContaining({
+            id: 77,
+            nodeId: "PR_kwDOtest0077",
+            enriched: true,
+            checkStatus: "running",
+            hotPollPinned: true,
+          }),
+        ],
+      })
+    );
 
     // 3. Subsequent full poll reporting stale draft: true within 60s keeps pr.draft === false
-    // and preserves hot-set membership (checkStatus: "pending" passed to rebuildHotSets)
+    // and preserves hot-set membership (checkStatus: "running", hotPollPinned: true passed to rebuildHotSets)
     vi.mocked(pollService.rebuildHotSets).mockClear();
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
@@ -4588,7 +4603,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
             id: 77,
             nodeId: "PR_kwDOtest0077",
             enriched: true,
-            checkStatus: "pending",
+            checkStatus: "running",
+            hotPollPinned: true,
           }),
         ],
       })
@@ -5098,7 +5114,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
       enriched: true,
       nodeId: "PR_kwDOtest0501",
       headSha: "1111111111111111111111111111111111111111",
-      checkStatus: "pending",
+      checkStatus: "running",
       reviewDecision: "REVIEW_REQUIRED",
       autoMergeMethod: "SQUASH",
       assigneeLogins: ["alice"],
@@ -5159,7 +5175,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
             id: 501,
             nodeId: "PR_kwDOtest0501",
             enriched: true,
-            checkStatus: "pending",
+            checkStatus: "running",
             autoMergeMethod: "SQUASH",
             assigneeLogins: ["alice"],
             reviewerLogins: ["bob"],
@@ -5177,7 +5193,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
         id: 501,
         nodeId: "PR_kwDOtest0501",
         enriched: true,
-        checkStatus: "pending",
+        checkStatus: "running",
         autoMergeMethod: "SQUASH",
         assigneeLogins: ["alice"],
         reviewerLogins: ["bob"],
