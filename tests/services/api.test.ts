@@ -2840,6 +2840,141 @@ describe("fetchIssuesAndPullRequests — settled-PR enrichment cache", () => {
     expect(res2.pullRequests[0].checkStatusStale).toBeUndefined();
   });
 
+  it("classifies 3-way non-terminal rollups ('running', 'waiting', 'pending') in runForkPRFallback, selects STATUS_CHECK_ROLLUP_FIELDS, and salvages partial fork responses on error", async () => {
+    let throwPartialForkError = false;
+    const forkQueries: string[] = [];
+
+    const lightForkPRs = [
+      makeLightPR({ id: "PR_fork_1", databaseId: 401, number: 401 }),
+      makeLightPR({ id: "PR_fork_2", databaseId: 402, number: 402 }),
+      makeLightPR({ id: "PR_fork_3", databaseId: 403, number: 403 }),
+    ];
+
+    const heavyForkPRs = [401, 402, 403].map((dbId, idx) =>
+      makeHeavyPR({
+        id: `PR_fork_${idx + 1}`,
+        databaseId: dbId,
+        headRefOid: `sha-fork-${dbId}`,
+        headRepository: { owner: { login: `fork-user-${idx + 1}` }, nameWithOwner: `fork-user-${idx + 1}/Hello-World` },
+        statusCheckRollup: null,
+      })
+    );
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          return { nodes: heavyForkPRs };
+        }
+        if (query.includes("fork0:")) {
+          forkQueries.push(query);
+          if (throwPartialForkError) {
+            throw Object.assign(new Error("Partial fork GraphQL error"), {
+              data: {
+                fork0: {
+                  object: {
+                    statusCheckRollup: {
+                      state: "PENDING",
+                      contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+                    },
+                  },
+                },
+                fork1: {
+                  object: {
+                    statusCheckRollup: {
+                      state: "PENDING",
+                      contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 2 }] },
+                    },
+                  },
+                },
+                fork2: null,
+                rateLimit: { cost: 1, limit: 5000, remaining: 4950, resetAt: "2026-04-23T12:00:00Z" },
+              },
+            });
+          }
+          return {
+            fork0: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 1 },
+                      { state: "WAITING", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            fork1: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 0 },
+                      { state: "WAITING", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            fork2: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 0 },
+                      { state: "WAITING", count: 0 },
+                      { state: "QUEUED", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            rateLimit: { cost: 1, limit: 5000, remaining: 4951, resetAt: "2026-04-23T12:00:00Z" },
+          };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 3, pageInfo: { hasNextPage: false, endCursor: null }, nodes: lightForkPRs },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    // 1. Normal response path: selects STATUS_CHECK_ROLLUP_FIELDS and classifies running / waiting / pending
+    const resNormal = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(forkQueries).toHaveLength(1);
+    expect(forkQueries[0]).toContain(
+      "statusCheckRollup { state contexts { checkRunCountsByState { state count } } }"
+    );
+    expect(resNormal.pullRequests.find((p) => p.id === 401)?.checkStatus).toBe("running");
+    expect(resNormal.pullRequests.find((p) => p.id === 402)?.checkStatus).toBe("waiting");
+    expect(resNormal.pullRequests.find((p) => p.id === 403)?.checkStatus).toBe("pending");
+
+    // 2. Partial-error salvage path: salvages fork0 ("waiting") and fork1 ("running"), marks missing fork2 stale
+    throwPartialForkError = true;
+    vi.mocked(pushNotification).mockClear();
+    const resPartial = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    const pr401 = resPartial.pullRequests.find((p) => p.id === 401)!;
+    const pr402 = resPartial.pullRequests.find((p) => p.id === 402)!;
+    const pr403 = resPartial.pullRequests.find((p) => p.id === 403)!;
+    expect(pr401.checkStatus).toBe("waiting");
+    expect(pr401.checkStatusStale).toBeUndefined();
+    expect(pr402.checkStatus).toBe("running");
+    expect(pr402.checkStatusStale).toBeUndefined();
+    expect(pr403.checkStatus).toBeNull();
+    expect(pr403.checkStatusStale).toBe(true);
+    expect(pushNotification).toHaveBeenCalledWith(
+      "graphql",
+      "Fork PR check status unavailable — CI status may be missing for some PRs",
+      "warning"
+    );
+  });
+
   it("skips runForkPRFallback when a fork PR falls back to LIGHT_PR_BACKFILL_QUERY (checkStatusStale: true)", async () => {
     let forkCalls = 0;
 
