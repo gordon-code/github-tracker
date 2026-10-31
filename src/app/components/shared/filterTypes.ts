@@ -69,7 +69,9 @@ export const prFilterGroups: FilterChipGroupDef[] = [
     options: [
       { value: "success", label: "Passing" },
       { value: "failure", label: "Failing" },
-      { value: "pending", label: "Pending" },
+      { value: "running", label: "Running" },
+      { value: "waiting", label: "Pending action" },
+      { value: "pending", label: "Pending condition" },
       { value: "conflict", label: "Conflict" },
       { value: "blocked", label: "Blocked" },
       { value: "none", label: "No CI" },
@@ -91,7 +93,7 @@ export const prFilterGroups: FilterChipGroupDef[] = [
 
 // Concrete conclusion/event values used for "other" exclusion logic.
 // Shared between ActionsTab (rendering) and DashboardPage (badge counts).
-export const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled"] as const;
+export const KNOWN_CONCLUSIONS = ["success", "failure", "cancelled", "action_required"] as const;
 export const KNOWN_EVENTS = ["push", "pull_request", "schedule", "workflow_dispatch"] as const;
 
 export const actionsFilterGroups: FilterChipGroupDef[] = [
@@ -103,6 +105,8 @@ export const actionsFilterGroups: FilterChipGroupDef[] = [
       { value: "failure", label: "Failure" },
       { value: "cancelled", label: "Cancelled" },
       { value: "running", label: "Running" },
+      { value: "waiting", label: "Pending action" },
+      { value: "pending", label: "Pending condition" },
       { value: "other", label: "Other" },
     ],
   },

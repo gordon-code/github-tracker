@@ -899,4 +899,164 @@ describe("PullRequestsTab", () => {
       expect(onMarkPRReady).toHaveBeenCalledWith(ownDraftPR);
     });
   });
+
+  describe("acute checkStatus states (running, waiting, pending)", () => {
+    it("renders 'Pending action' and 'Pending condition' row badges in comfortable and compact density when enriched, and omits when unenriched", () => {
+      setAllExpanded("pullRequests", true);
+      const runningPR = makePullRequest({
+        id: 30,
+        number: 30,
+        title: "Running PR",
+        repoFullName: "org/repo",
+        checkStatus: "running",
+        enriched: true,
+      });
+      const waitingPR = makePullRequest({
+        id: 31,
+        number: 31,
+        title: "Waiting PR",
+        repoFullName: "org/repo",
+        checkStatus: "waiting",
+        enriched: true,
+      });
+      const pendingPR = makePullRequest({
+        id: 32,
+        number: 32,
+        title: "Pending Condition PR",
+        repoFullName: "org/repo",
+        checkStatus: "pending",
+        enriched: true,
+      });
+      const unenrichedWaitingPR = makePullRequest({
+        id: 33,
+        number: 33,
+        title: "Unenriched Waiting PR",
+        repoFullName: "org/repo",
+        checkStatus: "waiting",
+        enriched: false,
+      });
+
+      const { unmount } = render(() => (
+        <PullRequestsTab
+          pullRequests={[runningPR, waitingPR, pendingPR, unenrichedWaitingPR]}
+          userLogin="alice"
+        />
+      ));
+
+      expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+      expect(screen.getByLabelText("Checks pending human action")).toBeTruthy();
+      expect(screen.getByLabelText("Checks pending condition")).toBeTruthy();
+
+      const waitingSpans = screen
+        .getAllByText("Pending action")
+        .filter((el) => el.tagName.toLowerCase() === "span");
+      expect(waitingSpans).toHaveLength(1);
+      expect(waitingSpans[0].className).toContain("badge-warning");
+
+      const pendingSpans = screen
+        .getAllByText("Pending condition")
+        .filter((el) => el.tagName.toLowerCase() === "span");
+      expect(pendingSpans).toHaveLength(1);
+      expect(pendingSpans[0].className).toContain("badge-ghost");
+      unmount();
+
+      // Compact density
+      setConfig("viewDensity", "compact");
+      render(() => (
+        <PullRequestsTab
+          pullRequests={[runningPR, waitingPR, pendingPR, unenrichedWaitingPR]}
+          userLogin="alice"
+        />
+      ));
+
+      const compactWaitingSpans = screen
+        .getAllByText("Pending action")
+        .filter((el) => el.tagName.toLowerCase() === "span");
+      expect(compactWaitingSpans).toHaveLength(1);
+
+      const compactPendingSpans = screen
+        .getAllByText("Pending condition")
+        .filter((el) => el.tagName.toLowerCase() === "span");
+      expect(compactPendingSpans).toHaveLength(1);
+    });
+
+    it("sorts PRs by checkStatusOrder: failure < conflict < waiting < running < pending < success < null", () => {
+      setAllExpanded("pullRequests", true);
+      viewStore.setSortPreference("checkStatus", "asc");
+      const prs = [
+        makePullRequest({ id: 1, title: "Null CI PR", checkStatus: null, repoFullName: "org/repo" }),
+        makePullRequest({ id: 2, title: "Success PR", checkStatus: "success", repoFullName: "org/repo" }),
+        makePullRequest({ id: 3, title: "Pending PR", checkStatus: "pending", repoFullName: "org/repo" }),
+        makePullRequest({ id: 4, title: "Running PR", checkStatus: "running", repoFullName: "org/repo" }),
+        makePullRequest({ id: 5, title: "Waiting PR", checkStatus: "waiting", repoFullName: "org/repo" }),
+        makePullRequest({ id: 6, title: "Conflict PR", checkStatus: "conflict", repoFullName: "org/repo" }),
+        makePullRequest({ id: 7, title: "Failure PR", checkStatus: "failure", repoFullName: "org/repo" }),
+      ];
+
+      render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+      const items = screen.getAllByRole("listitem").map((el) => el.textContent ?? "");
+
+      const idx = (title: string) => items.findIndex((t) => t.includes(title));
+      expect(idx("Failure PR")).toBeLessThan(idx("Conflict PR"));
+      expect(idx("Conflict PR")).toBeLessThan(idx("Waiting PR"));
+      expect(idx("Waiting PR")).toBeLessThan(idx("Running PR"));
+      expect(idx("Running PR")).toBeLessThan(idx("Pending PR"));
+      expect(idx("Pending PR")).toBeLessThan(idx("Success PR"));
+      expect(idx("Success PR")).toBeLessThan(idx("Null CI PR"));
+    });
+
+    it("shows running, waiting, and pending check counts and indicator dots in collapsed repo summary", () => {
+      const prs = [
+        makePullRequest({ id: 1, title: "Run 1", checkStatus: "running", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 2, title: "Run 2", checkStatus: "running", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 3, title: "Wait 1", checkStatus: "waiting", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 4, title: "Wait 2", checkStatus: "waiting", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 5, title: "Wait 3", checkStatus: "waiting", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 6, title: "Pend 1", checkStatus: "pending", repoFullName: "org/repo-a" }),
+      ];
+
+      render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+      const header = screen.getByText("org/repo-a").closest("button")!;
+      const summarySpan = header.querySelector(".ml-auto")!;
+
+      const runningDot = summarySpan.querySelector(".bg-warning");
+      expect(runningDot).not.toBeNull();
+      expect(runningDot?.parentElement?.textContent).toBe("2");
+
+      const waitingDot = summarySpan.querySelector(".bg-amber-500");
+      expect(waitingDot).not.toBeNull();
+      expect(waitingDot?.parentElement?.textContent).toBe("3");
+
+      const pendingDot = summarySpan.querySelector(".border-warning\\/80");
+      expect(pendingDot).not.toBeNull();
+      expect(pendingDot?.parentElement?.textContent).toBe("1");
+    });
+
+    it("filters PRs by 'running', 'waiting', and 'pending' checkStatus tab filter", () => {
+      setAllExpanded("pullRequests", true);
+      const prs = [
+        makePullRequest({ id: 1, title: "Running PR", checkStatus: "running", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 2, title: "Waiting PR", checkStatus: "waiting", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 3, title: "Pending PR", checkStatus: "pending", repoFullName: "org/repo-a" }),
+        makePullRequest({ id: 4, title: "Passing PR", checkStatus: "success", repoFullName: "org/repo-a" }),
+      ];
+
+      viewStore.setTabFilter("pullRequests", "checkStatus", "running");
+      render(() => <PullRequestsTab pullRequests={prs} userLogin="" />);
+
+      expect(screen.getByText("Running PR")).toBeTruthy();
+      expect(screen.queryByText("Waiting PR")).toBeNull();
+      expect(screen.queryByText("Pending PR")).toBeNull();
+      expect(screen.queryByText("Passing PR")).toBeNull();
+
+      viewStore.setTabFilter("pullRequests", "checkStatus", "waiting");
+      expect(screen.queryByText("Running PR")).toBeNull();
+      expect(screen.getByText("Waiting PR")).toBeTruthy();
+      expect(screen.queryByText("Pending PR")).toBeNull();
+
+      viewStore.setTabFilter("pullRequests", "checkStatus", "pending");
+      expect(screen.queryByText("Waiting PR")).toBeNull();
+      expect(screen.getByText("Pending PR")).toBeTruthy();
+    });
+  });
 });

@@ -828,7 +828,7 @@ describe("DashboardPage — onHotData integration", () => {
   it("discards stale hot poll updates when generation mismatches", async () => {
     const testPR = makePullRequest({
       id: 43,
-      checkStatus: "pending",
+      checkStatus: "running",
       state: "OPEN",
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({

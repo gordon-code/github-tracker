@@ -900,3 +900,76 @@ describe("PullRequestsTab — depPrIds ignored-item filtering", () => {
     expect(screen.queryByRole("button", { name: /ignored/i })).toBeNull();
   });
 });
+
+// ── PullRequestsTab — running, waiting, and pending check states ────────────
+
+describe("PullRequestsTab — running, waiting, and pending check states", () => {
+  it("renders 'Pending action' and 'Pending condition' badges in comfortable and compact density modes", () => {
+    setAllExpanded("pullRequests", true);
+    const prs = [
+      makePullRequest({ id: 1, title: "Running PR", repoFullName: "org/repo", checkStatus: "running", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "Waiting PR", repoFullName: "org/repo", checkStatus: "waiting", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Pending PR", repoFullName: "org/repo", checkStatus: "pending", surfacedBy: ["me"], enriched: true }),
+    ];
+
+    const { unmount } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(screen.getByLabelText("Checks in progress")).toBeTruthy();
+    expect(screen.getByLabelText("Checks pending human action")).toBeTruthy();
+    expect(screen.getByLabelText("Checks pending condition")).toBeTruthy();
+
+    const waitingBadge = screen.getAllByText("Pending action").find((el) => el.tagName.toLowerCase() === "span");
+    expect(waitingBadge).toBeDefined();
+    expect(waitingBadge?.className).toContain("badge-warning");
+
+    const pendingBadge = screen.getAllByText("Pending condition").find((el) => el.tagName.toLowerCase() === "span");
+    expect(pendingBadge).toBeDefined();
+    expect(pendingBadge?.className).toContain("badge-ghost");
+    unmount();
+
+    updateConfig({ viewDensity: "compact" });
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+
+    expect(screen.getAllByText("Pending action").find((el) => el.tagName.toLowerCase() === "span")).toBeDefined();
+    expect(screen.getAllByText("Pending condition").find((el) => el.tagName.toLowerCase() === "span")).toBeDefined();
+  });
+
+  it("filters PRs by checkStatus=running, checkStatus=waiting, and checkStatus=pending", () => {
+    setAllExpanded("pullRequests", true);
+    const prs = [
+      makePullRequest({ id: 1, title: "Running PR", repoFullName: "org/repo", checkStatus: "running", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 2, title: "Waiting PR", repoFullName: "org/repo", checkStatus: "waiting", surfacedBy: ["me"], enriched: true }),
+      makePullRequest({ id: 3, title: "Pending PR", repoFullName: "org/repo", checkStatus: "pending", surfacedBy: ["me"], enriched: true }),
+    ];
+
+    setTabFilter("pullRequests", "checkStatus", "running");
+    const { unmount } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+    screen.getByText("Running PR");
+    expect(screen.queryByText("Waiting PR")).toBeNull();
+    expect(screen.queryByText("Pending PR")).toBeNull();
+    unmount();
+
+    setTabFilter("pullRequests", "checkStatus", "waiting");
+    const { unmount: unmount2 } = render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+    expect(screen.queryByText("Running PR")).toBeNull();
+    screen.getByText("Waiting PR");
+    expect(screen.queryByText("Pending PR")).toBeNull();
+    unmount2();
+
+    setTabFilter("pullRequests", "checkStatus", "pending");
+    render(() => (
+      <PullRequestsTab pullRequests={prs} userLogin="me" monitoredRepos={[]} />
+    ));
+    expect(screen.queryByText("Running PR")).toBeNull();
+    expect(screen.queryByText("Waiting PR")).toBeNull();
+    screen.getByText("Pending PR");
+  });
+});
