@@ -445,15 +445,17 @@ describe("classifyDepStatus", () => {
     expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
   });
 
-  it("returns needs-action for recent PR with pending CI", () => {
-    const pr = makePullRequest({
-      enriched: true,
-      draft: false,
-      checkStatus: "pending",
-      reviewDecision: null,
-      updatedAt: RECENT,
-    });
-    expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
+  it("returns needs-action for recent PR with running, waiting, or pending CI", () => {
+    for (const checkStatus of ["running", "waiting", "pending"] as const) {
+      const pr = makePullRequest({
+        enriched: true,
+        draft: false,
+        checkStatus,
+        reviewDecision: null,
+        updatedAt: RECENT,
+      });
+      expect(classifyDepStatus(pr, "", 14)).toBe("needs-action");
+    }
   });
 
   it("returns needs-action for unenriched PR (enriched=false, draft=false, checkStatus is null)", () => {

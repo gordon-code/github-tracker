@@ -45,7 +45,7 @@ import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCss
 import { setsEqual } from "../../lib/collections";
 import { withScrollLock } from "../../lib/scroll";
 import { Tooltip } from "../shared/Tooltip";
-import { isIssueVisible, isPrVisible, isRunVisible } from "../../lib/filters";
+import { isIssueVisible, isPrVisible, isRunVisible, matchesActionsConclusionFilter } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import CustomTabModal from "../shared/CustomTabModal";
@@ -576,14 +576,7 @@ async function pollFetch(force = false): Promise<DashboardData> {
       });
     }
     const filteredRuns = config.enableActions ? data.workflowRuns : [];
-    const hotPullRequests =
-      recentlyMarkedReadyPRs.size > 0 || recentlyApprovedPRs.size > 0
-        ? resolvedPullRequests.map((pr) =>
-            (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
-              ? { ...pr, enriched: true, checkStatus: "pending" as const }
-              : pr
-          )
-        : resolvedPullRequests;
+    const hotPullRequests = pinRecentlyMutatedPRs(resolvedPullRequests);
     rebuildHotSets({ ...data, pullRequests: hotPullRequests, workflowRuns: filteredRuns });
     // Persist for stale-while-revalidate on full page reload.
     // Errors are transient and not persisted. Deferred to avoid blocking paint.
@@ -702,6 +695,8 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
     applyRecentApprovalGuard(pr, currentLogin);
   }
 
+  const targetedRuns = config.enableActions ? data.workflowRuns : [];
+
   withScrollLock(() => {
     setDashboardData(produce((state) => {
       // ID-based merge: replace targeted items, keep unaffected + tracked-user-only items
@@ -721,7 +716,6 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
         ),
         ...data.pullRequests,
       ];
-      const targetedRuns = config.enableActions ? data.workflowRuns : [];
       const newRunIds = new Set(targetedRuns.map(r => r.id));
       state.workflowRuns = config.enableActions ? [
         ...state.workflowRuns.filter(r =>
@@ -757,8 +751,20 @@ function handleTargetedData(data: DashboardData, affectedRepos: string[]): void 
   const newItems = detectNewItems(data);
   dispatchNotifications(newItems, config);
 
-  seedHotSetsFromTargeted(data);
+  const hotTargetedPullRequests = pinRecentlyMutatedPRs(data.pullRequests);
+  seedHotSetsFromTargeted({ ...data, pullRequests: hotTargetedPullRequests, workflowRuns: targetedRuns });
   persistDashboardSnapshot();
+}
+
+function pinRecentlyMutatedPRs(pullRequests: PullRequest[]): PullRequest[] {
+  if (recentlyMarkedReadyPRs.size === 0 && recentlyApprovedPRs.size === 0) {
+    return pullRequests;
+  }
+  return pullRequests.map((pr) =>
+    (recentlyMarkedReadyPRs.has(pr.id) || recentlyApprovedPRs.has(pr.id)) && pr.nodeId
+      ? { ...pr, enriched: true, checkStatus: "running" as const, hotPollPinned: true }
+      : pr
+  );
 }
 
 export default function DashboardPage() {
@@ -1369,11 +1375,7 @@ export default function DashboardPage() {
         customCounts[tab.id] = data.workflowRuns.filter((w) => {
           if (!isItemVisibleOnTab(ownership.actions, w.id, tab.id)) return false;
           if (!isRunVisible(w, { ignoredIds: ignoredRuns, showPrRuns: viewState.showPrRuns, globalFilter: null })) return false;
-          if (f.conclusion !== "all") {
-            if (f.conclusion === "running") { if (w.status !== "in_progress") return false; }
-            else if (f.conclusion === "other") { if (w.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(w.conclusion)) return false; }
-            else if (w.conclusion !== f.conclusion) return false;
-          }
+          if (!matchesActionsConclusionFilter(w, f.conclusion, KNOWN_CONCLUSIONS)) return false;
           if (f.event !== "all") {
             if (f.event === "other") { if ((KNOWN_EVENTS as readonly string[]).includes(w.event)) return false; }
             else if (w.event !== f.event) return false;
@@ -1825,7 +1827,7 @@ export default function DashboardPage() {
       // even when checkStatus was already "success" prior to approval.
       seedHotSetsFromTargeted({
         issues: [],
-        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "pending" }],
+        pullRequests: [{ ...pr, nodeId, headSha: approvedHeadSha, enriched: true, checkStatus: "running", hotPollPinned: true }],
         workflowRuns: [],
         errors: [],
       });
@@ -1894,7 +1896,7 @@ export default function DashboardPage() {
 
       seedHotSetsFromTargeted({
         issues: [],
-        pullRequests: [{ ...pr, nodeId, draft: false, enriched: true, checkStatus: "pending" }],
+        pullRequests: [{ ...pr, nodeId, draft: false, enriched: true, checkStatus: "running", hotPollPinned: true }],
         workflowRuns: [],
         errors: [],
       });

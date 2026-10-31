@@ -176,6 +176,69 @@ describe("WorkflowSummaryCard", () => {
     expect(card.className).toContain("border-l-warning");
   });
 
+  it("shows waiting ('1 pending action', text-amber-500, border-l-amber-500) and pending ('1 pending condition', text-base-content/60, border-l-warning/50) counts and border accents", () => {
+    const waitingRuns = [
+      makeWorkflowRun({ id: 1, status: "waiting", conclusion: null }),
+    ];
+    const { container: waitingContainer, unmount } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="Deploy"
+        runs={waitingRuns}
+        expanded={false}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+      />
+    ));
+    const waitingCard = waitingContainer.firstElementChild as HTMLElement;
+    expect(waitingCard.className).toContain("border-l-amber-500");
+    const waitingCountEl = screen.getByLabelText("1 pending action");
+    expect(waitingCountEl.textContent).toBe("1");
+    expect(waitingCountEl.className).toContain("text-amber-500");
+    unmount();
+
+    const pendingRuns = [
+      makeWorkflowRun({ id: 2, status: "queued", conclusion: null }),
+    ];
+    const { container: pendingContainer, unmount: unmountPending } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="Queue"
+        runs={pendingRuns}
+        expanded={false}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+      />
+    ));
+    const pendingCard = pendingContainer.firstElementChild as HTMLElement;
+    expect(pendingCard.className).toContain("border-l-warning/50");
+    const pendingCountEl = screen.getByLabelText("1 pending condition");
+    expect(pendingCountEl.textContent).toBe("1");
+    expect(pendingCountEl.className).toContain("text-base-content/60");
+    unmountPending();
+
+    // Mixed waiting + running + pending + success prioritizes amber border accent over yellow/pending/green
+    const mixedRuns = [
+      makeWorkflowRun({ id: 3, status: "completed", conclusion: "action_required" }),
+      makeWorkflowRun({ id: 4, status: "in_progress", conclusion: null }),
+      makeWorkflowRun({ id: 5, status: "pending", conclusion: null }),
+      makeWorkflowRun({ id: 6, status: "completed", conclusion: "success" }),
+    ];
+    const { container: mixedContainer } = render(() => (
+      <WorkflowSummaryCard
+        workflowName="Mixed"
+        runs={mixedRuns}
+        expanded={false}
+        onToggle={() => {}}
+        onIgnoreRun={() => {}}
+      />
+    ));
+    const mixedCard = mixedContainer.firstElementChild as HTMLElement;
+    expect(mixedCard.className).toContain("border-l-amber-500");
+    expect(screen.getByLabelText("1 pending action").textContent).toBe("1");
+    expect(screen.getByLabelText("1 running").textContent).toBe("1");
+    expect(screen.getByLabelText("1 pending condition").textContent).toBe("1");
+    expect(screen.getByLabelText("1 successful").textContent).toBe("1");
+  });
+
   it("passes isPolling to WorkflowRunRow when hotPollingRunIds contains run ID", () => {
     const runs = [
       makeWorkflowRun({ id: 10, conclusion: null, status: "in_progress" }),

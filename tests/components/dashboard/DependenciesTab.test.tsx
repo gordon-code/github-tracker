@@ -939,7 +939,7 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
     expect(onMarkPRReady).toHaveBeenCalledWith(selfDraftDepPR);
   });
 
-  it("renders 'Merge conflict', 'Failing checks', and 'Checks running' badges in 'Needs Action' and links StatusDot to /checks", () => {
+  it("renders 'Merge conflict', 'Failing checks', 'Checks running', 'Pending action', and 'Pending condition' badges in 'Needs Action' and links StatusDot to /checks", () => {
     setDependencyExpandedGroups(["mergeable", "needs-action"]);
     const conflictPR = makeNeedsActionPR({
       id: 8030,
@@ -957,23 +957,45 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
       checkStatus: "failure",
       enriched: true,
     });
-    const pendingPR = makeNeedsActionPR({
+    const runningPR = makeNeedsActionPR({
       id: 8032,
       number: 832,
       title: "Bump react from 17.0.0 to 18.0.0",
       htmlUrl: "https://github.com/owner/repo/pull/832",
+      checkStatus: "running",
+      checkStatusStale: true,
+      enriched: true,
+    });
+    const waitingPR = makeNeedsActionPR({
+      id: 8033,
+      number: 833,
+      title: "Bump vue from 3.2.0 to 3.3.0",
+      htmlUrl: "https://github.com/owner/repo/pull/833",
+      checkStatus: "waiting",
+      checkStatusStale: true,
+      enriched: true,
+    });
+    const pendingConditionPR = makeNeedsActionPR({
+      id: 8034,
+      number: 834,
+      title: "Bump svelte from 3.0.0 to 4.0.0",
+      htmlUrl: "https://github.com/owner/repo/pull/834",
       checkStatus: "pending",
+      checkStatusStale: true,
       enriched: true,
     });
 
     renderTab({
-      pullRequests: [conflictPR, failingPR, pendingPR],
+      pullRequests: [conflictPR, failingPR, runningPR, waitingPR, pendingConditionPR],
       userLogin: "testuser",
     });
 
     expect(screen.getByText("Merge conflict")).toBeDefined();
     expect(screen.getByText("Failing checks")).toBeDefined();
     expect(screen.getByText("Checks running")).toBeDefined();
+    expect(screen.getByText("Pending action")).toBeDefined();
+    expect(screen.getByText("Pending condition")).toBeDefined();
+    expect(screen.queryByText("Checking status")).toBeNull();
 
     const conflictDotLink = screen.getByLabelText("Checks blocked by merge conflict").closest("a");
     expect(conflictDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/830/checks");
@@ -981,8 +1003,14 @@ describe("DependenciesTab — auto-merge badge and Approve action", () => {
     const failingDotLink = screen.getByLabelText("Checks failing").closest("a");
     expect(failingDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/831/checks");
 
-    const pendingDotLink = screen.getByLabelText("Checks in progress").closest("a");
-    expect(pendingDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/832/checks");
+    const runningDotLink = screen.getByLabelText("Checks in progress").closest("a");
+    expect(runningDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/832/checks");
+
+    const waitingDotLink = screen.getByLabelText("Checks pending human action").closest("a");
+    expect(waitingDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/833/checks");
+
+    const pendingConditionDotLink = screen.getByLabelText("Checks pending condition").closest("a");
+    expect(pendingConditionDotLink?.getAttribute("href")).toBe("https://github.com/owner/repo/pull/834/checks");
   });
 
   it("classifies enriched non-draft PRs with checkStatus: null or reviewDecision: 'APPROVED' into 'Mergeable' and 'CHANGES_REQUESTED' into 'Needs Action'", () => {

@@ -2131,7 +2131,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     const octokit = makeOctokit(
       async () => ({ data: {} }),
       async (query: string) => {
-        expect(query).toContain("statusCheckRollup { state }");
+        expect(query).toContain("statusCheckRollup { state contexts { checkRunCountsByState { state count } } }");
         expect(query).not.toContain("commits(last: 1)");
         return {
           nodes: [
@@ -2200,6 +2200,128 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(e302!.reviewerLogins).toEqual(["alice", "bob"]);
     expect(e302!.comments).toBe(4);
     expect(e302!.reviewThreads).toBe(0);
+  });
+
+  it("classifies non-terminal statusCheckRollup into running, waiting, and pending via contexts.checkRunCountsByState and preserves all three under UNSTABLE mergeStateStatus", async () => {
+    const nodes = [
+      // (a) IN_PROGRESS > 0 wins over WAITING > 0 -> "running"
+      buildHeavyNode(310, "PR_310", {
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [
+              { state: "IN_PROGRESS", count: 2 },
+              { state: "WAITING", count: 1 },
+            ],
+          },
+        },
+      }),
+      // (b) IN_PROGRESS === 0, WAITING > 0 -> "waiting" (agent-director/platform #42 case)
+      buildHeavyNode(311, "PR_311", {
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [
+              { state: "IN_PROGRESS", count: 0 },
+              { state: "WAITING", count: 1 },
+              { state: "SUCCESS", count: 11 },
+            ],
+          },
+        },
+      }),
+      // (c) IN_PROGRESS === 0, WAITING === 0, QUEUED > 0 -> "pending" (osac-project/osac #2099 case)
+      buildHeavyNode(312, "PR_312", {
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [
+              { state: "IN_PROGRESS", count: 0 },
+              { state: "WAITING", count: 0 },
+              { state: "QUEUED", count: 1 },
+              { state: "SUCCESS", count: 13 },
+            ],
+          },
+        },
+      }),
+      // (d) PENDING StatusContext (IN_PROGRESS: 0, WAITING: 0) + mergeStateStatus: "UNSTABLE" -> "pending" (not overridden to "failure")
+      buildHeavyNode(313, "PR_313", {
+        mergeStateStatus: "UNSTABLE",
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [
+              { state: "IN_PROGRESS", count: 0 },
+              { state: "WAITING", count: 0 },
+            ],
+          },
+        },
+      }),
+      // (e) Bare { state: "PENDING" } without contexts -> "pending"
+      buildHeavyNode(314, "PR_314", {
+        statusCheckRollup: {
+          state: "PENDING",
+        },
+      }),
+      // (f1) IN_PROGRESS: 1 + mergeStateStatus: "UNSTABLE" -> "running" (not overridden to "failure")
+      buildHeavyNode(315, "PR_315", {
+        mergeStateStatus: "UNSTABLE",
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }],
+          },
+        },
+      }),
+      // (f2) WAITING: 1 + mergeStateStatus: "UNSTABLE" -> "waiting" (not overridden to "failure")
+      buildHeavyNode(316, "PR_316", {
+        mergeStateStatus: "UNSTABLE",
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [{ state: "WAITING", count: 1 }],
+          },
+        },
+      }),
+      // (f3) ACTION_REQUIRED > 0 in checkRunCountsByState under PENDING rollup -> "waiting"
+      buildHeavyNode(317, "PR_317", {
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: {
+            checkRunCountsByState: [{ state: "ACTION_REQUIRED", count: 1 }],
+          },
+        },
+      }),
+      // Control: terminal SUCCESS + mergeStateStatus: "UNSTABLE" -> overridden to "failure"
+      buildHeavyNode(318, "PR_318", {
+        mergeStateStatus: "UNSTABLE",
+        statusCheckRollup: {
+          state: "SUCCESS",
+          contexts: {
+            checkRunCountsByState: [{ state: "SUCCESS", count: 5 }],
+          },
+        },
+      }),
+    ];
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => ({ nodes }),
+    );
+
+    const { enrichments, errors } = await fetchPREnrichment(
+      octokit as never,
+      nodes.map((n) => n.id),
+    );
+    expect(errors).toEqual([]);
+    expect(enrichments.get(310)?.checkStatus).toBe("running");
+    expect(enrichments.get(311)?.checkStatus).toBe("waiting");
+    expect(enrichments.get(312)?.checkStatus).toBe("pending");
+    expect(enrichments.get(313)?.checkStatus).toBe("pending");
+    expect(enrichments.get(314)?.checkStatus).toBe("pending");
+    expect(enrichments.get(315)?.checkStatus).toBe("running");
+    expect(enrichments.get(316)?.checkStatus).toBe("waiting");
+    expect(enrichments.get(317)?.checkStatus).toBe("waiting");
+    expect(enrichments.get(318)?.checkStatus).toBe("failure");
   });
 
   it("excludes truncated node indices from err.errors[].path during partial salvage and retries 1..6 remaining IDs with HEAVY_PR_BACKFILL_QUERY", async () => {
@@ -2541,15 +2663,45 @@ describe("fetchIssuesAndPullRequests — settled-PR enrichment cache", () => {
     }
   });
 
-  it("never caches PRs with checkStatus === 'pending' or checkStatusStale === true", async () => {
+  it("never caches PRs with non-terminal checkStatus ('running', 'waiting', 'pending') or checkStatusStale === true", async () => {
     let heavyCalls = 0;
-    let mode: "pending" | "stale" = "pending";
+    let mode: "running" | "waiting" | "pending" | "stale" = "running";
 
     const octokit = makeOctokit(
       async () => ({ data: {} }),
       async (query: string, variables?: unknown) => {
         const vars = (variables ?? {}) as Record<string, unknown>;
         if ("ids" in vars) {
+          if (mode === "running") {
+            heavyCalls++;
+            return {
+              nodes: [
+                makeHeavyPR({
+                  statusCheckRollup: {
+                    state: "PENDING",
+                    contexts: {
+                      checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }],
+                    },
+                  },
+                }),
+              ],
+            };
+          }
+          if (mode === "waiting") {
+            heavyCalls++;
+            return {
+              nodes: [
+                makeHeavyPR({
+                  statusCheckRollup: {
+                    state: "PENDING",
+                    contexts: {
+                      checkRunCountsByState: [{ state: "WAITING", count: 1 }],
+                    },
+                  },
+                }),
+              ],
+            };
+          }
           if (mode === "pending") {
             heavyCalls++;
             return {
@@ -2595,22 +2747,40 @@ describe("fetchIssuesAndPullRequests — settled-PR enrichment cache", () => {
       }
     );
 
-    // Pending CI status must not be cached
-    const pendingRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
-    expect(pendingRes1.pullRequests[0].checkStatus).toBe("pending");
+    // Running CI status must not be cached
+    const runningRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(runningRes1.pullRequests[0].checkStatus).toBe("running");
     expect(heavyCalls).toBe(1);
 
     await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
     expect(heavyCalls).toBe(2);
 
-    // Light fallback (checkStatusStale === true) must not be cached
-    mode = "stale";
-    const staleRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
-    expect(staleRes1.pullRequests[0].checkStatusStale).toBe(true);
+    // Waiting CI status must not be cached
+    mode = "waiting";
+    const waitingRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(waitingRes1.pullRequests[0].checkStatus).toBe("waiting");
     expect(heavyCalls).toBe(3);
 
     await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
     expect(heavyCalls).toBe(4);
+
+    // Pending CI status must not be cached
+    mode = "pending";
+    const pendingRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(pendingRes1.pullRequests[0].checkStatus).toBe("pending");
+    expect(heavyCalls).toBe(5);
+
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(6);
+
+    // Light fallback (checkStatusStale === true) must not be cached
+    mode = "stale";
+    const staleRes1 = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(staleRes1.pullRequests[0].checkStatusStale).toBe(true);
+    expect(heavyCalls).toBe(7);
+
+    await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(heavyCalls).toBe(8);
   });
 
   it("marks fork PRs with checkStatusStale === true and skips caching when runForkPRFallback fails", async () => {
@@ -2668,6 +2838,141 @@ describe("fetchIssuesAndPullRequests — settled-PR enrichment cache", () => {
     expect(forkCalls).toBe(2);
     expect(res2.pullRequests[0].checkStatus).toBe("success");
     expect(res2.pullRequests[0].checkStatusStale).toBeUndefined();
+  });
+
+  it("classifies 3-way non-terminal rollups ('running', 'waiting', 'pending') in runForkPRFallback, selects STATUS_CHECK_ROLLUP_FIELDS, and salvages partial fork responses on error", async () => {
+    let throwPartialForkError = false;
+    const forkQueries: string[] = [];
+
+    const lightForkPRs = [
+      makeLightPR({ id: "PR_fork_1", databaseId: 401, number: 401 }),
+      makeLightPR({ id: "PR_fork_2", databaseId: 402, number: 402 }),
+      makeLightPR({ id: "PR_fork_3", databaseId: 403, number: 403 }),
+    ];
+
+    const heavyForkPRs = [401, 402, 403].map((dbId, idx) =>
+      makeHeavyPR({
+        id: `PR_fork_${idx + 1}`,
+        databaseId: dbId,
+        headRefOid: `sha-fork-${dbId}`,
+        headRepository: { owner: { login: `fork-user-${idx + 1}` }, nameWithOwner: `fork-user-${idx + 1}/Hello-World` },
+        statusCheckRollup: null,
+      })
+    );
+
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if ("ids" in vars) {
+          return { nodes: heavyForkPRs };
+        }
+        if (query.includes("fork0:")) {
+          forkQueries.push(query);
+          if (throwPartialForkError) {
+            throw Object.assign(new Error("Partial fork GraphQL error"), {
+              data: {
+                fork0: {
+                  object: {
+                    statusCheckRollup: {
+                      state: "PENDING",
+                      contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+                    },
+                  },
+                },
+                fork1: {
+                  object: {
+                    statusCheckRollup: {
+                      state: "PENDING",
+                      contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 2 }] },
+                    },
+                  },
+                },
+                fork2: null,
+                rateLimit: { cost: 1, limit: 5000, remaining: 4950, resetAt: "2026-04-23T12:00:00Z" },
+              },
+            });
+          }
+          return {
+            fork0: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 1 },
+                      { state: "WAITING", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            fork1: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 0 },
+                      { state: "WAITING", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            fork2: {
+              object: {
+                statusCheckRollup: {
+                  state: "PENDING",
+                  contexts: {
+                    checkRunCountsByState: [
+                      { state: "IN_PROGRESS", count: 0 },
+                      { state: "WAITING", count: 0 },
+                      { state: "QUEUED", count: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+            rateLimit: { cost: 1, limit: 5000, remaining: 4951, resetAt: "2026-04-23T12:00:00Z" },
+          };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: { issueCount: 3, pageInfo: { hasNextPage: false, endCursor: null }, nodes: lightForkPRs },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    // 1. Normal response path: selects STATUS_CHECK_ROLLUP_FIELDS and classifies running / waiting / pending
+    const resNormal = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    expect(forkQueries).toHaveLength(1);
+    expect(forkQueries[0]).toContain(
+      "statusCheckRollup { state contexts { checkRunCountsByState { state count } } }"
+    );
+    expect(resNormal.pullRequests.find((p) => p.id === 401)?.checkStatus).toBe("running");
+    expect(resNormal.pullRequests.find((p) => p.id === 402)?.checkStatus).toBe("waiting");
+    expect(resNormal.pullRequests.find((p) => p.id === 403)?.checkStatus).toBe("pending");
+
+    // 2. Partial-error salvage path: salvages fork0 ("waiting") and fork1 ("running"), marks missing fork2 stale
+    throwPartialForkError = true;
+    vi.mocked(pushNotification).mockClear();
+    const resPartial = await fetchIssuesAndPullRequests(octokit as never, [testRepo], "octocat");
+    const pr401 = resPartial.pullRequests.find((p) => p.id === 401)!;
+    const pr402 = resPartial.pullRequests.find((p) => p.id === 402)!;
+    const pr403 = resPartial.pullRequests.find((p) => p.id === 403)!;
+    expect(pr401.checkStatus).toBe("waiting");
+    expect(pr401.checkStatusStale).toBeUndefined();
+    expect(pr402.checkStatus).toBe("running");
+    expect(pr402.checkStatusStale).toBeUndefined();
+    expect(pr403.checkStatus).toBeNull();
+    expect(pr403.checkStatusStale).toBe(true);
+    expect(pushNotification).toHaveBeenCalledWith(
+      "graphql",
+      "Fork PR check status unavailable — CI status may be missing for some PRs",
+      "warning"
+    );
   });
 
   it("skips runForkPRFallback when a fork PR falls back to LIGHT_PR_BACKFILL_QUERY (checkStatusStale: true)", async () => {

@@ -33,11 +33,11 @@ Open issues where you're the creator, assignee, or mentioned. A scope filter let
 
 ### Pull Requests
 
-Open PRs with CI status dots (green/yellow/red), review decision badges, a read-only `auto` badge when GitHub auto-merge is enabled (with merge method tooltip), size badges (XS–XL by lines changed), clickable two-step `Draft` → `Ready?` badges on your own draft PRs (read-only draft indicators on others'), and a two-step inline `Approve` button on PR rows requiring approval (hidden when CI checks are failing). A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
+Open PRs with CI status dots (green for passing, pulsing yellow for checks in progress, solid amber for checks pending human action, ringed yellow for checks pending a condition, red for failing) and inline `Pending action` / `Pending condition` badges, review decision badges, a read-only `auto` badge when GitHub auto-merge is enabled (with merge method tooltip), size badges (XS–XL by lines changed), clickable two-step `Draft` → `Ready?` badges on your own draft PRs (read-only draft indicators on others'), and a two-step inline `Approve` button on PR rows requiring approval (hidden when CI checks are failing). A "blocked" filter catches PRs where checks are failing or a review requested changes. The scope filter works here too. Reviewer avatars stack for multiple reviewers.
 
 ### Actions
 
-Workflow runs grouped by repo and workflow name, with duration, triggering actor, and conclusion badges. Accordion collapse per group. A toggle hides runs triggered by PRs so you can focus on branch/schedule runs.
+Workflow runs grouped by repo and workflow name, with duration, triggering actor, and status/conclusion indicators (including `Pending action` for deployment approval gates and `Pending condition` for queued/pending runs). Accordion collapse per group. A toggle hides runs triggered by PRs so you can focus on branch/schedule runs.
 
 ### Personal Summary Strip
 
@@ -57,7 +57,7 @@ When you sign in, the app searches for repos you've interacted with that aren't 
 
 ### Hot Polling
 
-A second, faster poll loop (default 30s, configurable 10–120s) targets only in-flight items — PRs with pending CI checks and actively running workflow runs. These are updated via minimal GraphQL `nodes()` queries and individual REST calls rather than full re-fetches, keeping API usage low during active development.
+A second, faster poll loop (default 30s, configurable 10–120s) targets only actively running items — PRs with actively running (`Checks running`) or stale CI checks (plus a 60s window after inline `Approve` or `Ready?` actions) and in-progress/queued workflow runs, while skipping checks paused on human action (`Pending action`) or conditions (`Pending condition`). These are updated via minimal GraphQL `nodes()` queries and individual REST calls rather than full re-fetches, keeping API usage low during active development.
 
 ### Desktop Notifications
 
@@ -81,7 +81,7 @@ Star counts appear in repo group headers, fetched as part of the standard data r
 
 ### Dependencies Tab
 
-An auto-detected built-in tab that appears when dependency bot PRs are found in your tracked repos. Dependency PRs are identified via a multi-layer bot detection pipeline (PR author login, branch name prefix, configurable label). Items are grouped by status — **Mergeable** (CI passing or no CI configured, not a draft, and no changes requested), **Pending Rebase**, **Needs Action** (with explicit reason badges for failing/running checks, merge conflicts, drafts, or requested changes), and **Stale** (not updated in over 14 days) — rather than by repo. Abandoned dependency pills link directly to the Renovate Dashboard issue for bulk resolution. Configurable via **Settings > Dependencies**.
+An auto-detected built-in tab that appears when dependency bot PRs are found in your tracked repos. Dependency PRs are identified via a multi-layer bot detection pipeline (PR author login, branch name prefix, configurable label). Items are grouped by status — **Mergeable** (CI passing or no CI configured, not a draft, and no changes requested), **Pending Rebase**, **Needs Action** (with explicit reason badges for `Failing checks`, `Merge conflict`, `Checks running`, `Pending action`, `Pending condition`, `Checking status`, `Draft`, or `Changes`), and **Stale** (not updated in over 14 days) — rather than by repo. Abandoned dependency pills link directly to the Renovate Dashboard issue for bulk resolution. Configurable via **Settings > Dependencies**.
 
 ### Custom Tabs
 
