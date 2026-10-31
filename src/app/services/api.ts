@@ -1148,10 +1148,6 @@ export interface PREnrichmentData {
   viewerLatestReviewState: ViewerReviewState | null;
 }
 
-function extractRollup(node: { statusCheckRollup?: GraphQLStatusCheckRollup | null }): GraphQLStatusCheckRollup | null {
-  return node.statusCheckRollup ?? null;
-}
-
 function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PREnrichmentData {
   const pendingLogins = (node.reviewRequests?.nodes ?? [])
     .map((n) => n?.requestedReviewer?.login)
@@ -1165,7 +1161,7 @@ function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PRE
     ? null
     : applyMergeStateOverride(
         node.mergeStateStatus ?? "",
-        mapCheckStatus(extractRollup(node)),
+        mapCheckStatus(node.statusCheckRollup ?? null),
       );
 
   let headRepository: PREnrichmentData["headRepository"] = null;
@@ -2508,7 +2504,7 @@ export async function fetchHotPRStatus(
       // Fork PRs whose CI runs only in the fork report no PR-level rollup; read the
       // fork head commit's rollup instead (the same source runForkPRFallback uses).
       const rollup =
-        extractRollup(node) ??
+        node.statusCheckRollup ??
         (node.isCrossRepository ? (node.headRef?.target?.statusCheckRollup ?? null) : null);
       const checkStatus = applyMergeStateOverride(node.mergeStateStatus, mapCheckStatus(rollup));
 
