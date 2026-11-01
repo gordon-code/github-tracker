@@ -199,7 +199,7 @@ describe("render stability — keyed reconcile store writes and stable group ide
             number: 102,
             title: "Changing PR Beta",
             repoFullName: "owner/repo-a",
-            checkStatus: cycle === 1 ? "pending" : "failure",
+            checkStatus: cycle === 1 ? "running" : "failure",
             enriched: true,
           }),
           makePullRequest({
@@ -326,7 +326,7 @@ describe("render stability — keyed reconcile store writes and stable group ide
             number: 102,
             title: "Targeted PR Beta",
             repoFullName: "owner/repo-a",
-            checkStatus: "pending",
+            checkStatus: "running",
             enriched: true,
           }),
           makePullRequest({
