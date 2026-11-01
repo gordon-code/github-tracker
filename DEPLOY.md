@@ -284,13 +284,9 @@ Configure these rules in the Cloudflare dashboard under **Security → WAF**.
 **Where:** Security → WAF → Custom Rules
 **Action:** Block
 
-**Previous expression (pre-`/_app/` rollout, synthesized from `scripts/waf-smoke-test.sh`):**
+**Previous expression (pre-`/_app/` rollout):**
 ```
-not (
-  http.request.uri.path in {"/" "/login" "/oauth/callback" "/onboarding" "/dashboard" "/settings" "/privacy" "/index.html"} or
-  starts_with(http.request.uri.path, "/assets/") or
-  starts_with(http.request.uri.path, "/api/")
-)
+not (http.request.uri.path eq "/" or http.request.uri.path eq "/index.html" or http.request.uri.path eq "/login" or http.request.uri.path eq "/oauth/callback" or http.request.uri.path eq "/onboarding" or http.request.uri.path eq "/dashboard" or http.request.uri.path eq "/settings" or http.request.uri.path eq "/privacy" or starts_with(http.request.uri.path, "/assets/") or starts_with(http.request.uri.path, "/api/"))
 ```
 
 **Updated expression (allows `/_app/*` hashed chunks and static/metadata routes on `GET`/`HEAD`):**
@@ -311,6 +307,20 @@ not (
 - Blocks vulnerability scanners and probes for unmapped paths (`/wp-admin`, `/.env`, `/.git/config`, arbitrary paths) at the edge before the Worker or static asset router runs.
 - `scripts/waf-smoke-test.sh` (`pnpm test:waf`) validates this rule before every commit (`prek`) and deploy (`deploy.yml`).
 
+#### Rule 2: Scanner User-Agents
+
+**Rule name:** Scanner User-Agents (block empty and malicious User-Agents)
+**Where:** Security → WAF → Custom Rules
+**Expression:**
+```
+(http.user_agent eq "" or lower(http.user_agent) contains "sqlmap" or lower(http.user_agent) contains "nikto" or lower(http.user_agent) contains "nmap" or lower(http.user_agent) contains "masscan" or lower(http.user_agent) contains "zgrab")
+```
+**Action:** Block
+
+**Notes:**
+- Blocks automated vulnerability scanners (`sqlmap`, `nikto`, `nmap`, `masscan`, `zgrab`) and requests with an empty `User-Agent` header at the edge before the Worker runs.
+- Validated by `scripts/waf-smoke-test.sh` (`pnpm test:waf`).
+
 #### Rule 3: Origin Gate
 
 **Rule name:** Block API requests without valid Origin
@@ -327,12 +337,12 @@ not (http.request.uri.path eq "/api/error-reporting")
 **Exemptions:** `/api/csp-report` and `/api/error-reporting` are excluded because the Worker enforces its own strict origin check on both endpoints. See `hack/docs/security-runbook.md` for exemption rationale.
 
 **Notes:**
-- This uses **1 of the 5 free WAF custom rules** available on all plans.
+- Rules 1–3 use **3 of the 5 free WAF custom rules** available on all plans.
 - Blocks scanners, `curl` without `Origin`, and cross-site browser attacks before the Worker runs (never billed as a Worker request).
 
 ### Rate Limiting Rules
 
-> **Conditional:** WAF rate limiting rules may require a **Pro plan** or above. If unavailable on your current Cloudflare plan (Free plan), skip this step. The Workers Rate Limiting Binding provides per-session rate limiting instead, and the WAF custom rule (above) still enforces the Origin check layer.
+> **Note:** Cloudflare Free plan supports 1 unmanaged WAF rate limiting rule with a 10-second period (`60 requests per 10 seconds`) and a 10-second mitigation timeout (`Block for 10 seconds` on Free plan; `Block for 60 seconds` or longer on Pro and above). The Workers Rate Limiting Binding provides additional per-session rate limiting inside the Worker.
 
 **Rule name:** Rate limit API proxy endpoints
 **Where:** Security → WAF → Rate Limiting Rules
@@ -342,7 +352,7 @@ not (http.request.uri.path eq "/api/error-reporting")
 (http.request.method ne "OPTIONS")
 ```
 **Rate:** 60 requests per 10 seconds per IP
-**Action:** Block for 60 seconds
+**Action:** Block for 10 seconds (Free plan) / Block for 60 seconds (Pro+)
 
 See `hack/docs/security-runbook.md` for implementation details.
 

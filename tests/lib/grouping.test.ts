@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { groupByRepo, computePageLayout, slicePageGroups, isUserInvolved, ensureLockedRepoGroups, applyCustomOrder, type RepoGroup } from "../../src/app/lib/grouping";
+import {
+  groupByRepo,
+  computePageLayout,
+  slicePageGroups,
+  isUserInvolved,
+  ensureLockedRepoGroups,
+  applyCustomOrder,
+  groupKeys,
+  indexGroups,
+  arraysShallowEqual,
+  type RepoGroup,
+} from "../../src/app/lib/grouping";
 
 interface Item {
   repoFullName: string;
@@ -337,5 +348,58 @@ describe("applyCustomOrder", () => {
     expect(result).toHaveLength(2);
     expect(result[0]).toBe(item);
     expect(result[1]).toBe(item);
+  });
+});
+
+describe("groupKeys", () => {
+  it("returns empty array for empty groups", () => {
+    expect(groupKeys([])).toEqual([]);
+  });
+
+  it("extracts repoFullName in group order", () => {
+    const groups = [makeGroup("org/alpha", 2), makeGroup("org/beta", 1), makeGroup("org/gamma", 3)];
+    expect(groupKeys(groups)).toEqual(["org/alpha", "org/beta", "org/gamma"]);
+  });
+});
+
+describe("indexGroups", () => {
+  it("returns empty Map for empty groups", () => {
+    const map = indexGroups([]);
+    expect(map.size).toBe(0);
+  });
+
+  it("indexes groups by repoFullName preserving group references", () => {
+    const g1 = makeGroup("org/alpha", 2);
+    const g2 = makeGroup("org/beta", 1);
+    const map = indexGroups([g1, g2]);
+    expect(map.size).toBe(2);
+    expect(map.get("org/alpha")).toBe(g1);
+    expect(map.get("org/beta")).toBe(g2);
+    expect(map.get("org/missing")).toBeUndefined();
+  });
+});
+
+describe("arraysShallowEqual", () => {
+  it("returns true for the same array reference", () => {
+    const arr = ["org/a", "org/b"];
+    expect(arraysShallowEqual(arr, arr)).toBe(true);
+  });
+
+  it("returns true for two empty arrays", () => {
+    expect(arraysShallowEqual([], [])).toBe(true);
+  });
+
+  it("returns true for distinct arrays with identical elements in order", () => {
+    expect(arraysShallowEqual(["org/a", "org/b"], ["org/a", "org/b"])).toBe(true);
+  });
+
+  it("returns false when lengths differ", () => {
+    expect(arraysShallowEqual(["org/a"], ["org/a", "org/b"])).toBe(false);
+    expect(arraysShallowEqual(["org/a", "org/b"], ["org/a"])).toBe(false);
+  });
+
+  it("returns false when elements differ or are in different order", () => {
+    expect(arraysShallowEqual(["org/a", "org/b"], ["org/a", "org/c"])).toBe(false);
+    expect(arraysShallowEqual(["org/a", "org/b"], ["org/b", "org/a"])).toBe(false);
   });
 });

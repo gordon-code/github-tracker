@@ -1,0 +1,521 @@
+import "fake-indexeddb/auto";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { openDB } from "idb";
+import { makeIssue, makePullRequest, makeWorkflowRun } from "../helpers";
+import type { DashboardSnapshotState } from "../../src/app/lib/dashboard-snapshot";
+
+const idbHoisted = vi.hoisted(() => ({
+  realOpenDB: null as unknown as typeof openDB,
+}));
+vi.mock("idb", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("idb")>();
+  idbHoisted.realOpenDB = actual.openDB;
+  return {
+    ...actual,
+    openDB: vi.fn((...args: Parameters<typeof actual.openDB>) => actual.openDB(...args)),
+  };
+});
+
+const mockPushNotification = vi.fn();
+vi.mock("../../src/app/lib/errors", () => ({
+  pushNotification: (...args: unknown[]) => mockPushNotification(...args),
+}));
+
+const DB_NAME = "github-tracker-snapshot";
+const STORE_NAME = "snapshot";
+const RECORD_KEY = "current";
+
+function makeSampleState(overrides?: Partial<DashboardSnapshotState>): DashboardSnapshotState {
+  return {
+    issues: [makeIssue({ id: 1, title: "Issue 1" })],
+    pullRequests: [makePullRequest({ id: 10, title: "PR 10" })],
+    workflowRuns: [makeWorkflowRun({ id: 100, name: "CI" })],
+    lastRefreshedAt: new Date("2026-10-30T12:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+// Re-imports the module with a fresh DB connection whose `put` calls are counted
+// (and, when `gate` is given, held until it resolves).
+async function installPutCounter(gate?: Promise<void>): Promise<() => number> {
+  vi.resetModules();
+  const idb = await import("idb");
+  let putCount = 0;
+  vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+    const db = await idbHoisted.realOpenDB(...args);
+    const origPut = db.put.bind(db);
+    vi.spyOn(db, "put").mockImplementation((async (...putArgs: Parameters<typeof origPut>) => {
+      putCount++;
+      if (gate) await gate;
+      return origPut(...putArgs);
+    }) as typeof db.put);
+    return db;
+  });
+  return () => putCount;
+}
+
+describe("dashboard-snapshot", () => {
+  beforeEach(async () => {
+    vi.useRealTimers();
+    mockPushNotification.mockClear();
+    vi.mocked(openDB).mockImplementation((...args: Parameters<typeof openDB>) =>
+      idbHoisted.realOpenDB(...args),
+    );
+    const mod = await import("../../src/app/lib/dashboard-snapshot");
+    await mod.clearSnapshot();
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    vi.mocked(openDB).mockImplementation((...args: Parameters<typeof openDB>) =>
+      idbHoisted.realOpenDB(...args),
+    );
+    const mod = await import("../../src/app/lib/dashboard-snapshot");
+    await mod.clearSnapshot();
+    vi.restoreAllMocks();
+  });
+
+  it("removes legacy localStorage key 'github-tracker:dashboard' on module import", async () => {
+    localStorage.setItem("github-tracker:dashboard", '{"legacy":true}');
+    vi.resetModules();
+    await import("../../src/app/lib/dashboard-snapshot");
+    expect(localStorage.getItem("github-tracker:dashboard")).toBeNull();
+  });
+
+  it("round-trips a snapshot through writeSnapshot (immediate) and loadSnapshot (case-insensitive login)", async () => {
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    const state = makeSampleState();
+
+    writeSnapshot(state, "Alice", "immediate");
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
+
+    const loaded = await loadSnapshot("alice");
+    expect(loaded).not.toBeNull();
+    expect(loaded!._v).toBe(1);
+    expect(loaded!.login).toBe("Alice");
+    expect(loaded!.issues).toEqual(state.issues);
+    expect(loaded!.pullRequests).toEqual(state.pullRequests);
+    expect(loaded!.workflowRuns).toEqual(state.workflowRuns);
+    expect(loaded!.lastRefreshedAt).toEqual(new Date("2026-10-30T12:00:00.000Z"));
+  });
+
+  it("returns null on login mismatch", async () => {
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
+
+    const loaded = await loadSnapshot("bob");
+    expect(loaded).toBeNull();
+  });
+
+  it("returns null on version or shape mismatch", async () => {
+    const { loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    const db = await idbHoisted.realOpenDB(DB_NAME, 1, {
+      upgrade(d) {
+        if (!d.objectStoreNames.contains(STORE_NAME)) {
+          d.createObjectStore(STORE_NAME);
+        }
+      },
+    });
+
+    // Version mismatch
+    await db.put(
+      STORE_NAME,
+      {
+        _v: 2,
+        login: "alice",
+        savedAt: Date.now(),
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        lastRefreshedAt: null,
+      },
+      RECORD_KEY,
+    );
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    // Non-array issues
+    await db.put(
+      STORE_NAME,
+      {
+        _v: 1,
+        login: "alice",
+        savedAt: Date.now(),
+        issues: "not-an-array",
+        pullRequests: [],
+        workflowRuns: [],
+        lastRefreshedAt: null,
+      },
+      RECORD_KEY,
+    );
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    // Invalid lastRefreshedAt type
+    await db.put(
+      STORE_NAME,
+      {
+        _v: 1,
+        login: "alice",
+        savedAt: Date.now(),
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        lastRefreshedAt: 12345,
+      },
+      RECORD_KEY,
+    );
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    // Corrupt array element (null or missing numeric id)
+    await db.put(
+      STORE_NAME,
+      {
+        _v: 1,
+        login: "alice",
+        savedAt: Date.now(),
+        issues: [null],
+        pullRequests: [],
+        workflowRuns: [],
+        lastRefreshedAt: null,
+      },
+      RECORD_KEY,
+    );
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    db.close();
+  });
+
+  it("coalesces 5 debounced writes into 1 IDB put", async () => {
+    const putCount = await installPutCounter();
+
+    const { writeSnapshot, loadSnapshot, DEBOUNCE_MS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    for (let i = 1; i <= 5; i++) {
+      writeSnapshot(
+        makeSampleState({ issues: [makeIssue({ id: i, title: `Issue ${i}` })] }),
+        "alice",
+        "debounced",
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+
+    // 5 * 1000ms elapsed, last write still needs ~4000ms to fire
+    expect(putCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(putCount()).toBe(1);
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap?.issues.map((i) => i.id)).toEqual([5]);
+  });
+
+  it("commits an immediate write on the next macrotask without waiting for the 5s debounce", async () => {
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 42, title: "Immediate" })] }),
+      "alice",
+      "immediate",
+    );
+
+    // Advance only past setTimeout(0), not 5000ms
+    await vi.advanceTimersByTimeAsync(10);
+    vi.useRealTimers();
+    await vi.waitFor(async () => {
+      expect(await loadSnapshot("alice")).not.toBeNull();
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap).not.toBeNull();
+    expect(snap!.issues[0]?.id).toBe(42);
+  });
+
+  it("keeps a pending immediate timer when a debounced write arrives before it fires, committing the latest payload once", async () => {
+    const putCount = await installPutCounter();
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 1, title: "Immediate" })] }),
+      "alice",
+      "immediate",
+    );
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Debounced" })] }),
+      "alice",
+      "debounced",
+    );
+
+    // The debounced call reuses the pending 0ms timer instead of rescheduling at DEBOUNCE_MS
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(10);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(putCount()).toBe(1);
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap?.issues.map((i) => i.id)).toEqual([2]);
+  });
+
+  it("replaces a pending debounced timer when an immediate write arrives, committing on the next macrotask once", async () => {
+    const putCount = await installPutCounter();
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 1, title: "Debounced" })] }),
+      "alice",
+      "debounced",
+    );
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Immediate" })] }),
+      "alice",
+      "immediate",
+    );
+
+    // The DEBOUNCE_MS timer is cleared; only the 0ms timer remains
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Advance only past setTimeout(0), not DEBOUNCE_MS
+    await vi.advanceTimersByTimeAsync(10);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(putCount()).toBe(1);
+    });
+
+    const snap = await loadSnapshot("alice");
+    expect(snap?.issues.map((i) => i.id)).toEqual([2]);
+  });
+
+  it("cancels a pending debounced write when clearSnapshot() runs before debounce elapses", async () => {
+    const { writeSnapshot, clearSnapshot, loadSnapshot, DEBOUNCE_MS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    writeSnapshot(makeSampleState(), "alice", "debounced");
+    const clearPromise = clearSnapshot();
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1_000);
+    vi.useRealTimers();
+    await clearPromise;
+
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("drops an in-flight flush awaiting getDb() when clearSnapshot() runs concurrently", async () => {
+    vi.resetModules();
+    const idb = await import("idb");
+
+    let resolveOpenDb!: () => void;
+    const openGate = new Promise<void>((resolve) => {
+      resolveOpenDb = resolve;
+    });
+    let putCalls = 0;
+
+    vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+      await openGate;
+      const db = await idbHoisted.realOpenDB(...args);
+      const origPut = db.put.bind(db);
+      vi.spyOn(db, "put").mockImplementation((async (...putArgs: Parameters<typeof origPut>) => {
+        putCalls++;
+        return origPut(...putArgs);
+      }) as typeof db.put);
+      return db;
+    });
+
+    const { writeSnapshot, flushSnapshot, clearSnapshot, loadSnapshot } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+
+    writeSnapshot(makeSampleState(), "alice", "debounced");
+    const flushPromise = flushSnapshot();
+
+    // While flushSnapshot is suspended awaiting getDb(), clearSnapshot runs synchronously
+    const clearPromise = clearSnapshot();
+
+    // Release getDb()
+    resolveOpenDb();
+    await Promise.all([flushPromise, clearPromise]);
+
+    expect(putCalls).toBe(0);
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("skips writing and logs console.warn once when total items exceed MAX_SNAPSHOT_ITEMS (5000)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { writeSnapshot, loadSnapshot, MAX_SNAPSHOT_ITEMS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+
+    const oversizedIssues = Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) =>
+      makeIssue({ id: i + 1 }),
+    );
+
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exceeds 5000 items"));
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("queues one stored-snapshot delete per over-cap streak, re-arming after an under-cap write", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.resetModules();
+    const idb = await import("idb");
+    let deleteCount = 0;
+    vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+      const db = await idbHoisted.realOpenDB(...args);
+      const origDelete = db.delete.bind(db);
+      vi.spyOn(db, "delete").mockImplementation(async (...deleteArgs: Parameters<typeof origDelete>) => {
+        deleteCount++;
+        return origDelete(...deleteArgs);
+      });
+      return db;
+    });
+    const { writeSnapshot, flushSnapshot, MAX_SNAPSHOT_ITEMS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+    const oversized = makeSampleState({
+      issues: Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) => makeIssue({ id: i + 1 })),
+    });
+
+    writeSnapshot(oversized, "alice", "immediate");
+    writeSnapshot(oversized, "alice", "immediate");
+    writeSnapshot(oversized, "alice", "debounced");
+    await flushSnapshot();
+    expect(deleteCount).toBe(1);
+
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+    await flushSnapshot();
+    writeSnapshot(oversized, "alice", "immediate");
+    await flushSnapshot();
+    expect(deleteCount).toBe(2);
+  });
+
+  it("orders the over-cap discard after an under-cap put that is already in flight", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let releasePut!: () => void;
+    const putGate = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    const putCount = await installPutCounter(putGate);
+    const { writeSnapshot, flushSnapshot, loadSnapshot, MAX_SNAPSHOT_ITEMS } = await import(
+      "../../src/app/lib/dashboard-snapshot"
+    );
+
+    writeSnapshot(makeSampleState(), "alice", "debounced");
+    const inFlight = flushSnapshot();
+    await vi.waitFor(() => expect(putCount()).toBe(1));
+
+    const oversizedIssues = Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) =>
+      makeIssue({ id: i + 1 }),
+    );
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+
+    releasePut();
+    await inFlight;
+    await flushSnapshot();
+
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("discards the stored snapshot and any pending under-cap write when a later write exceeds MAX_SNAPSHOT_ITEMS", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { writeSnapshot, flushSnapshot, loadSnapshot, MAX_SNAPSHOT_ITEMS, DEBOUNCE_MS } =
+      await import("../../src/app/lib/dashboard-snapshot");
+
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+    await flushSnapshot();
+    expect(await loadSnapshot("alice")).not.toBeNull();
+
+    const oversizedIssues = Array.from({ length: MAX_SNAPSHOT_ITEMS + 1 }, (_, i) =>
+      makeIssue({ id: i + 1 }),
+    );
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 2, title: "Pending" })] }),
+      "alice",
+      "debounced",
+    );
+    writeSnapshot(makeSampleState({ issues: oversizedIssues }), "alice", "immediate");
+
+    // The pending debounced timer is cancelled and no new timer is scheduled
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + 1_000);
+    vi.useRealTimers();
+    await flushSnapshot();
+
+    expect(await loadSnapshot("alice")).toBeNull();
+  });
+
+  it("flushes a pending debounced snapshot when document visibilitychange transitions to hidden (and ignores visible)", async () => {
+    const { writeSnapshot, loadSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+
+    writeSnapshot(
+      makeSampleState({ issues: [makeIssue({ id: 99, title: "Hidden flush" })] }),
+      "alice",
+      "debounced",
+    );
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(await loadSnapshot("alice")).toBeNull();
+
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(async () => {
+      const snap = await loadSnapshot("alice");
+      expect(snap).not.toBeNull();
+      expect(snap!.issues[0]?.id).toBe(99);
+    });
+  });
+
+  it("pushes a single warning notification and does not throw on IDB quota error", async () => {
+    vi.resetModules();
+    const idb = await import("idb");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.mocked(idb.openDB).mockImplementation(async (...args: Parameters<typeof idbHoisted.realOpenDB>) => {
+      const db = await idbHoisted.realOpenDB(...args);
+      vi.spyOn(db, "put").mockRejectedValue(
+        new DOMException("QuotaExceededError", "QuotaExceededError"),
+      );
+      return db;
+    });
+
+    const { writeSnapshot, flushSnapshot } = await import("../../src/app/lib/dashboard-snapshot");
+    writeSnapshot(makeSampleState(), "alice", "immediate");
+
+    await expect(flushSnapshot()).resolves.toBeUndefined();
+    expect(mockPushNotification).toHaveBeenCalledTimes(1);
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "snapshot:write",
+      expect.stringContaining("storage may be full"),
+      "warning",
+    );
+  });
+});

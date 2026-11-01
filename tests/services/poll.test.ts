@@ -5,6 +5,7 @@ import {
   createPollCoordinator,
   processBackfillErrors,
   resetPollState,
+  StaleIdentityError,
   WAKE_GRACE_MS,
   ONLINE_RECOVERY_GRACE_MS,
   type DashboardData,
@@ -1071,6 +1072,31 @@ describe("createPollCoordinator", () => {
       vi.advanceTimersByTime(ONLINE_RECOVERY_GRACE_MS);
       await flushPromises();
       expect(fetchAll).toHaveBeenCalledTimes(3);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("treats StaleIdentityError from fetchAll as a silent no-op without pushing errors or dispatching notifications", async () => {
+    const notificationsMod = await import("../../src/app/lib/notifications");
+    vi.mocked(notificationsMod.detectNewItems).mockClear();
+    vi.mocked(notificationsMod.dispatchNotifications).mockClear();
+    mockPushError.mockClear();
+    mockPushNotification.mockClear();
+
+    const fetchAll = vi.fn().mockRejectedValue(new StaleIdentityError());
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+      expect(notificationsMod.detectNewItems).not.toHaveBeenCalled();
+      expect(notificationsMod.dispatchNotifications).not.toHaveBeenCalled();
+      expect(coordinator.isRefreshing()).toBe(false);
 
       coordinator.destroy();
       dispose();
