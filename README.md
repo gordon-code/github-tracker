@@ -57,7 +57,7 @@ When you sign in, the app searches for repos you've interacted with that aren't 
 
 ### Hot Polling
 
-A second, faster poll loop (default 30s, configurable 10–120s) targets only actively running items — PRs with actively running (`Checks running`) or stale CI checks (plus a 60s window after inline `Approve` or `Ready?` actions) and in-progress/queued workflow runs, while skipping checks paused on human action (`Pending action`) or conditions (`Pending condition`). These are updated via minimal GraphQL `nodes()` queries and individual REST calls rather than full re-fetches, keeping API usage low during active development.
+A second, faster poll loop (default 30s, configurable 10–120s) targets only actively running items — PRs with actively running (`Checks running`) or stale CI checks (plus a 60s window after inline `Approve` or `Ready?` actions, and the first 3 minutes of a `Pending condition` stretch to catch queued jobs) and in-progress/queued workflow runs, while skipping checks paused on human action (`Pending action`) or parked on a condition beyond that window. These are updated via minimal GraphQL `nodes()` queries and individual REST calls rather than full re-fetches, keeping API usage low during active development.
 
 ### Desktop Notifications
 

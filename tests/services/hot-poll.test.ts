@@ -75,6 +75,7 @@ import {
   fetchHotData,
   createHotPollCoordinator,
   getHotPollGeneration,
+  HOT_PR_PENDING_GRACE_MS,
   type DashboardData,
 } from "../../src/app/services/poll";
 
@@ -514,7 +515,7 @@ describe("rebuildHotSets", () => {
     expect(getHotPollGeneration()).toBe(2);
   });
 
-  it("populates hot PRs for enriched running checkStatus with nodeId and skips waiting/pending without hotPollPinned", async () => {
+  it("populates hot PRs for enriched running checkStatus or a fresh pending streak with nodeId and skips waiting without hotPollPinned", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -530,16 +531,15 @@ describe("rebuildHotSets", () => {
         makePullRequest({ id: 4, checkStatus: "running", enriched: true }), // no nodeId — skipped
         makePullRequest({ id: 5, checkStatus: "running", enriched: false, nodeId: "PR_e" }), // not enriched — skipped
         makePullRequest({ id: 6, checkStatus: "waiting", enriched: true, nodeId: "PR_waiting" }), // waiting without pin — skipped
-        makePullRequest({ id: 7, checkStatus: "pending", enriched: true, nodeId: "PR_pending" }), // pending without pin — skipped
+        makePullRequest({ id: 7, checkStatus: "pending", enriched: true, nodeId: "PR_pending" }), // first pending observation — within grace
       ],
     });
 
     await fetchHotData();
-    // Verify graphql was called with only the 1 eligible node ID
+    // Verify graphql was called with only the 2 eligible node IDs
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
     const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
-    expect(calledIds).toHaveLength(1);
-    expect(calledIds).toContain("PR_a");
+    expect(calledIds).toEqual(["PR_a", "PR_pending"]);
   });
 
   it("populates hot PRs when checkStatusStale is true even if checkStatus is null", async () => {
@@ -1645,54 +1645,138 @@ describe("fetchHotData eviction edge cases", () => {
     expect(second.prUpdates.size).toBe(0);
   });
 
-  it("evicts a running PR from _hotPRs when a hot-poll cycle transitions it to waiting or pending", async () => {
-    const graphqlFn = vi.fn(() => Promise.resolve({
-      nodes: [
-        {
-          databaseId: 10,
-          state: "OPEN",
-          mergeStateStatus: "CLEAN",
-          reviewDecision: null,
-          statusCheckRollup: {
-            state: "PENDING",
-            contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+  it("evicts a running PR from _hotPRs immediately on waiting and after the pending grace window on pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const graphqlFn = vi.fn(() => Promise.resolve({
+        nodes: [
+          {
+            databaseId: 10,
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+            statusCheckRollup: {
+              state: "PENDING",
+              contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+            },
           },
-        },
-        {
-          databaseId: 11,
-          state: "OPEN",
-          mergeStateStatus: "CLEAN",
-          reviewDecision: null,
-          statusCheckRollup: {
-            state: "PENDING",
-            contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+          {
+            databaseId: 11,
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+            statusCheckRollup: {
+              state: "PENDING",
+              contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+            },
           },
-        },
-      ],
-      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
-    }));
-    const octokit = makeOctokit(undefined, graphqlFn);
-    mockGetClient.mockReturnValue(octokit);
+        ],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }));
+      const octokit = makeOctokit(undefined, graphqlFn);
+      mockGetClient.mockReturnValue(octokit);
 
-    rebuildHotSets({
-      ...emptyData,
-      pullRequests: [
-        makePullRequest({ id: 10, checkStatus: "running", enriched: true, nodeId: "PR_to_waiting" }),
-        makePullRequest({ id: 11, checkStatus: "running", enriched: true, nodeId: "PR_to_pending" }),
-      ],
-    });
+      rebuildHotSets({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 10, checkStatus: "running", enriched: true, nodeId: "PR_to_waiting" }),
+          makePullRequest({ id: 11, checkStatus: "running", enriched: true, nodeId: "PR_to_pending" }),
+        ],
+      });
 
-    const first = await fetchHotData();
-    expect(first.prUpdates.get(10)!.checkStatus).toBe("waiting");
-    expect(first.prUpdates.get(11)!.checkStatus).toBe("pending");
+      const first = await fetchHotData();
+      expect(first.prUpdates.get(10)!.checkStatus).toBe("waiting");
+      expect(first.prUpdates.get(11)!.checkStatus).toBe("pending");
 
-    graphqlFn.mockClear();
-    const second = await fetchHotData();
-    expect(second.prUpdates.size).toBe(0);
-    expect(graphqlFn).not.toHaveBeenCalled();
+      // "waiting" is evicted at once; "pending" starts a grace streak and stays hot
+      graphqlFn.mockClear();
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS - 1);
+      const second = await fetchHotData();
+      expect(graphqlFn).toHaveBeenCalledTimes(1);
+      expect((graphqlFn.mock.calls[0] as unknown as [string, { ids: string[] }])[1].ids).toEqual(["PR_to_pending"]);
+      expect(second.prUpdates.get(11)!.checkStatus).toBe("pending");
+
+      // Grace window elapsed: the next pending observation evicts it
+      vi.advanceTimersByTime(1);
+      await fetchHotData();
+      graphqlFn.mockClear();
+      const fourth = await fetchHotData();
+      expect(fourth.prUpdates.size).toBe(0);
+      expect(graphqlFn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("evicts an already-enrolled unpinned running PR when seedHotSetsFromTargeted observes it transition to waiting, pending, or success while preserving hot PRs in other repos", async () => {
+  it("bounds pending hot-polling per head commit across rebuilds, restarting the streak on a new commit or after running", async () => {
+    vi.useFakeTimers();
+    try {
+      const octokit = makeOctokit(undefined, () => Promise.resolve({
+        nodes: [],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }));
+      mockGetClient.mockReturnValue(octokit);
+      const hotIds = async (): Promise<string[]> => {
+        octokit.graphql.mockClear();
+        await fetchHotData();
+        if (octokit.graphql.mock.calls.length === 0) return [];
+        return (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
+      };
+      const rebuildWith = (overrides: Parameters<typeof makePullRequest>[0]) =>
+        rebuildHotSets({
+          ...emptyData,
+          pullRequests: [makePullRequest({ id: 40, enriched: true, nodeId: "PR_parked", ...overrides })],
+        });
+
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Still within the streak that began at the first observation
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS - 1);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Parked on the same commit past the grace window: not re-enrolled by later full refreshes
+      vi.advanceTimersByTime(1);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual([]);
+      vi.advanceTimersByTime(300_000);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual([]);
+
+      // An unknown head SHA keeps the existing streak
+      rebuildWith({ checkStatus: "pending", headSha: "" });
+      expect(await hotIds()).toEqual([]);
+
+      // A new head commit starts a new streak
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Expire it, then a running observation ends the streak and a later pending starts fresh
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS);
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual([]);
+      rebuildWith({ checkStatus: "running", headSha: "sha2" });
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Stale observations carry no fresh status and leave the streak untouched
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS);
+      rebuildWith({ checkStatus: "running", checkStatusStale: true, headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]); // enrolled because stale
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual([]);
+
+      // PRs missing from a full refresh drop their streak
+      rebuildHotSets(emptyData);
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("evicts an already-enrolled unpinned running PR when seedHotSetsFromTargeted observes it transition to waiting or success, keeps fresh pending streaks, and preserves hot PRs in other repos", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -1709,7 +1793,8 @@ describe("fetchHotData eviction edge cases", () => {
       ],
     });
 
-    // Also verify seedHotSetsFromTargeted does NOT enroll brand-new waiting/pending PRs without hotPollPinned
+    // seedHotSetsFromTargeted does NOT enroll brand-new waiting PRs without hotPollPinned,
+    // but first-observed pending PRs (new or transitioning) start a grace streak
     seedHotSetsFromTargeted({
       ...emptyData,
       pullRequests: [
@@ -1724,7 +1809,7 @@ describe("fetchHotData eviction edge cases", () => {
     await fetchHotData();
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
     const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
-    expect(calledIds).toEqual(["PR_other_repo"]);
+    expect(calledIds).toEqual(["PR_other_repo", "PR_now_pending", "PR_new_pending"]);
   });
 
   it("evicts a workflow run from _hotRuns when it transitions from in_progress to waiting on a hot-poll cycle or via seedHotSetsFromTargeted", async () => {
