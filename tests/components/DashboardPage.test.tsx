@@ -828,7 +828,7 @@ describe("DashboardPage — onHotData integration", () => {
   it("discards stale hot poll updates when generation mismatches", async () => {
     const testPR = makePullRequest({
       id: 43,
-      checkStatus: "pending",
+      checkStatus: "running",
       state: "OPEN",
     });
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
@@ -1747,6 +1747,51 @@ describe("DashboardPage — tabCounts applies filterPreset", () => {
       // Only 2 failure runs counted
       const customTab = screen.getByRole("tab", { name: /Failed Runs/ });
       expect(customTab.textContent?.replace(/\D+/g, "")).toBe("2");
+    });
+  });
+
+  it("conclusion:waiting and conclusion:pending presets count matching workflow runs accurately on actions custom tabs", async () => {
+    configStore.addCustomTab({
+      id: "waitingruns",
+      name: "Waiting Runs",
+      baseType: "actions",
+      orgScope: ["owner"],
+      repoScope: [],
+      filterPreset: { conclusion: "waiting" },
+      exclusive: false,
+    });
+    configStore.addCustomTab({
+      id: "pendingruns",
+      name: "Pending Runs",
+      baseType: "actions",
+      orgScope: ["owner"],
+      repoScope: [],
+      filterPreset: { conclusion: "pending" },
+      exclusive: false,
+    });
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [
+        makeWorkflowRun({ id: 20, status: "waiting", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 21, status: "completed", conclusion: "action_required", isPrRun: false }),
+        makeWorkflowRun({ id: 22, status: "queued", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 23, status: "pending", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 24, status: "requested", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 25, status: "in_progress", conclusion: null, isPrRun: false }),
+        makeWorkflowRun({ id: 26, status: "completed", conclusion: "success", isPrRun: false }),
+        makeWorkflowRun({ id: 27, status: "action_required", conclusion: null, isPrRun: false }),
+      ],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      const waitingTab = screen.getByRole("tab", { name: /Waiting Runs/ });
+      expect(waitingTab.textContent?.replace(/\D+/g, "")).toBe("3");
+      const pendingTab = screen.getByRole("tab", { name: /Pending Runs/ });
+      expect(pendingTab.textContent?.replace(/\D+/g, "")).toBe("3");
     });
   });
 
@@ -3670,7 +3715,7 @@ describe("DashboardPage — PR approval integration", () => {
     expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("approve-pr:42");
     expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith({
       issues: [],
-      pullRequests: [expect.objectContaining({ id: 42, enriched: true, checkStatus: "pending" })],
+      pullRequests: [expect.objectContaining({ id: 42, enriched: true, checkStatus: "running", hotPollPinned: true })],
       workflowRuns: [],
       errors: [],
     });
@@ -4009,7 +4054,7 @@ describe("DashboardPage — PR approval integration", () => {
       nodeId: "PR_kwDOtest0042",
       headSha: validSha,
       reviewDecision: "REVIEW_REQUIRED",
-      checkStatus: "pending",
+      checkStatus: "running",
       viewerReviewRequested: true,
       viewerLatestReviewState: null,
     });
@@ -4036,7 +4081,7 @@ describe("DashboardPage — PR approval integration", () => {
     capturedOnHotData!(
       new Map([[42, {
         state: "OPEN",
-        checkStatus: "pending",
+        checkStatus: "running",
         mergeStateStatus: "BLOCKED",
         reviewDecision: "REVIEW_REQUIRED",
         headSha: newSha,
@@ -4108,7 +4153,7 @@ describe("DashboardPage — PR approval integration", () => {
       nodeId: "PR_kwDOtest0102",
       headSha: validSha,
       reviewDecision: "REVIEW_REQUIRED",
-      checkStatus: "pending",
+      checkStatus: "running",
       autoMergeMethod: null,
       viewerReviewRequested: true,
       viewerLatestReviewState: null,
@@ -4533,7 +4578,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
           nodeId: "PR_kwDOtest0077",
           draft: false,
           enriched: true,
-          checkStatus: "pending",
+          checkStatus: "running",
+          hotPollPinned: true,
         }),
       ],
       workflowRuns: [],
@@ -4551,7 +4597,7 @@ describe("DashboardPage — Mark PR ready integration", () => {
       new Map([[77, {
         state: "OPEN",
         draft: true,
-        checkStatus: "pending",
+        checkStatus: "running",
         mergeStateStatus: "DRAFT",
         reviewDecision: null,
       }]]),
@@ -4562,15 +4608,29 @@ describe("DashboardPage — Mark PR ready integration", () => {
     expect(screen.getByText("Review needed")).toBeTruthy();
 
     // 2. Subsequent targeted poll reporting stale draft: true within 60s
+    vi.mocked(pollService.seedHotSetsFromTargeted).mockClear();
     capturedOnTargetedData!(
       { issues: [], pullRequests: [makeStaleDraftPR()], workflowRuns: [], errors: [] },
       ["owner/repo"]
     );
     expect(screen.queryByTestId("draft-badge")).toBeNull();
     expect(screen.getByText("Review needed")).toBeTruthy();
+    expect(pollService.seedHotSetsFromTargeted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequests: [
+          expect.objectContaining({
+            id: 77,
+            nodeId: "PR_kwDOtest0077",
+            enriched: true,
+            checkStatus: "running",
+            hotPollPinned: true,
+          }),
+        ],
+      })
+    );
 
     // 3. Subsequent full poll reporting stale draft: true within 60s keeps pr.draft === false
-    // and preserves hot-set membership (checkStatus: "pending" passed to rebuildHotSets)
+    // and preserves hot-set membership (checkStatus: "running", hotPollPinned: true passed to rebuildHotSets)
     vi.mocked(pollService.rebuildHotSets).mockClear();
     vi.mocked(pollService.fetchAllData).mockResolvedValue({
       issues: [],
@@ -4588,7 +4648,8 @@ describe("DashboardPage — Mark PR ready integration", () => {
             id: 77,
             nodeId: "PR_kwDOtest0077",
             enriched: true,
-            checkStatus: "pending",
+            checkStatus: "running",
+            hotPollPinned: true,
           }),
         ],
       })
@@ -5098,7 +5159,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
       enriched: true,
       nodeId: "PR_kwDOtest0501",
       headSha: "1111111111111111111111111111111111111111",
-      checkStatus: "pending",
+      checkStatus: "running",
       reviewDecision: "REVIEW_REQUIRED",
       autoMergeMethod: "SQUASH",
       assigneeLogins: ["alice"],
@@ -5159,7 +5220,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
             id: 501,
             nodeId: "PR_kwDOtest0501",
             enriched: true,
-            checkStatus: "pending",
+            checkStatus: "running",
             autoMergeMethod: "SQUASH",
             assigneeLogins: ["alice"],
             reviewerLogins: ["bob"],
@@ -5177,7 +5238,7 @@ describe("DashboardPage — fallbackToPreviousEnrichment propagation to hot sets
         id: 501,
         nodeId: "PR_kwDOtest0501",
         enriched: true,
-        checkStatus: "pending",
+        checkStatus: "running",
         autoMergeMethod: "SQUASH",
         assigneeLogins: ["alice"],
         reviewerLogins: ["bob"],

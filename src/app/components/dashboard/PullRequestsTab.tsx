@@ -61,12 +61,16 @@ function checkStatusOrder(status: PullRequest["checkStatus"]): number {
       return 0;
     case "conflict":
       return 1;
-    case "pending":
+    case "waiting":
       return 2;
-    case "success":
+    case "running":
       return 3;
-    default:
+    case "pending":
       return 4;
+    case "success":
+      return 5;
+    default:
+      return 6;
   }
 }
 
@@ -385,13 +389,15 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                 const isExpanded = () => !isEmpty() && isRepoExpanded(tabKey(), repoGroup.repoFullName);
 
                 const summaryMeta = createMemo(() => {
-                  const checks = { success: 0, failure: 0, pending: 0, conflict: 0 };
+                  const checks = { success: 0, failure: 0, running: 0, waiting: 0, pending: 0, conflict: 0 };
                   const reviews = { APPROVED: 0, CHANGES_REQUESTED: 0, REVIEW_REQUIRED: 0 };
                   const roles: Record<string, number> = {};
 
                   for (const item of repoGroup.items) {
                     if (item.checkStatus === "success") checks.success++;
                     else if (item.checkStatus === "failure") checks.failure++;
+                    else if (item.checkStatus === "running") checks.running++;
+                    else if (item.checkStatus === "waiting") checks.waiting++;
                     else if (item.checkStatus === "pending") checks.pending++;
                     else if (item.checkStatus === "conflict") checks.conflict++;
 
@@ -452,9 +458,21 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                 <span>{summaryMeta().checks.failure}</span>
                               </span>
                             </Show>
-                            <Show when={summaryMeta().checks.pending > 0}>
+                            <Show when={summaryMeta().checks.running > 0}>
                               <span class="flex items-center gap-0.5">
                                 <span class="inline-block w-2 h-2 rounded-full bg-warning" />
+                                <span>{summaryMeta().checks.running}</span>
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().checks.waiting > 0}>
+                              <span class="flex items-center gap-0.5">
+                                <span class="inline-block w-2 h-2 rounded-full bg-amber-500" />
+                                <span>{summaryMeta().checks.waiting}</span>
+                              </span>
+                            </Show>
+                            <Show when={summaryMeta().checks.pending > 0}>
+                              <span class="flex items-center gap-0.5">
+                                <span class="inline-block w-2 h-2 rounded-full border border-warning/80 bg-warning/20" />
                                 <span>{summaryMeta().checks.pending}</span>
                               </span>
                             </Show>
@@ -563,6 +581,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                             Merge conflict
                                           </span>
                                         </Show>
+                                        <Show when={pr.checkStatus === "waiting"}>
+                                          <span class="badge badge-warning badge-sm">Pending action</span>
+                                        </Show>
+                                        <Show when={pr.checkStatus === "pending"}>
+                                          <span class="badge badge-ghost badge-outline badge-sm">Pending condition</span>
+                                        </Show>
                                       </Show>
                                       <DraftBadge
                                         draft={pr.draft}
@@ -597,6 +621,12 @@ export default function PullRequestsTab(props: PullRequestsTabProps) {
                                           <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
                                         </svg>
                                       </Tooltip>
+                                    </Show>
+                                    <Show when={pr.enriched !== false && pr.checkStatus === "waiting"}>
+                                      <span class="badge badge-warning badge-sm">Pending action</span>
+                                    </Show>
+                                    <Show when={pr.enriched !== false && pr.checkStatus === "pending"}>
+                                      <span class="badge badge-ghost badge-outline badge-sm">Pending condition</span>
                                     </Show>
                                     <DraftBadge
                                       draft={pr.draft}

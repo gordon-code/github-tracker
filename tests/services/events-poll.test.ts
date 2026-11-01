@@ -307,11 +307,11 @@ describe("seedHotSetsFromTargeted", () => {
     vi.mocked(fetchWorkflowRunById).mockClear();
   });
 
-  it("adds enriched pending-checkStatus PRs with nodeId to hot set", async () => {
+  it("adds enriched running-checkStatus PRs with nodeId to hot set", async () => {
     seedHotSetsFromTargeted({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" }),
+        makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" }),
       ],
     });
 
@@ -356,7 +356,7 @@ describe("seedHotSetsFromTargeted", () => {
     seedHotSetsFromTargeted({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 3, checkStatus: "pending", enriched: false, nodeId: "PR_c" }),
+        makePullRequest({ id: 3, checkStatus: "running", enriched: false, nodeId: "PR_c" }),
       ],
     });
 
@@ -370,7 +370,7 @@ describe("seedHotSetsFromTargeted", () => {
     rebuildHotSets({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 10, checkStatus: "pending", enriched: true, nodeId: "PR_existing" }),
+        makePullRequest({ id: 10, checkStatus: "running", enriched: true, nodeId: "PR_existing" }),
       ],
     });
 
@@ -378,7 +378,7 @@ describe("seedHotSetsFromTargeted", () => {
     seedHotSetsFromTargeted({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 11, checkStatus: "pending", enriched: true, nodeId: "PR_new" }),
+        makePullRequest({ id: 11, checkStatus: "running", enriched: true, nodeId: "PR_new" }),
       ],
     });
 
@@ -396,7 +396,7 @@ describe("seedHotSetsFromTargeted", () => {
     seedHotSetsFromTargeted({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 20, checkStatus: "pending", enriched: true, nodeId: "PR_gen" }),
+        makePullRequest({ id: 20, checkStatus: "running", enriched: true, nodeId: "PR_gen" }),
       ],
     });
 

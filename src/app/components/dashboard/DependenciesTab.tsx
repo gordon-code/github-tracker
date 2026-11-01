@@ -4,7 +4,7 @@ import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, 
 import IgnoreBadge from "./IgnoreBadge";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { canApprovePR, canMarkPRReady } from "../../lib/format";
-import type { PullRequest } from "../../services/api";
+import { isNonTerminalCheckStatus, type PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
 import {
   classifyDepStatus,
@@ -491,13 +491,19 @@ function StatusGroup(props: StatusGroupProps) {
                         <Show when={pr.checkStatus === "failure"}>
                           <span class="badge badge-error badge-outline badge-sm">Failing checks</span>
                         </Show>
-                        <Show when={pr.checkStatus === "pending"}>
+                        <Show when={pr.checkStatus === "running"}>
                           <span class="badge badge-warning badge-outline badge-sm">Checks running</span>
+                        </Show>
+                        <Show when={pr.checkStatus === "waiting"}>
+                          <span class="badge badge-warning badge-sm">Pending action</span>
+                        </Show>
+                        <Show when={pr.checkStatus === "pending"}>
+                          <span class="badge badge-ghost badge-outline badge-sm">Pending condition</span>
                         </Show>
                       </Show>
                       <Show
                         when={
-                          (pr.enriched !== false && pr.checkStatus !== "pending" && pr.checkStatusStale === true) ||
+                          (pr.enriched !== false && !isNonTerminalCheckStatus(pr.checkStatus) && pr.checkStatusStale === true) ||
                           (pr.enriched === false && !props.enrichmentPending)
                         }
                       >

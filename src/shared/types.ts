@@ -42,8 +42,18 @@ export interface Issue {
   nodeId?: string;
 }
 
+/**
+ * CI check status for a pull request:
+ * - "success": all checks passed
+ * - "failure": one or more checks failed or errored
+ * - "running": non-terminal rollup with at least one check run IN_PROGRESS
+ * - "waiting": non-terminal rollup with zero IN_PROGRESS and at least one check run WAITING or ACTION_REQUIRED
+ * - "pending": non-terminal rollup with zero IN_PROGRESS and zero WAITING/ACTION_REQUIRED (e.g. QUEUED or pending StatusContext)
+ * - "conflict": PR is DIRTY or BEHIND base branch
+ * - null: no CI checks configured or not yet enriched
+ */
 export interface CheckStatus {
-  status: "success" | "failure" | "pending" | "conflict" | null;
+  status: "success" | "failure" | "running" | "waiting" | "pending" | "conflict" | null;
 }
 
 export type AutoMergeMethod = "MERGE" | "SQUASH" | "REBASE";
@@ -97,6 +107,12 @@ export interface PullRequest {
    * and approve/mergeable gating treats CI as unknown.
    */
   checkStatusStale?: boolean;
+  /**
+   * Transient flag set on post-mutation PR clones (Approve / Mark Ready) so
+   * hot-polling retains the PR during the 60s window before newly triggered
+   * workflows transition from QUEUED ("pending") into IN_PROGRESS ("running").
+   */
+  hotPollPinned?: boolean;
   /** GraphQL global node ID — used for hot-poll status updates */
   nodeId?: string;
   /** PR body — fetched on demand for dependency update type detection */

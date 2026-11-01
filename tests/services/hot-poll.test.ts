@@ -70,10 +70,12 @@ vi.mock("../../src/app/stores/auth", () => ({
 import {
   resetPollState,
   rebuildHotSets,
+  seedHotSetsFromTargeted,
   clearHotSets,
   fetchHotData,
   createHotPollCoordinator,
   getHotPollGeneration,
+  HOT_PR_PENDING_GRACE_MS,
   type DashboardData,
 } from "../../src/app/services/poll";
 
@@ -203,6 +205,89 @@ describe("fetchHotPRStatus", () => {
 
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_node4"]);
     expect(results.get(45)!.checkStatus).toBe("pending");
+  });
+
+  it("classifies non-terminal statusCheckRollup into running, waiting, and pending and preserves all three when mergeStateStatus is UNSTABLE", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        {
+          databaseId: 451,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] },
+          },
+        },
+        {
+          databaseId: 452,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+          },
+        },
+        {
+          databaseId: 453,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+          },
+        },
+        {
+          databaseId: 454,
+          state: "OPEN",
+          mergeStateStatus: "UNSTABLE",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] },
+          },
+        },
+        {
+          databaseId: 455,
+          state: "OPEN",
+          mergeStateStatus: "UNSTABLE",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+          },
+        },
+        {
+          databaseId: 456,
+          state: "OPEN",
+          mergeStateStatus: "UNSTABLE",
+          reviewDecision: null,
+          statusCheckRollup: {
+            state: "PENDING",
+            contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+          },
+        },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, [
+      "PR_451",
+      "PR_452",
+      "PR_453",
+      "PR_454",
+      "PR_455",
+      "PR_456",
+    ]);
+    expect(results.get(451)!.checkStatus).toBe("running");
+    expect(results.get(452)!.checkStatus).toBe("waiting");
+    expect(results.get(453)!.checkStatus).toBe("pending");
+    expect(results.get(454)!.checkStatus).toBe("running");
+    expect(results.get(455)!.checkStatus).toBe("waiting");
+    expect(results.get(456)!.checkStatus).toBe("pending");
   });
 
   it("maps headRefOid (headSha), autoMergeMethod, viewerLatestReviewState, and viewerReviewRequested", async () => {
@@ -339,7 +424,7 @@ describe("fetchHotPRStatus", () => {
     expect(hadErrors).toBe(false);
 
     const calledQuery = octokit.graphql.mock.calls[0][0] as string;
-    expect(calledQuery).toContain("statusCheckRollup { state }");
+    expect(calledQuery).toContain("statusCheckRollup { state contexts { checkRunCountsByState { state count } } }");
     expect(calledQuery).toContain("updatedAt");
     expect(calledQuery).not.toContain("commits(last: 1)");
 
@@ -401,7 +486,7 @@ describe("resetPollState", () => {
   it("clears hot sets and resets generation", async () => {
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_x" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_x" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
     expect(getHotPollGeneration()).toBe(1);
@@ -430,7 +515,7 @@ describe("rebuildHotSets", () => {
     expect(getHotPollGeneration()).toBe(2);
   });
 
-  it("populates hot PRs for enriched pending checkStatus with nodeId", async () => {
+  it("populates hot PRs for enriched running checkStatus or a fresh pending streak with nodeId and skips waiting without hotPollPinned", async () => {
     const octokit = makeOctokit(undefined, () => Promise.resolve({
       nodes: [],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
@@ -440,20 +525,21 @@ describe("rebuildHotSets", () => {
     rebuildHotSets({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" }),
-        makePullRequest({ id: 2, checkStatus: null, enriched: true, nodeId: "PR_b" }), // null checkStatus — skipped (not pending)
+        makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" }),
+        makePullRequest({ id: 2, checkStatus: null, enriched: true, nodeId: "PR_b" }), // null checkStatus — skipped (not running)
         makePullRequest({ id: 3, checkStatus: "success", enriched: true, nodeId: "PR_c" }), // resolved — skipped
-        makePullRequest({ id: 4, checkStatus: "pending", enriched: true }), // no nodeId — skipped
-        makePullRequest({ id: 5, checkStatus: "pending", enriched: false, nodeId: "PR_e" }), // not enriched — skipped
+        makePullRequest({ id: 4, checkStatus: "running", enriched: true }), // no nodeId — skipped
+        makePullRequest({ id: 5, checkStatus: "running", enriched: false, nodeId: "PR_e" }), // not enriched — skipped
+        makePullRequest({ id: 6, checkStatus: "waiting", enriched: true, nodeId: "PR_waiting" }), // waiting without pin — skipped
+        makePullRequest({ id: 7, checkStatus: "pending", enriched: true, nodeId: "PR_pending" }), // first pending observation — within grace
       ],
     });
 
     await fetchHotData();
-    // Verify graphql was called with only the 1 eligible node ID
+    // Verify graphql was called with only the 2 eligible node IDs
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
     const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
-    expect(calledIds).toHaveLength(1);
-    expect(calledIds).toContain("PR_a");
+    expect(calledIds).toEqual(["PR_a", "PR_pending"]);
   });
 
   it("populates hot PRs when checkStatusStale is true even if checkStatus is null", async () => {
@@ -593,7 +679,7 @@ describe("fetchHotData", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_x" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_x" })],
     });
 
     // First fetch — PR is hot, returns success -> evicts
@@ -623,10 +709,10 @@ describe("fetchHotData", () => {
     const octokit = makeOctokit(undefined, graphqlFn);
     mockGetClient.mockReturnValue(octokit);
 
-    // Seed PR into _hotPRs (e.g. synthetically seeded with pending checkStatus before hot poll confirms no CI)
+    // Seed PR into _hotPRs (e.g. synthetically seeded with running checkStatus before hot poll confirms no CI)
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_no_ci" })],
+      pullRequests: [makePullRequest({ id: 2, checkStatus: "running", enriched: true, nodeId: "PR_no_ci" })],
     });
 
     // First fetch — PR is OPEN with checkStatus: null -> evicts after single cycle
@@ -882,7 +968,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     const { pushError } = await import("../../src/app/lib/errors");
@@ -918,7 +1004,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     const Sentry = await import("@sentry/solid");
@@ -983,7 +1069,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 42, checkStatus: "pending", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
+      pullRequests: [makePullRequest({ id: 42, checkStatus: "running", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
       workflowRuns: [makeWorkflowRun({ id: 7, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -1068,7 +1154,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 42, checkStatus: "pending", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
+      pullRequests: [makePullRequest({ id: 42, checkStatus: "running", enriched: true, nodeId: "PR_node42", repoFullName: "o/r" })],
     });
 
     const { pushError } = await import("../../src/app/lib/errors");
@@ -1091,7 +1177,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     const { expireToken } = await import("../../src/app/stores/auth");
@@ -1120,7 +1206,7 @@ describe("createHotPollCoordinator", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     const graphqlFn = octokit.graphql as ReturnType<typeof vi.fn>;
@@ -1261,11 +1347,72 @@ describe("fetchHotPRStatus edge cases", () => {
     const { results } = await fetchHotPRStatus(octokit as never, ["PR_61", "PR_62", "PR_63", "PR_64"]);
     const calledQuery = octokit.graphql.mock.calls[0][0] as string;
     expect(calledQuery).toContain("isCrossRepository");
-    expect(calledQuery).toContain("headRef { target { ... on Commit { statusCheckRollup { state } } } }");
+    expect(calledQuery).toContain("headRef { target { ... on Commit { statusCheckRollup { state contexts { checkRunCountsByState { state count } } } } } }");
     expect(results.get(61)!.checkStatus).toBe("failure");
     expect(results.get(62)!.checkStatus).toBe("success");
     expect(results.get(63)!.checkStatus).toBeNull();
     expect(results.get(64)!.checkStatus).toBeNull();
+  });
+
+  it("classifies fork headRef.target.statusCheckRollup into running, waiting, and pending for cross-repository PRs", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [
+        {
+          databaseId: 65,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: null,
+          isCrossRepository: true,
+          headRef: {
+            target: {
+              statusCheckRollup: {
+                state: "PENDING",
+                contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] },
+              },
+            },
+          },
+        },
+        {
+          databaseId: 66,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: null,
+          isCrossRepository: true,
+          headRef: {
+            target: {
+              statusCheckRollup: {
+                state: "PENDING",
+                contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+              },
+            },
+          },
+        },
+        {
+          databaseId: 67,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: null,
+          isCrossRepository: true,
+          headRef: {
+            target: {
+              statusCheckRollup: {
+                state: "PENDING",
+                contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+              },
+            },
+          },
+        },
+      ],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+
+    const { results } = await fetchHotPRStatus(octokit as never, ["PR_65", "PR_66", "PR_67"]);
+    expect(results.get(65)!.checkStatus).toBe("running");
+    expect(results.get(66)!.checkStatus).toBe("waiting");
+    expect(results.get(67)!.checkStatus).toBe("pending");
   });
 
   it("salvages resolved nodes from a rejected batch's partial data and skips errored node indices", async () => {
@@ -1337,7 +1484,7 @@ describe("rebuildHotSets caps", () => {
 
   it("caps hot PRs at MAX_HOT_PRS (200)", async () => {
     const prs = Array.from({ length: 250 }, (_, i) =>
-      makePullRequest({ id: i + 1, checkStatus: "pending", enriched: true, nodeId: `PR_${i}` })
+      makePullRequest({ id: i + 1, checkStatus: "running", enriched: true, nodeId: `PR_${i}` })
     );
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1391,11 +1538,20 @@ describe("fetchHotData eviction edge cases", () => {
     const graphqlFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
-        // First fetch: PR 1 resolved (success), PR 2 still pending
+        // First fetch: PR 1 resolved (success), PR 2 still running
         return Promise.resolve({
           nodes: [
             { databaseId: 1, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "SUCCESS" } },
-            { databaseId: 2, state: "OPEN", mergeStateStatus: "CLEAN", reviewDecision: null, statusCheckRollup: { state: "PENDING" } },
+            {
+              databaseId: 2,
+              state: "OPEN",
+              mergeStateStatus: "CLEAN",
+              reviewDecision: null,
+              statusCheckRollup: {
+                state: "PENDING",
+                contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] },
+              },
+            },
           ],
           rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
         });
@@ -1414,12 +1570,12 @@ describe("fetchHotData eviction edge cases", () => {
     rebuildHotSets({
       ...emptyData,
       pullRequests: [
-        makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_one" }),
-        makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_two" }),
+        makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_one" }),
+        makePullRequest({ id: 2, checkStatus: "running", enriched: true, nodeId: "PR_two" }),
       ],
     });
 
-    // First fetch — PR 1 resolves, PR 2 stays pending
+    // First fetch — PR 1 resolves, PR 2 stays running
     const first = await fetchHotData();
     expect(first.prUpdates.size).toBe(2);
 
@@ -1432,14 +1588,17 @@ describe("fetchHotData eviction edge cases", () => {
     expect(secondCallArgs[1].ids).toEqual(["PR_two"]);
   });
 
-  it("evicts PRs when state is MERGED even with pending checkStatus", async () => {
+  it("evicts PRs when state is MERGED even with running checkStatus", async () => {
     const graphqlFn = vi.fn(() => Promise.resolve({
       nodes: [{
         databaseId: 1,
         state: "MERGED",
         mergeStateStatus: "CLEAN",
         reviewDecision: "APPROVED",
-        statusCheckRollup: { state: "PENDING" },
+        statusCheckRollup: {
+          state: "PENDING",
+          contexts: { checkRunCountsByState: [{ state: "IN_PROGRESS", count: 1 }] },
+        },
       }],
       rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
     }));
@@ -1448,13 +1607,13 @@ describe("fetchHotData eviction edge cases", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_merged" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_merged" })],
     });
 
     const first = await fetchHotData();
     expect(first.prUpdates.get(1)!.state).toBe("MERGED");
 
-    // Should be evicted — MERGED state takes priority over pending checks
+    // Should be evicted — MERGED state takes priority over running checks
     graphqlFn.mockClear();
     const second = await fetchHotData();
     expect(second.prUpdates.size).toBe(0);
@@ -1477,7 +1636,7 @@ describe("fetchHotData eviction edge cases", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 2, checkStatus: "pending", enriched: true, nodeId: "PR_closed" })],
+      pullRequests: [makePullRequest({ id: 2, checkStatus: "running", enriched: true, nodeId: "PR_closed" })],
     });
 
     await fetchHotData();
@@ -1485,13 +1644,296 @@ describe("fetchHotData eviction edge cases", () => {
     const second = await fetchHotData();
     expect(second.prUpdates.size).toBe(0);
   });
+
+  it("evicts a running PR from _hotPRs immediately on waiting and after the pending grace window on pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const graphqlFn = vi.fn(() => Promise.resolve({
+        nodes: [
+          {
+            databaseId: 10,
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+            statusCheckRollup: {
+              state: "PENDING",
+              contexts: { checkRunCountsByState: [{ state: "WAITING", count: 1 }] },
+            },
+          },
+          {
+            databaseId: 11,
+            state: "OPEN",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: null,
+            statusCheckRollup: {
+              state: "PENDING",
+              contexts: { checkRunCountsByState: [{ state: "QUEUED", count: 1 }] },
+            },
+          },
+        ],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }));
+      const octokit = makeOctokit(undefined, graphqlFn);
+      mockGetClient.mockReturnValue(octokit);
+
+      rebuildHotSets({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 10, checkStatus: "running", enriched: true, nodeId: "PR_to_waiting" }),
+          makePullRequest({ id: 11, checkStatus: "running", enriched: true, nodeId: "PR_to_pending" }),
+        ],
+      });
+
+      const first = await fetchHotData();
+      expect(first.prUpdates.get(10)!.checkStatus).toBe("waiting");
+      expect(first.prUpdates.get(11)!.checkStatus).toBe("pending");
+
+      // "waiting" is evicted at once; "pending" starts a grace streak and stays hot
+      graphqlFn.mockClear();
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS - 1);
+      const second = await fetchHotData();
+      expect(graphqlFn).toHaveBeenCalledTimes(1);
+      expect((graphqlFn.mock.calls[0] as unknown as [string, { ids: string[] }])[1].ids).toEqual(["PR_to_pending"]);
+      expect(second.prUpdates.get(11)!.checkStatus).toBe("pending");
+
+      // Grace window elapsed: the next pending observation evicts it
+      vi.advanceTimersByTime(1);
+      await fetchHotData();
+      graphqlFn.mockClear();
+      const fourth = await fetchHotData();
+      expect(fourth.prUpdates.size).toBe(0);
+      expect(graphqlFn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds pending hot-polling per head commit across rebuilds, restarting the streak on a new commit or after running", async () => {
+    vi.useFakeTimers();
+    try {
+      const octokit = makeOctokit(undefined, () => Promise.resolve({
+        nodes: [],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }));
+      mockGetClient.mockReturnValue(octokit);
+      const hotIds = async (): Promise<string[]> => {
+        octokit.graphql.mockClear();
+        await fetchHotData();
+        if (octokit.graphql.mock.calls.length === 0) return [];
+        return (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
+      };
+      const rebuildWith = (overrides: Parameters<typeof makePullRequest>[0]) =>
+        rebuildHotSets({
+          ...emptyData,
+          pullRequests: [makePullRequest({ id: 40, enriched: true, nodeId: "PR_parked", ...overrides })],
+        });
+
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Still within the streak that began at the first observation
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS - 1);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Parked on the same commit past the grace window: not re-enrolled by later full refreshes
+      vi.advanceTimersByTime(1);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual([]);
+      vi.advanceTimersByTime(300_000);
+      rebuildWith({ checkStatus: "pending", headSha: "sha1" });
+      expect(await hotIds()).toEqual([]);
+
+      // An unknown head SHA keeps the existing streak
+      rebuildWith({ checkStatus: "pending", headSha: "" });
+      expect(await hotIds()).toEqual([]);
+
+      // A new head commit starts a new streak
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Expire it, then a running observation ends the streak and a later pending starts fresh
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS);
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual([]);
+      rebuildWith({ checkStatus: "running", headSha: "sha2" });
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+
+      // Stale observations carry no fresh status and leave the streak untouched
+      vi.advanceTimersByTime(HOT_PR_PENDING_GRACE_MS);
+      rebuildWith({ checkStatus: "running", checkStatusStale: true, headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]); // enrolled because stale
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual([]);
+
+      // PRs missing from a full refresh drop their streak
+      rebuildHotSets(emptyData);
+      rebuildWith({ checkStatus: "pending", headSha: "sha2" });
+      expect(await hotIds()).toEqual(["PR_parked"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("evicts an already-enrolled unpinned running PR when seedHotSetsFromTargeted observes it transition to waiting or success, keeps fresh pending streaks, and preserves hot PRs in other repos", async () => {
+    const octokit = makeOctokit(undefined, () => Promise.resolve({
+      nodes: [],
+      rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+    }));
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_other_repo" }),
+        makePullRequest({ id: 2, checkStatus: "running", enriched: true, nodeId: "PR_now_waiting" }),
+        makePullRequest({ id: 3, checkStatus: "running", enriched: true, nodeId: "PR_now_pending" }),
+        makePullRequest({ id: 4, checkStatus: "running", enriched: true, nodeId: "PR_now_success" }),
+      ],
+    });
+
+    // seedHotSetsFromTargeted does NOT enroll brand-new waiting PRs without hotPollPinned,
+    // but first-observed pending PRs (new or transitioning) start a grace streak
+    seedHotSetsFromTargeted({
+      ...emptyData,
+      pullRequests: [
+        makePullRequest({ id: 2, checkStatus: "waiting", enriched: true, nodeId: "PR_now_waiting" }),
+        makePullRequest({ id: 3, checkStatus: "pending", enriched: true, nodeId: "PR_now_pending" }),
+        makePullRequest({ id: 4, checkStatus: "success", enriched: true, nodeId: "PR_now_success" }),
+        makePullRequest({ id: 5, checkStatus: "waiting", enriched: true, nodeId: "PR_new_waiting" }),
+        makePullRequest({ id: 6, checkStatus: "pending", enriched: true, nodeId: "PR_new_pending" }),
+      ],
+    });
+
+    await fetchHotData();
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    const calledIds = (octokit.graphql.mock.calls[0][1] as { ids: string[] }).ids;
+    expect(calledIds).toEqual(["PR_other_repo", "PR_now_pending", "PR_new_pending"]);
+  });
+
+  it("evicts a workflow run from _hotRuns when it transitions from in_progress to waiting on a hot-poll cycle or via seedHotSetsFromTargeted", async () => {
+    const requestFn = vi.fn(() => Promise.resolve({
+      data: { id: 10, status: "waiting", conclusion: null, updated_at: "2026-01-01T00:02:00Z", completed_at: null },
+      headers: {},
+    }));
+    const octokit = makeOctokit(requestFn);
+    mockGetClient.mockReturnValue(octokit);
+
+    rebuildHotSets({
+      ...emptyData,
+      workflowRuns: [
+        makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" }),
+        makeWorkflowRun({ id: 11, status: "in_progress", conclusion: null, repoFullName: "o/r" }),
+      ],
+    });
+
+    // seedHotSetsFromTargeted observes run 11 transition to waiting -> evicted before fetchHotData
+    seedHotSetsFromTargeted({
+      ...emptyData,
+      workflowRuns: [
+        makeWorkflowRun({ id: 11, status: "waiting", conclusion: null, repoFullName: "o/r" }),
+      ],
+    });
+
+    // First fetchHotData queries only run 10, which returns status: "waiting" -> evicted
+    const first = await fetchHotData();
+    expect(requestFn).toHaveBeenCalledTimes(1);
+    expect(first.runUpdates.get(10)!.status).toBe("waiting");
+
+    requestFn.mockClear();
+    const second = await fetchHotData();
+    expect(second.runUpdates.size).toBe(0);
+    expect(requestFn).not.toHaveBeenCalled();
+  });
+
+  it("retains a hotPollPinned PR in _hotPRs across hot-poll ticks returning pending or success within 60s and evicts once the 60s pin expires or when unpinned", async () => {
+    vi.useFakeTimers();
+    try {
+      let statusState: "PENDING" | "SUCCESS" = "PENDING";
+      const graphqlFn = vi.fn(() => Promise.resolve({
+        nodes: [{
+          databaseId: 77,
+          state: "OPEN",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "APPROVED",
+          statusCheckRollup: { state: statusState },
+        }],
+        rateLimit: { limit: 5000, remaining: 4999, resetAt: "2026-01-01T00:00:00Z" },
+      }));
+      const octokit = makeOctokit(undefined, graphqlFn);
+      mockGetClient.mockReturnValue(octokit);
+
+      // Seed PR 77 with hotPollPinned: true
+      seedHotSetsFromTargeted({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 77, checkStatus: "running", hotPollPinned: true, enriched: true, nodeId: "PR_pinned" }),
+        ],
+      });
+
+      // Tick 1 at +15s: returns checkStatus: "pending" -> retained because 60s pin is still active
+      vi.advanceTimersByTime(15_000);
+      const first = await fetchHotData();
+      expect(first.prUpdates.get(77)!.checkStatus).toBe("pending");
+
+      // Tick 2 at +30s: returns checkStatus: "success" -> retained because 60s pin is still active
+      statusState = "SUCCESS";
+      vi.advanceTimersByTime(15_000);
+      const second = await fetchHotData();
+      expect(second.prUpdates.get(77)!.checkStatus).toBe("success");
+
+      // Advance past the 60s pin window (+31s -> 61s total): next tick evicts PR 77
+      vi.advanceTimersByTime(31_000);
+      const third = await fetchHotData();
+      expect(third.prUpdates.get(77)!.checkStatus).toBe("success");
+
+      graphqlFn.mockClear();
+      const fourth = await fetchHotData();
+      expect(fourth.prUpdates.size).toBe(0);
+      expect(graphqlFn).not.toHaveBeenCalled();
+
+      // Re-pin PR 77, then run seedHotSetsFromTargeted / rebuildHotSets without hotPollPinned -> pin dropped immediately
+      seedHotSetsFromTargeted({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 77, checkStatus: "running", hotPollPinned: true, enriched: true, nodeId: "PR_pinned" }),
+        ],
+      });
+      seedHotSetsFromTargeted({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 77, checkStatus: "success", enriched: true, nodeId: "PR_pinned" }),
+        ],
+      });
+      const afterTargetedUnpin = await fetchHotData();
+      expect(afterTargetedUnpin.prUpdates.size).toBe(0);
+
+      rebuildHotSets({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 77, checkStatus: "running", hotPollPinned: true, enriched: true, nodeId: "PR_pinned" }),
+        ],
+      });
+      rebuildHotSets({
+        ...emptyData,
+        pullRequests: [
+          makePullRequest({ id: 77, checkStatus: "success", enriched: true, nodeId: "PR_pinned" }),
+        ],
+      });
+      const afterRebuildUnpin = await fetchHotData();
+      expect(afterRebuildUnpin.prUpdates.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("clearHotSets", () => {
   it("empties both hot maps so next fetchHotData is a no-op", async () => {
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -1529,7 +1971,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
       workflowRuns: [makeWorkflowRun({ id: 10, status: "in_progress", conclusion: null, repoFullName: "o/r" })],
     });
 
@@ -1543,7 +1985,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     const { hadErrors, prUpdates } = await fetchHotData();
@@ -1575,7 +2017,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     await expect(fetchHotData()).rejects.toMatchObject({ status: 401 });
@@ -1602,7 +2044,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     await fetchHotData(2); // 2 prior failures — still below the threshold of 3
@@ -1618,7 +2060,7 @@ describe("fetchHotData hadErrors", () => {
 
     rebuildHotSets({
       ...emptyData,
-      pullRequests: [makePullRequest({ id: 1, checkStatus: "pending", enriched: true, nodeId: "PR_a" })],
+      pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
     await fetchHotData(3); // 3 prior failures — meets the threshold

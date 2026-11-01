@@ -57,11 +57,23 @@ export interface PollCoordinator {
 
 // ── Hot poll state ────────────────────────────────────────────────────────────
 
-/** PRs with pending/null check status: maps GraphQL node ID → databaseId */
+/** PRs with running/stale/pinned/pending-grace check status: maps GraphQL node ID → databaseId */
 const _hotPRs = new Map<string, number>();
 /** Inverse index for O(1) eviction: maps databaseId → nodeId */
 const _hotPRsByDbId = new Map<number, string>();
 const MAX_HOT_PRS = 200;
+const HOT_PR_MUTATION_PIN_TTL_MS = 60_000;
+/** Post-mutation pin deadlines: maps databaseId → expiry timestamp (ms) */
+const _hotPRPinnedUntil = new Map<number, number>();
+/**
+ * How long a PR whose checks are "pending" (queued, or a pending commit status) keeps
+ * hot-polling. Covers runner pickup, gaps between dependent jobs, and commit-status CI
+ * that reports "pending" while building, without hot-polling PRs parked on a condition
+ * (review, draft, labels) indefinitely.
+ */
+export const HOT_PR_PENDING_GRACE_MS = 180_000;
+/** First observation of a continuous "pending" streak: maps databaseId → head commit + timestamp (ms) */
+const _hotPRPendingSince = new Map<number, { headSha: string; since: number }>();
 
 /** In-progress workflow runs: maps run ID → repo descriptor */
 const _hotRuns = new Map<number, { owner: string; repo: string }>();
@@ -87,6 +99,8 @@ export function clearHotSets(): void {
   _hotPRs.clear();
   _hotPRsByDbId.clear();
   _hotRuns.clear();
+  _hotPRPinnedUntil.clear();
+  _hotPRPendingSince.clear();
 }
 
 export const WAKE_GRACE_MS = 2_000;
@@ -137,9 +151,7 @@ export function processBackfillErrors(
 }
 
 export function resetPollState(): void {
-  _hotPRs.clear();
-  _hotPRsByDbId.clear();
-  _hotRuns.clear();
+  clearHotSets();
   _hotPollGeneration = 0;
   _consecutiveBackfillFailures = 0;
   resetPREnrichmentCache();
@@ -585,11 +597,75 @@ export function createPollCoordinator(
 
 // ── Hot poll: targeted refresh for in-flight items ───────────────────────────
 
+function pruneExpiredHotPRPins(now: number): void {
+  for (const [id, untilMs] of _hotPRPinnedUntil) {
+    if (untilMs <= now) _hotPRPinnedUntil.delete(id);
+  }
+}
+
+/**
+ * Records a "pending" observation for a PR and reports whether it is still within
+ * HOT_PR_PENDING_GRACE_MS of the start of its current pending streak. Any other status
+ * ends the streak. A new head commit starts a new streak; an unknown ("") head SHA
+ * keeps the current one.
+ */
+function isWithinPendingGrace(
+  id: number,
+  checkStatus: PullRequest["checkStatus"],
+  headSha: string | undefined,
+  now: number,
+): boolean {
+  if (checkStatus !== "pending") {
+    _hotPRPendingSince.delete(id);
+    return false;
+  }
+  const sha = headSha ?? "";
+  const streak = _hotPRPendingSince.get(id);
+  if (!streak || (sha !== "" && streak.headSha !== "" && streak.headSha !== sha)) {
+    _hotPRPendingSince.set(id, { headSha: sha || (streak?.headSha ?? ""), since: now });
+    return true;
+  }
+  if (streak.headSha === "" && sha !== "") streak.headSha = sha;
+  return now - streak.since < HOT_PR_PENDING_GRACE_MS;
+}
+
+function syncHotPRPinAndCheckEligibility(pr: PullRequest, now: number): boolean {
+  const isTerminal = pr.state === "CLOSED" || pr.state === "MERGED";
+  if (!isTerminal && pr.hotPollPinned) {
+    if ((_hotPRPinnedUntil.get(pr.id) ?? 0) <= now) {
+      _hotPRPinnedUntil.set(pr.id, now + HOT_PR_MUTATION_PIN_TTL_MS);
+    }
+  } else if (_hotPRPinnedUntil.has(pr.id)) {
+    _hotPRPinnedUntil.delete(pr.id);
+  }
+
+  // Terminal PRs and post-mutation clones (whose checkStatus is synthetic) end any
+  // pending streak; stale or unenriched PRs carry no fresh status and leave it untouched.
+  let inPendingGrace = false;
+  if (isTerminal || pr.hotPollPinned) {
+    _hotPRPendingSince.delete(pr.id);
+  } else if (pr.enriched && pr.checkStatusStale !== true) {
+    inPendingGrace = isWithinPendingGrace(pr.id, pr.checkStatus, pr.headSha, now);
+  }
+
+  return (
+    !isTerminal &&
+    Boolean(pr.enriched && pr.nodeId) &&
+    (pr.checkStatus === "running" ||
+      pr.checkStatusStale === true ||
+      inPendingGrace ||
+      (_hotPRPinnedUntil.get(pr.id) ?? 0) > now)
+  );
+}
+
 /**
  * Rebuilds hot item sets from fresh full refresh data. Called after each full
  * poll cycle completes. Clears and replaces both sets (full replacement, not
- * incremental). Increments the generation counter so stale hot poll results
- * from the previous cycle can be detected and discarded.
+ * incremental). Enrolls PRs whose checkStatus is actively "running", whose
+ * checkStatusStale flag is set, whose post-mutation hotPollPinned window is
+ * active, or whose "pending" streak is within HOT_PR_PENDING_GRACE_MS.
+ * Increments the generation counter so stale hot poll results from the
+ * previous cycle can be detected and discarded.
  */
 export function rebuildHotSets(data: DashboardData): void {
   _hotPollGeneration++;
@@ -597,8 +673,16 @@ export function rebuildHotSets(data: DashboardData): void {
   _hotPRsByDbId.clear();
   _hotRuns.clear();
 
+  const now = Date.now();
+  pruneExpiredHotPRPins(now);
+  // Full refresh data is authoritative: drop pending streaks for PRs no longer present.
+  const presentIds = new Set(data.pullRequests.map((pr) => pr.id));
+  for (const id of _hotPRPendingSince.keys()) {
+    if (!presentIds.has(id)) _hotPRPendingSince.delete(id);
+  }
+
   for (const pr of data.pullRequests) {
-    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
+    if (syncHotPRPinAndCheckEligibility(pr, now) && pr.nodeId) {
       if (_hotPRs.size >= MAX_HOT_PRS) {
         console.warn(`[hot-poll] PR cap reached (${MAX_HOT_PRS}), skipping remaining`);
         break;
@@ -623,10 +707,12 @@ export function rebuildHotSets(data: DashboardData): void {
 }
 
 /**
- * Fetches updated status for all hot items (pending-check PRs + in-progress runs).
- * Evicts items from the hot sets when they settle (PR closed/merged/resolved,
- * run completed). Returns captured generation alongside results so callers can
- * detect staleness.
+ * Fetches updated status for all hot items (running/stale/pinned/pending-grace PRs +
+ * in-progress/queued runs). Evicts items from the hot sets when they leave active execution
+ * (PR closed/merged, or checkStatus !== "running" outside a post-mutation pin window and
+ * outside a HOT_PR_PENDING_GRACE_MS "pending" streak; workflow run status no longer
+ * "in_progress" or "queued", e.g. "waiting" or "completed"). Returns captured generation
+ * alongside results so callers can detect staleness.
  *
  * @param priorConsecutiveFailures - Failures from prior cycles (before this one).
  * Below HOT_POLL_SENTRY_THRESHOLD, fetch errors are logged/surfaced to the user
@@ -693,13 +779,23 @@ export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
   // The freshly rebuilt sets are authoritative — evicting from them based on
   // stale fetch results would corrupt the new data.
   if (generation === _hotPollGeneration) {
-    // Evict settled PRs using inverse index for O(1) lookup
+    // Evict PRs that are no longer actively running, unless within a 60s post-mutation
+    // pin window or a HOT_PR_PENDING_GRACE_MS "pending" streak
+    const now = Date.now();
     for (const [databaseId, upd] of prUpdates) {
-      if (
-        upd.state === "CLOSED" ||
-        upd.state === "MERGED" ||
-        upd.checkStatus !== "pending"
-      ) {
+      const isTerminal = upd.state === "CLOSED" || upd.state === "MERGED";
+      const pinnedUntil = _hotPRPinnedUntil.get(databaseId) ?? 0;
+      if (pinnedUntil > 0 && (isTerminal || now >= pinnedUntil)) {
+        _hotPRPinnedUntil.delete(databaseId);
+      }
+      const isPinned = !isTerminal && now < pinnedUntil;
+      let inPendingGrace = false;
+      if (isTerminal) {
+        _hotPRPendingSince.delete(databaseId);
+      } else {
+        inPendingGrace = isWithinPendingGrace(databaseId, upd.checkStatus, upd.headSha, now);
+      }
+      if (isTerminal || (upd.checkStatus !== "running" && !isPinned && !inPendingGrace)) {
         const nodeId = _hotPRsByDbId.get(databaseId);
         if (nodeId) {
           _hotPRs.delete(nodeId);
@@ -708,9 +804,9 @@ export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
       }
     }
 
-    // Evict completed runs
+    // Evict workflow runs that are no longer actively executing or queued (e.g. waiting or completed)
     for (const [runId, runUpdate] of runUpdates) {
-      if (runUpdate.status === "completed") {
+      if (runUpdate.status !== "in_progress" && runUpdate.status !== "queued") {
         _hotRuns.delete(runId);
       }
     }
@@ -960,26 +1056,44 @@ export async function fetchTargetedRepoData(
 
 // ── Hot set seeding from targeted refresh ────────────────────────────────────
 
+/**
+ * Updates hot item sets incrementally from a targeted refresh or post-mutation seed.
+ * Enrolls eligible running, stale, post-mutation pinned, or pending-grace PRs and
+ * queued/in_progress workflow runs, and evicts already-enrolled items in the targeted
+ * payload that have transitioned out of active execution (e.g. to "waiting", "success",
+ * "pending" past HOT_PR_PENDING_GRACE_MS, or CLOSED/MERGED) without disturbing hot items
+ * in unaffected repositories.
+ */
 export function seedHotSetsFromTargeted(data: DashboardData): void {
+  const now = Date.now();
+  pruneExpiredHotPRPins(now);
+
   for (const pr of data.pullRequests) {
-    if (pr.enriched && (pr.checkStatus === "pending" || pr.checkStatusStale === true) && pr.nodeId) {
-      if (_hotPRs.size >= MAX_HOT_PRS) break;
-      if (!_hotPRs.has(pr.nodeId)) {
+    const isTerminal = pr.state === "CLOSED" || pr.state === "MERGED";
+    const isEligible = syncHotPRPinAndCheckEligibility(pr, now);
+
+    if (isEligible && pr.nodeId) {
+      if (!_hotPRs.has(pr.nodeId) && _hotPRs.size < MAX_HOT_PRS) {
         _hotPRs.set(pr.nodeId, pr.id);
         _hotPRsByDbId.set(pr.id, pr.nodeId);
       }
+    } else if (isTerminal || pr.enriched) {
+      const existingNodeId = _hotPRsByDbId.get(pr.id) ?? pr.nodeId;
+      if (existingNodeId) _hotPRs.delete(existingNodeId);
+      _hotPRsByDbId.delete(pr.id);
     }
   }
 
   for (const run of data.workflowRuns) {
     if (run.status === "queued" || run.status === "in_progress") {
-      if (_hotRuns.size >= MAX_HOT_RUNS) break;
-      if (!_hotRuns.has(run.id)) {
+      if (!_hotRuns.has(run.id) && _hotRuns.size < MAX_HOT_RUNS) {
         const parts = run.repoFullName.split("/");
         if (parts.length === 2) {
           _hotRuns.set(run.id, { owner: parts[0], repo: parts[1] });
         }
       }
+    } else {
+      _hotRuns.delete(run.id);
     }
   }
 }

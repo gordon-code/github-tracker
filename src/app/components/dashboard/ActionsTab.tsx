@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import type { WorkflowRun } from "../../services/api";
 import { viewState, setViewState, ignoreItem, unignoreItem, toggleExpandedRepo, setAllExpanded, isRepoExpanded, pruneExpandedRepos, pruneLockedRepos, ActionsFiltersSchema } from "../../stores/view";
 import { createTabFilterHandlers, mergeActiveFilters } from "../../lib/tabFilters";
-import { isRunVisible } from "../../lib/filters";
+import { isRunVisible, isWorkflowRunPending, isWorkflowRunWaiting, matchesActionsConclusionFilter } from "../../lib/filters";
 import WorkflowSummaryCard from "./WorkflowSummaryCard";
 import IgnoreBadge from "./IgnoreBadge";
 import SkeletonRows from "../shared/SkeletonRows";
@@ -93,10 +93,12 @@ function sortWorkflowsByStatus(workflows: WorkflowGroup[]): WorkflowGroup[] {
   return workflows.toSorted((a, b) => {
     const priorityOf = (wf: WorkflowGroup): number => {
       const latest = wf.runs[0];
-      if (!latest) return 2;
+      if (!latest) return 4;
+      if (isWorkflowRunWaiting(latest)) return 1;
+      if (latest.status === "in_progress") return 2;
+      if (isWorkflowRunPending(latest)) return 3;
       if (latest.conclusion === "failure") return 0;
-      if (latest.status === "in_progress") return 1;
-      return 2;
+      return 4;
     };
     return priorityOf(a) - priorityOf(b);
   });
@@ -165,14 +167,8 @@ export default function ActionsTab(props: ActionsTabProps) {
     return props.workflowRuns.filter((run) => {
       if (!isRunVisible(run, { ignoredIds, showPrRuns: viewState.showPrRuns, globalFilter })) return false;
 
-      if (conclusionFilter !== "all") {
-        if (conclusionFilter === "running") {
-          if (run.status !== "in_progress") return false;
-        } else if (conclusionFilter === "other") {
-          if (run.conclusion === null || (KNOWN_CONCLUSIONS as readonly string[]).includes(run.conclusion)) return false;
-        } else {
-          if (run.conclusion !== conclusionFilter) return false;
-        }
+      if (!matchesActionsConclusionFilter(run, conclusionFilter, KNOWN_CONCLUSIONS)) {
+        return false;
       }
 
       if (eventFilter !== "all") {
@@ -268,13 +264,18 @@ export default function ActionsTab(props: ActionsTabProps) {
               let passed = 0;
               let failed = 0;
               let running = 0;
+              let waiting = 0;
+              let pending = 0;
               for (const wf of wfs) {
                 const latest = wf.runs[0];
-                if (latest?.conclusion === "success") passed++;
-                else if (latest?.conclusion === "failure") failed++;
-                else if (latest?.status === "in_progress") running++;
+                if (!latest) continue;
+                if (latest.status === "in_progress") running++;
+                else if (isWorkflowRunWaiting(latest)) waiting++;
+                else if (isWorkflowRunPending(latest)) pending++;
+                else if (latest.conclusion === "success") passed++;
+                else if (latest.conclusion === "failure") failed++;
               }
-              return { total, passed, failed, running };
+              return { total, passed, failed, running, waiting, pending };
             });
 
             return (
@@ -299,22 +300,34 @@ export default function ActionsTab(props: ActionsTabProps) {
                     collapsedSummary={
                       <span class="ml-auto text-xs font-normal text-base-content/60">
                         {workflowCounts().total} workflow{workflowCounts().total !== 1 ? "s" : ""}
-                        <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0}>
+                        <Show when={workflowCounts().passed > 0 || workflowCounts().failed > 0 || workflowCounts().running > 0 || workflowCounts().waiting > 0 || workflowCounts().pending > 0}>
                           {": "}
                           <Show when={workflowCounts().passed > 0}>
                             <span>{workflowCounts().passed} passed</span>
                           </Show>
-                          <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0)}>
+                          <Show when={workflowCounts().passed > 0 && (workflowCounts().failed > 0 || workflowCounts().running > 0 || workflowCounts().waiting > 0 || workflowCounts().pending > 0)}>
                             {", "}
                           </Show>
                           <Show when={workflowCounts().failed > 0}>
                             <span class="text-error font-medium">{workflowCounts().failed} failed</span>
                           </Show>
-                          <Show when={workflowCounts().failed > 0 && workflowCounts().running > 0}>
+                          <Show when={workflowCounts().failed > 0 && (workflowCounts().running > 0 || workflowCounts().waiting > 0 || workflowCounts().pending > 0)}>
                             {", "}
                           </Show>
                           <Show when={workflowCounts().running > 0}>
                             <span>{workflowCounts().running} running</span>
+                          </Show>
+                          <Show when={workflowCounts().running > 0 && (workflowCounts().waiting > 0 || workflowCounts().pending > 0)}>
+                            {", "}
+                          </Show>
+                          <Show when={workflowCounts().waiting > 0}>
+                            <span class="text-amber-500 font-medium">{workflowCounts().waiting} pending action</span>
+                          </Show>
+                          <Show when={workflowCounts().waiting > 0 && workflowCounts().pending > 0}>
+                            {", "}
+                          </Show>
+                          <Show when={workflowCounts().pending > 0}>
+                            <span>{workflowCounts().pending} pending condition</span>
                           </Show>
                         </Show>
                       </span>

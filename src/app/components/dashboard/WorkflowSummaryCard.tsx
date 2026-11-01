@@ -1,5 +1,6 @@
 import { createMemo, For, Show } from "solid-js";
 import type { WorkflowRun } from "../../services/api";
+import { isWorkflowRunPending, isWorkflowRunWaiting } from "../../lib/filters";
 import WorkflowRunRow from "./WorkflowRunRow";
 import { Tooltip } from "../shared/Tooltip";
 
@@ -19,18 +20,24 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
     let success = 0;
     let failure = 0;
     let running = 0;
+    let waiting = 0;
+    let pending = 0;
     for (const r of props.runs) {
       if (r.status === "in_progress") running++;
+      else if (isWorkflowRunWaiting(r)) waiting++;
+      else if (isWorkflowRunPending(r)) pending++;
       else if (r.conclusion === "success") success++;
       else if (r.conclusion === "failure") failure++;
     }
-    return { success, failure, running };
+    return { success, failure, running, waiting, pending };
   });
 
   const accentColor = createMemo(() => {
-    const { failure, running, success } = counts();
+    const { failure, waiting, running, pending, success } = counts();
     if (failure > 0) return "red";
+    if (waiting > 0) return "amber";
     if (running > 0) return "yellow";
+    if (pending > 0) return "pending";
     if (success > 0 && success === props.runs.length) return "green";
     return "gray";
   });
@@ -40,7 +47,9 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
   const borderLeftClass = createMemo(() => {
     const color = accentColor();
     if (color === "red") return "border-l-4 border-l-error";
+    if (color === "amber") return "border-l-4 border-l-amber-500";
     if (color === "yellow") return "border-l-4 border-l-warning";
+    if (color === "pending") return "border-l-4 border-l-warning/50";
     if (color === "green") return "border-l-4 border-l-success";
     return "border-l-4 border-l-base-300";
   });
@@ -98,6 +107,20 @@ export default function WorkflowSummaryCard(props: WorkflowSummaryCardProps) {
             <Tooltip content={`${counts().running} running`}>
               <span class="text-xs font-medium text-warning" aria-label={`${counts().running} running`}>
                 {counts().running}
+              </span>
+            </Tooltip>
+          </Show>
+          <Show when={counts().waiting > 0}>
+            <Tooltip content={`${counts().waiting} pending action`}>
+              <span class="text-xs font-medium text-amber-500" aria-label={`${counts().waiting} pending action`}>
+                {counts().waiting}
+              </span>
+            </Tooltip>
+          </Show>
+          <Show when={counts().pending > 0}>
+            <Tooltip content={`${counts().pending} pending condition`}>
+              <span class="text-xs font-medium text-base-content/60" aria-label={`${counts().pending} pending condition`}>
+                {counts().pending}
               </span>
             </Tooltip>
           </Show>

@@ -39,3 +39,33 @@ export function isRunVisible(run: WorkflowRun, opts: ItemFilterOpts): boolean {
   }
   return true;
 }
+
+export function isWorkflowRunWaiting(run: Pick<WorkflowRun, "status" | "conclusion">): boolean {
+  return (
+    run.status === "waiting" ||
+    run.status === "action_required" ||
+    (run.status === "completed" && run.conclusion === "action_required")
+  );
+}
+
+export function isWorkflowRunPending(run: Pick<WorkflowRun, "status">): boolean {
+  return run.status === "queued" || run.status === "pending" || run.status === "requested";
+}
+
+export function matchesActionsConclusionFilter(
+  run: Pick<WorkflowRun, "status" | "conclusion">,
+  conclusionFilter: string,
+  knownConclusions: readonly string[]
+): boolean {
+  if (conclusionFilter === "all") return true;
+  if (conclusionFilter === "running") return run.status === "in_progress";
+  if (conclusionFilter === "waiting") return isWorkflowRunWaiting(run);
+  if (conclusionFilter === "pending") return isWorkflowRunPending(run);
+  if (run.status === "in_progress" || isWorkflowRunWaiting(run) || isWorkflowRunPending(run)) {
+    return false;
+  }
+  if (conclusionFilter === "other") {
+    return run.conclusion !== null && !knownConclusions.includes(run.conclusion);
+  }
+  return run.conclusion === conclusionFilter;
+}

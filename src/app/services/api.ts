@@ -204,6 +204,20 @@ interface GraphQLIssueSearchResponse {
   rateLimit?: GraphQLRateLimit;
 }
 
+export interface GraphQLRollupStateCount {
+  state: string;
+  count: number;
+}
+
+export interface GraphQLStatusCheckRollup {
+  state: string;
+  contexts?: {
+    checkRunCountsByState?: GraphQLRollupStateCount[] | null;
+  } | null;
+}
+
+const STATUS_CHECK_ROLLUP_FIELDS = `state contexts { checkRunCountsByState { state count } }`;
+
 interface ForkCandidate {
   databaseId: number;
   headOwner: string;
@@ -212,7 +226,7 @@ interface ForkCandidate {
 }
 
 interface ForkRepoResult {
-  object: { statusCheckRollup: { state: string } | null } | null;
+  object: { statusCheckRollup: GraphQLStatusCheckRollup | null } | null;
 }
 
 interface ForkQueryResponse {
@@ -417,7 +431,7 @@ const HEAVY_PR_BACKFILL_QUERY = `
     nodes(ids: $ids) {
       ... on PullRequest {${BASE_PR_BACKFILL_FIELDS}
         mergeStateStatus
-        statusCheckRollup { state }
+        statusCheckRollup { ${STATUS_CHECK_ROLLUP_FIELDS} }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -450,9 +464,9 @@ const HOT_PR_STATUS_QUERY = `
         autoMergeRequest { mergeMethod }
         viewerLatestReview { state }
         viewerLatestReviewRequest { id }
-        statusCheckRollup { state }
+        statusCheckRollup { ${STATUS_CHECK_ROLLUP_FIELDS} }
         isCrossRepository
-        headRef { target { ... on Commit { statusCheckRollup { state } } } }
+        headRef { target { ... on Commit { statusCheckRollup { ${STATUS_CHECK_ROLLUP_FIELDS} } } } }
       }
     }
     rateLimit { cost limit remaining resetAt }
@@ -470,9 +484,9 @@ interface HotPRStatusNode {
   autoMergeRequest?: { mergeMethod: string } | null;
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
-  statusCheckRollup?: { state: string } | null;
+  statusCheckRollup?: GraphQLStatusCheckRollup | null;
   isCrossRepository?: boolean;
-  headRef?: { target?: { statusCheckRollup?: { state: string } | null } | null } | null;
+  headRef?: { target?: { statusCheckRollup?: GraphQLStatusCheckRollup | null } | null } | null;
 }
 
 interface HotPRStatusResponse {
@@ -518,7 +532,7 @@ interface GraphQLHeavyPRNode {
   autoMergeRequest?: { mergeMethod: string } | null;
   viewerLatestReview?: { state: string } | null;
   viewerLatestReviewRequest?: { id: string } | null;
-  statusCheckRollup?: { state: string } | null;
+  statusCheckRollup?: GraphQLStatusCheckRollup | null;
 }
 
 interface LightCombinedSearchResponse {
@@ -718,7 +732,7 @@ async function runForkPRFallback(
         `fork${i}: repository(owner: $owner${i}, name: $repo${i}) {
             object(expression: $sha${i}) {
               ... on Commit {
-                statusCheckRollup { state }
+                statusCheckRollup { ${STATUS_CHECK_ROLLUP_FIELDS} }
               }
             }
           }`
@@ -735,10 +749,10 @@ async function runForkPRFallback(
 
       for (let i = 0; i < forkChunk.length; i++) {
         const data = forkResponse[`fork${i}`] as ForkRepoResult | null | undefined;
-        const state = data?.object?.statusCheckRollup?.state ?? null;
+        const rollup = data?.object?.statusCheckRollup ?? null;
         const pr = prMap.get(forkChunk[i].databaseId);
         if (pr) {
-          pr.checkStatus = mapCheckStatus(state);
+          pr.checkStatus = mapCheckStatus(rollup);
         }
       }
     } catch (err) {
@@ -753,8 +767,8 @@ async function runForkPRFallback(
         const pr = prMap.get(forkChunk[i].databaseId);
         if (!pr) continue;
         if (data) {
-          const state = data.object?.statusCheckRollup?.state ?? null;
-          pr.checkStatus = mapCheckStatus(state);
+          const rollup = data.object?.statusCheckRollup ?? null;
+          pr.checkStatus = mapCheckStatus(rollup);
         } else {
           pr.checkStatusStale = true;
         }
@@ -1134,10 +1148,6 @@ export interface PREnrichmentData {
   viewerLatestReviewState: ViewerReviewState | null;
 }
 
-function extractRollupState(node: { statusCheckRollup?: { state: string } | null }): string | null {
-  return node.statusCheckRollup?.state ?? null;
-}
-
 function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PREnrichmentData {
   const pendingLogins = (node.reviewRequests?.nodes ?? [])
     .map((n) => n?.requestedReviewer?.login)
@@ -1151,7 +1161,7 @@ function mapHeavyPRNode(node: GraphQLHeavyPRNode, isLightFallback: boolean): PRE
     ? null
     : applyMergeStateOverride(
         node.mergeStateStatus ?? "",
-        mapCheckStatus(extractRollupState(node)),
+        mapCheckStatus(node.statusCheckRollup ?? null),
       );
 
   let headRepository: PREnrichmentData["headRepository"] = null;
@@ -1922,7 +1932,7 @@ export async function fetchIssuesAndPullRequests(
       cached.userLogin === normalizedLogin &&
       cached.updatedAt === pr.updatedAt &&
       !cached.enrichment.checkStatusStale &&
-      cached.enrichment.checkStatus !== "pending" &&
+      !isNonTerminalCheckStatus(cached.enrichment.checkStatus) &&
       Date.now() - cached.fetchedAt < _enrichmentCacheTtlMs
     ) {
       return cached.enrichment;
@@ -2092,7 +2102,7 @@ export async function fetchIssuesAndPullRequests(
     for (const [prId, rawEnrichment] of freshEnrichments) {
       const finalPr = enrichedPRMap.get(prId);
       const nodeId = nodeIdMap.get(prId);
-      if (finalPr && nodeId && !finalPr.checkStatusStale && finalPr.checkStatus !== "pending") {
+      if (finalPr && nodeId && !finalPr.checkStatusStale && !isNonTerminalCheckStatus(finalPr.checkStatus)) {
         _prEnrichmentCache.set(nodeId, {
           userLogin: normalizedLogin,
           updatedAt: finalPr.updatedAt,
@@ -2129,19 +2139,50 @@ export async function fetchIssuesAndPullRequests(
 }
 
 /**
- * Maps a GraphQL statusCheckRollup state string to the app's CheckStatus type.
+ * True when a PR's checkStatus is non-terminal ("running", "waiting", or "pending"),
+ * meaning CI has not reached a settled pass/fail/conflict state.
  */
-function mapCheckStatus(state: string | null | undefined): CheckStatus["status"] {
+export function isNonTerminalCheckStatus(status: CheckStatus["status"]): boolean {
+  return status === "running" || status === "waiting" || status === "pending";
+}
+
+/**
+ * Maps a GraphQL statusCheckRollup object (or state string) to the app's CheckStatus["status"].
+ * Non-terminal rollups (PENDING / EXPECTED / QUEUED) inspect contexts.checkRunCountsByState:
+ * - IN_PROGRESS > 0 -> "running"
+ * - WAITING > 0 or ACTION_REQUIRED > 0 -> "waiting"
+ * - otherwise (e.g. QUEUED > 0, pending StatusContext, or omitted contexts) -> "pending"
+ */
+function mapCheckStatus(rollup: GraphQLStatusCheckRollup | string | null | undefined): CheckStatus["status"] {
+  const state = typeof rollup === "string" ? rollup : rollup?.state ?? null;
   if (state === "FAILURE" || state === "ERROR" || state === "ACTION_REQUIRED") return "failure";
-  if (state === "PENDING" || state === "EXPECTED" || state === "QUEUED") return "pending";
   if (state === "SUCCESS") return "success";
+  if (state === "PENDING" || state === "EXPECTED" || state === "QUEUED") {
+    const checkRunCounts =
+      typeof rollup === "object" && rollup !== null
+        ? rollup.contexts?.checkRunCountsByState
+        : undefined;
+    if (Array.isArray(checkRunCounts)) {
+      if (checkRunCounts.some((c) => c.state === "IN_PROGRESS" && c.count > 0)) return "running";
+      if (
+        checkRunCounts.some(
+          (c) => (c.state === "WAITING" || c.state === "ACTION_REQUIRED") && c.count > 0,
+        )
+      ) {
+        return "waiting";
+      }
+      return "pending";
+    }
+    return "pending";
+  }
   return null;
 }
 
 /**
  * Applies mergeStateStatus overrides to a PR's checkStatus.
- * DIRTY/BEHIND → conflict. UNSTABLE → failure unless checkStatus is already pending
- * (a pending rollup means checks are still running, not conclusively failed).
+ * DIRTY/BEHIND → conflict. UNSTABLE → failure unless checkStatus is non-terminal
+ * ("running", "waiting", or "pending"), since a non-terminal rollup means checks
+ * are still active or awaiting action/conditions rather than conclusively failed.
  * All other values (CLEAN, BLOCKED, HAS_HOOKS, UNKNOWN) pass through unchanged.
  */
 function applyMergeStateOverride(
@@ -2149,7 +2190,7 @@ function applyMergeStateOverride(
   checkStatus: CheckStatus["status"],
 ): CheckStatus["status"] {
   if (mergeStateStatus === "DIRTY" || mergeStateStatus === "BEHIND") return "conflict";
-  if (mergeStateStatus === "UNSTABLE" && checkStatus !== "pending") return "failure";
+  if (mergeStateStatus === "UNSTABLE" && !isNonTerminalCheckStatus(checkStatus)) return "failure";
   return checkStatus;
 }
 
@@ -2462,10 +2503,10 @@ export async function fetchHotPRStatus(
 
       // Fork PRs whose CI runs only in the fork report no PR-level rollup; read the
       // fork head commit's rollup instead (the same source runForkPRFallback uses).
-      const rollupState =
-        extractRollupState(node) ??
-        (node.isCrossRepository ? (node.headRef?.target?.statusCheckRollup?.state ?? null) : null);
-      const checkStatus = applyMergeStateOverride(node.mergeStateStatus, mapCheckStatus(rollupState));
+      const rollup =
+        node.statusCheckRollup ??
+        (node.isCrossRepository ? (node.headRef?.target?.statusCheckRollup ?? null) : null);
+      const checkStatus = applyMergeStateOverride(node.mergeStateStatus, mapCheckStatus(rollup));
 
       results.set(node.databaseId, {
         state: node.state,
