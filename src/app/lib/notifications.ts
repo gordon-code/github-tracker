@@ -22,6 +22,8 @@ export function canNotify(config: Config): boolean {
 
 // ── New item detection ────────────────────────────────────────────────────────
 
+export const SEEN_ID_CAP = 20_000;
+
 // In-memory sets of seen IDs — not persisted across page loads
 const seenIssueIds = new Set<number>();
 const seenPrIds = new Set<number>();
@@ -30,6 +32,33 @@ const seenRunIds = new Set<number>();
 // True after the first fetch completes — prevents flood on initial load
 let initialized = false;
 
+function markIdSeen(set: Set<number>, id: number): void {
+  set.delete(id);
+  set.add(id);
+  if (set.size > SEEN_ID_CAP) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) {
+      set.delete(oldest);
+    }
+  }
+}
+
+function collectNewAndMarkSeen<T extends { id: number }>(set: Set<number>, items: T[]): T[] {
+  for (const item of items) {
+    if (set.has(item.id)) {
+      markIdSeen(set, item.id);
+    }
+  }
+  const newItems: T[] = [];
+  for (const item of items) {
+    if (!set.has(item.id)) {
+      newItems.push(item);
+      markIdSeen(set, item.id);
+    }
+  }
+  return newItems;
+}
+
 export interface NewItems {
   issues: Issue[];
   pullRequests: PullRequest[];
@@ -37,40 +66,19 @@ export interface NewItems {
 }
 
 export function detectNewItems(current: DashboardData): NewItems {
-  const newIssues: Issue[] = [];
-  const newPrs: PullRequest[] = [];
-  const newRuns: WorkflowRun[] = [];
-
   if (!initialized) {
     // First fetch: populate seen sets without notifying
-    for (const item of current.issues) seenIssueIds.add(item.id);
-    for (const item of current.pullRequests) seenPrIds.add(item.id);
-    for (const item of current.workflowRuns) seenRunIds.add(item.id);
+    for (const item of current.issues) markIdSeen(seenIssueIds, item.id);
+    for (const item of current.pullRequests) markIdSeen(seenPrIds, item.id);
+    for (const item of current.workflowRuns) markIdSeen(seenRunIds, item.id);
     initialized = true;
     console.debug(`[notifications] seeded: ${seenIssueIds.size} issues, ${seenPrIds.size} PRs, ${seenRunIds.size} runs`);
     return { issues: [], pullRequests: [], workflowRuns: [] };
   }
 
-  for (const item of current.issues) {
-    if (!seenIssueIds.has(item.id)) {
-      seenIssueIds.add(item.id);
-      newIssues.push(item);
-    }
-  }
-
-  for (const item of current.pullRequests) {
-    if (!seenPrIds.has(item.id)) {
-      seenPrIds.add(item.id);
-      newPrs.push(item);
-    }
-  }
-
-  for (const item of current.workflowRuns) {
-    if (!seenRunIds.has(item.id)) {
-      seenRunIds.add(item.id);
-      newRuns.push(item);
-    }
-  }
+  const newIssues = collectNewAndMarkSeen(seenIssueIds, current.issues);
+  const newPrs = collectNewAndMarkSeen(seenPrIds, current.pullRequests);
+  const newRuns = collectNewAndMarkSeen(seenRunIds, current.workflowRuns);
 
   console.debug(`[notifications] detected: ${newIssues.length} new issues, ${newPrs.length} new PRs, ${newRuns.length} new runs (seen: ${seenIssueIds.size}/${seenPrIds.size}/${seenRunIds.size})`);
   return { issues: newIssues, pullRequests: newPrs, workflowRuns: newRuns };
@@ -82,6 +90,14 @@ export function _resetNotificationState(): void {
   seenPrIds.clear();
   seenRunIds.clear();
   initialized = false;
+}
+
+export function _getSeenSizes(): { issues: number; pullRequests: number; workflowRuns: number } {
+  return {
+    issues: seenIssueIds.size,
+    pullRequests: seenPrIds.size,
+    workflowRuns: seenRunIds.size,
+  };
 }
 
 // ── Notification dispatch ─────────────────────────────────────────────────────

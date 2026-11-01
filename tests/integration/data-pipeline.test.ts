@@ -104,7 +104,7 @@ describe("data pipeline: fetch → IDB cache → return", () => {
     expect(workflowRuns[0].repoFullName).toBe("octocat/Hello-World");
 
     // IDB should have been written with the ETag
-    const cacheEntry = await getCacheEntry("runs:octocat/Hello-World:p1");
+    const cacheEntry = await getCacheEntry("runs2:octocat/Hello-World:p1");
     expect(cacheEntry).toBeDefined();
     expect(cacheEntry!.etag).toBe('"etag-v1"');
     expect((cacheEntry!.data as { workflow_runs: unknown[] }).workflow_runs).toHaveLength(1);
@@ -172,11 +172,11 @@ describe("data pipeline: fetch → IDB cache → return", () => {
     );
 
     // Verify it's in IDB
-    expect(await getCacheEntry("runs:octocat/Hello-World:p1")).toBeDefined();
+    expect(await getCacheEntry("runs2:octocat/Hello-World:p1")).toBeDefined();
 
     // Evict the cache
     await clearCache();
-    expect(await getCacheEntry("runs:octocat/Hello-World:p1")).toBeUndefined();
+    expect(await getCacheEntry("runs2:octocat/Hello-World:p1")).toBeUndefined();
 
     // Second fetch should go back to API (no 304 this time)
     const updatedRun = { ...rawRun, id: 9002, run_number: 2 };
@@ -198,7 +198,7 @@ describe("data pipeline: fetch → IDB cache → return", () => {
     expect(workflowRuns[0].id).toBe(9002);
 
     // New ETag stored in IDB
-    const entry = await getCacheEntry("runs:octocat/Hello-World:p1");
+    const entry = await getCacheEntry("runs2:octocat/Hello-World:p1");
     expect(entry!.etag).toBe('"etag-v2"');
 
     // Second call should NOT have sent If-None-Match (cache was empty)
@@ -234,7 +234,7 @@ describe("data pipeline: fetch → IDB cache → return", () => {
     expect(errors[0].retryable).toBe(true);
 
     // IDB should NOT have been written
-    const entry = await getCacheEntry("runs:octocat/Hello-World:p1");
+    const entry = await getCacheEntry("runs2:octocat/Hello-World:p1");
     expect(entry).toBeUndefined();
   });
 });

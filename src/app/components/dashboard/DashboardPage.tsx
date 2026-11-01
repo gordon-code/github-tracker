@@ -58,10 +58,13 @@ const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
 const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
 const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
+export const _testCounters = { exclusiveOwnershipRuns: 0 };
+
 /**
  * Build a scope matcher for a custom tab's org/repo scope. Shared between
- * customTabData and tabCounts. An empty scope (no orgs, no repos) matches
- * nothing — see isTabUnscoped, which flags this state for the UI.
+ * exclusiveCustomTabData, activeCustomTabData, and tabCounts. An empty scope
+ * (no orgs, no repos) matches nothing — see isTabUnscoped, which flags this
+ * state for the UI.
  */
 function buildTabScopeMatcher(tab: CustomTab): (repoFullName: string) => boolean {
   const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
@@ -1135,20 +1138,40 @@ export default function DashboardPage() {
     new Set(dependencyPullRequests().map((pr) => pr.id))
   );
 
-  // Eagerly compute scoped data for exclusive custom tabs (needed by exclusiveOwnership).
-  // Non-exclusive tabs only compute when they are the active tab.
-  const customTabData = createMemo(() => {
-    const currentTabId = activeTab();
-    const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
+  interface CustomTabScopedData {
+    issues: typeof dashboardData.issues;
+    pullRequests: typeof dashboardData.pullRequests;
+    workflowRuns: typeof dashboardData.workflowRuns;
+  }
+
+  function computeCustomTabEntry(tab: CustomTab): CustomTabScopedData {
+    const matchesScope = buildTabScopeMatcher(tab);
+    return {
+      issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
+      pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
+      workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
+    };
+  }
+
+  // Scoped data for exclusive custom tabs only (does NOT depend on activeTab).
+  const exclusiveCustomTabData = createMemo(() => {
+    const result: Record<string, CustomTabScopedData> = {};
     for (const tab of config.customTabs) {
+      if (!tab.exclusive) continue;
       if (!config.enableActions && tab.baseType === "actions") continue;
-      if (!tab.exclusive && tab.id !== currentTabId) continue;
-      const matchesScope = buildTabScopeMatcher(tab);
-      result[tab.id] = {
-        issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
-        pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
-        workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
-      };
+      result[tab.id] = computeCustomTabEntry(tab);
+    }
+    return result;
+  });
+
+  // Scoped data for the currently active non-exclusive custom tab (if any).
+  const activeCustomTabData = createMemo(() => {
+    const currentTabId = activeTab();
+    const result: Record<string, CustomTabScopedData> = {};
+    for (const tab of config.customTabs) {
+      if (tab.exclusive || tab.id !== currentTabId) continue;
+      if (!config.enableActions && tab.baseType === "actions") continue;
+      result[tab.id] = computeCustomTabEntry(tab);
     }
     return result;
   });
@@ -1157,6 +1180,8 @@ export default function DashboardPage() {
   // Only claims items matching the tab's baseType (an exclusive Issues tab must
   // not hide PRs or workflow runs from their respective tabs).
   const exclusiveOwnership = createMemo(() => {
+    _testCounters.exclusiveOwnershipRuns += 1;
+    const exclusiveData = exclusiveCustomTabData();
     const issueOwner = new Map<number, string>();
     const prOwner = new Map<number, string>();
     const runOwner = new Map<number, string>();
@@ -1167,7 +1192,7 @@ export default function DashboardPage() {
     }
     for (const tab of config.customTabs) {
       if (!tab.exclusive) continue;
-      const data = customTabData()[tab.id];
+      const data = exclusiveData[tab.id];
       if (!data) continue;
       if (tab.baseType === "issues") {
         for (const i of data.issues) if (!issueOwner.has(i.id)) issueOwner.set(i.id, tab.id);
@@ -1223,20 +1248,12 @@ export default function DashboardPage() {
     const login = userLogin().toLowerCase();
     const monitoredSet = new Set((config.monitoredRepos ?? []).map((r) => r.fullName));
     const users = allUsers();
+    const exclusiveData = exclusiveCustomTabData();
     const customCounts: Record<string, number> = {};
     for (const tab of config.customTabs) {
       if (!config.enableActions && tab.baseType === "actions") continue;
-      // customTabData skips non-exclusive inactive tabs (perf optimization),
-      // so compute scope on demand for tabs absent from the memo.
-      let data = customTabData()[tab.id];
-      if (!data) {
-        const matchesScope = buildTabScopeMatcher(tab);
-        data = {
-          issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
-          pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
-          workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
-        };
-      }
+      // exclusiveCustomTabData caches exclusive tabs; compute scope on demand for non-exclusive tabs.
+      const data = exclusiveData[tab.id] ?? computeCustomTabEntry(tab);
       // Merge filter chain via shared helper (same as tab components)
       const preset = tab.filterPreset;
       if (tab.baseType === "issues") {
@@ -1997,13 +2014,14 @@ export default function DashboardPage() {
                 {(tab) => {
                   // Apply exclusivity: exclude items owned by OTHER exclusive tabs
                   const data = createMemo(() => {
-                    const raw = customTabData()[tab().id];
+                    const tabId = tab().id;
+                    const raw = exclusiveCustomTabData()[tabId] ?? activeCustomTabData()[tabId];
                     if (!raw) return { issues: [] as typeof dashboardData.issues, pullRequests: [] as typeof dashboardData.pullRequests, workflowRuns: [] as typeof dashboardData.workflowRuns };
                     const ownership = exclusiveOwnership();
                     return {
-                      issues: raw.issues.filter((i) => isItemVisibleOnTab(ownership.issues, i.id, tab().id)),
-                      pullRequests: raw.pullRequests.filter((p) => isItemVisibleOnTab(ownership.pullRequests, p.id, tab().id)),
-                      workflowRuns: raw.workflowRuns.filter((w) => isItemVisibleOnTab(ownership.actions, w.id, tab().id)),
+                      issues: raw.issues.filter((i) => isItemVisibleOnTab(ownership.issues, i.id, tabId)),
+                      pullRequests: raw.pullRequests.filter((p) => isItemVisibleOnTab(ownership.pullRequests, p.id, tabId)),
+                      workflowRuns: raw.workflowRuns.filter((w) => isItemVisibleOnTab(ownership.actions, w.id, tabId)),
                     };
                   });
                   return (

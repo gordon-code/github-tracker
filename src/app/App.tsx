@@ -1,10 +1,10 @@
-import { createSignal, createEffect, onMount, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
+import { createSignal, createEffect, on, onMount, onCleanup, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
 import * as Sentry from "@sentry/solid";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
-import { evictStaleEntries } from "./stores/cache";
+import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
 import { initClientWatcher } from "./services/github";
 import { initMcpRelay } from "./lib/mcp-relay";
 import LoginPage from "./pages/LoginPage";
@@ -173,6 +173,24 @@ export default function App() {
     document.documentElement.dataset.density = config.viewDensity;
   });
 
+  createEffect(
+    on(
+      () => config.selectedRepos.map((r) => r.fullName).join(","),
+      (currentCsv, prevCsv) => {
+        if (!prevCsv) return;
+        const currentSet = new Set(currentCsv.split(",").filter(Boolean));
+        const removed = prevCsv
+          .split(",")
+          .filter((r) => r.length > 0 && !currentSet.has(r));
+        if (removed.length > 0) {
+          evictKeysWithPrefix(removed.map((r) => `runs2:${r}:`)).catch(() => {
+            // Non-fatal — cache eviction failure is acceptable
+          });
+        }
+      },
+    ),
+  );
+
   onMount(() => {
     // Listen for system theme changes so "auto" reacts immediately
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -189,8 +207,19 @@ export default function App() {
     initClientWatcher();
     initMcpRelay();
     pruneStaleIgnoredItems();
-    evictStaleEntries(24 * 60 * 60 * 1000).catch(() => {
+
+    const staleCacheMaxAgeMs = 24 * 60 * 60 * 1000;
+    const staleEvictionIntervalMs = 60 * 60 * 1000;
+    evictStaleEntries(staleCacheMaxAgeMs).catch(() => {
       // Non-fatal — stale eviction failure is acceptable
+    });
+    const evictionInterval = setInterval(() => {
+      evictStaleEntries(staleCacheMaxAgeMs).catch(() => {
+        // Non-fatal — stale eviction failure is acceptable
+      });
+    }, staleEvictionIntervalMs);
+    onCleanup(() => {
+      clearInterval(evictionInterval);
     });
 
     // Preload dashboard chunk in parallel with token validation to avoid

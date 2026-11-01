@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createSignal } from "solid-js";
-import { render } from "@solidjs/testing-library";
+import { render, fireEvent } from "@solidjs/testing-library";
 import { rateLimitCssClass } from "../../../src/app/lib/format";
 import { applyHotPollPRUpdates } from "../../../src/app/components/dashboard/DashboardPage";
 import { makePullRequest } from "../../helpers/index";
@@ -309,12 +309,78 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
 
     return {
       DashboardPage: freshDash.default,
+      _testCounters: freshDash._testCounters,
+      freshConfig,
+      freshView,
       setLastRefreshAt,
       triggerAuthCleared: () => {
         for (const cb of authClearCallbacks) cb();
       },
     };
   }
+
+  it("does not recompute exclusiveOwnership when switching between built-in tabs", async () => {
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const { DashboardPage: FreshDashboard, _testCounters, freshConfig, freshView } =
+      await setupJiraDedupeMocks(mockSearchJql);
+
+    freshConfig.updateConfig({
+      selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+      customTabs: [
+        {
+          id: "exclusive-issues",
+          name: "Exclusive Issues",
+          baseType: "issues",
+          orgScope: ["octocat"],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: true,
+        },
+        {
+          id: "non-exclusive-prs",
+          name: "Team PRs",
+          baseType: "pullRequests",
+          orgScope: ["octocat"],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: false,
+        },
+      ],
+    });
+    freshView.updateViewState({ lastActiveTab: "issues" });
+
+    _testCounters.exclusiveOwnershipRuns = 0;
+
+    const { unmount, getByRole } = render(() => <FreshDashboard />);
+    try {
+      const runsAfterMount = _testCounters.exclusiveOwnershipRuns;
+      expect(runsAfterMount).toBeGreaterThan(0);
+
+      // Switch to Pull Requests tab via TabBar click and viewState
+      const prTabBtn = getByRole("tab", { name: /Pull Requests/i });
+      fireEvent.click(prTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("pullRequests");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+
+      // Switch to Actions tab and back to Issues tab
+      const actionsTabBtn = getByRole("tab", { name: /Actions/i });
+      fireEvent.click(actionsTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("actions");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+
+      const issuesTabBtn = getByRole("tab", { name: /^Issues/i });
+      fireEvent.click(issuesTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("issues");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+    } finally {
+      unmount();
+    }
+  });
 
   it("skips the duplicate post-refresh Jira fetch when the first poll completes 5 s after mount, and fetches on the next poll at +60 s", async () => {
     vi.useFakeTimers();

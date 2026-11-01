@@ -8,8 +8,14 @@ import {
   deleteCacheEntry,
   clearCache,
   evictStaleEntries,
+  evictKeysWithPrefix,
   cachedFetch,
 } from "../../src/app/stores/cache";
+import {
+  projectRunsPage,
+  mapWorkflowRun,
+  type RawWorkflowRunsResponse,
+} from "../../src/app/services/api";
 
 vi.mock("@sentry/solid", () => ({
   captureException: vi.fn(),
@@ -373,5 +379,123 @@ describe("cachedFetch", () => {
     await expect(cachedFetch("bad:status", fetchFn)).rejects.toThrow(
       "Unexpected fetch status: 500"
     );
+  });
+
+  it("projects workflow run payloads before storing on 200 and preserves mapper equivalence across 200 and 304", async () => {
+    const fullRun = {
+      id: 4201,
+      name: "CI",
+      status: "completed",
+      conclusion: "success",
+      event: "push",
+      workflow_id: 77,
+      head_sha: "abc1234def5678",
+      head_branch: "main",
+      run_number: 18,
+      html_url: "https://github.com/octocat/Hello-World/actions/runs/4201",
+      created_at: "2026-11-01T10:00:00Z",
+      updated_at: "2026-11-01T10:05:00Z",
+      run_started_at: "2026-11-01T10:00:05Z",
+      completed_at: "2026-11-01T10:05:00Z",
+      run_attempt: 1,
+      display_title: "Run CI suite",
+      actor: {
+        login: "octocat",
+        id: 1,
+        avatar_url: "https://avatars.githubusercontent.com/u/1?v=4",
+        html_url: "https://github.com/octocat",
+      },
+      repository: {
+        id: 1296269,
+        name: "Hello-World",
+        full_name: "octocat/Hello-World",
+      },
+      head_repository: {
+        id: 1296269,
+        name: "Hello-World",
+        full_name: "octocat/Hello-World",
+      },
+      jobs_url: "https://api.github.com/repos/octocat/Hello-World/actions/runs/4201/jobs",
+    };
+
+    const fullPage: RawWorkflowRunsResponse = {
+      total_count: 1,
+      workflow_runs: [fullRun],
+    };
+
+    const fetch200 = vi.fn().mockResolvedValue({
+      data: fullPage,
+      etag: '"runs-etag-1"',
+      lastModified: null,
+      status: 200,
+    });
+
+    const res200 = await cachedFetch<RawWorkflowRunsResponse>(
+      "runs2:octocat/Hello-World:p1",
+      fetch200,
+      { project: projectRunsPage }
+    );
+
+    const returned200Page = res200.data as RawWorkflowRunsResponse;
+    const returnedRun = returned200Page.workflow_runs[0] as unknown as Record<string, unknown>;
+    expect(returnedRun.repository).toBeUndefined();
+    expect(returnedRun.head_repository).toBeUndefined();
+    expect(returnedRun.jobs_url).toBeUndefined();
+    expect(returnedRun.actor).toEqual({ login: "octocat" });
+
+    const stored = await getCacheEntry("runs2:octocat/Hello-World:p1");
+    expect(stored).toBeDefined();
+    const storedPage = stored!.data as RawWorkflowRunsResponse;
+    const storedRun = storedPage.workflow_runs[0] as unknown as Record<string, unknown>;
+    expect(storedRun.repository).toBeUndefined();
+    expect(storedRun.head_repository).toBeUndefined();
+    expect(storedRun.actor).toEqual({ login: "octocat" });
+
+    // Mapper output on projected run deep-equals mapper output on full run
+    const mappedFromFull = mapWorkflowRun(fullRun, "octocat/Hello-World");
+    const mappedFrom200 = mapWorkflowRun(returned200Page.workflow_runs[0], "octocat/Hello-World");
+    expect(mappedFrom200).toEqual(mappedFromFull);
+
+    // Subsequent 304 returns cached projected data that maps identically
+    const fetch304 = vi.fn().mockResolvedValue({
+      data: null,
+      etag: null,
+      lastModified: null,
+      status: 304,
+    });
+
+    const res304 = await cachedFetch<RawWorkflowRunsResponse>(
+      "runs2:octocat/Hello-World:p1",
+      fetch304,
+      { project: projectRunsPage }
+    );
+
+    expect(res304.fromCache).toBe(true);
+    const returned304Page = res304.data as RawWorkflowRunsResponse;
+    expect(mapWorkflowRun(returned304Page.workflow_runs[0], "octocat/Hello-World")).toEqual(
+      mappedFromFull
+    );
+  });
+});
+
+describe("evictKeysWithPrefix", () => {
+  it("deletes only keys starting with any of the provided prefixes", async () => {
+    await setCacheEntry("runs2:a/b:p1", { page: 1 }, "e1");
+    await setCacheEntry("runs2:a/b:p2", { page: 2 }, "e2");
+    await setCacheEntry("runs2:c/d:p1", { page: 1 }, "e3");
+    await setCacheEntry("other:key", { other: true }, "e4");
+
+    await evictKeysWithPrefix(["runs2:a/b:"]);
+
+    expect(await getCacheEntry("runs2:a/b:p1")).toBeUndefined();
+    expect(await getCacheEntry("runs2:a/b:p2")).toBeUndefined();
+    expect(await getCacheEntry("runs2:c/d:p1")).toBeDefined();
+    expect(await getCacheEntry("other:key")).toBeDefined();
+  });
+
+  it("is a no-op when passed an empty prefix list", async () => {
+    await setCacheEntry("runs2:a/b:p1", { page: 1 }, "e1");
+    await evictKeysWithPrefix([]);
+    expect(await getCacheEntry("runs2:a/b:p1")).toBeDefined();
   });
 });

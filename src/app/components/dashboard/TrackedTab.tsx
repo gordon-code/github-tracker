@@ -1,4 +1,4 @@
-import { For, Show, Switch, Match, createMemo } from "solid-js";
+import { For, Show, Switch, Match, createMemo, onCleanup } from "solid-js";
 import { config } from "../../stores/config";
 import { viewState, untrackItem, moveTrackedItem, untrackJiraItem, moveJiraItem } from "../../stores/view";
 import type { TrackedItem } from "../../stores/view";
@@ -32,6 +32,12 @@ function TypeBadge(props: { type: TrackedItem["type"] }) {
 
 // FLIP animation: record positions before move, animate slide after DOM updates
 const itemRefs = new Map<string, HTMLDivElement>();
+
+// Test-only accessor for the module-level itemRefs Map — lets tests verify
+// row unmount and tab cleanup remove detached DOM references.
+export function _getItemRefsCount(): number {
+  return itemRefs.size;
+}
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -114,11 +120,20 @@ export default function TrackedTab(props: TrackedTabProps) {
               const isFirst = () => index() === 0;
               const isLast = () => index() === viewState.trackedItems.length - 1;
               const itemKey = `${item.type}:${item.id}`;
+              let rowEl: HTMLDivElement | undefined;
+              onCleanup(() => {
+                if (itemRefs.get(itemKey) === rowEl) {
+                  itemRefs.delete(itemKey);
+                }
+              });
 
               return (
                 <div
                   class="flex items-center gap-1 compact:gap-0"
-                  ref={(el) => { itemRefs.set(itemKey, el); }}
+                  ref={(el) => {
+                    rowEl = el;
+                    itemRefs.set(itemKey, el);
+                  }}
                 >
                   {/* Reorder buttons */}
                   <div class="flex flex-col shrink-0 pl-2 compact:pl-1">

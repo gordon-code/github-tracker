@@ -43,7 +43,7 @@ interface RawRepo {
   archived?: boolean;
 }
 
-interface RawWorkflowRun {
+export interface RawWorkflowRun {
   id: number;
   name: string;
   status: string;
@@ -61,6 +61,60 @@ interface RawWorkflowRun {
   run_attempt: number;
   display_title: string;
   actor: { login: string } | null;
+}
+
+export interface RawWorkflowRunsResponse {
+  total_count: number;
+  workflow_runs: RawWorkflowRun[];
+}
+
+export function projectRunsPage(raw: RawWorkflowRunsResponse): RawWorkflowRunsResponse {
+  return {
+    total_count: raw.total_count,
+    workflow_runs: (raw.workflow_runs ?? []).map((run) => ({
+      id: run.id,
+      name: run.name,
+      status: run.status,
+      conclusion: run.conclusion,
+      event: run.event,
+      workflow_id: run.workflow_id,
+      head_sha: run.head_sha,
+      head_branch: run.head_branch,
+      run_number: run.run_number,
+      html_url: run.html_url,
+      created_at: run.created_at,
+      updated_at: run.updated_at,
+      run_started_at: run.run_started_at,
+      completed_at: run.completed_at ?? null,
+      run_attempt: run.run_attempt,
+      display_title: run.display_title,
+      actor: run.actor ? { login: run.actor.login } : null,
+    })),
+  };
+}
+
+export function mapWorkflowRun(run: RawWorkflowRun, repoFullName: string): WorkflowRun {
+  return {
+    id: run.id,
+    name: run.name,
+    status: run.status,
+    conclusion: run.conclusion,
+    event: run.event,
+    workflowId: run.workflow_id,
+    headSha: run.head_sha,
+    headBranch: run.head_branch,
+    runNumber: run.run_number,
+    htmlUrl: run.html_url,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    repoFullName,
+    isPrRun: run.event === "pull_request",
+    runStartedAt: run.run_started_at,
+    completedAt: run.completed_at ?? null,
+    runAttempt: run.run_attempt,
+    displayTitle: run.display_title,
+    actorLogin: run.actor?.login ?? "",
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -2378,15 +2432,13 @@ export async function fetchWorkflowRuns(
     while (rawRuns.length < targetRunsPerRepo) {
       const result = await cachedRequest(
         octokit,
-        `runs:${repo.fullName}:p${page}`,
+        `runs2:${repo.fullName}:p${page}`,
         "GET /repos/{owner}/{repo}/actions/runs",
-        { owner: repo.owner, repo: repo.name, per_page: perPage, page }
+        { owner: repo.owner, repo: repo.name, per_page: perPage, page },
+        { project: projectRunsPage }
       );
 
-      const data = result.data as {
-        workflow_runs: RawWorkflowRun[];
-        total_count: number;
-      };
+      const data = result.data as RawWorkflowRunsResponse;
       const runs = data.workflow_runs ?? [];
       rawRuns.push(...runs);
 
@@ -2425,27 +2477,7 @@ export async function fetchWorkflowRuns(
         (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
-        allRuns.push({
-          id: run.id,
-          name: run.name,
-          status: run.status,
-          conclusion: run.conclusion,
-          event: run.event,
-          workflowId: run.workflow_id,
-          headSha: run.head_sha,
-          headBranch: run.head_branch,
-          runNumber: run.run_number,
-          htmlUrl: run.html_url,
-          createdAt: run.created_at,
-          updatedAt: run.updated_at,
-          repoFullName: repo.fullName,
-          isPrRun: run.event === "pull_request",
-          runStartedAt: run.run_started_at,
-          completedAt: run.completed_at ?? null,
-          runAttempt: run.run_attempt,
-          displayTitle: run.display_title,
-          actorLogin: run.actor?.login ?? "",
-        });
+        allRuns.push(mapWorkflowRun(run, repo.fullName));
       }
     }
   });

@@ -124,6 +124,23 @@ export async function evictStaleEntries(maxAgeMs: number): Promise<number> {
   return count;
 }
 
+export async function evictKeysWithPrefix(prefixes: string[]): Promise<void> {
+  const activePrefixes = prefixes.filter((p) => p.length > 0);
+  if (activePrefixes.length === 0) return;
+
+  const db = await getDb();
+  const tx = db.transaction("cache", "readwrite");
+  let cursor = await tx.store.openCursor();
+  while (cursor) {
+    const key = typeof cursor.key === "string" ? cursor.key : cursor.value.key;
+    if (activePrefixes.some((prefix) => key.startsWith(prefix))) {
+      await cursor.delete();
+    }
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+}
+
 export interface FetchResult {
   data: unknown;
   etag: string | null;
@@ -136,11 +153,19 @@ export interface ConditionalHeaders {
   lastModified: string | null;
 }
 
-export async function cachedFetch(
+export interface CachedFetchOptions<T = unknown> {
+  maxAge?: number;
+  project?: (data: T) => T;
+}
+
+export async function cachedFetch<T = unknown>(
   key: string,
   fetchFn: (headers: ConditionalHeaders) => Promise<FetchResult>,
-  maxAge?: number
+  options?: number | CachedFetchOptions<T>
 ): Promise<{ data: unknown; fromCache: boolean }> {
+  const maxAge = typeof options === "number" ? options : options?.maxAge;
+  const project = typeof options === "object" && options !== null ? options.project : undefined;
+
   const existing = await getCacheEntry(key);
 
   let conditionalHeaders: ConditionalHeaders = { etag: null, lastModified: null };
@@ -175,8 +200,9 @@ export async function cachedFetch(
   }
 
   if (result.status === 200) {
-    await setCacheEntry(key, result.data, result.etag, maxAge, result.lastModified);
-    return { data: result.data, fromCache: false };
+    const projectedData = project ? project(result.data as T) : result.data;
+    await setCacheEntry(key, projectedData, result.etag, maxAge, result.lastModified);
+    return { data: projectedData, fromCache: false };
   }
 
   throw new Error(`Unexpected fetch status: ${result.status}`);
