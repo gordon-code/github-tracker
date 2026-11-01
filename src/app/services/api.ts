@@ -1,6 +1,7 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import * as Sentry from "@sentry/solid";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
+import { deleteCacheEntry } from "../stores/cache";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
@@ -246,7 +247,7 @@ const LIGHT_ISSUE_FRAGMENT = `
     url
     createdAt
     updatedAt
-    author { login avatarUrl }
+    author { login avatarUrl(size: 40) }
     labels(first: 10) { nodes { name color } }
     assignees(first: 10) { nodes { login } }
     repository { nameWithOwner stargazerCount }
@@ -283,7 +284,7 @@ const LIGHT_PR_FRAGMENT = `
     url
     createdAt
     updatedAt
-    author { login avatarUrl }
+    author { login avatarUrl(size: 40) }
     repository { nameWithOwner stargazerCount }
     headRefName
     baseRefName
@@ -2570,20 +2571,30 @@ export async function fetchWorkflowRunById(
   descriptor: { id: number; owner: string; repo: string }
 ): Promise<HotWorkflowRunUpdate> {
   const { id, owner, repo } = descriptor;
-  const response = await octokit.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}", {
-    owner,
-    repo,
-    run_id: id,
-  });
+  const cacheKey = `run:${owner}/${repo}:${id}`;
+  const result = await cachedRequest(
+    octokit,
+    cacheKey,
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}",
+    {
+      owner,
+      repo,
+      run_id: id,
+    }
+  );
   // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
-  const run = response.data as unknown as RawWorkflowRun;
-  return {
+  const run = result.data as RawWorkflowRun;
+  const mapped: HotWorkflowRunUpdate = {
     id: run.id,
     status: run.status ?? "",
     conclusion: run.conclusion ?? null,
     updatedAt: run.updated_at,
     completedAt: run.completed_at ?? null,
   };
+  if (mapped.status === "completed") {
+    await deleteCacheEntry(cacheKey);
+  }
+  return mapped;
 }
 
 // ── User validation + upstream repo discovery ─────────────────────────────────

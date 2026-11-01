@@ -129,6 +129,7 @@ const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
 const [jiraLoading, setJiraLoading] = createSignal(false);
 const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
 let _jiraFetching = false;
+let lastJiraFetchStartedAt = 0;
 
 // Dependency dashboard state — module-level for same reasons as jira state above
 const [abandonedDepsMap, setAbandonedDepsMap] = createSignal<Map<string, AbandonedDependency[]>>(new Map());
@@ -380,6 +381,7 @@ onAuthCleared(() => {
   setJiraLoading(false);
   setJiraKeyMap(new Map());
   _jiraFetching = false;
+  lastJiraFetchStartedAt = 0;
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
   setDepMeta(new Map());
@@ -699,6 +701,7 @@ export default function DashboardPage() {
     const client = jiraClient();
     if (!client) return;
     _jiraFetching = true;
+    lastJiraFetchStartedAt = Date.now();
     setJiraLoading(true);
     const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
     try {
@@ -1410,6 +1413,7 @@ export default function DashboardPage() {
     () => _coordinator()?.lastRefreshAt(),
     () => {
       if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      if (Date.now() - lastJiraFetchStartedAt < 20_000) return;
       fetchJiraAssigned().catch(handleJiraError);
     },
     { defer: true }

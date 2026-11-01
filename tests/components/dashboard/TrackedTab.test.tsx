@@ -24,6 +24,7 @@ Object.defineProperty(globalThis, "localStorage", {
 
 vi.mock("../../../src/app/lib/url", () => ({
   isSafeGitHubUrl: () => true,
+  sizedAvatarUrl: (url: string) => url,
 }));
 
 // ── Imports ───────────────────────────────────────────────────────────────────

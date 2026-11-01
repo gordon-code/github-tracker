@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from "solid-js";
+import { sizedAvatarUrl } from "../../lib/url";
 import { Tooltip } from "./Tooltip";
 
 export function buildSurfacedByUsers(
@@ -37,8 +38,10 @@ export default function UserAvatarBadge(props: UserAvatarBadgeProps) {
               >
                 <div class="w-5 rounded-full ring-1 ring-base-100">
                   <img
-                    src={u.avatarUrl}
+                    src={sizedAvatarUrl(u.avatarUrl, 40)}
                     alt={u.login}
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
               </div>

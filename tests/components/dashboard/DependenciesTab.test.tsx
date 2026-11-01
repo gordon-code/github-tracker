@@ -21,7 +21,8 @@ Object.defineProperty(globalThis, "localStorage", {
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock("../../../src/app/lib/url", () => ({
+vi.mock("../../../src/app/lib/url", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/app/lib/url")>()),
   isSafeGitHubUrl: (url: string) => typeof url === "string" && url.startsWith("https://github.com"),
   openGitHubUrl: vi.fn(),
 }));
@@ -738,6 +739,10 @@ describe("DependenciesTab — unknown bot banner", () => {
     renderTab({ pullRequests: [pr] });
     expect(screen.getByRole("button", { name: "Track bot" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+    const img = screen.getByAltText("custom-dep-bot");
+    expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/12345?s=40");
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
   });
 
   it("does not show banner for known dep bots", () => {
@@ -1214,6 +1219,10 @@ describe("DependenciesTab — unknown bot banner", () => {
     renderTab({ pullRequests: [pr] });
     expect(screen.getByRole("button", { name: "Track bot" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeDefined();
+    const img = screen.getByAltText("custom-dep-bot");
+    expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/12345?s=40");
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
   });
 
   it("does not show banner for known dep bots", () => {

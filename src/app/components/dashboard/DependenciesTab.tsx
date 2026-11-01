@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { config, updateConfig } from "../../stores/config";
 import { viewState, setTabFilter, resetAllTabFilters, ignoreItem, unignoreItem, trackItem, untrackItem, DependencyFiltersSchema, setDependencyExpandedGroups } from "../../stores/view";
 import IgnoreBadge from "./IgnoreBadge";
-import { isSafeGitHubUrl } from "../../lib/url";
+import { isSafeGitHubUrl, sizedAvatarUrl } from "../../lib/url";
 import { canApprovePR, canMarkPRReady } from "../../lib/format";
 import { isNonTerminalCheckStatus, type PullRequest } from "../../services/api";
 import type { AbandonedDependency } from "../../lib/dependency-dashboard";
@@ -315,7 +315,13 @@ export default function DependenciesTab(props: DependenciesTabProps) {
         {(bot) => (
           <div class="flex items-center gap-2 px-4 py-2 bg-info/10 border-b border-base-300 text-sm">
             <Show when={bot.avatarUrl}>
-              <img src={bot.avatarUrl} alt={bot.login} class="w-5 h-5 rounded-full" />
+              <img
+                src={sizedAvatarUrl(bot.avatarUrl, 40)}
+                alt={bot.login}
+                class="w-5 h-5 rounded-full"
+                loading="lazy"
+                decoding="async"
+              />
             </Show>
             <span class="flex-1">
               Dependency PRs from <strong>{bot.login}</strong> — track this bot for full coverage?

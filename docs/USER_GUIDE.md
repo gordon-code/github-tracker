@@ -426,7 +426,7 @@ Each full refresh also checks GitHub's own status page for outages affecting Act
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
 
 - **PRs with actively running (`running`) or stale (`checkStatusStale`) CI checks** — re-checks status until checks leave the running state (plus a 60-second window after an inline `Approve` or `Ready?` action to catch newly triggered workflows). PRs in `pending` (`Pending condition`) are re-checked for up to 3 minutes from when they were first seen pending on their current commit, which covers jobs waiting for a runner and gaps between dependent jobs; after that, PRs parked on a condition (such as review or draft status) wait for the next full refresh. A new commit or a return to `running` starts a fresh 3-minute window. PRs paused in `waiting` (`Pending action`) are not hot-polled. For PRs from forks whose CI runs only in the fork, the status is read from the fork's head commit, the same source the full refresh uses.
-- **In-progress or queued workflow runs** — re-checks until the run completes or pauses on an environment approval gate (`waiting`)
+- **In-progress or queued workflow runs** — re-checks until the run completes or pauses on an environment approval gate (`waiting`), using conditional requests (`ETag` / `304 Not Modified`) so unchanged runs do not consume REST rate-limit budget
 
 Default interval: **30 seconds** (configurable from 10 to 120 seconds in Settings).
 

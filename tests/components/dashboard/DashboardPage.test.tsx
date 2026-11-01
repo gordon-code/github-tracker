@@ -1,9 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createSignal } from "solid-js";
+import { render } from "@solidjs/testing-library";
 import { rateLimitCssClass } from "../../../src/app/lib/format";
 import { applyHotPollPRUpdates } from "../../../src/app/components/dashboard/DashboardPage";
 import { makePullRequest } from "../../helpers/index";
 import type { PullRequest } from "../../../src/shared/types";
 import type { HotPRStatusUpdate } from "../../../src/app/services/api";
+import type { DashboardData } from "../../../src/app/services/poll";
 
 describe("rateLimitCssClass", () => {
   it("remaining: 0 gives text-error", () => {
@@ -159,5 +162,225 @@ describe("hot poll terminal PR splice logic", () => {
     expect(state.pullRequests[0].draft).toBe(false);
     expect(state.pullRequests[1].draft).toBe(true);
     expect(state.pullRequests[2].draft).toBe(true);
+  });
+});
+
+// ── Jira duplicate-fetch deduplication on load ───────────────────────────────
+
+describe("DashboardPage — Jira load fetch deduplication", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  async function setupJiraDedupeMocks(mockSearchJql: ReturnType<typeof vi.fn>) {
+    vi.resetModules();
+
+    let identityEpochVal = 0;
+    const authClearCallbacks: (() => void)[] = [];
+    const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+
+    vi.doMock("@solidjs/router", () => ({
+      useNavigate: () => vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => {
+        authClearCallbacks.push(() => {
+          identityEpochVal++;
+          cb();
+        });
+      }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: vi.fn(),
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => identityEpochVal,
+    }));
+
+    vi.doMock("../../../src/app/lib/dashboard-snapshot", () => ({
+      loadSnapshot: vi.fn().mockResolvedValue(null),
+      writeSnapshot: vi.fn(),
+      flushSnapshot: vi.fn().mockResolvedValue(undefined),
+      clearSnapshot: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+
+    vi.doMock("../../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: MockJiraClient,
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../../src/app/services/jira-keys", () => ({
+      detectAndLookupJiraKeys: vi.fn().mockResolvedValue(new Map()),
+      clearJiraKeyCache: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/services/github", () => ({
+      getCoreRateLimit: () => null,
+      getGraphqlRateLimit: () => null,
+      getClient: vi.fn(() => null),
+      updateGraphqlRateLimit: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/lib/notifications", () => ({
+      detectNewItems: vi.fn(() => ({ issues: [], pullRequests: [], workflowRuns: [] })),
+      dispatchNotifications: vi.fn(),
+      _resetNotificationState: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/lib/errors", () => ({
+      getErrors: vi.fn().mockReturnValue([]),
+      getNotifications: vi.fn().mockReturnValue([]),
+      getUnreadCount: vi.fn().mockReturnValue(0),
+      markAllAsRead: vi.fn(),
+      dismissError: vi.fn(),
+      dismissNotificationBySource: vi.fn(),
+      pushError: vi.fn(),
+      pushNotification: vi.fn(),
+      clearErrors: vi.fn(),
+      clearNotifications: vi.fn(),
+      addMutedSource: vi.fn(),
+      isMuted: vi.fn(() => false),
+      clearMutedSources: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/services/poll", () => ({
+      fetchAllData: vi.fn().mockResolvedValue({
+        issues: [],
+        pullRequests: [],
+        workflowRuns: [],
+        errors: [],
+      }),
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, _fetchAll: () => Promise<DashboardData>) => ({
+          isRefreshing: () => false,
+          lastRefreshAt,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        }),
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
+    }));
+
+    const freshView = await import("../../../src/app/stores/view");
+    const freshConfig = await import("../../../src/app/stores/config");
+    const freshDash = await import("../../../src/app/components/dashboard/DashboardPage");
+
+    freshView.resetViewState();
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({
+      enabled: true,
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      authMethod: "oauth",
+    });
+
+    return {
+      DashboardPage: freshDash.default,
+      setLastRefreshAt,
+      triggerAuthCleared: () => {
+        for (const cb of authClearCallbacks) cb();
+      },
+    };
+  }
+
+  it("skips the duplicate post-refresh Jira fetch when the first poll completes 5 s after mount, and fetches on the next poll at +60 s", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt } = await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      // Immediate mount fetch ran once at t = 0
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // First GitHub poll completes 5 s later (within the 20 s deduplication window)
+      await vi.advanceTimersByTimeAsync(5_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // Next GitHub poll completes at +60 s (55 s later, outside the 20 s window)
+      await vi.advanceTimersByTimeAsync(55_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("resets lastJiraFetchStartedAt on logout so the first post-login poll within 20 s fetches Jira issues", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt, triggerAuthCleared } =
+      await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // Logout/login within 20 s (at +5 s) resets lastJiraFetchStartedAt to 0
+      await vi.advanceTimersByTimeAsync(5_000);
+      triggerAuthCleared();
+
+      // Re-mount for the newly logged-in session or trigger the first post-login poll within 20 s
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
   });
 });

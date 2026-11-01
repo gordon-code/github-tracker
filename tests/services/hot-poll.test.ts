@@ -16,12 +16,27 @@ Object.defineProperty(window, "location", {
 
 // Mock github module so getClient returns our fake octokit
 const mockGetClient = vi.fn();
+const defaultCachedRequestImpl = async (
+  octokit: { request: (route: string, params?: Record<string, unknown>) => Promise<{ data: unknown }> },
+  _key: string,
+  route: string,
+  params?: Record<string, unknown>,
+) => {
+  const response = await octokit.request(route, params);
+  return { data: response.data, fromCache: false };
+};
+const mockCachedRequest = vi.fn(defaultCachedRequestImpl);
 vi.mock("../../src/app/services/github", () => ({
   getClient: () => mockGetClient(),
-  cachedRequest: vi.fn(),
+  cachedRequest: (...args: Parameters<typeof defaultCachedRequestImpl>) => mockCachedRequest(...args),
   updateGraphqlRateLimit: vi.fn(),
   updateRateLimitFromHeaders: vi.fn(),
   onApiRequest: vi.fn(),
+}));
+
+const mockDeleteCacheEntry = vi.fn().mockResolvedValue(undefined);
+vi.mock("../../src/app/stores/cache", () => ({
+  deleteCacheEntry: (...args: unknown[]) => mockDeleteCacheEntry(...args),
 }));
 
 // Mock errors/notifications so poll.ts module doesn't crash
@@ -441,8 +456,18 @@ describe("fetchHotPRStatus", () => {
 });
 
 describe("fetchWorkflowRunById", () => {
+  beforeEach(() => {
+    mockCachedRequest.mockReset();
+    mockDeleteCacheEntry.mockClear();
+  });
+
+  afterEach(() => {
+    mockCachedRequest.mockImplementation(defaultCachedRequestImpl);
+  });
+
   it("maps snake_case response to camelCase", async () => {
-    const octokit = makeOctokit(() => Promise.resolve({
+    const octokit = makeOctokit();
+    mockCachedRequest.mockResolvedValue({
       data: {
         id: 100,
         status: "in_progress",
@@ -450,8 +475,8 @@ describe("fetchWorkflowRunById", () => {
         updated_at: "2026-03-29T10:00:00Z",
         completed_at: null,
       },
-      headers: {},
-    }));
+      fromCache: false,
+    });
 
     const result = await fetchWorkflowRunById(octokit as never, {
       id: 100,
@@ -464,19 +489,24 @@ describe("fetchWorkflowRunById", () => {
     expect(result.conclusion).toBeNull();
     expect(result.updatedAt).toBe("2026-03-29T10:00:00Z");
     expect(result.completedAt).toBeNull();
+    expect(mockDeleteCacheEntry).not.toHaveBeenCalled();
   });
 
-  it("calls octokit.request with correct route and params", async () => {
-    const octokit = makeOctokit(() => Promise.resolve({
+  it("calls cachedRequest with key/route/params", async () => {
+    const octokit = makeOctokit();
+    mockCachedRequest.mockResolvedValue({
       data: { id: 200, status: "completed", conclusion: "success", updated_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z" },
-      headers: {},
-    }));
+      fromCache: false,
+    });
 
     await fetchWorkflowRunById(octokit as never, { id: 200, owner: "myorg", repo: "myrepo" });
-    expect(octokit.request).toHaveBeenCalledWith(
+    expect(mockCachedRequest).toHaveBeenCalledWith(
+      octokit,
+      "run:myorg/myrepo:200",
       "GET /repos/{owner}/{repo}/actions/runs/{run_id}",
       { owner: "myorg", repo: "myrepo", run_id: 200 },
     );
+    expect(mockDeleteCacheEntry).toHaveBeenCalledWith("run:myorg/myrepo:200");
   });
 
   // NOTE: updateRateLimitFromHeaders is now handled by the Octokit hook.wrap

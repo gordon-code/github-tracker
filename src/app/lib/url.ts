@@ -31,3 +31,24 @@ export function openGitHubUrl(url: string): void {
   if (!isSafeGitHubUrl(url)) return;
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+/**
+ * Sets or replaces the `s` size query parameter on `https://avatars.githubusercontent.com/`
+ * URLs. Returns any other input (or invalid URLs) unchanged.
+ */
+export function sizedAvatarUrl(url: string, px: number): string {
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.protocol === "https:" &&
+      parsed.hostname === "avatars.githubusercontent.com" &&
+      parsed.pathname.length > 1
+    ) {
+      parsed.searchParams.set("s", String(px));
+      return parsed.toString();
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
