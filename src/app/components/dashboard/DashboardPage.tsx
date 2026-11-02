@@ -712,7 +712,10 @@ export default function DashboardPage() {
       return;
     }
     const client = jiraClient();
-    if (!client) return;
+    if (!client) {
+      setJiraLoading(false);
+      return;
+    }
     _jiraFetching = true;
     _inFlightJiraScope = scope;
     lastJiraFetchStartedAt = Date.now();

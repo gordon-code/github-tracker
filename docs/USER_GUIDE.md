@@ -850,7 +850,7 @@ Encrypted credentials are sealed by this deployment's server and can only be imp
 
 The tracker uses GitHub's GraphQL and REST APIs. Each poll cycle consumes some of your 5,000 request hourly budget. Tracking many repos, tracked users, or having a short refresh interval increases consumption. Increasing the refresh interval or reducing the number of tracked repos will reduce API usage.
 
-A 60-second events poll uses ETag conditional requests to detect changes at near-zero cost, triggering targeted per-repo refreshes only when needed.
+A lightweight 60-second events poll (~1 REST request per cycle) detects new activity by comparing event IDs and triggers targeted per-repo refreshes only when needed.
 
 For detailed per-source API call counts, see Settings > API Usage.
 
@@ -866,7 +866,7 @@ Your token does not have write permission for pull requests. If you are using a 
 
 **Data looks stale after switching back to the tab.**
 
-When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The events poll continues running in background tabs using ETag conditional requests (zero rate-limit cost), so changes are detected even while the tab is hidden.
+When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The lightweight events poll (~1 REST request per 60-second cycle) continues running in background tabs, so changes are detected even while the tab is hidden without the cost of a full refresh.
 
 **I want to stop tracking a repository.**
 

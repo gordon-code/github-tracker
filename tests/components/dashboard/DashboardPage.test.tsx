@@ -621,4 +621,45 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       unmount();
     }
   });
+
+  it("clears jiraLoading if a pending scope-change rerun finds jiraClient() is null", async () => {
+    let resolveFirstFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    const mockSearchJql = vi.fn().mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstFetch = resolve;
+        }),
+    );
+
+    const { DashboardPage: FreshDashboard, freshConfig, freshView } = await setupJiraDedupeMocks(mockSearchJql);
+    freshView.updateViewState({ lastActiveTab: "jiraAssigned" });
+    freshView.setAllExpanded("jiraAssigned", true);
+
+    const { unmount, queryByRole } = render(() => <FreshDashboard />);
+    try {
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(queryByRole("status")).not.toBeNull();
+
+      // Switch scope while in-flight, and switch authMethod to "token" (no email -> createJiraClient returns null)
+      freshView.setTabFilter("jiraAssigned", "scope", "reported");
+      freshConfig.updateJiraConfig({
+        enabled: true,
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+        authMethod: "token",
+      });
+
+      resolveFirstFetch({
+        issues: [],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(queryByRole("status")).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
 });

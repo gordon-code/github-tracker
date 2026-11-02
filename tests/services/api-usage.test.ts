@@ -473,4 +473,38 @@ describe("deriveSource — URL pattern matching", () => {
   it("falls back to 'graphql' for unrecognized apiSource string", () => {
     expect(mod.deriveSource(makeInfo({ isGraphql: true, url: "/graphql", apiSource: "unknownLabel" }))).toBe("graphql");
   });
+
+  it("skips trackApiCall on HTTP 304 Not Modified while still updating resetAt", async () => {
+    const githubMod = await import("../../src/app/services/github");
+    const onApiRequestMock = vi.mocked(githubMod.onApiRequest);
+    const registeredCb = onApiRequestMock.mock.calls.at(-1)?.[0];
+    expect(registeredCb).toBeDefined();
+
+    registeredCb!(
+      makeInfo({
+        url: "/repos/foo/bar/actions/runs/12345",
+        status: 304,
+        resetEpochMs: 1_800_000_000_000,
+      }),
+    );
+
+    expect(mod.getUsageSnapshot()).toEqual([]);
+    expect(mod.getUsageResetAt()).toBe(1_800_000_000_000);
+
+    registeredCb!(
+      makeInfo({
+        url: "/repos/foo/bar/actions/runs/12345",
+        status: 200,
+        resetEpochMs: 1_800_000_000_000,
+      }),
+    );
+
+    expect(mod.getUsageSnapshot()).toEqual([
+      expect.objectContaining({
+        source: "hotRunStatus",
+        pool: "core",
+        count: 1,
+      }),
+    ]);
+  });
 });
