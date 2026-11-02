@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createEffect, createRoot } from "solid-js";
 import { clearCache } from "../../src/app/stores/cache";
 
 const mockPushNotification = vi.fn();
@@ -274,11 +275,20 @@ describe("fetchGitHubStatus", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("304 cache-hit path: reflects parseSummary run against the cached JSON, not empty/null", async () => {
+  it("304 cache-hit path on cold start (_githubStatus() === null): reflects parseSummary run against the cached JSON, not empty/null", async () => {
+    const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+      makeComponent(n, n === "Actions" ? "major_outage" : "operational")
+    );
     const incidents = [makeIncident({ id: "cached-1", name: "Cached Incident", body: "Investigating", componentNames: ["Actions"] })];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }), { etag: "etag-1" })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components, incidents }), { etag: "etag-1" })));
     await fetchGitHubStatus();
     expect(getGitHubStatus()!.incidents).toHaveLength(1);
+
+    // Simulate a cold start / page reload where IndexedDB retains the ETag + JSON
+    // while in-memory _githubStatus() is reset to null:
+    resetGitHubStatusState();
+    mockPushNotification.mockClear();
+    expect(getGitHubStatus()).toBeNull();
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 304 })));
     await fetchGitHubStatus();
@@ -286,6 +296,80 @@ describe("fetchGitHubStatus", () => {
     const result = getGitHubStatus();
     expect(result!.incidents).toHaveLength(1);
     expect(result!.incidents[0].name).toBe("Cached Incident");
+    expect(mockPushNotification).toHaveBeenCalledWith("github-status", "Cached Incident", "error", false);
+  });
+
+  it("short-circuits on a consecutive 304 without re-setting the signal or re-running notifyTransitions", async () => {
+    const incidents = [makeIncident({ id: "cached-1", name: "Cached Incident", body: "Investigating", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }), { etag: "etag-1" })));
+    await fetchGitHubStatus();
+
+    const firstSummary = getGitHubStatus();
+    expect(firstSummary).not.toBeNull();
+
+    let signalEmissions = 0;
+    const dispose = createRoot((d) => {
+      createEffect(() => {
+        getGitHubStatus();
+        signalEmissions++;
+      });
+      return d;
+    });
+
+    try {
+      expect(signalEmissions).toBe(1);
+      mockPushNotification.mockClear();
+      mockDismissNotificationBySource.mockClear();
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 304 })));
+      await fetchGitHubStatus();
+
+      // Signal was not written again and notification transitions did not re-run
+      expect(signalEmissions).toBe(1);
+      expect(getGitHubStatus()).toBe(firstSummary);
+      expect(mockPushNotification).not.toHaveBeenCalled();
+      expect(mockDismissNotificationBySource).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("re-runs parseSummary and notifyTransitions on a 304 after 3 consecutive failures so a dismissed ongoing incident is re-shown", async () => {
+    const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+      makeComponent(n, n === "Actions" ? "major_outage" : "operational")
+    );
+    const incidents = [makeIncident({ id: "inc-recover", name: "Actions Outage", body: "Investigating", componentNames: ["Actions"] })];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components, incidents }), { etag: "etag-inc" })));
+    await fetchGitHubStatus();
+    const initialSummary = getGitHubStatus();
+    expect(mockPushNotification).toHaveBeenCalledWith("github-status", "Actions Outage", "error", false);
+
+    // 3 consecutive failures dismiss the active incident notification
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    mockDismissNotificationBySource.mockClear();
+    await fetchGitHubStatus();
+    await fetchGitHubStatus();
+    await fetchGitHubStatus();
+    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("github-status");
+
+    mockPushNotification.mockClear();
+    mockDismissNotificationBySource.mockClear();
+
+    // Recovery answered by 304 must take the full path and re-push the incident
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 304 })));
+    await fetchGitHubStatus();
+
+    expect(mockPushNotification).toHaveBeenCalledTimes(1);
+    expect(mockPushNotification).toHaveBeenCalledWith("github-status", "Actions Outage", "error", false);
+    const recoveredSummary = getGitHubStatus();
+    expect(recoveredSummary).not.toBe(initialSummary);
+    expect(recoveredSummary!.incidents[0].name).toBe("Actions Outage");
+
+    // Subsequent 304 now short-circuits normally because _consecutiveFailures was reset to 0
+    mockPushNotification.mockClear();
+    await fetchGitHubStatus();
+    expect(mockPushNotification).not.toHaveBeenCalled();
+    expect(getGitHubStatus()).toBe(recoveredSummary);
   });
 
   it("keeps the prior value on a single fetch failure and does not dismiss the notification (CR-002)", async () => {

@@ -58,10 +58,13 @@ const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
 const PR_FILTER_DEFAULTS = PullRequestFiltersSchema.parse({});
 const ACTIONS_FILTER_DEFAULTS = ActionsFiltersSchema.parse({});
 
+export const _testCounters = { exclusiveOwnershipRuns: 0 };
+
 /**
  * Build a scope matcher for a custom tab's org/repo scope. Shared between
- * customTabData and tabCounts. An empty scope (no orgs, no repos) matches
- * nothing — see isTabUnscoped, which flags this state for the UI.
+ * exclusiveCustomTabData, activeCustomTabData, and tabCounts. An empty scope
+ * (no orgs, no repos) matches nothing — see isTabUnscoped, which flags this
+ * state for the UI.
  */
 function buildTabScopeMatcher(tab: CustomTab): (repoFullName: string) => boolean {
   const orgSet = tab.orgScope.length > 0 ? new Set(tab.orgScope.map((o) => o.toLowerCase())) : null;
@@ -129,6 +132,9 @@ const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
 const [jiraLoading, setJiraLoading] = createSignal(false);
 const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
 let _jiraFetching = false;
+let _inFlightJiraScope: string | null = null;
+let _jiraPendingRerun = false;
+let lastJiraFetchStartedAt = 0;
 
 // Dependency dashboard state — module-level for same reasons as jira state above
 const [abandonedDepsMap, setAbandonedDepsMap] = createSignal<Map<string, AbandonedDependency[]>>(new Map());
@@ -380,6 +386,9 @@ onAuthCleared(() => {
   setJiraLoading(false);
   setJiraKeyMap(new Map());
   _jiraFetching = false;
+  _inFlightJiraScope = null;
+  _jiraPendingRerun = false;
+  lastJiraFetchStartedAt = 0;
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
   setDepMeta(new Map());
@@ -695,12 +704,22 @@ export default function DashboardPage() {
   );
 
   async function fetchJiraAssigned(): Promise<void> {
-    if (_jiraFetching) return;
-    const client = jiraClient();
-    if (!client) return;
-    _jiraFetching = true;
-    setJiraLoading(true);
     const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
+    if (_jiraFetching) {
+      if (scope !== _inFlightJiraScope) {
+        _jiraPendingRerun = true;
+      }
+      return;
+    }
+    const client = jiraClient();
+    if (!client) {
+      setJiraLoading(false);
+      return;
+    }
+    _jiraFetching = true;
+    _inFlightJiraScope = scope;
+    lastJiraFetchStartedAt = Date.now();
+    setJiraLoading(true);
     try {
       const result = await client.searchJql(
         jiraJqlForScope(scope),
@@ -711,6 +730,12 @@ export default function DashboardPage() {
         if (missing.length > 0) console.info("[jira] issues missing issuetype:", missing.map((i) => `${i.key}: ${JSON.stringify(i.fields.issuetype)}`));
       }
       if (!isJiraAuthenticated()) return;
+      const currentScope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
+      if (currentScope !== scope) {
+        _jiraPendingRerun = true;
+        return;
+      }
+      _jiraPendingRerun = false;
       setJiraIssues(result.issues);
 
       // Only prune when the result set is complete. The Enhanced JQL Search
@@ -763,6 +788,7 @@ export default function DashboardPage() {
         }
       }
     } catch (err) {
+      lastJiraFetchStartedAt = 0;
       if (err instanceof JiraApiError) {
         if (err.status === 401) {
           clearJiraAuth();
@@ -782,7 +808,14 @@ export default function DashboardPage() {
       }
     } finally {
       _jiraFetching = false;
-      setJiraLoading(false);
+      _inFlightJiraScope = null;
+      if (_jiraPendingRerun && config.jira?.enabled && isJiraAuthenticated()) {
+        _jiraPendingRerun = false;
+        void fetchJiraAssigned().catch(handleJiraError);
+      } else {
+        _jiraPendingRerun = false;
+        setJiraLoading(false);
+      }
     }
   }
 
@@ -1132,20 +1165,40 @@ export default function DashboardPage() {
     new Set(dependencyPullRequests().map((pr) => pr.id))
   );
 
-  // Eagerly compute scoped data for exclusive custom tabs (needed by exclusiveOwnership).
-  // Non-exclusive tabs only compute when they are the active tab.
-  const customTabData = createMemo(() => {
-    const currentTabId = activeTab();
-    const result: Record<string, { issues: typeof dashboardData.issues; pullRequests: typeof dashboardData.pullRequests; workflowRuns: typeof dashboardData.workflowRuns }> = {};
+  interface CustomTabScopedData {
+    issues: typeof dashboardData.issues;
+    pullRequests: typeof dashboardData.pullRequests;
+    workflowRuns: typeof dashboardData.workflowRuns;
+  }
+
+  function computeCustomTabEntry(tab: CustomTab): CustomTabScopedData {
+    const matchesScope = buildTabScopeMatcher(tab);
+    return {
+      issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
+      pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
+      workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
+    };
+  }
+
+  // Scoped data for exclusive custom tabs only (does NOT depend on activeTab).
+  const exclusiveCustomTabData = createMemo(() => {
+    const result: Record<string, CustomTabScopedData> = {};
     for (const tab of config.customTabs) {
+      if (!tab.exclusive) continue;
       if (!config.enableActions && tab.baseType === "actions") continue;
-      if (!tab.exclusive && tab.id !== currentTabId) continue;
-      const matchesScope = buildTabScopeMatcher(tab);
-      result[tab.id] = {
-        issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
-        pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
-        workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
-      };
+      result[tab.id] = computeCustomTabEntry(tab);
+    }
+    return result;
+  });
+
+  // Scoped data for the currently active non-exclusive custom tab (if any).
+  const activeCustomTabData = createMemo(() => {
+    const currentTabId = activeTab();
+    const result: Record<string, CustomTabScopedData> = {};
+    for (const tab of config.customTabs) {
+      if (tab.exclusive || tab.id !== currentTabId) continue;
+      if (!config.enableActions && tab.baseType === "actions") continue;
+      result[tab.id] = computeCustomTabEntry(tab);
     }
     return result;
   });
@@ -1154,6 +1207,8 @@ export default function DashboardPage() {
   // Only claims items matching the tab's baseType (an exclusive Issues tab must
   // not hide PRs or workflow runs from their respective tabs).
   const exclusiveOwnership = createMemo(() => {
+    _testCounters.exclusiveOwnershipRuns += 1;
+    const exclusiveData = exclusiveCustomTabData();
     const issueOwner = new Map<number, string>();
     const prOwner = new Map<number, string>();
     const runOwner = new Map<number, string>();
@@ -1164,7 +1219,7 @@ export default function DashboardPage() {
     }
     for (const tab of config.customTabs) {
       if (!tab.exclusive) continue;
-      const data = customTabData()[tab.id];
+      const data = exclusiveData[tab.id];
       if (!data) continue;
       if (tab.baseType === "issues") {
         for (const i of data.issues) if (!issueOwner.has(i.id)) issueOwner.set(i.id, tab.id);
@@ -1220,20 +1275,12 @@ export default function DashboardPage() {
     const login = userLogin().toLowerCase();
     const monitoredSet = new Set((config.monitoredRepos ?? []).map((r) => r.fullName));
     const users = allUsers();
+    const exclusiveData = exclusiveCustomTabData();
     const customCounts: Record<string, number> = {};
     for (const tab of config.customTabs) {
       if (!config.enableActions && tab.baseType === "actions") continue;
-      // customTabData skips non-exclusive inactive tabs (perf optimization),
-      // so compute scope on demand for tabs absent from the memo.
-      let data = customTabData()[tab.id];
-      if (!data) {
-        const matchesScope = buildTabScopeMatcher(tab);
-        data = {
-          issues: tab.baseType === "issues" ? dashboardData.issues.filter((i) => matchesScope(i.repoFullName)) : [],
-          pullRequests: tab.baseType === "pullRequests" ? dashboardData.pullRequests.filter((p) => matchesScope(p.repoFullName)) : [],
-          workflowRuns: tab.baseType === "actions" ? dashboardData.workflowRuns.filter((w) => matchesScope(w.repoFullName)) : [],
-        };
-      }
+      // exclusiveCustomTabData caches exclusive tabs; compute scope on demand for non-exclusive tabs.
+      const data = exclusiveData[tab.id] ?? computeCustomTabEntry(tab);
       // Merge filter chain via shared helper (same as tab components)
       const preset = tab.filterPreset;
       if (tab.baseType === "issues") {
@@ -1410,6 +1457,7 @@ export default function DashboardPage() {
     () => _coordinator()?.lastRefreshAt(),
     () => {
       if (!config.jira?.enabled || !isJiraAuthenticated()) return;
+      if (Date.now() - lastJiraFetchStartedAt < 20_000) return;
       fetchJiraAssigned().catch(handleJiraError);
     },
     { defer: true }
@@ -1785,7 +1833,7 @@ export default function DashboardPage() {
           `Could not approve ${pr.repoFullName}#${pr.number}: new commits were pushed — refreshing`,
           "warning"
         );
-        _coordinator()?.manualRefresh();
+        handleManualRefresh();
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -1856,6 +1904,11 @@ export default function DashboardPage() {
     }
   }
 
+  function handleManualRefresh(): void {
+    lastJiraFetchStartedAt = 0;
+    _coordinator()?.manualRefresh();
+  }
+
   const isPartialSync = createMemo(() =>
     getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
   );
@@ -1893,7 +1946,7 @@ export default function DashboardPage() {
             <FilterBar
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-              onRefresh={() => _coordinator()?.manualRefresh()}
+              onRefresh={handleManualRefresh}
               sortOptions={activeTab() === "dependencies" ? undefined : globalSortOptions}
               sortValue={activeTab() === "dependencies" ? undefined : viewState.globalSort.field}
               sortDirection={activeTab() === "dependencies" ? undefined : viewState.globalSort.direction}
@@ -1950,7 +2003,7 @@ export default function DashboardPage() {
                   rebaseLabel={config.dependencies.rebaseLabel}
                   userLogin={userLogin()}
                   trackedBotLogins={trackedBotLogins()}
-                  onRefresh={() => _coordinator()?.manualRefresh()}
+                  onRefresh={handleManualRefresh}
                   onApprovePR={handleApprovePR}
                   approvingPRIds={approvingPRIds()}
                   onMarkPRReady={handleMarkPRReady}
@@ -1993,13 +2046,14 @@ export default function DashboardPage() {
                 {(tab) => {
                   // Apply exclusivity: exclude items owned by OTHER exclusive tabs
                   const data = createMemo(() => {
-                    const raw = customTabData()[tab().id];
+                    const tabId = tab().id;
+                    const raw = exclusiveCustomTabData()[tabId] ?? activeCustomTabData()[tabId];
                     if (!raw) return { issues: [] as typeof dashboardData.issues, pullRequests: [] as typeof dashboardData.pullRequests, workflowRuns: [] as typeof dashboardData.workflowRuns };
                     const ownership = exclusiveOwnership();
                     return {
-                      issues: raw.issues.filter((i) => isItemVisibleOnTab(ownership.issues, i.id, tab().id)),
-                      pullRequests: raw.pullRequests.filter((p) => isItemVisibleOnTab(ownership.pullRequests, p.id, tab().id)),
-                      workflowRuns: raw.workflowRuns.filter((w) => isItemVisibleOnTab(ownership.actions, w.id, tab().id)),
+                      issues: raw.issues.filter((i) => isItemVisibleOnTab(ownership.issues, i.id, tabId)),
+                      pullRequests: raw.pullRequests.filter((p) => isItemVisibleOnTab(ownership.pullRequests, p.id, tabId)),
+                      workflowRuns: raw.workflowRuns.filter((w) => isItemVisibleOnTab(ownership.actions, w.id, tabId)),
                     };
                   });
                   return (

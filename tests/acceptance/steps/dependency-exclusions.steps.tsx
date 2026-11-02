@@ -142,6 +142,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
 vi.mock("../../../src/app/lib/url", () => ({
   isSafeGitHubUrl: vi.fn(() => true),
   openGitHubUrl: vi.fn(),
+  sizedAvatarUrl: (url: string) => url,
 }));
 
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";

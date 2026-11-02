@@ -124,6 +124,22 @@ export async function evictStaleEntries(maxAgeMs: number): Promise<number> {
   return count;
 }
 
+export async function evictKeysWithPrefix(prefixes: string[]): Promise<void> {
+  const activePrefixes = prefixes.filter((p) => p.length > 0);
+  if (activePrefixes.length === 0) return;
+
+  const db = await getDb();
+  const tx = db.transaction("cache", "readwrite");
+  await Promise.all(
+    activePrefixes.map((prefix) =>
+      tx.store.delete(IDBKeyRange.bound(prefix, `${prefix}￿`))
+    )
+  );
+  await tx.done;
+}
+
+export const STALE_TOUCH_THROTTLE_MS = 60 * 60 * 1000;
+
 export interface FetchResult {
   data: unknown;
   etag: string | null;
@@ -136,11 +152,19 @@ export interface ConditionalHeaders {
   lastModified: string | null;
 }
 
-export async function cachedFetch(
+export interface CachedFetchOptions<T = unknown> {
+  maxAge?: number;
+  project?: (data: T) => T;
+}
+
+export async function cachedFetch<T = unknown>(
   key: string,
   fetchFn: (headers: ConditionalHeaders) => Promise<FetchResult>,
-  maxAge?: number
+  options?: number | CachedFetchOptions<T>
 ): Promise<{ data: unknown; fromCache: boolean }> {
+  const maxAge = typeof options === "number" ? options : options?.maxAge;
+  const project = typeof options === "object" && options !== null ? options.project : undefined;
+
   const existing = await getCacheEntry(key);
 
   let conditionalHeaders: ConditionalHeaders = { etag: null, lastModified: null };
@@ -171,12 +195,22 @@ export async function cachedFetch(
     if (!existing || (conditionalHeaders.etag === null && conditionalHeaders.lastModified === null)) {
       throw new Error(`Received 304 but no valid cache entry for key: ${key}`);
     }
+    if (existing.maxAge === null && Date.now() - existing.fetchedAt >= STALE_TOUCH_THROTTLE_MS) {
+      await setCacheEntry(
+        key,
+        existing.data,
+        existing.etag,
+        undefined,
+        existing.lastModified
+      ).catch(() => {});
+    }
     return { data: existing.data, fromCache: true };
   }
 
   if (result.status === 200) {
-    await setCacheEntry(key, result.data, result.etag, maxAge, result.lastModified);
-    return { data: result.data, fromCache: false };
+    const projectedData = project ? project(result.data as T) : result.data;
+    await setCacheEntry(key, projectedData, result.etag, maxAge, result.lastModified);
+    return { data: projectedData, fromCache: false };
   }
 
   throw new Error(`Unexpected fetch status: ${result.status}`);

@@ -199,7 +199,7 @@ export async function fetchGitHubStatus(): Promise<void> {
   if (_fetchInProgress) return; // in-flight guard — avoid pile-up if refreshInterval is very short/0 or the endpoint is slow to respond
   _fetchInProgress = true;
   try {
-    const { data } = await cachedFetch(CACHE_KEY, async (headers) => {
+    const { data, fromCache } = await cachedFetch(CACHE_KEY, async (headers) => {
       const reqHeaders: Record<string, string> = {};
       if (headers.etag) reqHeaders["If-None-Match"] = headers.etag;
       const res = await fetch(STATUS_API_URL, {
@@ -214,6 +214,10 @@ export async function fetchGitHubStatus(): Promise<void> {
       const json = await res.json();
       return { data: json, etag: res.headers.get("ETag"), lastModified: res.headers.get("Last-Modified"), status: res.status };
     });
+
+    if (fromCache && _githubStatus() !== null && _consecutiveFailures === 0) {
+      return;
+    }
 
     // Validate the raw shape before parsing — catches API drift (e.g. a field
     // renamed/removed upstream) as a distinct, loud log message instead of an

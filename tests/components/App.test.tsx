@@ -47,6 +47,7 @@ vi.mock("../../src/app/stores/cache", async (importOriginal) => {
   return {
     ...actual,
     evictStaleEntries: vi.fn().mockResolvedValue(undefined),
+    evictKeysWithPrefix: vi.fn().mockResolvedValue(undefined),
   };
 });
 

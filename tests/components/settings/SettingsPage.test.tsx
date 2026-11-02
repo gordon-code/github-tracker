@@ -76,6 +76,7 @@ vi.mock("../../../src/app/services/api", () => ({
 vi.mock("../../../src/app/lib/url", () => ({
   isSafeGitHubUrl: vi.fn(() => true),
   openGitHubUrl: vi.fn(),
+  sizedAvatarUrl: (url: string) => url,
 }));
 
 vi.mock("../../../src/app/lib/errors", () => ({

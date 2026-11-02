@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isSafeGitHubUrl, isSafeJiraSiteUrl, openGitHubUrl } from "../../src/app/lib/url";
+import { isSafeGitHubUrl, isSafeJiraSiteUrl, openGitHubUrl, sizedAvatarUrl } from "../../src/app/lib/url";
 
 describe("isSafeGitHubUrl", () => {
   it("returns true for a root GitHub URL", () => {
@@ -105,5 +105,42 @@ describe("openGitHubUrl", () => {
   it("does NOT call window.open for a non-HTTPS GitHub URL", () => {
     openGitHubUrl("http://github.com/owner/repo");
     expect(window.open).not.toHaveBeenCalled();
+  });
+});
+
+describe("sizedAvatarUrl", () => {
+  it("adds the s query param to an avatars.githubusercontent.com URL", () => {
+    expect(sizedAvatarUrl("https://avatars.githubusercontent.com/u/583231", 40)).toBe(
+      "https://avatars.githubusercontent.com/u/583231?s=40",
+    );
+  });
+
+  it("replaces an existing s query param while preserving other query params", () => {
+    expect(sizedAvatarUrl("https://avatars.githubusercontent.com/u/583231?v=4&s=200", 56)).toBe(
+      "https://avatars.githubusercontent.com/u/583231?v=4&s=56",
+    );
+  });
+
+  it("returns non-GitHub avatar host URLs unchanged", () => {
+    const nonGitHub = "https://example.com/avatar.png";
+    expect(sizedAvatarUrl(nonGitHub, 40)).toBe(nonGitHub);
+    expect(sizedAvatarUrl("https://github.com/images/error/octocat_happy.gif", 56)).toBe(
+      "https://github.com/images/error/octocat_happy.gif",
+    );
+  });
+
+  it("returns non-HTTPS avatars.githubusercontent.com URLs unchanged", () => {
+    const httpUrl = "http://avatars.githubusercontent.com/u/583231";
+    expect(sizedAvatarUrl(httpUrl, 40)).toBe(httpUrl);
+  });
+
+  it("returns bare root path on avatars.githubusercontent.com unchanged", () => {
+    const rootUrl = "https://avatars.githubusercontent.com/";
+    expect(sizedAvatarUrl(rootUrl, 40)).toBe(rootUrl);
+  });
+
+  it("returns invalid URLs and empty strings unchanged", () => {
+    expect(sizedAvatarUrl("not-a-url", 40)).toBe("not-a-url");
+    expect(sizedAvatarUrl("", 40)).toBe("");
   });
 });

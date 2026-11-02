@@ -426,7 +426,7 @@ Each full refresh also checks GitHub's own status page for outages affecting Act
 A second, faster poll loop runs alongside the full refresh specifically for in-flight items. It targets:
 
 - **PRs with actively running (`running`) or stale (`checkStatusStale`) CI checks** — re-checks status until checks leave the running state (plus a 60-second window after an inline `Approve` or `Ready?` action to catch newly triggered workflows). PRs in `pending` (`Pending condition`) are re-checked for up to 3 minutes from when they were first seen pending on their current commit, which covers jobs waiting for a runner and gaps between dependent jobs; after that, PRs parked on a condition (such as review or draft status) wait for the next full refresh. A new commit or a return to `running` starts a fresh 3-minute window. PRs paused in `waiting` (`Pending action`) are not hot-polled. For PRs from forks whose CI runs only in the fork, the status is read from the fork's head commit, the same source the full refresh uses.
-- **In-progress or queued workflow runs** — re-checks until the run completes or pauses on an environment approval gate (`waiting`)
+- **In-progress or queued workflow runs** — re-checks until the run completes or pauses on an environment approval gate (`waiting`), using conditional requests (`ETag` / `304 Not Modified`) so unchanged runs do not consume REST rate-limit budget
 
 Default interval: **30 seconds** (configurable from 10 to 120 seconds in Settings).
 
@@ -850,7 +850,7 @@ Encrypted credentials are sealed by this deployment's server and can only be imp
 
 The tracker uses GitHub's GraphQL and REST APIs. Each poll cycle consumes some of your 5,000 request hourly budget. Tracking many repos, tracked users, or having a short refresh interval increases consumption. Increasing the refresh interval or reducing the number of tracked repos will reduce API usage.
 
-A 60-second events poll uses ETag conditional requests to detect changes at near-zero cost, triggering targeted per-repo refreshes only when needed.
+A lightweight 60-second events poll (~1 REST request per cycle) detects new activity by comparing event IDs and triggers targeted per-repo refreshes only when needed.
 
 For detailed per-source API call counts, see Settings > API Usage.
 
@@ -866,7 +866,7 @@ Your token does not have write permission for pull requests. If you are using a 
 
 **Data looks stale after switching back to the tab.**
 
-When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The events poll continues running in background tabs using ETag conditional requests (zero rate-limit cost), so changes are detected even while the tab is hidden.
+When a tab has been hidden for more than 2 minutes, a catch-up fetch fires automatically on return. The lightweight events poll (~1 REST request per 60-second cycle) continues running in background tabs, so changes are detected even while the tab is hidden without the cost of a full refresh.
 
 **I want to stop tracking a repository.**
 

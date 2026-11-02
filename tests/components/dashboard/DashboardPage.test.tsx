@@ -1,9 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createSignal } from "solid-js";
+import { render, fireEvent } from "@solidjs/testing-library";
 import { rateLimitCssClass } from "../../../src/app/lib/format";
 import { applyHotPollPRUpdates } from "../../../src/app/components/dashboard/DashboardPage";
-import { makePullRequest } from "../../helpers/index";
+import { makeIssue, makePullRequest } from "../../helpers/index";
 import type { PullRequest } from "../../../src/shared/types";
 import type { HotPRStatusUpdate } from "../../../src/app/services/api";
+import type { DashboardData } from "../../../src/app/services/poll";
 
 describe("rateLimitCssClass", () => {
   it("remaining: 0 gives text-error", () => {
@@ -159,5 +162,504 @@ describe("hot poll terminal PR splice logic", () => {
     expect(state.pullRequests[0].draft).toBe(false);
     expect(state.pullRequests[1].draft).toBe(true);
     expect(state.pullRequests[2].draft).toBe(true);
+  });
+});
+
+// ── Jira duplicate-fetch deduplication on load ───────────────────────────────
+
+describe("DashboardPage — Jira load fetch deduplication", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  async function setupJiraDedupeMocks(mockSearchJql: ReturnType<typeof vi.fn>) {
+    vi.resetModules();
+
+    let identityEpochVal = 0;
+    const authClearCallbacks: (() => void)[] = [];
+    const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
+
+    vi.doMock("@solidjs/router", () => ({
+      useNavigate: () => vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/stores/auth", () => ({
+      clearAuth: vi.fn(),
+      expireToken: vi.fn(),
+      token: () => "fake-token",
+      user: () => ({ login: "testuser", avatar_url: "", name: "Test User" }),
+      isAuthenticated: () => true,
+      onAuthCleared: vi.fn((cb: () => void) => {
+        authClearCallbacks.push(() => {
+          identityEpochVal++;
+          cb();
+        });
+      }),
+      DASHBOARD_STORAGE_KEY: "github-tracker:dashboard",
+      DEP_META_STORAGE_KEY: "github-tracker:dep-meta",
+      jiraAuth: vi.fn(() => ({
+        cloudId: "cloud-123",
+        accessToken: "tok",
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+      })),
+      isJiraAuthenticated: vi.fn(() => true),
+      setJiraAuth: vi.fn(),
+      clearJiraAuth: vi.fn(),
+      ensureJiraTokenValid: vi.fn().mockResolvedValue(true),
+      identityEpoch: () => identityEpochVal,
+    }));
+
+    vi.doMock("../../../src/app/lib/dashboard-snapshot", () => ({
+      loadSnapshot: vi.fn().mockResolvedValue(null),
+      writeSnapshot: vi.fn(),
+      flushSnapshot: vi.fn().mockResolvedValue(undefined),
+      clearSnapshot: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    const MockJiraClient = vi.fn(function (this: Record<string, unknown>) {
+      this.searchJql = mockSearchJql;
+      this.bulkFetch = vi.fn().mockResolvedValue({ issues: [], errors: [] });
+    });
+
+    vi.doMock("../../../src/app/services/jira-client", () => ({
+      JiraClient: MockJiraClient,
+      JiraProxyClient: MockJiraClient,
+      JiraApiError: class JiraApiError extends Error {
+        status: number;
+        constructor(status: number, _body: unknown, message: string) {
+          super(message);
+          this.status = status;
+        }
+      },
+      DEFAULT_FIELDS: ["summary", "status", "priority", "assignee", "project", "updated", "issuetype", "created"],
+    }));
+
+    vi.doMock("../../../src/app/services/jira-keys", () => ({
+      detectAndLookupJiraKeys: vi.fn().mockResolvedValue(new Map()),
+      clearJiraKeyCache: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/services/github", () => ({
+      getCoreRateLimit: () => null,
+      getGraphqlRateLimit: () => null,
+      getClient: vi.fn(() => null),
+      updateGraphqlRateLimit: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/lib/notifications", () => ({
+      detectNewItems: vi.fn(() => ({ issues: [], pullRequests: [], workflowRuns: [] })),
+      dispatchNotifications: vi.fn(),
+      _resetNotificationState: vi.fn(),
+    }));
+
+    vi.doMock("../../../src/app/lib/errors", () => ({
+      getErrors: vi.fn().mockReturnValue([]),
+      getNotifications: vi.fn().mockReturnValue([]),
+      getUnreadCount: vi.fn().mockReturnValue(0),
+      markAllAsRead: vi.fn(),
+      dismissError: vi.fn(),
+      dismissNotificationBySource: vi.fn(),
+      pushError: vi.fn(),
+      pushNotification: vi.fn(),
+      clearErrors: vi.fn(),
+      clearNotifications: vi.fn(),
+      addMutedSource: vi.fn(),
+      isMuted: vi.fn(() => false),
+      clearMutedSources: vi.fn(),
+    }));
+
+    const mockFetchAllData = vi.fn().mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
+
+    vi.doMock("../../../src/app/services/poll", () => ({
+      fetchAllData: mockFetchAllData,
+      createPollCoordinator: vi.fn().mockImplementation(
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          capturedFetchAll = fetchAll;
+          return {
+            isRefreshing: () => false,
+            lastRefreshAt,
+            manualRefresh: vi.fn(() => {
+              setLastRefreshAt(new Date());
+            }),
+            destroy: vi.fn(),
+          };
+        },
+      ),
+      createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
+      rebuildHotSets: vi.fn(),
+      seedHotSetsFromTargeted: vi.fn(),
+      clearHotSets: vi.fn(),
+      getHotPollGeneration: vi.fn().mockReturnValue(0),
+      StaleIdentityError: class StaleIdentityError extends Error {},
+    }));
+
+    const freshView = await import("../../../src/app/stores/view");
+    const freshConfig = await import("../../../src/app/stores/config");
+    const freshDash = await import("../../../src/app/components/dashboard/DashboardPage");
+
+    freshView.resetViewState();
+    freshConfig.resetConfig();
+    freshConfig.updateJiraConfig({
+      enabled: true,
+      siteUrl: "https://test.atlassian.net",
+      siteName: "Test Site",
+      authMethod: "oauth",
+    });
+
+    return {
+      DashboardPage: freshDash.default,
+      _testCounters: freshDash._testCounters,
+      freshConfig,
+      freshView,
+      mockFetchAllData,
+      triggerPoll: () => capturedFetchAll!(),
+      setLastRefreshAt,
+      triggerAuthCleared: () => {
+        for (const cb of authClearCallbacks) cb();
+      },
+    };
+  }
+
+  it("does not recompute exclusiveOwnership when switching between built-in and custom tabs and renders scoped custom-tab items", async () => {
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const {
+      DashboardPage: FreshDashboard,
+      _testCounters,
+      freshConfig,
+      freshView,
+      mockFetchAllData,
+      triggerPoll,
+    } = await setupJiraDedupeMocks(mockSearchJql);
+
+    mockFetchAllData.mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Octocat Exclusive Issue", repoFullName: "octocat/Hello-World", userLogin: "testuser" }),
+        makeIssue({ id: 2, title: "Other Repo Issue", repoFullName: "other/Repo", userLogin: "testuser" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, title: "Octocat Team PR", repoFullName: "octocat/Hello-World", userLogin: "testuser" }),
+        makePullRequest({ id: 11, title: "Other Repo PR", repoFullName: "other/Repo", userLogin: "testuser" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    freshConfig.updateConfig({
+      selectedRepos: [
+        { owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" },
+        { owner: "other", name: "Repo", fullName: "other/Repo" },
+      ],
+      customTabs: [
+        {
+          id: "exclusive-issues",
+          name: "Exclusive Issues",
+          baseType: "issues",
+          orgScope: ["octocat"],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: true,
+        },
+        {
+          id: "non-exclusive-prs",
+          name: "Team PRs",
+          baseType: "pullRequests",
+          orgScope: ["octocat"],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: false,
+        },
+      ],
+    });
+    freshView.updateViewState({ lastActiveTab: "issues" });
+    freshView.setAllExpanded("issues", true);
+    freshView.setAllExpanded("pullRequests", true);
+    freshView.setAllExpanded("non-exclusive-prs", true);
+    freshView.setAllExpanded("exclusive-issues", true);
+
+    _testCounters.exclusiveOwnershipRuns = 0;
+
+    const { unmount, getByRole, queryByText } = render(() => <FreshDashboard />);
+    try {
+      await triggerPoll();
+
+      // Built-in Issues tab shows only the non-claimed issue
+      expect(queryByText("Other Repo Issue")).not.toBeNull();
+      expect(queryByText("Octocat Exclusive Issue")).toBeNull();
+
+      const runsAfterLoad = _testCounters.exclusiveOwnershipRuns;
+      expect(runsAfterLoad).toBeGreaterThan(0);
+
+      // Switch to Pull Requests tab via TabBar click and viewState
+      const prTabBtn = getByRole("tab", { name: /^Pull Requests/i });
+      fireEvent.click(prTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("pullRequests");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Team PR")).not.toBeNull();
+      expect(queryByText("Other Repo PR")).not.toBeNull();
+
+      // Switch to non-exclusive custom tab ("Team PRs") — exercises activeCustomTabData()[tabId]
+      const teamPrsTabBtn = getByRole("tab", { name: /Team PRs/i });
+      fireEvent.click(teamPrsTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("non-exclusive-prs");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Team PR")).not.toBeNull();
+      expect(queryByText("Other Repo PR")).toBeNull();
+
+      // Switch to exclusive custom tab ("Exclusive Issues") — exercises exclusiveCustomTabData()[tabId]
+      const exclusiveIssuesTabBtn = getByRole("tab", { name: /Exclusive Issues/i });
+      fireEvent.click(exclusiveIssuesTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("exclusive-issues");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Exclusive Issue")).not.toBeNull();
+      expect(queryByText("Other Repo Issue")).toBeNull();
+
+      // Switch to Actions tab and back to Issues tab
+      const actionsTabBtn = getByRole("tab", { name: /Actions/i });
+      fireEvent.click(actionsTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("actions");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+
+      const issuesTabBtn = getByRole("tab", { name: /^Issues/i });
+      fireEvent.click(issuesTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("issues");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Other Repo Issue")).not.toBeNull();
+      expect(queryByText("Octocat Exclusive Issue")).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("skips the duplicate post-refresh Jira fetch when the first poll completes 5 s after mount, and fetches on the next poll at +60 s", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt } = await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      // Immediate mount fetch ran once at t = 0
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // First GitHub poll completes 5 s later (within the 20 s deduplication window)
+      await vi.advanceTimersByTimeAsync(5_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // Next GitHub poll completes at +60 s (55 s later, outside the 20 s window)
+      await vi.advanceTimersByTimeAsync(55_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("resets lastJiraFetchStartedAt on logout so the first post-login poll within 20 s fetches Jira issues", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt, triggerAuthCleared } =
+      await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // Logout/login within 20 s (at +5 s) resets lastJiraFetchStartedAt to 0
+      await vi.advanceTimersByTimeAsync(5_000);
+      triggerAuthCleared();
+
+      // Re-mount for the newly logged-in session or trigger the first post-login poll within 20 s
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("retries Jira fetch on the first poll within 20 s if the initial mount fetch failed, and re-fetches on manual Refresh within 20 s", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Transient network failure"))
+      .mockResolvedValue({
+        issues: [],
+        maxResults: 100,
+        startAt: 0,
+      });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt } = await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount, getByRole } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // First poll completes 5 s later -> retries because the mount fetch failed
+      await vi.advanceTimersByTimeAsync(5_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+
+      // User clicks manual Refresh 3 s later (within 20 s of the successful retry) -> not suppressed
+      await vi.advanceTimersByTimeAsync(3_000);
+      const refreshBtn = getByRole("button", { name: /Refresh data/i });
+      fireEvent.click(refreshBtn);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(3);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("discards stale-scope issues and re-runs fetchJiraAssigned for the new scope when scope changes while a Jira fetch is in flight", async () => {
+    const makeJiraIssue = (id: string, key: string, summary: string) => ({
+      id,
+      key,
+      fields: {
+        summary,
+        status: { name: "To Do", statusCategory: { key: "new", name: "To Do" } },
+        priority: { name: "High", id: "2" },
+        assignee: { displayName: "Test User" },
+        project: { key: "PROJ", name: "Project" },
+        updated: "2026-11-01T12:00:00.000+0000",
+        created: "2026-11-01T10:00:00.000+0000",
+        issuetype: { name: "Bug", subtask: false },
+      },
+    });
+
+    let resolveFirstFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    let resolveSecondFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    const mockSearchJql = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstFetch = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondFetch = resolve;
+          }),
+      );
+
+    const { DashboardPage: FreshDashboard, freshView } = await setupJiraDedupeMocks(mockSearchJql);
+    freshView.updateViewState({ lastActiveTab: "jiraAssigned" });
+    freshView.setAllExpanded("jiraAssigned", true);
+
+    const { unmount, queryByText } = render(() => <FreshDashboard />);
+    try {
+      // Mount fetch is in flight for default "assigned" scope
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(mockSearchJql.mock.calls[0][0]).toContain("assignee = currentUser()");
+
+      // User switches scope to "reported" while the "assigned" fetch is still in flight
+      freshView.setTabFilter("jiraAssigned", "scope", "reported");
+
+      // Resolve the initial "assigned" fetch with a stale issue -> discarded and triggers a rerun for "reported"
+      resolveFirstFetch({
+        issues: [makeJiraIssue("101", "PROJ-1", "Stale Assigned Issue")],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+      expect(mockSearchJql.mock.calls[1][0]).toContain("reporter = currentUser()");
+      expect(queryByText("Stale Assigned Issue")).toBeNull();
+
+      // Resolve the "reported" fetch -> renders only the reported scope's issue
+      resolveSecondFetch({
+        issues: [makeJiraIssue("102", "PROJ-2", "Fresh Reported Issue")],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(queryByText("Stale Assigned Issue")).toBeNull();
+      expect(queryByText("Fresh Reported Issue")).not.toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("clears jiraLoading if a pending scope-change rerun finds jiraClient() is null", async () => {
+    let resolveFirstFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    const mockSearchJql = vi.fn().mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstFetch = resolve;
+        }),
+    );
+
+    const { DashboardPage: FreshDashboard, freshConfig, freshView } = await setupJiraDedupeMocks(mockSearchJql);
+    freshView.updateViewState({ lastActiveTab: "jiraAssigned" });
+    freshView.setAllExpanded("jiraAssigned", true);
+
+    const { unmount, queryByRole } = render(() => <FreshDashboard />);
+    try {
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(queryByRole("status")).not.toBeNull();
+
+      // Switch scope while in-flight, and switch authMethod to "token" (no email -> createJiraClient returns null)
+      freshView.setTabFilter("jiraAssigned", "scope", "reported");
+      freshConfig.updateJiraConfig({
+        enabled: true,
+        siteUrl: "https://test.atlassian.net",
+        siteName: "Test Site",
+        authMethod: "token",
+      });
+
+      resolveFirstFetch({
+        issues: [],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(queryByRole("status")).toBeNull();
+    } finally {
+      unmount();
+    }
   });
 });

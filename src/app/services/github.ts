@@ -3,7 +3,7 @@ import { Octokit } from "@octokit/core";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
-import { cachedFetch, type ConditionalHeaders } from "../stores/cache";
+import { cachedFetch, type CachedFetchOptions, type ConditionalHeaders } from "../stores/cache";
 import { token } from "../stores/auth";
 import { pushNotification } from "../lib/errors";
 import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery } from "../../shared/validation";
@@ -402,12 +402,12 @@ export function createGitHubClient(authToken: string): GitHubOctokitInstance {
 
 // ── ETag-aware request wrapper ───────────────────────────────────────────────
 
-export async function cachedRequest(
+export async function cachedRequest<T = unknown>(
   octokit: GitHubOctokitInstance,
   cacheKey: string,
   route: string,
   params?: Record<string, unknown>,
-  maxAge?: number
+  options?: number | CachedFetchOptions<T>
 ): Promise<{ data: unknown; fromCache: boolean }> {
   return cachedFetch(cacheKey, async (cached: ConditionalHeaders) => {
     const conditionalHeaders: Record<string, string> = {};
@@ -447,7 +447,7 @@ export async function cachedRequest(
       }
       throw err;
     }
-  }, maxAge);
+  }, options);
 }
 
 // ── Client singleton ─────────────────────────────────────────────────────────

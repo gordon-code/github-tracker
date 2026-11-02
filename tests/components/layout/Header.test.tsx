@@ -184,4 +184,17 @@ describe("Header", () => {
     render(() => <Header />);
     expect(screen.getByLabelText("Critical GitHub service outage")).toBeDefined();
   });
+
+  it("renders the user avatar with s=56 on avatars.githubusercontent.com URLs without lazy loading", () => {
+    vi.spyOn(authStore, "user").mockReturnValue({
+      login: "octocat",
+      avatar_url: "https://avatars.githubusercontent.com/u/583231",
+      name: "The Octocat",
+    });
+    render(() => <Header />);
+    const img = screen.getByAltText("octocat");
+    expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231?s=56");
+    expect(img.getAttribute("loading")).toBeNull();
+    vi.mocked(authStore.user).mockRestore();
+  });
 });

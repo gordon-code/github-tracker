@@ -77,7 +77,7 @@ describe("UserAvatarBadge", () => {
     vi.useRealTimers();
   });
 
-  it("uses avatarUrl as img src", () => {
+  it("uses sizedAvatarUrl with s=40 and sets loading=lazy and decoding=async on img", () => {
     const avatarUrl = "https://avatars.githubusercontent.com/u/583231";
     render(() => (
       <UserAvatarBadge
@@ -86,7 +86,9 @@ describe("UserAvatarBadge", () => {
       />
     ));
     const img = screen.getByRole("img");
-    expect(img.getAttribute("src")).toBe(avatarUrl);
+    expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231?s=40");
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
   });
 
   it("applies negative margin for stacked avatars when multiple users", () => {

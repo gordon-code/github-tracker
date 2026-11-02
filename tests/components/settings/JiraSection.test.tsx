@@ -150,6 +150,7 @@ vi.mock("../../../src/app/lib/mcp-relay", () => ({
 vi.mock("../../../src/app/lib/url", () => ({
   isSafeGitHubUrl: vi.fn(() => true),
   openGitHubUrl: vi.fn(),
+  sizedAvatarUrl: (url: string) => url,
 }));
 
 const mockBuildJiraAuthorizeUrl = vi.fn(() => "https://auth.atlassian.com/authorize?mock=1");

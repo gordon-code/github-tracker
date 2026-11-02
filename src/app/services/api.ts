@@ -1,6 +1,7 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
 import * as Sentry from "@sentry/solid";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
+import { deleteCacheEntry } from "../stores/cache";
 import type { ApiCallSource } from "./api-usage";
 import type { TrackedUser } from "../stores/config";
 import { VALID_REPO_NAME, VALID_TRACKED_LOGIN, SEARCH_RESULT_CAP, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE } from "../../shared/validation";
@@ -42,7 +43,7 @@ interface RawRepo {
   archived?: boolean;
 }
 
-interface RawWorkflowRun {
+export interface RawWorkflowRun {
   id: number;
   name: string;
   status: string;
@@ -60,6 +61,75 @@ interface RawWorkflowRun {
   run_attempt: number;
   display_title: string;
   actor: { login: string } | null;
+}
+
+export interface RawWorkflowRunsResponse {
+  total_count: number;
+  workflow_runs: RawWorkflowRun[];
+}
+
+export type RawSingleWorkflowRun = Pick<
+  RawWorkflowRun,
+  "id" | "status" | "conclusion" | "updated_at" | "completed_at"
+>;
+
+export function projectSingleRun(raw: RawSingleWorkflowRun): RawSingleWorkflowRun {
+  return {
+    id: raw.id,
+    status: raw.status,
+    conclusion: raw.conclusion ?? null,
+    updated_at: raw.updated_at,
+    completed_at: raw.completed_at ?? null,
+  };
+}
+
+export function projectRunsPage(raw: RawWorkflowRunsResponse): RawWorkflowRunsResponse {
+  return {
+    total_count: raw.total_count,
+    workflow_runs: (raw.workflow_runs ?? []).map((run) => ({
+      id: run.id,
+      name: run.name,
+      status: run.status,
+      conclusion: run.conclusion,
+      event: run.event,
+      workflow_id: run.workflow_id,
+      head_sha: run.head_sha,
+      head_branch: run.head_branch,
+      run_number: run.run_number,
+      html_url: run.html_url,
+      created_at: run.created_at,
+      updated_at: run.updated_at,
+      run_started_at: run.run_started_at,
+      completed_at: run.completed_at ?? null,
+      run_attempt: run.run_attempt,
+      display_title: run.display_title,
+      actor: run.actor ? { login: run.actor.login } : null,
+    })),
+  };
+}
+
+export function mapWorkflowRun(run: RawWorkflowRun, repoFullName: string): WorkflowRun {
+  return {
+    id: run.id,
+    name: run.name,
+    status: run.status,
+    conclusion: run.conclusion,
+    event: run.event,
+    workflowId: run.workflow_id,
+    headSha: run.head_sha,
+    headBranch: run.head_branch,
+    runNumber: run.run_number,
+    htmlUrl: run.html_url,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    repoFullName,
+    isPrRun: run.event === "pull_request",
+    runStartedAt: run.run_started_at,
+    completedAt: run.completed_at ?? null,
+    runAttempt: run.run_attempt,
+    displayTitle: run.display_title,
+    actorLogin: run.actor?.login ?? "",
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -246,7 +316,7 @@ const LIGHT_ISSUE_FRAGMENT = `
     url
     createdAt
     updatedAt
-    author { login avatarUrl }
+    author { login avatarUrl(size: 40) }
     labels(first: 10) { nodes { name color } }
     assignees(first: 10) { nodes { login } }
     repository { nameWithOwner stargazerCount }
@@ -283,7 +353,7 @@ const LIGHT_PR_FRAGMENT = `
     url
     createdAt
     updatedAt
-    author { login avatarUrl }
+    author { login avatarUrl(size: 40) }
     repository { nameWithOwner stargazerCount }
     headRefName
     baseRefName
@@ -2377,15 +2447,13 @@ export async function fetchWorkflowRuns(
     while (rawRuns.length < targetRunsPerRepo) {
       const result = await cachedRequest(
         octokit,
-        `runs:${repo.fullName}:p${page}`,
+        `runs2:${repo.fullName}:p${page}`,
         "GET /repos/{owner}/{repo}/actions/runs",
-        { owner: repo.owner, repo: repo.name, per_page: perPage, page }
+        { owner: repo.owner, repo: repo.name, per_page: perPage, page },
+        { project: projectRunsPage }
       );
 
-      const data = result.data as {
-        workflow_runs: RawWorkflowRun[];
-        total_count: number;
-      };
+      const data = result.data as RawWorkflowRunsResponse;
       const runs = data.workflow_runs ?? [];
       rawRuns.push(...runs);
 
@@ -2424,27 +2492,7 @@ export async function fetchWorkflowRuns(
         (a, b) => a.created_at > b.created_at ? -1 : a.created_at < b.created_at ? 1 : 0
       );
       for (const run of sorted.slice(0, maxRuns)) {
-        allRuns.push({
-          id: run.id,
-          name: run.name,
-          status: run.status,
-          conclusion: run.conclusion,
-          event: run.event,
-          workflowId: run.workflow_id,
-          headSha: run.head_sha,
-          headBranch: run.head_branch,
-          runNumber: run.run_number,
-          htmlUrl: run.html_url,
-          createdAt: run.created_at,
-          updatedAt: run.updated_at,
-          repoFullName: repo.fullName,
-          isPrRun: run.event === "pull_request",
-          runStartedAt: run.run_started_at,
-          completedAt: run.completed_at ?? null,
-          runAttempt: run.run_attempt,
-          displayTitle: run.display_title,
-          actorLogin: run.actor?.login ?? "",
-        });
+        allRuns.push(mapWorkflowRun(run, repo.fullName));
       }
     }
   });
@@ -2570,20 +2618,31 @@ export async function fetchWorkflowRunById(
   descriptor: { id: number; owner: string; repo: string }
 ): Promise<HotWorkflowRunUpdate> {
   const { id, owner, repo } = descriptor;
-  const response = await octokit.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}", {
-    owner,
-    repo,
-    run_id: id,
-  });
-  // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
-  const run = response.data as unknown as RawWorkflowRun;
-  return {
+  const cacheKey = `run:${owner}/${repo}:${id}`;
+  const result = await cachedRequest(
+    octokit,
+    cacheKey,
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}",
+    {
+      owner,
+      repo,
+      run_id: id,
+    },
+    { project: projectSingleRun }
+  );
+  // Octokit's generated type for this endpoint omits completed_at; cast to our projected raw shape
+  const run = result.data as RawSingleWorkflowRun;
+  const mapped: HotWorkflowRunUpdate = {
     id: run.id,
     status: run.status ?? "",
     conclusion: run.conclusion ?? null,
     updatedAt: run.updated_at,
     completedAt: run.completed_at ?? null,
   };
+  if (mapped.status !== "in_progress" && mapped.status !== "queued") {
+    await deleteCacheEntry(cacheKey).catch(() => {});
+  }
+  return mapped;
 }
 
 // ── User validation + upstream repo discovery ─────────────────────────────────

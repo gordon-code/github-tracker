@@ -3,7 +3,9 @@ import {
   canNotify,
   detectNewItems,
   dispatchNotifications,
+  SEEN_ID_CAP,
   _resetNotificationState,
+  _getSeenSizes,
   type NewItems,
 } from "../../src/app/lib/notifications";
 import { ConfigSchema, type Config } from "../../src/app/stores/config";
@@ -179,6 +181,78 @@ describe("detectNewItems", () => {
     expect(result.issues).toHaveLength(1);
     expect(result.pullRequests).toHaveLength(1);
     expect(result.workflowRuns).toHaveLength(1);
+  });
+
+  it("caps seen IDs at SEEN_ID_CAP and evicts the oldest entries in insertion order", () => {
+    const initialIssues = Array.from({ length: SEEN_ID_CAP }, (_, i) => makeIssue(i + 1));
+    detectNewItems(makeData(initialIssues));
+    expect(_getSeenSizes().issues).toBe(SEEN_ID_CAP);
+
+    // Add 10 new IDs past the cap -> oldest 1..10 should be evicted
+    const tenMore = Array.from({ length: 10 }, (_, i) => makeIssue(SEEN_ID_CAP + i + 1));
+    const addedResult = detectNewItems(makeData(tenMore));
+    expect(addedResult.issues).toHaveLength(10);
+    expect(_getSeenSizes().issues).toBe(SEEN_ID_CAP);
+
+    // ID 11 should still be remembered (not reported as new), while ID 1 was evicted (reported as new)
+    const probeResult = detectNewItems(makeData([makeIssue(1), makeIssue(11)]));
+    expect(probeResult.issues.map((i) => i.id)).toEqual([1]);
+  });
+
+  it("refreshes an old ID's recency when re-seen so it is not evicted next", () => {
+    const initialIssues = Array.from({ length: SEEN_ID_CAP }, (_, i) => makeIssue(i + 1));
+    detectNewItems(makeData(initialIssues));
+
+    // Re-see ID 1 so it moves to the most-recent position
+    const reseeResult = detectNewItems(makeData([makeIssue(1)]));
+    expect(reseeResult.issues).toHaveLength(0);
+
+    // Push 1 new ID past the cap -> ID 2 (now oldest) should be evicted, while ID 1 remains
+    detectNewItems(makeData([makeIssue(SEEN_ID_CAP + 1)]));
+    expect(_getSeenSizes().issues).toBe(SEEN_ID_CAP);
+
+    const probeResult = detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
+    expect(probeResult.issues.map((i) => i.id)).toEqual([2]);
+  });
+
+  it("refreshes existing IDs in pass 1 before inserting new IDs and evicting in pass 2 within a single poll batch", () => {
+    const initialIssues = Array.from({ length: SEEN_ID_CAP }, (_, i) => makeIssue(i + 1));
+    detectNewItems(makeData(initialIssues));
+
+    // Single poll batch with a new item ahead of the oldest seen item (ID 1):
+    // Pass 1 refreshes ID 1's recency before pass 2 inserts SEEN_ID_CAP + 1 and evicts ID 2.
+    const batchResult = detectNewItems(makeData([makeIssue(SEEN_ID_CAP + 1), makeIssue(1)]));
+    expect(batchResult.issues.map((i) => i.id)).toEqual([SEEN_ID_CAP + 1]);
+    expect(_getSeenSizes().issues).toBe(SEEN_ID_CAP);
+
+    const probeResult = detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
+    expect(probeResult.issues.map((i) => i.id)).toEqual([2]);
+  });
+
+  it("does not report an item as new when it disappears for several polls and reappears", () => {
+    detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
+
+    // Issue 2 disappears across several polls
+    expect(detectNewItems(makeData([makeIssue(1)])).issues).toHaveLength(0);
+    expect(detectNewItems(makeData([makeIssue(1)])).issues).toHaveLength(0);
+    expect(detectNewItems(makeData([])).issues).toHaveLength(0);
+
+    // Issue 2 reappears -> still remembered, not reported as new
+    const result = detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it("does not re-notify existing workflow runs when enableActions is toggled off and back on", () => {
+    const runs = [makeRun(101), makeRun(102)];
+    detectNewItems(makeData([makeIssue(1)], [], runs));
+
+    // Poll while enableActions is false (workflowRuns is empty)
+    const offPoll = detectNewItems(makeData([makeIssue(1)], [], []));
+    expect(offPoll.workflowRuns).toHaveLength(0);
+
+    // Poll after enableActions is turned back on -> existing runs are not reported as new
+    const onPoll = detectNewItems(makeData([makeIssue(1)], [], runs));
+    expect(onPoll.workflowRuns).toHaveLength(0);
   });
 });
 

@@ -24,12 +24,13 @@ Object.defineProperty(globalThis, "localStorage", {
 
 vi.mock("../../../src/app/lib/url", () => ({
   isSafeGitHubUrl: () => true,
+  sizedAvatarUrl: (url: string) => url,
 }));
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
-import TrackedTab from "../../../src/app/components/dashboard/TrackedTab";
-import { viewState, resetViewState, updateViewState, untrackJiraItem } from "../../../src/app/stores/view";
+import TrackedTab, { _getItemRefsCount } from "../../../src/app/components/dashboard/TrackedTab";
+import { viewState, resetViewState, updateViewState, untrackItem, untrackJiraItem } from "../../../src/app/stores/view";
 import { setConfig, resetConfig } from "../../../src/app/stores/config";
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -634,5 +635,33 @@ describe("TrackedTab — auto-merge badge and Approve action", () => {
 
     expect(screen.getAllByText("Pending action")).toHaveLength(1);
     expect(screen.getAllByText("Pending condition")).toHaveLength(1);
+  });
+});
+
+describe("TrackedTab — itemRefs cleanup on untrack and unmount", () => {
+  it("tracks 3 item refs when rendered, drops to 2 when one item is untracked, and clears to 0 on unmount", () => {
+    const issue1 = makeIssue({ id: 1001, title: "Tracked 1" });
+    const issue2 = makeIssue({ id: 1002, title: "Tracked 2" });
+    const issue3 = makeIssue({ id: 1003, title: "Tracked 3" });
+
+    updateViewState({
+      trackedItems: [
+        makeTrackedItem({ id: 1001, type: "issue", title: "Tracked 1" }),
+        makeTrackedItem({ id: 1002, type: "issue", title: "Tracked 2" }),
+        makeTrackedItem({ id: 1003, type: "issue", title: "Tracked 3" }),
+      ],
+    });
+
+    const { unmount } = render(() => (
+      <TrackedTab issues={[issue1, issue2, issue3]} pullRequests={[]} userLogin="testuser" />
+    ));
+
+    expect(_getItemRefsCount()).toBe(3);
+
+    untrackItem(1002, "issue");
+    expect(_getItemRefsCount()).toBe(2);
+
+    unmount();
+    expect(_getItemRefsCount()).toBe(0);
   });
 });

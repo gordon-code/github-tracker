@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
 import { getUnreadCount, markAllAsRead } from "../../lib/errors";
+import { sizedAvatarUrl } from "../../lib/url";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
 import { Tooltip } from "../shared/Tooltip";
@@ -46,7 +47,7 @@ export default function Header() {
           {(u) => (
             <div class="flex items-center gap-2 shrink-0">
               <img
-                src={u().avatar_url}
+                src={sizedAvatarUrl(u().avatar_url, 56)}
                 alt={u().login}
                 class="h-7 w-7 rounded-full"
               />
