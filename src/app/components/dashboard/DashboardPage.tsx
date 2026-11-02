@@ -132,6 +132,8 @@ const [jiraIssues, setJiraIssues] = createSignal<JiraIssue[]>([]);
 const [jiraLoading, setJiraLoading] = createSignal(false);
 const [jiraKeyMap, setJiraKeyMap] = createSignal<ReadonlyMap<string, JiraIssue | null>>(new Map());
 let _jiraFetching = false;
+let _inFlightJiraScope: string | null = null;
+let _jiraPendingRerun = false;
 let lastJiraFetchStartedAt = 0;
 
 // Dependency dashboard state — module-level for same reasons as jira state above
@@ -384,6 +386,8 @@ onAuthCleared(() => {
   setJiraLoading(false);
   setJiraKeyMap(new Map());
   _jiraFetching = false;
+  _inFlightJiraScope = null;
+  _jiraPendingRerun = false;
   lastJiraFetchStartedAt = 0;
   setAbandonedDepsMap(new Map());
   setDashboardIssueUrls(new Map());
@@ -700,13 +704,19 @@ export default function DashboardPage() {
   );
 
   async function fetchJiraAssigned(): Promise<void> {
-    if (_jiraFetching) return;
+    const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
+    if (_jiraFetching) {
+      if (scope !== _inFlightJiraScope) {
+        _jiraPendingRerun = true;
+      }
+      return;
+    }
     const client = jiraClient();
     if (!client) return;
     _jiraFetching = true;
+    _inFlightJiraScope = scope;
     lastJiraFetchStartedAt = Date.now();
     setJiraLoading(true);
-    const scope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
     try {
       const result = await client.searchJql(
         jiraJqlForScope(scope),
@@ -717,6 +727,12 @@ export default function DashboardPage() {
         if (missing.length > 0) console.info("[jira] issues missing issuetype:", missing.map((i) => `${i.key}: ${JSON.stringify(i.fields.issuetype)}`));
       }
       if (!isJiraAuthenticated()) return;
+      const currentScope = viewState.tabFilters.jiraAssigned?.scope ?? "assigned";
+      if (currentScope !== scope) {
+        _jiraPendingRerun = true;
+        return;
+      }
+      _jiraPendingRerun = false;
       setJiraIssues(result.issues);
 
       // Only prune when the result set is complete. The Enhanced JQL Search
@@ -769,6 +785,7 @@ export default function DashboardPage() {
         }
       }
     } catch (err) {
+      lastJiraFetchStartedAt = 0;
       if (err instanceof JiraApiError) {
         if (err.status === 401) {
           clearJiraAuth();
@@ -788,7 +805,14 @@ export default function DashboardPage() {
       }
     } finally {
       _jiraFetching = false;
-      setJiraLoading(false);
+      _inFlightJiraScope = null;
+      if (_jiraPendingRerun && config.jira?.enabled && isJiraAuthenticated()) {
+        _jiraPendingRerun = false;
+        void fetchJiraAssigned().catch(handleJiraError);
+      } else {
+        _jiraPendingRerun = false;
+        setJiraLoading(false);
+      }
     }
   }
 
@@ -1806,7 +1830,7 @@ export default function DashboardPage() {
           `Could not approve ${pr.repoFullName}#${pr.number}: new commits were pushed — refreshing`,
           "warning"
         );
-        _coordinator()?.manualRefresh();
+        handleManualRefresh();
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -1877,6 +1901,11 @@ export default function DashboardPage() {
     }
   }
 
+  function handleManualRefresh(): void {
+    lastJiraFetchStartedAt = 0;
+    _coordinator()?.manualRefresh();
+  }
+
   const isPartialSync = createMemo(() =>
     getNotifications().some((n) => n.source === PR_ENRICHMENT_NOTIFICATION_SOURCE)
   );
@@ -1914,7 +1943,7 @@ export default function DashboardPage() {
             <FilterBar
               isRefreshing={_coordinator()?.isRefreshing() ?? dashboardData.loading}
               lastRefreshedAt={_coordinator()?.lastRefreshAt() ?? dashboardData.lastRefreshedAt}
-              onRefresh={() => _coordinator()?.manualRefresh()}
+              onRefresh={handleManualRefresh}
               sortOptions={activeTab() === "dependencies" ? undefined : globalSortOptions}
               sortValue={activeTab() === "dependencies" ? undefined : viewState.globalSort.field}
               sortDirection={activeTab() === "dependencies" ? undefined : viewState.globalSort.direction}
@@ -1971,7 +2000,7 @@ export default function DashboardPage() {
                   rebaseLabel={config.dependencies.rebaseLabel}
                   userLogin={userLogin()}
                   trackedBotLogins={trackedBotLogins()}
-                  onRefresh={() => _coordinator()?.manualRefresh()}
+                  onRefresh={handleManualRefresh}
                   onApprovePR={handleApprovePR}
                   approvingPRIds={approvingPRIds()}
                   onMarkPRReady={handleMarkPRReady}

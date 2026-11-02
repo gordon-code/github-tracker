@@ -68,6 +68,21 @@ export interface RawWorkflowRunsResponse {
   workflow_runs: RawWorkflowRun[];
 }
 
+export type RawSingleWorkflowRun = Pick<
+  RawWorkflowRun,
+  "id" | "status" | "conclusion" | "updated_at" | "completed_at"
+>;
+
+export function projectSingleRun(raw: RawSingleWorkflowRun): RawSingleWorkflowRun {
+  return {
+    id: raw.id,
+    status: raw.status,
+    conclusion: raw.conclusion ?? null,
+    updated_at: raw.updated_at,
+    completed_at: raw.completed_at ?? null,
+  };
+}
+
 export function projectRunsPage(raw: RawWorkflowRunsResponse): RawWorkflowRunsResponse {
   return {
     total_count: raw.total_count,
@@ -2612,10 +2627,11 @@ export async function fetchWorkflowRunById(
       owner,
       repo,
       run_id: id,
-    }
+    },
+    { project: projectSingleRun }
   );
-  // Octokit's generated type for this endpoint omits completed_at; cast to our full raw shape
-  const run = result.data as RawWorkflowRun;
+  // Octokit's generated type for this endpoint omits completed_at; cast to our projected raw shape
+  const run = result.data as RawSingleWorkflowRun;
   const mapped: HotWorkflowRunUpdate = {
     id: run.id,
     status: run.status ?? "",
@@ -2623,8 +2639,8 @@ export async function fetchWorkflowRunById(
     updatedAt: run.updated_at,
     completedAt: run.completed_at ?? null,
   };
-  if (mapped.status === "completed") {
-    await deleteCacheEntry(cacheKey);
+  if (mapped.status !== "in_progress" && mapped.status !== "queued") {
+    await deleteCacheEntry(cacheKey).catch(() => {});
   }
   return mapped;
 }

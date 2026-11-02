@@ -275,11 +275,20 @@ describe("fetchGitHubStatus", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("304 cache-hit path: reflects parseSummary run against the cached JSON, not empty/null", async () => {
+  it("304 cache-hit path on cold start (_githubStatus() === null): reflects parseSummary run against the cached JSON, not empty/null", async () => {
+    const components = [...TRACKED_COMPONENT_NAMES].map((n) =>
+      makeComponent(n, n === "Actions" ? "major_outage" : "operational")
+    );
     const incidents = [makeIncident({ id: "cached-1", name: "Cached Incident", body: "Investigating", componentNames: ["Actions"] })];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ incidents }), { etag: "etag-1" })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeSummary({ components, incidents }), { etag: "etag-1" })));
     await fetchGitHubStatus();
     expect(getGitHubStatus()!.incidents).toHaveLength(1);
+
+    // Simulate a cold start / page reload where IndexedDB retains the ETag + JSON
+    // while in-memory _githubStatus() is reset to null:
+    resetGitHubStatusState();
+    mockPushNotification.mockClear();
+    expect(getGitHubStatus()).toBeNull();
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 304 })));
     await fetchGitHubStatus();
@@ -287,6 +296,7 @@ describe("fetchGitHubStatus", () => {
     const result = getGitHubStatus();
     expect(result!.incidents).toHaveLength(1);
     expect(result!.incidents[0].name).toBe("Cached Incident");
+    expect(mockPushNotification).toHaveBeenCalledWith("github-status", "Cached Incident", "error", false);
   });
 
   it("short-circuits on a consecutive 304 without re-setting the signal or re-running notifyTransitions", async () => {

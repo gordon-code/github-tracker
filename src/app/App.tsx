@@ -183,7 +183,7 @@ export default function App() {
           .split(",")
           .filter((r) => r.length > 0 && !currentSet.has(r));
         if (removed.length > 0) {
-          evictKeysWithPrefix(removed.map((r) => `runs2:${r}:`)).catch(() => {
+          evictKeysWithPrefix(removed.flatMap((r) => [`runs2:${r}:`, `run:${r}:`])).catch(() => {
             // Non-fatal — cache eviction failure is acceptable
           });
         }

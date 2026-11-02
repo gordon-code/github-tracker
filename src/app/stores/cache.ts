@@ -130,16 +130,15 @@ export async function evictKeysWithPrefix(prefixes: string[]): Promise<void> {
 
   const db = await getDb();
   const tx = db.transaction("cache", "readwrite");
-  let cursor = await tx.store.openCursor();
-  while (cursor) {
-    const key = typeof cursor.key === "string" ? cursor.key : cursor.value.key;
-    if (activePrefixes.some((prefix) => key.startsWith(prefix))) {
-      await cursor.delete();
-    }
-    cursor = await cursor.continue();
-  }
+  await Promise.all(
+    activePrefixes.map((prefix) =>
+      tx.store.delete(IDBKeyRange.bound(prefix, `${prefix}￿`))
+    )
+  );
   await tx.done;
 }
+
+export const STALE_TOUCH_THROTTLE_MS = 60 * 60 * 1000;
 
 export interface FetchResult {
   data: unknown;
@@ -195,6 +194,15 @@ export async function cachedFetch<T = unknown>(
   if (result.status === 304) {
     if (!existing || (conditionalHeaders.etag === null && conditionalHeaders.lastModified === null)) {
       throw new Error(`Received 304 but no valid cache entry for key: ${key}`);
+    }
+    if (existing.maxAge === null && Date.now() - existing.fetchedAt >= STALE_TOUCH_THROTTLE_MS) {
+      await setCacheEntry(
+        key,
+        existing.data,
+        existing.etag,
+        undefined,
+        existing.lastModified
+      ).catch(() => {});
     }
     return { data: existing.data, fromCache: true };
   }

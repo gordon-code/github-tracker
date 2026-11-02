@@ -21,9 +21,11 @@ const defaultCachedRequestImpl = async (
   _key: string,
   route: string,
   params?: Record<string, unknown>,
+  options?: { project?: (data: never) => unknown },
 ) => {
   const response = await octokit.request(route, params);
-  return { data: response.data, fromCache: false };
+  const data = options?.project ? options.project(response.data as never) : response.data;
+  return { data, fromCache: false };
 };
 const mockCachedRequest = vi.fn(defaultCachedRequestImpl);
 vi.mock("../../src/app/services/github", () => ({
@@ -99,6 +101,7 @@ import {
 import {
   fetchHotPRStatus,
   fetchWorkflowRunById,
+  projectSingleRun,
   isUnauthorizedError,
 } from "../../src/app/services/api";
 
@@ -492,7 +495,7 @@ describe("fetchWorkflowRunById", () => {
     expect(mockDeleteCacheEntry).not.toHaveBeenCalled();
   });
 
-  it("calls cachedRequest with key/route/params", async () => {
+  it("calls cachedRequest with key/route/params/project and deletes cache entry on terminal or waiting status", async () => {
     const octokit = makeOctokit();
     mockCachedRequest.mockResolvedValue({
       data: { id: 200, status: "completed", conclusion: "success", updated_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z" },
@@ -505,8 +508,27 @@ describe("fetchWorkflowRunById", () => {
       "run:myorg/myrepo:200",
       "GET /repos/{owner}/{repo}/actions/runs/{run_id}",
       { owner: "myorg", repo: "myrepo", run_id: 200 },
+      { project: projectSingleRun },
     );
     expect(mockDeleteCacheEntry).toHaveBeenCalledWith("run:myorg/myrepo:200");
+  });
+
+  it("still returns mapped completed update when deleteCacheEntry rejects", async () => {
+    const octokit = makeOctokit();
+    mockCachedRequest.mockResolvedValue({
+      data: { id: 201, status: "completed", conclusion: "failure", updated_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z" },
+      fromCache: false,
+    });
+    mockDeleteCacheEntry.mockRejectedValueOnce(new Error("IDB delete failed"));
+
+    const result = await fetchWorkflowRunById(octokit as never, { id: 201, owner: "myorg", repo: "myrepo" });
+    expect(result).toEqual({
+      id: 201,
+      status: "completed",
+      conclusion: "failure",
+      updatedAt: "2026-01-01T00:00:00Z",
+      completedAt: "2026-01-01T00:05:00Z",
+    });
   });
 
   // NOTE: updateRateLimitFromHeaders is now handled by the Octokit hook.wrap

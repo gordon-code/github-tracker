@@ -90,7 +90,7 @@ describe("App — cache eviction scheduling and deselected repo cleanup", () => 
     expect(cacheStore.evictStaleEntries).toHaveBeenCalledTimes(2);
   });
 
-  it("evicts runs2:<repo>: keys when a repo is deselected from config.selectedRepos", () => {
+  it("evicts runs2:<repo>: and run:<repo>: keys when a repo is deselected from config.selectedRepos", () => {
     configStore.updateConfig({
       selectedRepos: [
         { owner: "a", name: "b", fullName: "a/b" },
@@ -107,7 +107,7 @@ describe("App — cache eviction scheduling and deselected repo cleanup", () => 
     });
 
     expect(cacheStore.evictKeysWithPrefix).toHaveBeenCalledTimes(1);
-    expect(cacheStore.evictKeysWithPrefix).toHaveBeenCalledWith(["runs2:a/b:"]);
+    expect(cacheStore.evictKeysWithPrefix).toHaveBeenCalledWith(["runs2:a/b:", "run:a/b:"]);
 
     unmount();
   });

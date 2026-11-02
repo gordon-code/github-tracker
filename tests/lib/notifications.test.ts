@@ -215,6 +215,20 @@ describe("detectNewItems", () => {
     expect(probeResult.issues.map((i) => i.id)).toEqual([2]);
   });
 
+  it("refreshes existing IDs in pass 1 before inserting new IDs and evicting in pass 2 within a single poll batch", () => {
+    const initialIssues = Array.from({ length: SEEN_ID_CAP }, (_, i) => makeIssue(i + 1));
+    detectNewItems(makeData(initialIssues));
+
+    // Single poll batch with a new item ahead of the oldest seen item (ID 1):
+    // Pass 1 refreshes ID 1's recency before pass 2 inserts SEEN_ID_CAP + 1 and evicts ID 2.
+    const batchResult = detectNewItems(makeData([makeIssue(SEEN_ID_CAP + 1), makeIssue(1)]));
+    expect(batchResult.issues.map((i) => i.id)).toEqual([SEEN_ID_CAP + 1]);
+    expect(_getSeenSizes().issues).toBe(SEEN_ID_CAP);
+
+    const probeResult = detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
+    expect(probeResult.issues.map((i) => i.id)).toEqual([2]);
+  });
+
   it("does not report an item as new when it disappears for several polls and reappears", () => {
     detectNewItems(makeData([makeIssue(1), makeIssue(2)]));
 

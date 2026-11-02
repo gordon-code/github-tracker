@@ -476,19 +476,61 @@ describe("cachedFetch", () => {
       mappedFromFull
     );
   });
+
+  it("refreshes fetchedAt on 304 only when the entry is at least 1 hour old so hourly 24h eviction does not drop active keys", async () => {
+    const db = await getDb();
+    const initialFetchedAt = Date.now() - 2 * 60 * 60 * 1000; // 2 hours ago (>= 1h throttle)
+    await db.put("cache", {
+      key: "runs2:octocat/Hello-World:p1",
+      data: { total_count: 0, workflow_runs: [] },
+      etag: '"etag-old"',
+      lastModified: null,
+      fetchedAt: initialFetchedAt,
+      maxAge: null,
+    });
+
+    const fetch304 = vi.fn().mockResolvedValue({
+      data: null,
+      etag: null,
+      lastModified: null,
+      status: 304,
+    });
+
+    const firstRes = await cachedFetch("runs2:octocat/Hello-World:p1", fetch304);
+    expect(firstRes.fromCache).toBe(true);
+    const refreshedEntry = await getCacheEntry("runs2:octocat/Hello-World:p1");
+    expect(refreshedEntry).toBeDefined();
+    expect(refreshedEntry!.fetchedAt).toBeGreaterThan(initialFetchedAt);
+
+    // An immediate second 304 within the 1h throttle window does not rewrite fetchedAt
+    const recentFetchedAt = Date.now() - 5 * 60 * 1000; // 5 minutes ago (< 1h throttle)
+    await db.put("cache", {
+      ...refreshedEntry!,
+      fetchedAt: recentFetchedAt,
+    });
+    await cachedFetch("runs2:octocat/Hello-World:p1", fetch304);
+    const afterSecond304 = await getCacheEntry("runs2:octocat/Hello-World:p1");
+    expect(afterSecond304!.fetchedAt).toBe(recentFetchedAt);
+  });
 });
 
 describe("evictKeysWithPrefix", () => {
-  it("deletes only keys starting with any of the provided prefixes", async () => {
+  it("deletes only keys starting with any of the provided prefixes using ranged deletes", async () => {
     await setCacheEntry("runs2:a/b:p1", { page: 1 }, "e1");
     await setCacheEntry("runs2:a/b:p2", { page: 2 }, "e2");
+    await setCacheEntry("run:a/b:101", { id: 101 }, "e-run");
+    await setCacheEntry("runs2:a/b", { boundary: "no-trailing-colon" }, "e-boundary1");
+    await setCacheEntry("runs2:a/bc:p1", { boundary: "longer-repo-name" }, "e-boundary2");
     await setCacheEntry("runs2:c/d:p1", { page: 1 }, "e3");
     await setCacheEntry("other:key", { other: true }, "e4");
 
-    await evictKeysWithPrefix(["runs2:a/b:"]);
+    await evictKeysWithPrefix(["runs2:a/b:", "run:a/b:"]);
 
     expect(await getCacheEntry("runs2:a/b:p1")).toBeUndefined();
     expect(await getCacheEntry("runs2:a/b:p2")).toBeUndefined();
+    expect(await getCacheEntry("run:a/b:101")).toBeUndefined();
+    expect(await getCacheEntry("runs2:a/b")).toBeDefined();
+    expect(await getCacheEntry("runs2:a/bc:p1")).toBeDefined();
     expect(await getCacheEntry("runs2:c/d:p1")).toBeDefined();
     expect(await getCacheEntry("other:key")).toBeDefined();
   });

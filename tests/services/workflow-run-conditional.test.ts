@@ -16,13 +16,17 @@ describe("fetchWorkflowRunById conditional ETag requests", () => {
     vi.clearAllMocks();
   });
 
-  it("sends no If-None-Match on the first call, sends the stored ETag on the second, returns the cached mapped update on 304, and deletes the cache entry on completed status", async () => {
+  it("sends no If-None-Match on the first call, projects the cached payload, sends the stored ETag on the second, returns the cached mapped update on 304, and deletes the cache entry on completed status", async () => {
     const rawInProgress = {
       id: 101,
       status: "in_progress",
       conclusion: null,
       updated_at: "2026-11-01T15:52:22Z",
       completed_at: null,
+      repository: { id: 1, full_name: "org/repo" },
+      head_repository: { id: 1, full_name: "org/repo" },
+      actor: { login: "octocat", id: 99 },
+      jobs_url: "https://api.github.com/repos/org/repo/actions/runs/101/jobs",
     };
 
     const requestFn = vi.fn().mockResolvedValueOnce({
@@ -34,7 +38,7 @@ describe("fetchWorkflowRunById conditional ETag requests", () => {
     const descriptor = { id: 101, owner: "org", repo: "repo" };
     const cacheKey = "run:org/repo:101";
 
-    // 1. First call: no If-None-Match header sent; ETag + payload stored in IndexedDB
+    // 1. First call: no If-None-Match header sent; ETag + projected payload stored in IndexedDB
     const first = await fetchWorkflowRunById(octokit, descriptor);
     expect(requestFn).toHaveBeenCalledTimes(1);
     expect(requestFn).toHaveBeenNthCalledWith(
@@ -58,6 +62,13 @@ describe("fetchWorkflowRunById conditional ETag requests", () => {
     const cachedAfterFirst = await getCacheEntry(cacheKey);
     expect(cachedAfterFirst).toBeDefined();
     expect(cachedAfterFirst?.etag).toBe('W/"etag-run-101"');
+    expect(cachedAfterFirst?.data).toEqual({
+      id: 101,
+      status: "in_progress",
+      conclusion: null,
+      updated_at: "2026-11-01T15:52:22Z",
+      completed_at: null,
+    });
 
     // 2. Second call: sends stored If-None-Match; 304 returns the cached mapped update
     const err304 = Object.assign(new Error("Not Modified"), { status: 304 });
@@ -118,6 +129,44 @@ describe("fetchWorkflowRunById conditional ETag requests", () => {
     });
 
     // Terminal status deletes the entry from IndexedDB
+    expect(await getCacheEntry(cacheKey)).toBeUndefined();
+  });
+
+  it("deletes the run: cache entry when a run transitions to waiting status", async () => {
+    const requestFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: 202,
+          status: "queued",
+          conclusion: null,
+          updated_at: "2026-11-01T15:50:00Z",
+          completed_at: null,
+        },
+        headers: { etag: 'W/"etag-run-202"' },
+        status: 200,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: 202,
+          status: "waiting",
+          conclusion: null,
+          updated_at: "2026-11-01T15:51:00Z",
+          completed_at: null,
+        },
+        headers: { etag: 'W/"etag-run-202-waiting"' },
+        status: 200,
+      });
+
+    const octokit = { request: requestFn } as never;
+    const descriptor = { id: 202, owner: "org", repo: "repo" };
+    const cacheKey = "run:org/repo:202";
+
+    await fetchWorkflowRunById(octokit, descriptor);
+    expect(await getCacheEntry(cacheKey)).toBeDefined();
+
+    const waitingUpdate = await fetchWorkflowRunById(octokit, descriptor);
+    expect(waitingUpdate.status).toBe("waiting");
     expect(await getCacheEntry(cacheKey)).toBeUndefined();
   });
 });

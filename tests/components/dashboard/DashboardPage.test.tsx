@@ -3,7 +3,7 @@ import { createSignal } from "solid-js";
 import { render, fireEvent } from "@solidjs/testing-library";
 import { rateLimitCssClass } from "../../../src/app/lib/format";
 import { applyHotPollPRUpdates } from "../../../src/app/components/dashboard/DashboardPage";
-import { makePullRequest } from "../../helpers/index";
+import { makeIssue, makePullRequest } from "../../helpers/index";
 import type { PullRequest } from "../../../src/shared/types";
 import type { HotPRStatusUpdate } from "../../../src/app/services/api";
 import type { DashboardData } from "../../../src/app/services/poll";
@@ -270,20 +270,28 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       clearMutedSources: vi.fn(),
     }));
 
+    const mockFetchAllData = vi.fn().mockResolvedValue({
+      issues: [],
+      pullRequests: [],
+      workflowRuns: [],
+      errors: [],
+    });
+    let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
+
     vi.doMock("../../../src/app/services/poll", () => ({
-      fetchAllData: vi.fn().mockResolvedValue({
-        issues: [],
-        pullRequests: [],
-        workflowRuns: [],
-        errors: [],
-      }),
+      fetchAllData: mockFetchAllData,
       createPollCoordinator: vi.fn().mockImplementation(
-        (_getInterval: unknown, _fetchAll: () => Promise<DashboardData>) => ({
-          isRefreshing: () => false,
-          lastRefreshAt,
-          manualRefresh: vi.fn(),
-          destroy: vi.fn(),
-        }),
+        (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+          capturedFetchAll = fetchAll;
+          return {
+            isRefreshing: () => false,
+            lastRefreshAt,
+            manualRefresh: vi.fn(() => {
+              setLastRefreshAt(new Date());
+            }),
+            destroy: vi.fn(),
+          };
+        },
       ),
       createHotPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
       createEventsPollCoordinator: vi.fn().mockImplementation(() => ({ destroy: vi.fn() })),
@@ -312,6 +320,8 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       _testCounters: freshDash._testCounters,
       freshConfig,
       freshView,
+      mockFetchAllData,
+      triggerPoll: () => capturedFetchAll!(),
       setLastRefreshAt,
       triggerAuthCleared: () => {
         for (const cb of authClearCallbacks) cb();
@@ -319,18 +329,40 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
     };
   }
 
-  it("does not recompute exclusiveOwnership when switching between built-in tabs", async () => {
+  it("does not recompute exclusiveOwnership when switching between built-in and custom tabs and renders scoped custom-tab items", async () => {
     const mockSearchJql = vi.fn().mockResolvedValue({
       issues: [],
       maxResults: 100,
       startAt: 0,
     });
 
-    const { DashboardPage: FreshDashboard, _testCounters, freshConfig, freshView } =
-      await setupJiraDedupeMocks(mockSearchJql);
+    const {
+      DashboardPage: FreshDashboard,
+      _testCounters,
+      freshConfig,
+      freshView,
+      mockFetchAllData,
+      triggerPoll,
+    } = await setupJiraDedupeMocks(mockSearchJql);
+
+    mockFetchAllData.mockResolvedValue({
+      issues: [
+        makeIssue({ id: 1, title: "Octocat Exclusive Issue", repoFullName: "octocat/Hello-World", userLogin: "testuser" }),
+        makeIssue({ id: 2, title: "Other Repo Issue", repoFullName: "other/Repo", userLogin: "testuser" }),
+      ],
+      pullRequests: [
+        makePullRequest({ id: 10, title: "Octocat Team PR", repoFullName: "octocat/Hello-World", userLogin: "testuser" }),
+        makePullRequest({ id: 11, title: "Other Repo PR", repoFullName: "other/Repo", userLogin: "testuser" }),
+      ],
+      workflowRuns: [],
+      errors: [],
+    });
 
     freshConfig.updateConfig({
-      selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+      selectedRepos: [
+        { owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" },
+        { owner: "other", name: "Repo", fullName: "other/Repo" },
+      ],
       customTabs: [
         {
           id: "exclusive-issues",
@@ -353,30 +385,60 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       ],
     });
     freshView.updateViewState({ lastActiveTab: "issues" });
+    freshView.setAllExpanded("issues", true);
+    freshView.setAllExpanded("pullRequests", true);
+    freshView.setAllExpanded("non-exclusive-prs", true);
+    freshView.setAllExpanded("exclusive-issues", true);
 
     _testCounters.exclusiveOwnershipRuns = 0;
 
-    const { unmount, getByRole } = render(() => <FreshDashboard />);
+    const { unmount, getByRole, queryByText } = render(() => <FreshDashboard />);
     try {
-      const runsAfterMount = _testCounters.exclusiveOwnershipRuns;
-      expect(runsAfterMount).toBeGreaterThan(0);
+      await triggerPoll();
+
+      // Built-in Issues tab shows only the non-claimed issue
+      expect(queryByText("Other Repo Issue")).not.toBeNull();
+      expect(queryByText("Octocat Exclusive Issue")).toBeNull();
+
+      const runsAfterLoad = _testCounters.exclusiveOwnershipRuns;
+      expect(runsAfterLoad).toBeGreaterThan(0);
 
       // Switch to Pull Requests tab via TabBar click and viewState
-      const prTabBtn = getByRole("tab", { name: /Pull Requests/i });
+      const prTabBtn = getByRole("tab", { name: /^Pull Requests/i });
       fireEvent.click(prTabBtn);
       expect(freshView.viewState.lastActiveTab).toBe("pullRequests");
-      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Team PR")).not.toBeNull();
+      expect(queryByText("Other Repo PR")).not.toBeNull();
+
+      // Switch to non-exclusive custom tab ("Team PRs") — exercises activeCustomTabData()[tabId]
+      const teamPrsTabBtn = getByRole("tab", { name: /Team PRs/i });
+      fireEvent.click(teamPrsTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("non-exclusive-prs");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Team PR")).not.toBeNull();
+      expect(queryByText("Other Repo PR")).toBeNull();
+
+      // Switch to exclusive custom tab ("Exclusive Issues") — exercises exclusiveCustomTabData()[tabId]
+      const exclusiveIssuesTabBtn = getByRole("tab", { name: /Exclusive Issues/i });
+      fireEvent.click(exclusiveIssuesTabBtn);
+      expect(freshView.viewState.lastActiveTab).toBe("exclusive-issues");
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Octocat Exclusive Issue")).not.toBeNull();
+      expect(queryByText("Other Repo Issue")).toBeNull();
 
       // Switch to Actions tab and back to Issues tab
       const actionsTabBtn = getByRole("tab", { name: /Actions/i });
       fireEvent.click(actionsTabBtn);
       expect(freshView.viewState.lastActiveTab).toBe("actions");
-      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
 
       const issuesTabBtn = getByRole("tab", { name: /^Issues/i });
       fireEvent.click(issuesTabBtn);
       expect(freshView.viewState.lastActiveTab).toBe("issues");
-      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterMount);
+      expect(_testCounters.exclusiveOwnershipRuns).toBe(runsAfterLoad);
+      expect(queryByText("Other Repo Issue")).not.toBeNull();
+      expect(queryByText("Octocat Exclusive Issue")).toBeNull();
     } finally {
       unmount();
     }
@@ -445,6 +507,116 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockSearchJql).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("retries Jira fetch on the first poll within 20 s if the initial mount fetch failed, and re-fetches on manual Refresh within 20 s", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+
+    const mockSearchJql = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Transient network failure"))
+      .mockResolvedValue({
+        issues: [],
+        maxResults: 100,
+        startAt: 0,
+      });
+
+    const { DashboardPage: FreshDashboard, setLastRefreshAt } = await setupJiraDedupeMocks(mockSearchJql);
+
+    const { unmount, getByRole } = render(() => <FreshDashboard />);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+
+      // First poll completes 5 s later -> retries because the mount fetch failed
+      await vi.advanceTimersByTimeAsync(5_000);
+      setLastRefreshAt(new Date());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+
+      // User clicks manual Refresh 3 s later (within 20 s of the successful retry) -> not suppressed
+      await vi.advanceTimersByTimeAsync(3_000);
+      const refreshBtn = getByRole("button", { name: /Refresh data/i });
+      fireEvent.click(refreshBtn);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockSearchJql).toHaveBeenCalledTimes(3);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("discards stale-scope issues and re-runs fetchJiraAssigned for the new scope when scope changes while a Jira fetch is in flight", async () => {
+    const makeJiraIssue = (id: string, key: string, summary: string) => ({
+      id,
+      key,
+      fields: {
+        summary,
+        status: { name: "To Do", statusCategory: { key: "new", name: "To Do" } },
+        priority: { name: "High", id: "2" },
+        assignee: { displayName: "Test User" },
+        project: { key: "PROJ", name: "Project" },
+        updated: "2026-11-01T12:00:00.000+0000",
+        created: "2026-11-01T10:00:00.000+0000",
+        issuetype: { name: "Bug", subtask: false },
+      },
+    });
+
+    let resolveFirstFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    let resolveSecondFetch!: (value: { issues: unknown[]; maxResults: number; startAt: number }) => void;
+    const mockSearchJql = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstFetch = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondFetch = resolve;
+          }),
+      );
+
+    const { DashboardPage: FreshDashboard, freshView } = await setupJiraDedupeMocks(mockSearchJql);
+    freshView.updateViewState({ lastActiveTab: "jiraAssigned" });
+    freshView.setAllExpanded("jiraAssigned", true);
+
+    const { unmount, queryByText } = render(() => <FreshDashboard />);
+    try {
+      // Mount fetch is in flight for default "assigned" scope
+      expect(mockSearchJql).toHaveBeenCalledTimes(1);
+      expect(mockSearchJql.mock.calls[0][0]).toContain("assignee = currentUser()");
+
+      // User switches scope to "reported" while the "assigned" fetch is still in flight
+      freshView.setTabFilter("jiraAssigned", "scope", "reported");
+
+      // Resolve the initial "assigned" fetch with a stale issue -> discarded and triggers a rerun for "reported"
+      resolveFirstFetch({
+        issues: [makeJiraIssue("101", "PROJ-1", "Stale Assigned Issue")],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockSearchJql).toHaveBeenCalledTimes(2);
+      expect(mockSearchJql.mock.calls[1][0]).toContain("reporter = currentUser()");
+      expect(queryByText("Stale Assigned Issue")).toBeNull();
+
+      // Resolve the "reported" fetch -> renders only the reported scope's issue
+      resolveSecondFetch({
+        issues: [makeJiraIssue("102", "PROJ-2", "Fresh Reported Issue")],
+        maxResults: 100,
+        startAt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(queryByText("Stale Assigned Issue")).toBeNull();
+      expect(queryByText("Fresh Reported Issue")).not.toBeNull();
     } finally {
       unmount();
     }
