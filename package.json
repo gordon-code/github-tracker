@@ -19,7 +19,8 @@
     "test:status-smoke": "vitest run --config vitest.smoke.config.ts",
     "screenshot": "pnpm exec playwright test --config playwright.config.screenshot.ts",
     "mcp:serve": "pnpm --filter github-tracker-mcp dev",
-    "validate:deploy": "bash scripts/validate-deploy.sh"
+    "validate:deploy": "bash scripts/validate-deploy.sh",
+    "bundle:report": "bash scripts/bundle-report.sh"
   },
   "dependencies": {
     "@kobalte/core": "0.13.14",
@@ -49,6 +50,7 @@
     "happy-dom": "21.0.4",
     "oxlint": "1.89.0",
     "oxlint-tsgolint": "7.0.2004",
+    "rollup-plugin-visualizer": "7.1.1",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",

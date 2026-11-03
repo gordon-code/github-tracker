@@ -42,6 +42,7 @@ pnpm run typecheck     # TypeScript validation (root + mcp/)
 pnpm lint              # Type-aware lint check (oxlint — root + mcp/)
 pnpm lint:fix          # Auto-fix safe lint findings (oxlint)
 pnpm run screenshot    # Capture dashboard screenshot (saves to docs/)
+pnpm bundle:report     # Build and print client bundle sizes + top-20 entry modules (deploy-safe)
 pnpm mcp:serve         # Start the MCP server (requires GITHUB_TOKEN)
 ```
 
