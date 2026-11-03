@@ -13,6 +13,7 @@
   },
   "ignorePatterns": [
     "dist/**",
+    "dist-report/**",
     "mcp/dist/**",
     "**/node_modules/**",
     ".wrangler/**",
@@ -157,7 +158,12 @@
         "src/app/lib/use-credential-import.ts",
         "src/app/lib/pat.ts",
         "src/app/lib/oauth.ts",
-        "src/app/lib/proxy.ts"
+        "src/app/lib/proxy.ts",
+        "src/app/lib/dashboard-snapshot.ts",
+        "src/app/lib/errors.ts",
+        "src/app/services/jira-keys.ts",
+        "src/app/services/jira-client.ts",
+        "src/app/components/shared/LoadingSpinner.tsx"
       ],
       "rules": {
         "no-restricted-imports": [

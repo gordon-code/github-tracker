@@ -302,6 +302,32 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       StaleIdentityError: class StaleIdentityError extends Error {},
     }));
 
+    const mockLoadEmojiMap = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("../../../src/app/lib/emoji", () => ({
+      loadEmojiMap: mockLoadEmojiMap,
+      expandEmoji: (text: string) => text,
+      _resetEmojiMapForTests: vi.fn(),
+    }));
+
+    const mockCustomTabModalMount = vi.fn();
+    vi.doMock("../../../src/app/components/shared/CustomTabModal", () => ({
+      default: (props: { open: boolean; onClose?: () => void; editingTab?: { name: string } }) => {
+        mockCustomTabModalMount();
+        return (
+          <div data-testid="custom-tab-modal">
+            {props.open ? (
+              <div>
+                <span>{props.editingTab ? `Edit Custom Tab: ${props.editingTab.name}` : "New Custom Tab"}</span>
+                <button type="button" onClick={() => props.onClose?.()}>
+                  Close Modal
+                </button>
+              </div>
+            ) : null}
+          </div>
+        );
+      },
+    }));
+
     const freshView = await import("../../../src/app/stores/view");
     const freshConfig = await import("../../../src/app/stores/config");
     const freshDash = await import("../../../src/app/components/dashboard/DashboardPage");
@@ -321,6 +347,8 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       freshConfig,
       freshView,
       mockFetchAllData,
+      mockLoadEmojiMap,
+      mockCustomTabModalMount,
       triggerPoll: () => capturedFetchAll!(),
       setLastRefreshAt,
       triggerAuthCleared: () => {
@@ -658,6 +686,73 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
 
       expect(mockSearchJql).toHaveBeenCalledTimes(1);
       expect(queryByRole("status")).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("calls loadEmojiMap on mount and lazily mounts CustomTabModal on first open with close and reopen support", async () => {
+    const mockSearchJql = vi.fn().mockResolvedValue({
+      issues: [],
+      maxResults: 100,
+      startAt: 0,
+    });
+
+    const {
+      DashboardPage: FreshDashboard,
+      freshConfig,
+      mockLoadEmojiMap,
+      mockCustomTabModalMount,
+    } = await setupJiraDedupeMocks(mockSearchJql);
+
+    freshConfig.updateConfig({
+      selectedRepos: [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }],
+      customTabs: [
+        {
+          id: "team-prs",
+          name: "Team PRs",
+          baseType: "pullRequests",
+          orgScope: ["octocat"],
+          repoScope: [],
+          filterPreset: {},
+          exclusive: false,
+        },
+      ],
+    });
+
+    const { unmount, getByRole, queryByText, findByText, queryByTestId } = render(() => <FreshDashboard />);
+    try {
+      // loadEmojiMap is triggered once during onMount
+      expect(mockLoadEmojiMap).toHaveBeenCalledTimes(1);
+
+      // CustomTabModal is gated behind customTabModalEverOpened() and not mounted initially
+      expect(mockCustomTabModalMount).not.toHaveBeenCalled();
+      expect(queryByTestId("custom-tab-modal")).toBeNull();
+      expect(queryByText("New Custom Tab")).toBeNull();
+
+      // Clicking "+" in TabBar sets showCustomTabModal(true) -> customTabModalEverOpened(true) and lazily mounts modal
+      fireEvent.click(getByRole("button", { name: /add custom tab/i }));
+      expect(await findByText("New Custom Tab")).toBeDefined();
+      expect(mockCustomTabModalMount).toHaveBeenCalledTimes(1);
+      expect(queryByTestId("custom-tab-modal")).not.toBeNull();
+
+      // Closing modal keeps it mounted (customTabModalEverOpened stays true) while setting open=false
+      fireEvent.click(getByRole("button", { name: "Close Modal" }));
+      expect(queryByText("New Custom Tab")).toBeNull();
+      expect(queryByTestId("custom-tab-modal")).not.toBeNull();
+      expect(mockCustomTabModalMount).toHaveBeenCalledTimes(1);
+
+      // Reopening via custom tab Edit button in TabBar opens modal in edit mode without remounting
+      fireEvent.click(getByRole("button", { name: /Edit Team PRs/i }));
+      expect(await findByText("Edit Custom Tab: Team PRs")).toBeDefined();
+      expect(mockCustomTabModalMount).toHaveBeenCalledTimes(1);
+
+      // Closing resets editingTabId so reopening via "+" opens in create mode
+      fireEvent.click(getByRole("button", { name: "Close Modal" }));
+      expect(queryByText("Edit Custom Tab: Team PRs")).toBeNull();
+
+      fireEvent.click(getByRole("button", { name: /add custom tab/i }));
+      expect(await findByText("New Custom Tab")).toBeDefined();
     } finally {
       unmount();
     }

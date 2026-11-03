@@ -11,7 +11,8 @@ const { evalCounts, relayState } = vi.hoisted(() => ({
   },
   relayState: {
     observedTokens: [] as Array<string | null>,
-    disposed: false,
+    failNextImport: false,
+    importRejections: 0,
   },
 }));
 
@@ -28,6 +29,11 @@ vi.mock("../../src/app/services/github", async (importOriginal) => {
 });
 
 vi.mock("../../src/app/lib/mcp-relay", async () => {
+  if (relayState.failNextImport) {
+    relayState.failNextImport = false;
+    relayState.importRejections++;
+    throw new Error("Simulated mcp-relay dynamic import failure");
+  }
   evalCounts.mcpRelay++;
   const auth = await import("../../src/app/stores/auth");
   return {
@@ -77,6 +83,8 @@ describe("App — lean login path & authenticated-only initializers", () => {
     evalCounts.initClientWatcherCalls = 0;
     evalCounts.initMcpRelayCalls = 0;
     relayState.observedTokens.length = 0;
+    relayState.failNextImport = false;
+    relayState.importRejections = 0;
     window.history.pushState({}, "", "/login");
   });
 
@@ -100,6 +108,46 @@ describe("App — lean login path & authenticated-only initializers", () => {
     expect(evalCounts.mcpRelay).toBe(0);
     expect(evalCounts.initClientWatcherCalls).toBe(0);
     expect(evalCounts.initMcpRelayCalls).toBe(0);
+
+    unmount();
+  });
+
+  it("resets authInitStarted when dynamic auth-init import rejects while mounted so a subsequent auth transition retries and succeeds", async () => {
+    relayState.failNextImport = true;
+    const { unmount } = render(() => <App />);
+
+    const tokenA = "ghp_" + "4".repeat(36);
+    const tokenB = "ghp_" + "5".repeat(36);
+
+    // First login: mcp-relay dynamic import rejects
+    authStore.setAuthFromPat(tokenA, {
+      login: "user-fail",
+      avatar_url: "https://avatars.githubusercontent.com/u/4",
+      name: "User Fail",
+    });
+
+    await waitFor(() => {
+      expect(relayState.importRejections).toBe(1);
+    });
+    // Allow Promise.all().catch() microtask and concurrent github import to settle
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(evalCounts.initClientWatcherCalls).toBe(0);
+    expect(evalCounts.initMcpRelayCalls).toBe(0);
+
+    // Transition auth false -> true: because .catch() reset authInitStarted = false, retry runs and succeeds
+    authStore.clearAuth();
+    authStore.setAuthFromPat(tokenB, {
+      login: "user-retry",
+      avatar_url: "https://avatars.githubusercontent.com/u/5",
+      name: "User Retry",
+    });
+
+    await waitFor(() => {
+      expect(evalCounts.initClientWatcherCalls).toBe(1);
+      expect(evalCounts.initMcpRelayCalls).toBe(1);
+    });
+    expect(relayState.observedTokens).toContain(tokenB);
 
     unmount();
   });
@@ -155,7 +203,7 @@ describe("App — lean login path & authenticated-only initializers", () => {
     unmount();
   });
 
-  it("STRUCT-502: unmounting App before dynamic auth-init imports resolve does not run initializers on the disposed owner", async () => {
+  it("unmounting App before dynamic auth-init imports resolve does not run initializers on the disposed owner", async () => {
     const { unmount } = render(() => <App />);
 
     const tokenA = "ghp_" + "3".repeat(36);

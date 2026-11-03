@@ -195,6 +195,7 @@ for (const rule of forbiddenBootPatterns) {
 }
 
 const dashboardAsset = files.find((f) => /^DashboardPage-[^/]+\.js$/.test(f.name));
+const sentryInitAsset = files.find((f) => /^sentry-init-[^/]+\.js$/.test(f.name));
 const bootGzipBytes = bootAssets.reduce((s, f) => s + f.gzipBytes, 0);
 
 const sizeBudgets = [
@@ -212,6 +213,11 @@ const sizeBudgets = [
     name: "DashboardPage-*.js chunk",
     actual: dashboardAsset ? dashboardAsset.gzipBytes : null,
     max: 68 * 1024,
+  },
+  {
+    name: "sentry-init-*.js chunk",
+    actual: sentryInitAsset ? sentryInitAsset.gzipBytes : null,
+    max: 35 * 1024,
   },
   {
     name: "Total CSS (index-*.css)",

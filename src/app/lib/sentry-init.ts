@@ -1,11 +1,15 @@
-import * as Sentry from "@sentry/solid";
+import { captureException, init } from "@sentry/solid";
 import { beforeBreadcrumbHandler, beforeSendHandler } from "./sentry";
 
-export function initSdk(): typeof Sentry {
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (import.meta.env.DEV || !dsn) return Sentry;
+export interface SentrySdkClient {
+  captureException: typeof captureException;
+}
 
-  Sentry.init({
+export function initSdk(): SentrySdkClient {
+  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+  if (import.meta.env.DEV || !dsn) return { captureException };
+
+  init({
     dsn,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
@@ -34,7 +38,5 @@ export function initSdk(): typeof Sentry {
     beforeBreadcrumb: beforeBreadcrumbHandler,
   });
 
-  return Sentry;
+  return { captureException };
 }
-
-export const initSentry = initSdk;

@@ -8,19 +8,25 @@ describe("expandEmoji — lazy loading & reactivity", () => {
     expect(expandEmoji(":bug: fix")).toBe(":bug: fix");
 
     const observed: string[] = [];
+    const plainObserved: string[] = [];
     let disposeRoot!: () => void;
     createRoot((dispose) => {
       disposeRoot = dispose;
       createEffect(() => {
         observed.push(expandEmoji(":rocket: launch"));
       });
+      createEffect(() => {
+        plainObserved.push(expandEmoji("plain label"));
+      });
     });
 
     expect(observed).toEqual([":rocket: launch"]);
+    expect(plainObserved).toEqual(["plain label"]);
 
     await loadEmojiMap();
 
     expect(observed).toEqual([":rocket: launch", "🚀 launch"]);
+    expect(plainObserved).toEqual(["plain label"]);
     expect(expandEmoji(":bug: fix")).toBe("🐛 fix");
     disposeRoot();
   });

@@ -755,7 +755,7 @@ describe("LoginPage — Import from backup", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it("STRUCT-501: cancelling while onResolved is awaiting settings-transfer import does not commit or set resolvedCred", async () => {
+  it("cancelling while onResolved is awaiting settings-transfer import does not commit or set resolvedCred", async () => {
     mockValidCredsFile();
     vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
     let finishResolve!: (v: { ok: true; bundle: CredentialBundle; identity: typeof IDENTITY }) => void;

@@ -42,6 +42,14 @@ vi.mock("../../src/app/lib/mcp-relay", () => ({
   initMcpRelay: vi.fn(),
 }));
 
+vi.mock("../../src/app/lib/sentry-facade", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/lib/sentry-facade")>();
+  return {
+    ...actual,
+    reportBoundaryError: vi.fn(),
+  };
+});
+
 vi.mock("../../src/app/stores/cache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/app/stores/cache")>();
   return {
@@ -78,6 +86,7 @@ import * as configStore from "../../src/app/stores/config";
 import * as githubService from "../../src/app/services/github";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as viewStore from "../../src/app/stores/view";
+import * as sentryFacade from "../../src/app/lib/sentry-facade";
 import App, { _resetAuthInitStartedForTests } from "../../src/app/App";
 
 describe("App", () => {
@@ -201,10 +210,14 @@ describe("App", () => {
       screen.getByRole("button", { name: "Reload page" });
     });
 
-    // Verify the error is logged (not silently swallowed) for observability
+    // Verify the error is logged and forwarded to Sentry boundary reporting
     expect(spy).toHaveBeenCalledWith(
       "[app] Route render failed:",
       expect.any(Error),
+    );
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
     );
 
     spy.mockRestore();
@@ -224,6 +237,11 @@ describe("App", () => {
       screen.getByText("Failed to load page");
     });
 
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
+    );
+
     spy.mockRestore();
   });
 
@@ -240,6 +258,11 @@ describe("App", () => {
     await waitFor(() => {
       screen.getByText("Failed to load page");
     });
+
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
+    );
 
     spy.mockRestore();
   });

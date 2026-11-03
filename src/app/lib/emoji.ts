@@ -34,8 +34,9 @@ export function _resetEmojiMapForTests(): void {
 
 /** Replace GitHub `:shortcode:` patterns with Unicode emoji. Unknown codes are left as-is. */
 export function expandEmoji(text: string): string {
+  if (!text.includes(":")) return text;
   emojiVersion();
-  if (!text.includes(":") || !emojiMap) return text;
+  if (!emojiMap) return text;
   const map = emojiMap;
   return text.replace(SHORTCODE_RE, (match, name: string) => map[name] ?? match);
 }

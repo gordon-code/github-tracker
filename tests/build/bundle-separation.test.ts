@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "../..");
@@ -90,10 +90,22 @@ describe("bundle module separation & anti-bloat guardrails", () => {
       "src/app/stores/auth.ts",
       "src/app/stores/config.ts",
       "src/app/stores/view.ts",
+      "src/app/stores/cache.ts",
       "src/app/pages/LoginPage.tsx",
       "src/app/pages/JiraCallback.tsx",
       "src/app/pages/OAuthCallback.tsx",
+      "src/app/pages/PrivacyPage.tsx",
+      "src/app/lib/sentry.ts",
+      "src/app/lib/sentry-facade.ts",
       "src/app/lib/use-credential-import.ts",
+      "src/app/lib/pat.ts",
+      "src/app/lib/oauth.ts",
+      "src/app/lib/proxy.ts",
+      "src/app/lib/dashboard-snapshot.ts",
+      "src/app/lib/errors.ts",
+      "src/app/services/jira-keys.ts",
+      "src/app/services/jira-client.ts",
+      "src/app/components/shared/LoadingSpinner.tsx",
     ];
 
     const forbiddenMatchers = [
@@ -105,9 +117,48 @@ describe("bundle module separation & anti-bloat guardrails", () => {
       (spec: string) => /(?:^|\/)(?:lib\/)?settings-transfer$/.test(spec),
     ];
 
+    function resolveLocalModule(fromRelPath: string, specifier: string): string | null {
+      if (!specifier.startsWith(".")) return null;
+      if (specifier.endsWith(".css") || specifier.endsWith(".json")) return null;
+      const fromDir = dirname(resolve(ROOT, fromRelPath));
+      const rawTarget = resolve(fromDir, specifier);
+      const strippedTarget = rawTarget.replace(/\.(js|jsx)$/, "");
+      const candidates = [
+        rawTarget,
+        `${strippedTarget}.ts`,
+        `${strippedTarget}.tsx`,
+        join(strippedTarget, "index.ts"),
+        join(strippedTarget, "index.tsx"),
+      ];
+      for (const candidate of candidates) {
+        if (existsSync(candidate) && /\.(ts|tsx)$/.test(candidate)) {
+          return relative(ROOT, candidate).replaceAll("\\", "/");
+        }
+      }
+      throw new Error(`Unable to resolve local import "${specifier}" from ${fromRelPath}`);
+    }
+
+    const discoveredBootFiles = new Set<string>();
+    const queue: string[] = ["src/app/index.tsx"];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (discoveredBootFiles.has(current)) continue;
+      discoveredBootFiles.add(current);
+      for (const specifier of extractStaticValueImports(readFile(current))) {
+        if (forbiddenMatchers.some((fn) => fn(specifier))) continue;
+        const resolved = resolveLocalModule(current, specifier);
+        if (resolved && !discoveredBootFiles.has(resolved)) {
+          queue.push(resolved);
+        }
+      }
+    }
+
+    expect([...discoveredBootFiles]).toEqual(expect.arrayContaining(bootPathFiles));
+
+    const allBootFiles = new Set([...bootPathFiles, ...discoveredBootFiles]);
     const violations: Array<{ file: string; specifier: string }> = [];
 
-    for (const file of bootPathFiles) {
+    for (const file of allBootFiles) {
       const staticImports = extractStaticValueImports(readFile(file));
       for (const specifier of staticImports) {
         if (forbiddenMatchers.some((fn) => fn(specifier))) {

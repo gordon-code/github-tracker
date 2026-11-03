@@ -8,6 +8,7 @@ import { initSdk } from "../../src/app/lib/sentry-init";
 
 vi.mock("@sentry/solid", () => ({
   init: vi.fn(),
+  captureException: vi.fn(),
 }));
 
 describe("scrubUrl", () => {
