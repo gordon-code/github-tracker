@@ -33,14 +33,14 @@ vi.mock("../../src/app/stores/view", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/app/services/github", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/app/services/github")>();
-  return {
-    ...actual,
-    initClientWatcher: vi.fn(),
-    getClient: vi.fn().mockReturnValue(null),
-  };
-});
+vi.mock("../../src/app/services/github", () => ({
+  initClientWatcher: vi.fn(),
+  getClient: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../../src/app/lib/mcp-relay", () => ({
+  initMcpRelay: vi.fn(),
+}));
 
 vi.mock("../../src/app/stores/cache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/app/stores/cache")>();
@@ -78,12 +78,13 @@ import * as configStore from "../../src/app/stores/config";
 import * as githubService from "../../src/app/services/github";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as viewStore from "../../src/app/stores/view";
-import App from "../../src/app/App";
+import App, { _resetAuthInitStartedForTests } from "../../src/app/App";
 
 describe("App", () => {
   beforeEach(() => {
     // Reset all mock state (implementations, calls, return values)
     vi.resetAllMocks();
+    _resetAuthInitStartedForTests();
     mockIsAuthenticated = false;
     mockValidateToken = async () => false;
     dashboardShouldThrow = false;
@@ -143,14 +144,23 @@ describe("App", () => {
     });
   });
 
-  it("App calls init functions on mount", async () => {
-    render(() => <App />);
+  it("App calls init functions on mount and defers initClientWatcher until authenticated", async () => {
+    const { unmount } = render(() => <App />);
 
     await waitFor(() => {
       expect(vi.mocked(configStore.initConfigPersistence)).toHaveBeenCalled();
       expect(vi.mocked(viewStore.initViewPersistence)).toHaveBeenCalled();
-      expect(vi.mocked(githubService.initClientWatcher)).toHaveBeenCalled();
       expect(vi.mocked(cacheStore.evictStaleEntries)).toHaveBeenCalled();
+    });
+    expect(vi.mocked(githubService.initClientWatcher)).not.toHaveBeenCalled();
+    unmount();
+
+    mockIsAuthenticated = true;
+    configStore.updateConfig({ onboardingComplete: true });
+    render(() => <App />);
+
+    await waitFor(() => {
+      expect(vi.mocked(githubService.initClientWatcher)).toHaveBeenCalledTimes(1);
     });
   });
 

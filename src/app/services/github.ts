@@ -1,4 +1,4 @@
-import { createSignal, createEffect } from "solid-js";
+import { createSignal, createEffect, untrack } from "solid-js";
 import { Octokit } from "@octokit/core";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
@@ -452,44 +452,42 @@ export async function cachedRequest<T = unknown>(
 
 // ── Client singleton ─────────────────────────────────────────────────────────
 
-// Eagerly create client if token exists at module load (before initClientWatcher effect runs).
-// This ensures getClient() returns non-null for early callers like the poll coordinator.
-// Wrapped in try/catch: if Octokit construction fails, fall back to null and let
-// initClientWatcher retry when its effect fires.
-let _eagerClient: GitHubOctokitInstance | null = null;
+const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(null);
 let _clientToken: string | null = null;
-try {
-  const t = token();
-  if (t) {
-    _eagerClient = createGitHubClient(t);
-    _clientToken = t;
+
+function syncClientWithToken(): void {
+  const currentToken = untrack(token);
+  if (currentToken === _clientToken) return;
+  if (currentToken) {
+    try {
+      _setClient(createGitHubClient(currentToken));
+      _clientToken = currentToken;
+    } catch {
+      _setClient(null);
+      _clientToken = null;
+    }
+  } else {
+    _setClient(null);
+    _clientToken = null;
   }
-} catch {
-  // Non-fatal — initClientWatcher will retry
 }
-const [_client, _setClient] = createSignal<GitHubOctokitInstance | null>(_eagerClient);
+
+syncClientWithToken();
 
 export function getClient(): GitHubOctokitInstance | null {
+  syncClientWithToken();
   return _client();
 }
 
 /**
- * Must be called from within a reactive root (e.g., App.tsx onMount).
+ * Must be called from within a reactive root (e.g., App.tsx).
  * Sets up a createEffect that watches the auth token signal and creates/clears
  * the Octokit instance accordingly.
  */
 export function initClientWatcher(): void {
   createEffect(() => {
-    const currentToken = token();
-    if (currentToken) {
-      // Skip if the eager init already created a client for this exact token
-      if (currentToken === _clientToken && _client()) return;
-      _setClient(createGitHubClient(currentToken));
-      _clientToken = currentToken;
-    } else {
-      _setClient(null);
-      _clientToken = null;
-    }
+    void token();
+    syncClientWithToken();
   });
 }
 

@@ -44,6 +44,26 @@ describe("ItemRow", () => {
     screen.getByText("bug");
   });
 
+  it("reactively expands emoji shortcodes in label chips once loadEmojiMap resolves", async () => {
+    const { loadEmojiMap, _resetEmojiMapForTests } = await import("../../src/app/lib/emoji");
+    _resetEmojiMapForTests();
+
+    render(() => (
+      <ItemRow
+        {...defaultProps}
+        labels={[{ name: ":bug: regression", color: "d73a4a" }]}
+      />
+    ));
+
+    // Pre-load: raw shortcode text is rendered
+    expect(screen.getByText(":bug: regression")).toBeDefined();
+
+    await loadEmojiMap();
+
+    // Post-load: reactive JSX updates automatically to expanded emoji
+    expect(screen.getByText("🐛 regression")).toBeDefined();
+  });
+
   it("renders relative time for createdAt", () => {
     const { container } = render(() => <ItemRow {...defaultProps} />);
     // Should show compact format like "2h"

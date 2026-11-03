@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { z } from "zod";
+import * as z from "zod/mini";
 import { captureException } from "../lib/sentry-facade";
 import { clearCache } from "./cache";
 import { clearSnapshot } from "../lib/dashboard-snapshot";
@@ -13,13 +13,13 @@ import { DASHBOARD_BODIES_STORAGE_KEY } from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
-  accessToken: z.string().min(1),
+  accessToken: z.string().check(z.minLength(1)),
   sealedRefreshToken: z.string(),
   expiresAt: z.number(),
-  cloudId: z.string().min(1),
-  siteUrl: z.string().url(),
-  siteName: z.string().min(1),
-  email: z.string().optional(),
+  cloudId: z.string().check(z.minLength(1)),
+  siteUrl: z.url(),
+  siteName: z.string().check(z.minLength(1)),
+  email: z.optional(z.string()),
 });
 
 export type { JiraAuthState } from "../../shared/jira-types";

@@ -1,7 +1,7 @@
 import { createSignal, onMount, Show, For } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
-import { z } from "zod";
+import * as z from "zod/mini";
 import { setJiraAuth } from "../stores/auth";
 import { updateJiraConfig } from "../stores/config";
 import { JIRA_OAUTH_STATE_KEY } from "../lib/oauth";
@@ -15,7 +15,7 @@ const JiraAccessibleResourceSchema = z.array(z.object({
   name: z.string(),
   url: z.string(),
   scopes: z.array(z.string()),
-  avatarUrl: z.string().optional(),
+  avatarUrl: z.optional(z.string()),
 }));
 
 const JiraTokenResponseSchema = z.object({

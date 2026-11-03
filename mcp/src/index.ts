@@ -30,10 +30,10 @@ const MAX_TRACKED_USERS = 10;
 const MAX_MONITORED_REPOS = 10;
 
 const ConfigUpdatePayloadSchema = z.object({
-  selectedRepos: RepoRefSchema.array().max(MAX_REPOS).default([]),
-  trackedUsers: TrackedUserSchema.array().max(MAX_TRACKED_USERS).default([]),
-  upstreamRepos: RepoRefSchema.array().max(MAX_REPOS).default([]),
-  monitoredRepos: RepoRefSchema.array().max(MAX_MONITORED_REPOS).default([]),
+  selectedRepos: z.array(RepoRefSchema).max(MAX_REPOS).default([]),
+  trackedUsers: z.array(TrackedUserSchema).max(MAX_TRACKED_USERS).default([]),
+  upstreamRepos: z.array(RepoRefSchema).max(MAX_REPOS).default([]),
+  monitoredRepos: z.array(RepoRefSchema).max(MAX_MONITORED_REPOS).default([]),
   enableActions: z.boolean().default(true),
 });
 

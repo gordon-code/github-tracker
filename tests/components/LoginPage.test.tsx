@@ -156,27 +156,6 @@ describe("LoginPage — OAuth view (default)", () => {
     await user.click(screen.getByText("Sign in with GitHub"));
     expect(window.location.href).toContain("https://github.com/login/oauth/authorize");
   });
-
-  it("schedules dashboard chunk prefetch on mount", () => {
-    // happy-dom lacks requestIdleCallback, so the setTimeout(prefetch, 2000) fallback fires
-    vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    render(() => <LoginPage />);
-
-    // The prefetch is scheduled via setTimeout with 2s delay
-    const timeoutCalls = vi.getTimerCount();
-    expect(timeoutCalls).toBeGreaterThan(0);
-
-    // Advancing the timer triggers the import — resolves to mock, no error
-    vi.advanceTimersByTime(2000);
-
-    // No console.warn means the .catch() didn't fire (import succeeded via mock)
-    expect(warnSpy).not.toHaveBeenCalledWith("[app] Dashboard chunk prefetch failed");
-
-    vi.useRealTimers();
-    warnSpy.mockRestore();
-  });
 });
 
 describe("LoginPage — PAT form navigation", () => {

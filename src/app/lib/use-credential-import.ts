@@ -1,7 +1,6 @@
 import { createSignal } from "solid-js";
 import type { Config } from "../../shared/schemas";
 import type { GitHubUser } from "../stores/auth";
-import { parseImportFile, resolveImportedCredentials, CredentialsSectionSchema } from "./settings-transfer";
 import type { CredentialBundle, CredentialsSection } from "./settings-transfer";
 import { unsealCredentialBundle } from "./proxy";
 
@@ -79,6 +78,7 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
 
   async function handleFileSelected(file: File) {
     reset();
+    const capturedGen = gen;
     let text: string;
     try {
       // A read rejection (unreadable/binary file) is treated identically to a
@@ -88,6 +88,8 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
       opts.onReadError(READ_ERROR_MESSAGE);
       return;
     }
+    const { parseImportFile, CredentialsSectionSchema } = await import("./settings-transfer");
+    if (capturedGen !== gen) return;
     const result = parseImportFile(text);
     if (!result.ok) {
       opts.onParseError(`Import failed: ${result.errors[0] ?? "invalid settings file"}`);
@@ -155,6 +157,8 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
     }
 
     // Client-side, retryable against the cached ciphertext (no re-unseal).
+    const { resolveImportedCredentials } = await import("./settings-transfer");
+    if (capturedGen !== gen) return;
     const resolved = await resolveImportedCredentials(ciphertext, cred.credentials.salt, code);
     // The resolve await is another window where a Cancel-then-reselect can change
     // the generation (unsealInFlight is false here); discard the result if so.

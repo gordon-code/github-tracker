@@ -1,7 +1,36 @@
-import { describe, it, expect } from "vitest";
-import { expandEmoji } from "../../src/app/lib/emoji";
+import { describe, it, expect, beforeAll } from "vitest";
+import { createRoot, createEffect } from "solid-js";
+import { expandEmoji, loadEmojiMap, _resetEmojiMapForTests } from "../../src/app/lib/emoji";
+
+describe("expandEmoji — lazy loading & reactivity", () => {
+  it("returns text unchanged before loadEmojiMap() resolves, then updates reactive computations once loaded", async () => {
+    _resetEmojiMapForTests();
+    expect(expandEmoji(":bug: fix")).toBe(":bug: fix");
+
+    const observed: string[] = [];
+    let disposeRoot!: () => void;
+    createRoot((dispose) => {
+      disposeRoot = dispose;
+      createEffect(() => {
+        observed.push(expandEmoji(":rocket: launch"));
+      });
+    });
+
+    expect(observed).toEqual([":rocket: launch"]);
+
+    await loadEmojiMap();
+
+    expect(observed).toEqual([":rocket: launch", "🚀 launch"]);
+    expect(expandEmoji(":bug: fix")).toBe("🐛 fix");
+    disposeRoot();
+  });
+});
 
 describe("expandEmoji", () => {
+  beforeAll(async () => {
+    await loadEmojiMap();
+  });
+
   it("expands known shortcodes to Unicode", () => {
     expect(expandEmoji(":microbe: bug")).toBe("🦠 bug");
     expect(expandEmoji(":sponge: formatter")).toBe("🧽 formatter");

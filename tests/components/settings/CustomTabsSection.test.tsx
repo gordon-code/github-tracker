@@ -50,12 +50,16 @@ vi.mock("../../../src/app/stores/view", () => ({
 }));
 
 vi.mock("../../../src/app/components/shared/CustomTabModal", () => ({
-  default: (props: { open: boolean; editingTab?: unknown }) => {
-    if (!props.open) return null;
-    return props.editingTab
-      ? (() => { const el = document.createElement("div"); el.textContent = "Edit Custom Tab"; return el; })()
-      : (() => { const el = document.createElement("div"); el.textContent = "New Custom Tab"; return el; })();
-  },
+  default: (props: { open: boolean; onClose?: () => void; editingTab?: unknown }) => (
+    <>
+      {props.open ? (
+        <div>
+          <span>{props.editingTab ? "Edit Custom Tab" : "New Custom Tab"}</span>
+          <button type="button" onClick={() => props.onClose?.()}>Close Modal</button>
+        </div>
+      ) : null}
+    </>
+  ),
 }));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
@@ -283,12 +287,11 @@ describe("CustomTabsSection — edit button", () => {
     expect(screen.getByRole("button", { name: /edit "Tab Two"/i })).toBeDefined();
   });
 
-  it("clicking edit button does not throw", () => {
-    // CustomTabModal is mocked; verify the click handler runs without error
+  it("clicking edit button lazily mounts CustomTabModal in edit mode", async () => {
     renderSection([makeTab({ id: "t1", name: "Editable" })]);
-    expect(() => {
-      fireEvent.click(screen.getByRole("button", { name: /edit "Editable"/i }));
-    }).not.toThrow();
+    expect(screen.queryByText("Edit Custom Tab")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /edit "Editable"/i }));
+    expect(await screen.findByText("Edit Custom Tab")).toBeDefined();
   });
 });
 
@@ -310,11 +313,20 @@ describe("CustomTabsSection — add button cap", () => {
     expect(screen.getByText("Maximum 10 custom tabs")).toBeDefined();
   });
 
-  it("clicking Add button does not throw", () => {
-    // CustomTabModal is mocked; verify the click handler runs without error
-    renderSection([]);
-    expect(() => {
-      fireEvent.click(screen.getByRole("button", { name: /add custom tab/i }));
-    }).not.toThrow();
+  it("clicking Add button lazily mounts CustomTabModal and supports open -> close -> reopen", async () => {
+    renderSection([makeTab({ id: "t1", name: "Editable" })]);
+    expect(screen.queryByText("New Custom Tab")).toBeNull();
+
+    // Open in create mode
+    fireEvent.click(screen.getByRole("button", { name: /add custom tab/i }));
+    expect(await screen.findByText("New Custom Tab")).toBeDefined();
+
+    // Close modal
+    fireEvent.click(screen.getByRole("button", { name: "Close Modal" }));
+    expect(screen.queryByText("New Custom Tab")).toBeNull();
+
+    // Reopen in edit mode
+    fireEvent.click(screen.getByRole("button", { name: /edit "Editable"/i }));
+    expect(await screen.findByText("Edit Custom Tab")).toBeDefined();
   });
 });

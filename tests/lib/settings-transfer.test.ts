@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { z } from "zod";
 
 // Mock cache so auth's identity-clear path never touches IndexedDB; the pre-auth
 // ordering test controls clearCache's timing directly via this mock.
@@ -1609,7 +1608,7 @@ describe("import-side stripped-item backfill guard", () => {
   afterEach(() => resetViewState());
 
   /** Fields a schema requires — i.e. omitting them (passing `undefined`) fails validation. Optional/`.default()` fields pass `undefined` and are excluded. */
-  function requiredKeys(shape: Record<string, z.ZodTypeAny>): string[] {
+  function requiredKeys(shape: Record<string, { safeParse: (val: unknown) => { success: boolean } }>): string[] {
     return Object.keys(shape).filter((key) => !shape[key].safeParse(undefined).success);
   }
 

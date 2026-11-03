@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 import { createStore, produce } from "solid-js/store";
 import { createEffect, onCleanup, untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
@@ -27,16 +27,16 @@ export const JIRA_CUSTOM_SORT_FIELD = "custom" as const;
 
 export const TrackedItemSchema = z.object({
   id: z.number(),
-  number: z.number().optional(),
+  number: z.optional(z.number()),
   type: z.enum(["issue", "pullRequest", "jiraIssue"]),
-  source: z.enum(["github", "jira"]).default("github"),
+  source: z._default(z.enum(["github", "jira"]), "github"),
   repoFullName: z.string(),
   title: z.string(),
   addedAt: z.number(),
-  jiraKey: z.string().optional(),
-  jiraProjectKey: z.string().optional(),
-  jiraStatus: z.string().optional(),
-  htmlUrl: z.string().optional(),
+  jiraKey: z.optional(z.string()),
+  jiraProjectKey: z.optional(z.string()),
+  jiraStatus: z.optional(z.string()),
+  htmlUrl: z.optional(z.string()),
 });
 
 export type TrackedItem = z.infer<typeof TrackedItemSchema>;
@@ -50,30 +50,30 @@ export const IgnoredItemSchema = z.object({
 });
 
 export const IssueFiltersSchema = z.object({
-  scope: z.enum(["involves_me", "all"]).default("involves_me"),
-  role: z.enum(["all", "author", "assignee"]).default("all"),
-  comments: z.enum(["all", "has", "none"]).default("all"),
-  user: z.enum(["all"]).or(z.string()).default("all"),
+  scope: z._default(z.enum(["involves_me", "all"]), "involves_me"),
+  role: z._default(z.enum(["all", "author", "assignee"]), "all"),
+  comments: z._default(z.enum(["all", "has", "none"]), "all"),
+  user: z._default(z.union([z.enum(["all"]), z.string()]), "all"),
 });
 
 export const PullRequestFiltersSchema = z.object({
-  scope: z.enum(["involves_me", "all"]).default("involves_me"),
-  role: z.enum(["all", "author", "reviewer", "assignee"]).default("all"),
-  reviewDecision: z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]).default("all"),
-  draft: z.enum(["all", "draft", "ready"]).default("all"),
-  checkStatus: z.enum(["all", "success", "failure", "running", "waiting", "pending", "conflict", "blocked", "none"]).default("all"),
-  sizeCategory: z.enum(["all", "XS", "S", "M", "L", "XL", "XXL"]).default("all"),
-  user: z.enum(["all"]).or(z.string()).default("all"),
+  scope: z._default(z.enum(["involves_me", "all"]), "involves_me"),
+  role: z._default(z.enum(["all", "author", "reviewer", "assignee"]), "all"),
+  reviewDecision: z._default(z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]), "all"),
+  draft: z._default(z.enum(["all", "draft", "ready"]), "all"),
+  checkStatus: z._default(z.enum(["all", "success", "failure", "running", "waiting", "pending", "conflict", "blocked", "none"]), "all"),
+  sizeCategory: z._default(z.enum(["all", "XS", "S", "M", "L", "XL", "XXL"]), "all"),
+  user: z._default(z.union([z.enum(["all"]), z.string()]), "all"),
 });
 
 export const ActionsFiltersSchema = z.object({
-  conclusion: z.enum(["all", "success", "failure", "cancelled", "running", "waiting", "pending", "other"]).default("all"),
-  event: z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]).default("all"),
+  conclusion: z._default(z.enum(["all", "success", "failure", "cancelled", "running", "waiting", "pending", "other"]), "all"),
+  event: z._default(z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]), "all"),
 });
 
 export const DependencyFiltersSchema = z.object({
-  updateType: z.enum(["all", "major", "minor", "patch", "pin", "digest", "maintenance", "other"]).default("all"),
-  bot: z.string().default("all"),
+  updateType: z._default(z.enum(["all", "major", "minor", "patch", "pin", "digest", "maintenance", "other"]), "all"),
+  bot: z._default(z.string(), "all"),
 });
 
 export type DependencyFilters = z.infer<typeof DependencyFiltersSchema>;
@@ -81,11 +81,17 @@ export type DependencyFilterField = keyof DependencyFilters;
 
 // "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
 export const JiraFiltersSchema = z.object({
-  scope: z.enum(["assigned", "reported", "watching"]).or(z.string().regex(/^[a-zA-Z0-9_-]+$/).max(100)).default("assigned"),
-  statusCategory: z.enum(["all", "new", "indeterminate"]).default("all"),
-  priority: z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]).default("all"),
-  sortField: z.string().default(JIRA_CUSTOM_SORT_FIELD),
-  sortDirection: z.enum(["asc", "desc"]).default("asc"),
+  scope: z._default(
+    z.union([
+      z.enum(["assigned", "reported", "watching"]),
+      z.string().check(z.regex(/^[a-zA-Z0-9_-]+$/), z.maxLength(100)),
+    ]),
+    "assigned"
+  ),
+  statusCategory: z._default(z.enum(["all", "new", "indeterminate"]), "all"),
+  priority: z._default(z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]), "all"),
+  sortField: z._default(z.string(), JIRA_CUSTOM_SORT_FIELD),
+  sortDirection: z._default(z.enum(["asc", "desc"]), "asc"),
 });
 
 export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
@@ -98,70 +104,102 @@ export type JiraFilters = z.infer<typeof JiraFiltersSchema>;
 export type JiraFilterField = keyof JiraFilters;
 
 export const ViewStateSchema = z.object({
-  lastActiveTab: z.string().default("issues"),
-  globalSort: z.object({
-    field: z.string(),
-    direction: z.enum(["asc", "desc"]),
-  }).default({ field: "updatedAt", direction: "desc" }),
-  ignoredItems: z
-    .array(IgnoredItemSchema)
-    .max(IGNORED_ITEMS_CAP)
-    .default([]),
-  globalFilter: z
-    .object({
-      org: z.string().nullable().default(null),
-      repo: z.string().nullable().default(null),
-    })
-    .default({ org: null, repo: null }),
-  tabFilters: z.object({
-    issues: IssueFiltersSchema.default({ scope: "involves_me", role: "all", comments: "all", user: "all" }),
-    pullRequests: PullRequestFiltersSchema.default({ scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
-    actions: ActionsFiltersSchema.default({ conclusion: "all", event: "all" }),
-    jiraAssigned: JiraFiltersSchema.default({ scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" }),
-    dependencies: DependencyFiltersSchema.default({ updateType: "all", bot: "all" }),
-  }).default({
-    issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
-    pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
-    actions: { conclusion: "all", event: "all" },
-    jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" },
-    dependencies: { updateType: "all", bot: "all" },
-  }),
-  showPrRuns: z.boolean().default(false),
-  hideDepDashboard: z.boolean().default(true),
-  customTabFilters: z.record(
-    z.string(),
-    z.record(z.string(), z.string())
-      .refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_FIELDS_CAP, {
-        message: `Too many filter fields for a single tab (max ${CUSTOM_TAB_FILTERS_FIELDS_CAP})`,
+  lastActiveTab: z._default(z.string(), "issues"),
+  globalSort: z._default(
+    z.object({
+      field: z.string(),
+      direction: z.enum(["asc", "desc"]),
+    }),
+    { field: "updatedAt", direction: "desc" }
+  ),
+  ignoredItems: z._default(
+    z.array(IgnoredItemSchema).check(z.maxLength(IGNORED_ITEMS_CAP)),
+    []
+  ),
+  globalFilter: z._default(
+    z.object({
+      org: z._default(z.nullable(z.string()), null),
+      repo: z._default(z.nullable(z.string()), null),
+    }),
+    { org: null, repo: null }
+  ),
+  tabFilters: z._default(
+    z.object({
+      issues: z._default(IssueFiltersSchema, { scope: "involves_me", role: "all", comments: "all", user: "all" }),
+      pullRequests: z._default(PullRequestFiltersSchema, { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
+      actions: z._default(ActionsFiltersSchema, { conclusion: "all", event: "all" }),
+      jiraAssigned: z._default(JiraFiltersSchema, { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" }),
+      dependencies: z._default(DependencyFiltersSchema, { updateType: "all", bot: "all" }),
+    }),
+    {
+      issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
+      pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
+      actions: { conclusion: "all", event: "all" },
+      jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" },
+      dependencies: { updateType: "all", bot: "all" },
+    }
+  ),
+  showPrRuns: z._default(z.boolean(), false),
+  hideDepDashboard: z._default(z.boolean(), true),
+  customTabFilters: z._default(
+    z.record(
+      z.string(),
+      z.record(z.string(), z.string()).check(
+        z.refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_FIELDS_CAP, {
+          message: `Too many filter fields for a single tab (max ${CUSTOM_TAB_FILTERS_FIELDS_CAP})`,
+        })
+      )
+    ).check(
+      z.refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_TABS_CAP, {
+        message: `Too many tabs with saved filters (max ${CUSTOM_TAB_FILTERS_TABS_CAP})`,
       })
-  ).refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_TABS_CAP, {
-    message: `Too many tabs with saved filters (max ${CUSTOM_TAB_FILTERS_TABS_CAP})`,
-  }).default({}),
-  expandedRepos: z.record(
-    z.string(),
-    z.record(z.string(), z.boolean())
-      .refine((v) => Object.keys(v).length <= EXPANDED_REPOS_REPOS_CAP, {
-        message: `Too many expanded repos for a single tab (max ${EXPANDED_REPOS_REPOS_CAP})`,
+    ),
+    {}
+  ),
+  expandedRepos: z._default(
+    z.record(
+      z.string(),
+      z._default(
+        z.record(z.string(), z.boolean()).check(
+          z.refine((v) => Object.keys(v).length <= EXPANDED_REPOS_REPOS_CAP, {
+            message: `Too many expanded repos for a single tab (max ${EXPANDED_REPOS_REPOS_CAP})`,
+          })
+        ),
+        {}
+      )
+    ).check(
+      z.refine((v) => Object.keys(v).length <= EXPANDED_REPOS_TABS_CAP, {
+        message: `Too many tabs with expanded-repo state (max ${EXPANDED_REPOS_TABS_CAP})`,
       })
-      .default({})
-  ).refine((v) => Object.keys(v).length <= EXPANDED_REPOS_TABS_CAP, {
-    message: `Too many tabs with expanded-repo state (max ${EXPANDED_REPOS_TABS_CAP})`,
-  }).default({
-    issues: {},
-    pullRequests: {},
-    actions: {},
-    jiraAssigned: {},
-  }),
+    ),
+    {
+      issues: {},
+      pullRequests: {},
+      actions: {},
+      jiraAssigned: {},
+    }
+  ),
   // Per-tab default expand state. A repo with no entry in `expandedRepos[tab]` follows
   // this default (a tab with no entry here defaults to collapsed). Expand All / Collapse
   // All set this default so repos that appear later inherit it; a manual per-repo toggle
   // records an exception in `expandedRepos[tab]`. Jira project groups default to expanded.
-  expandDefault: z.record(z.string(), z.boolean()).default({ jiraAssigned: true }),
-  lockedRepos: z.record(z.string(), z.array(z.string().max(200)).max(LOCKED_REPOS_CAP)).default({ issues: [], pullRequests: [], actions: [], jiraAssigned: [] }),
-  trackedItems: z.array(TrackedItemSchema).max(TRACKED_ITEMS_CAP).default([]),
-  dependencyExpandedGroups: z.array(z.string()).default(["mergeable"]),
-  jiraCustomOrder: z.array(z.string().max(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH)).max(JIRA_CUSTOM_ORDER_CAP).default([])
-    .transform((arr) => [...new Set(arr)]),
+  expandDefault: z._default(z.record(z.string(), z.boolean()), { jiraAssigned: true }),
+  lockedRepos: z._default(
+    z.record(
+      z.string(),
+      z.array(z.string().check(z.maxLength(200))).check(z.maxLength(LOCKED_REPOS_CAP))
+    ),
+    { issues: [], pullRequests: [], actions: [], jiraAssigned: [] }
+  ),
+  trackedItems: z._default(z.array(TrackedItemSchema).check(z.maxLength(TRACKED_ITEMS_CAP)), []),
+  dependencyExpandedGroups: z._default(z.array(z.string()), ["mergeable"]),
+  jiraCustomOrder: z.pipe(
+    z._default(
+      z.array(z.string().check(z.maxLength(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH))).check(z.maxLength(JIRA_CUSTOM_ORDER_CAP)),
+      []
+    ),
+    z.transform((arr) => [...new Set(arr)])
+  ),
 });
 
 export type ViewState = z.infer<typeof ViewStateSchema>;
@@ -242,8 +280,8 @@ function coerceStrippedItemsArray(raw: unknown): unknown {
  * means validation failed.
  */
 function validateViewStateField<K extends keyof ViewState>(key: K, value: unknown): ViewState[K] | undefined {
-  const mask: Partial<Record<keyof ViewState, true>> = { [key]: true };
-  const result = ViewStateSchema.pick(mask).safeParse({
+  const mask = { [key]: true } as Record<keyof ViewState, true>;
+  const result = z.pick(ViewStateSchema, mask).safeParse({
     [key]: value,
   });
   return result.success ? ((result.data as Record<string, unknown>)[key] as ViewState[K]) : undefined;
@@ -426,8 +464,8 @@ export function resetViewState(): void {
 export function updateViewState(partial: Partial<ViewState>): void {
   const keys = Object.keys(partial) as (keyof ViewState)[];
   if (keys.length === 0) return;
-  const shape = Object.fromEntries(keys.map((k) => [k, true])) as Partial<Record<keyof ViewState, true>>;
-  const validated = ViewStateSchema.pick(shape).safeParse(partial);
+  const shape = Object.fromEntries(keys.map((k) => [k, true])) as Record<keyof ViewState, true>;
+  const validated = z.pick(ViewStateSchema, shape).safeParse(partial);
   if (!validated.success) {
     pushNotification("view:updateViewState", "Some view settings could not be saved due to invalid data.", "warning");
     return;
@@ -824,7 +862,7 @@ export function initViewPersistence(): void {
       // Without this, Zod's .default([]) would backfill the missing key with an empty
       // array and silently wipe the current tab's real order.
       if (!("jiraCustomOrder" in (parsed as Record<string, unknown>))) return;
-      const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse(parsed);
+      const result = z.pick(ViewStateSchema, { jiraCustomOrder: true }).safeParse(parsed);
       if (!result.success) return;
       const incoming = result.data.jiraCustomOrder;
       if (JSON.stringify(incoming) === JSON.stringify(untrack(() => viewState.jiraCustomOrder))) return;
