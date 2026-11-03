@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show, Switch, Match } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
 import { setAuthFromPat, type GitHubUser } from "../stores/auth";
 import { config } from "../stores/config";
@@ -85,7 +85,7 @@ export default function LoginPage() {
       setPatInput("");
       navigate("/", { replace: true });
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: "pat-validation" } });
+      captureException(err, { tags: { source: "pat-validation" } });
       setPatError("Network error — please try again");
     } finally {
       setSubmitting(false);

@@ -1,10 +1,12 @@
 import "./index.css";
 import { render } from "solid-js/web";
-import { initSentry } from "./lib/sentry";
+import { installEarlyErrorCapture, startSentryLoad } from "./lib/sentry-facade";
 import App from "./App";
 
-// Initialize Sentry before rendering — captures errors from first paint.
-// No-ops in dev/test (guarded by import.meta.env.DEV check).
-initSentry();
+// Capture early errors synchronously before first paint, then lazy-load the
+// Sentry SDK on idle after render. No-ops in dev/test or without DSN.
+installEarlyErrorCapture();
 
 render(() => <App />, document.getElementById("app")!);
+
+startSentryLoad();

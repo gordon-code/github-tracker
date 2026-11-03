@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { z } from "zod";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../lib/sentry-facade";
 import { clearCache } from "./cache";
 import { clearSnapshot } from "../lib/dashboard-snapshot";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
@@ -295,7 +295,7 @@ export async function clearIdentityData(): Promise<void> {
     await clearCache();
   } catch (err) {
     console.warn("[auth] Cache clear failed during identity data clear:", err);
-    Sentry.captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
+    captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
   }
   await snapshotClear;
 }
@@ -330,7 +330,7 @@ export function clearAuth(): void {
     // Clear IndexedDB cache and snapshot to prevent data leakage between users
     clearCache().catch((err) => {
       console.warn("[auth] Cache clear failed during logout:", err);
-      Sentry.captureException(err, { tags: { source: "auth-logout-cache-clear" } });
+      captureException(err, { tags: { source: "auth-logout-cache-clear" } });
     });
     void clearSnapshotLogged();
     // Run registered cleanup callbacks (e.g., poll state reset)

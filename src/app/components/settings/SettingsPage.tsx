@@ -1,7 +1,7 @@
 import { createSignal, createMemo, createEffect, Show, For, onCleanup, onMount } from "solid-js";
 import { Select } from "@kobalte/core/select";
 import { Dialog } from "@kobalte/core/dialog";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../../lib/sentry-facade";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
 import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
@@ -511,7 +511,7 @@ export default function SettingsPage() {
       pushNotification("pat-replace", "Token replaced successfully", "info");
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      Sentry.captureException(err, { tags: { source: "pat-replace" } });
+      captureException(err, { tags: { source: "pat-replace" } });
       setReplacePatError("Network error — please try again");
     } finally {
       setReplaceSubmitting(false);
@@ -733,7 +733,7 @@ export default function SettingsPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error("[jira-connect]", err);
-      Sentry.captureException(err, { tags: { source: "jira-api-token-connect" } });
+      captureException(err, { tags: { source: "jira-api-token-connect" } });
       setJiraApiError(`Connection failed: ${msg}`);
     } finally {
       setJiraApiConnecting(false);
@@ -830,7 +830,7 @@ export default function SettingsPage() {
       pushNotification("jira-replace", "Jira API token replaced successfully", "info");
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      Sentry.captureException(err, { tags: { source: "jira-token-replace" } });
+      captureException(err, { tags: { source: "jira-token-replace" } });
       setReplaceJiraError("Connection failed — please try again.");
     } finally {
       setReplaceJiraSubmitting(false);

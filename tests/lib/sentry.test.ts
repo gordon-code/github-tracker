@@ -3,8 +3,8 @@ import {
   scrubUrl,
   beforeSendHandler,
   beforeBreadcrumbHandler,
-  initSentry,
 } from "../../src/app/lib/sentry";
+import { initSdk } from "../../src/app/lib/sentry-init";
 
 vi.mock("@sentry/solid", () => ({
   init: vi.fn(),
@@ -72,6 +72,30 @@ describe("scrubUrl", () => {
   it("strips Atlassian API token prefix (ATATT...)", () => {
     expect(scrubUrl("Error: token ATATT3xFfGF0abc123_def-456= exposed")).toBe(
       "Error: token ATATT[REDACTED] exposed",
+    );
+  });
+
+  it("strips refresh_token= parameter case-insensitively", () => {
+    expect(
+      scrubUrl("https://example.com/oauth?refresh_token=rt_secret123&REFRESH_TOKEN=rt_upper456&other=ok"),
+    ).toBe(
+      "https://example.com/oauth?refresh_token=[REDACTED]&refresh_token=[REDACTED]&other=ok",
+    );
+  });
+
+  it("strips sealed_*= query and body parameters while preserving the parameter name", () => {
+    expect(
+      scrubUrl("https://example.com/cb?sealed_refresh_token=enc123&sealed_bundle=enc456&sealed_token=enc789&safe=1"),
+    ).toBe(
+      "https://example.com/cb?sealed_refresh_token=[REDACTED]&sealed_bundle=[REDACTED]&sealed_token=[REDACTED]&safe=1",
+    );
+  });
+
+  it("strips Bearer <token> substrings case-insensitively", () => {
+    expect(
+      scrubUrl("Authorization header failed: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc-123_def+/= and bearer secret_tok_99"),
+    ).toBe(
+      "Authorization header failed: Bearer [REDACTED] and Bearer [REDACTED]",
     );
   });
 });
@@ -419,7 +443,7 @@ describe("beforeBreadcrumbHandler", () => {
   });
 });
 
-describe("initSentry", () => {
+describe("initSdk", () => {
   // Import the mock so we can inspect calls
   let mockInit: ReturnType<typeof vi.fn>;
 
@@ -439,21 +463,21 @@ describe("initSentry", () => {
   it("is a no-op when VITE_SENTRY_DSN is undefined", () => {
     vi.stubEnv("DEV", false);
     // Do not stub VITE_SENTRY_DSN — beforeEach calls vi.unstubAllEnvs() so it is truly undefined
-    initSentry();
+    initSdk();
     expect(mockInit).not.toHaveBeenCalled();
   });
 
   it("is a no-op when VITE_SENTRY_DSN is empty string", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "");
-    initSentry();
+    initSdk();
     expect(mockInit).not.toHaveBeenCalled();
   });
 
   it("calls Sentry.init with correct DSN and enhanceFetchErrorMessages: 'report-only' when VITE_SENTRY_DSN is set", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
-    initSentry();
+    initSdk();
     expect(mockInit).toHaveBeenCalledOnce();
     expect(mockInit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -467,7 +491,7 @@ describe("initSentry", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
     vi.stubGlobal("location", { origin: "https://test.example.com" });
-    initSentry();
+    initSdk();
     const [config] = mockInit.mock.calls[0] as [{ allowUrls: RegExp[] }];
     expect(config.allowUrls).toHaveLength(1);
     expect(config.allowUrls[0]).toBeInstanceOf(RegExp);

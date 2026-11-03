@@ -1,5 +1,5 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../lib/sentry-facade";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { deleteCacheEntry } from "../stores/cache";
 import type { ApiCallSource } from "./api-usage";
@@ -1017,7 +1017,7 @@ async function executeLightCombinedQuery(
     for (const s of paginationSettled) {
       if (s.status === "rejected") {
         console.warn("[api] PR pagination task failed:", s.reason);
-        Sentry.captureException(s.reason, { tags: { source: "pr-pagination" } });
+        captureException(s.reason, { tags: { source: "pr-pagination" } });
       }
     }
   }
@@ -1369,7 +1369,7 @@ export async function fetchPREnrichment(
         if (batchErrorPushed) return;
         batchErrorPushed = true;
         console.warn(`[api] PR enrichment batch ${batchLabel} failed:`, err);
-        Sentry.captureException(err, { tags: { source: "prEnrichment" } });
+        captureException(err, { tags: { source: "prEnrichment" } });
         errors.push({ repo: `${BACKFILL_ERROR_PREFIX}${batchLabel}`, statusCode, message, retryable });
       };
 
@@ -1599,7 +1599,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
         if (!batchErrorPushed) {
           batchErrorPushed = true;
           console.warn(`[api] ${source} batch failed or timed out:`, err);
-          Sentry.captureException(err, { tags: { source } });
+          captureException(err, { tags: { source } });
         }
       }
     };
@@ -2586,7 +2586,7 @@ export async function fetchHotPRStatus(
       hadErrors = true;
       console.warn("[hot-poll] PR status batch failed:", s.reason);
       if (options?.reportToSentry) {
-        Sentry.captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
+        captureException(s.reason, { tags: { source: "hot-poll-pr-batch" } });
       }
       // Salvage nodes GraphQL resolved before the batch errored so stale/pending
       // PRs in a partially failing batch still get a status this cycle.

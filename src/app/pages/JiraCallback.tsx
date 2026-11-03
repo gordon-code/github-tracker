@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show, For } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
 import { z } from "zod";
 import { setJiraAuth } from "../stores/auth";
@@ -101,7 +101,7 @@ export default function JiraCallback() {
     try {
       turnstileToken = await acquireTurnstileToken(import.meta.env.VITE_TURNSTILE_SITE_KEY as string ?? "", "jira-token");
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: "jira-callback-turnstile" } });
+      captureException(err, { tags: { source: "jira-callback-turnstile" } });
       setError("Human verification failed. Please try again.");
       return;
     }
@@ -133,7 +133,7 @@ export default function JiraCallback() {
       }
       tokenData = tokenParsed.data;
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: "jira-callback-token-exchange" } });
+      captureException(err, { tags: { source: "jira-callback-token-exchange" } });
       setError("A network error occurred. Please try again.");
       return;
     }
@@ -149,7 +149,7 @@ export default function JiraCallback() {
       }
       resources = parsed.data;
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: "jira-callback-site-discovery" } });
+      captureException(err, { tags: { source: "jira-callback-site-discovery" } });
       setError("Failed to discover Jira sites. Please try again.");
       return;
     }

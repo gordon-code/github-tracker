@@ -90,8 +90,11 @@ vi.mock("../../src/app/services/api-usage", () => ({
   checkAndResetIfExpired: vi.fn(),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 // Import AFTER mocks

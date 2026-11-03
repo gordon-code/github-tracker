@@ -1,4 +1,3 @@
-import * as Sentry from "@sentry/solid";
 import type { ErrorEvent, Breadcrumb } from "@sentry/solid";
 
 /** Strip OAuth credentials and tokens from any captured URL or query string. */
@@ -7,13 +6,16 @@ export function scrubUrl(url: string): string {
     .replace(/code=[^&\s"]+/g, "code=[REDACTED]")
     .replace(/state=[^&\s"]+/g, "state=[REDACTED]")
     .replace(/access_token=[^&\s"]+/g, "access_token=[REDACTED]")
+    .replace(/\brefresh_token=[^&\s"]+/gi, "refresh_token=[REDACTED]")
     .replace(/client_secret=[^&\s"]+/gi, "client_secret=[REDACTED]")
+    .replace(/\b(sealed_[a-zA-Z0-9_]*)=[^&\s"]+/gi, "$1=[REDACTED]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(/\b(ghu_|ghp_|gho_|github_pat_)[A-Za-z0-9_]+/g, "$1[REDACTED]")
     .replace(/\bATATT[A-Za-z0-9_\-=]+/g, "ATATT[REDACTED]");
 }
 
 /** Allowed console breadcrumb prefixes — drop everything else. */
-const ALLOWED_CONSOLE_PREFIXES = [
+export const ALLOWED_CONSOLE_PREFIXES = [
   "[app]",
   "[auth]",
   "[api]",
@@ -27,7 +29,7 @@ const ALLOWED_CONSOLE_PREFIXES = [
   "[notifications]",
 ];
 
-const BACKGROUND_POLL_SOURCES = new Set([
+export const BACKGROUND_POLL_SOURCES = new Set([
   "prEnrichment",
   "dashboardBodies",
   "depPRBodies",
@@ -120,34 +122,4 @@ export function beforeBreadcrumbHandler(
     breadcrumb.message = scrubUrl(msg);
   }
   return breadcrumb;
-}
-
-export function initSentry(): void {
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (import.meta.env.DEV || !dsn) return;
-
-  Sentry.init({
-    dsn,
-    tunnel: "/api/error-reporting",
-    environment: import.meta.env.MODE,
-    enhanceFetchErrorMessages: "report-only",
-
-    // ── Privacy: absolute minimum data ──────────────────────────
-    dataCollection: {
-      userInfo: false,
-      cookies: false,
-      httpHeaders: false,
-      httpBodies: [],
-    },
-
-    // ── Disable performance tracing (tracesSampleRate omitted = undefined = no spans) ───
-    profileSessionSampleRate: 0,
-
-    // ── Only capture errors from our own code ───────────────────
-    allowUrls: [new RegExp(`^${window.location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[/\\?#])`)],
-
-    // ── Scrub sensitive data before it leaves the browser ────────
-    beforeSend: beforeSendHandler,
-    beforeBreadcrumb: beforeBreadcrumbHandler,
-  });
 }

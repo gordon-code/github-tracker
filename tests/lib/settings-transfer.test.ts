@@ -12,10 +12,11 @@ vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
   writeSnapshot: vi.fn(),
   flushSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
-  captureMessage: vi.fn(),
-  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 import { ConfigSchema, JiraConfigSchema } from "../../src/shared/schemas";

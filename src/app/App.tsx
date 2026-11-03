@@ -1,5 +1,5 @@
 import { createSignal, createEffect, on, onMount, onCleanup, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { reportBoundaryError } from "./lib/sentry-facade";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
@@ -32,8 +32,6 @@ function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
 const DashboardPage = lazyWithReload(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazyWithReload(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazyWithReload(() => import("./components/settings/SettingsPage"));
-
-const SentryErrorBoundary = Sentry.withSentryErrorBoundary(ErrorBoundary);
 
 function handleRouteError(err: unknown) {
   console.error("[app] Route render failed:", err);
@@ -232,7 +230,12 @@ export default function App() {
   });
 
   return (
-    <SentryErrorBoundary fallback={handleRouteError}>
+    <ErrorBoundary
+      fallback={(err) => {
+        reportBoundaryError(err);
+        return handleRouteError(err);
+      }}
+    >
       <Suspense fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <span class="loading loading-spinner loading-lg" aria-label="Loading" />
@@ -250,6 +253,6 @@ export default function App() {
           <Route path="/*" component={() => <Navigate href="/" />} />
         </Router>
       </Suspense>
-    </SentryErrorBoundary>
+    </ErrorBoundary>
   );
 }

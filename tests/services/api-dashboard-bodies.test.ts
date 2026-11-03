@@ -12,7 +12,7 @@ import {
 } from "../../src/app/services/api";
 import { getClient } from "../../src/app/services/github";
 import { pushNotification, dismissNotificationBySource } from "../../src/app/lib/errors";
-import { captureException } from "@sentry/solid";
+import { captureException } from "../../src/app/lib/sentry-facade";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -41,8 +41,11 @@ vi.mock("../../src/app/lib/errors", () => ({
   isMuted: vi.fn(() => false),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

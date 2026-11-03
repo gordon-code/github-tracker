@@ -40,9 +40,11 @@ vi.mock("../../src/app/stores/cache", () => ({
   clearCache: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
-  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 vi.mock("../../src/app/lib/pat", async (importOriginal) => {

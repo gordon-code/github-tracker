@@ -11,7 +11,7 @@ import {
 } from "../../src/app/services/api";
 import { getClient } from "../../src/app/services/github";
 import { pushNotification, dismissNotificationBySource } from "../../src/app/lib/errors";
-import { captureException } from "@sentry/solid";
+import { captureException } from "../../src/app/lib/sentry-facade";
 
 const mockUpdateGraphqlRateLimit = vi.fn();
 vi.mock("../../src/app/services/github", () => ({
@@ -37,8 +37,11 @@ vi.mock("../../src/app/lib/errors", () => ({
   isMuted: vi.fn(() => false),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 const NODES_BATCH_SIZE = BODY_FETCH_BATCH_SIZE;

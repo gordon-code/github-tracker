@@ -157,6 +157,8 @@ describe("validate-deploy.sh stays in sync with Env interfaces", () => {
     const viteFiles = [
       "src/app/lib/oauth.ts",
       "src/app/lib/sentry.ts",
+      "src/app/lib/sentry-facade.ts",
+      "src/app/lib/sentry-init.ts",
       "src/app/lib/proxy.ts",
     ];
     const viteVars = new Set<string>();
