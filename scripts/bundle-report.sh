@@ -165,4 +165,76 @@ for (const [idx, mod] of entryModules.slice(0, 20).entries()) {
 
 console.log(`\n=== Entry/Boot Chunk Zod Breakdown (${bootLabel}) ===`);
 console.log(`Total zod rendered in entry/boot chunks: ${fmtKb(zodEntryBytes)} across ${zodModules.length} module(s)`);
+
+console.log("\n=== Bundle Budget & Separation Verification ===");
+let failed = false;
+
+const forbiddenBootPatterns = [
+  { re: /node_modules\/.*@sentry\//, label: "@sentry/* must be lazy-loaded via sentry-init" },
+  { re: /node_modules\/.*@octokit\//, label: "@octokit/* must be deferred off boot path" },
+  { re: /node_modules\/.*bottleneck\//, label: "bottleneck must be deferred off boot path" },
+  { re: /src\/app\/lib\/mcp-relay\.ts$/, label: "mcp-relay must be deferred off boot path" },
+  { re: /src\/app\/lib\/settings-transfer\.ts$/, label: "settings-transfer must be dynamically imported" },
+  { re: /src\/app\/lib\/github-emoji-map\.json$/, label: "github-emoji-map.json must be lazy-loaded" },
+  { re: /src\/app\/components\/shared\/CustomTabModal\.tsx$/, label: "CustomTabModal must be lazy-loaded" },
+  { re: /node_modules\/.*zod\/v4\/classic\//, label: "classic zod runtime must not be in boot chunks; use zod/mini" },
+  { re: /node_modules\/.*zod\/v4\/core\/to-json-schema\.js$/, label: "Zod JSON Schema converter must not be in boot chunks" },
+];
+
+for (const rule of forbiddenBootPatterns) {
+  const matches = entryModules.filter((m) => rule.re.test(m.id));
+  if (matches.length > 0) {
+    failed = true;
+    console.error(`[FAIL] Forbidden boot module (${rule.label}):`);
+    for (const m of matches) {
+      console.error(`       - ${m.id} (${fmtKb(m.renderedLength)})`);
+    }
+  } else {
+    console.log(`[PASS] Boot module check: ${rule.label}`);
+  }
+}
+
+const dashboardAsset = files.find((f) => /^DashboardPage-[^/]+\.js$/.test(f.name));
+const bootGzipBytes = bootAssets.reduce((s, f) => s + f.gzipBytes, 0);
+
+const sizeBudgets = [
+  {
+    name: "Entry JS (index-*.js)",
+    actual: entryAsset ? entryAsset.gzipBytes : null,
+    max: 35 * 1024,
+  },
+  {
+    name: "Combined Initial Boot JS",
+    actual: bootAssets.length > 0 ? bootGzipBytes : null,
+    max: 68 * 1024,
+  },
+  {
+    name: "DashboardPage-*.js chunk",
+    actual: dashboardAsset ? dashboardAsset.gzipBytes : null,
+    max: 68 * 1024,
+  },
+  {
+    name: "Total CSS (index-*.css)",
+    actual: totalCssGzip > 0 ? totalCssGzip : null,
+    max: 30 * 1024,
+  },
+];
+
+for (const budget of sizeBudgets) {
+  if (budget.actual === null) {
+    failed = true;
+    console.error(`[FAIL] ${budget.name}: asset not found in build output`);
+  } else if (budget.actual > budget.max) {
+    failed = true;
+    console.error(`[FAIL] ${budget.name}: gzip-9 ${fmtKb(budget.actual)} exceeds budget ${fmtKb(budget.max)}`);
+  } else {
+    console.log(`[PASS] ${budget.name}: gzip-9 ${fmtKb(budget.actual)} <= budget ${fmtKb(budget.max)}`);
+  }
+}
+
+if (failed) {
+  console.error("\nBundle verification FAILED.");
+  process.exit(1);
+}
+console.log("\nAll bundle size budgets and chunk separation checks PASSED.");
 '

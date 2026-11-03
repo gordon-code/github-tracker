@@ -25,6 +25,9 @@ runs:
     - name: Unit tests
       shell: bash
       run: pnpm test
+    - name: Bundle size and chunk separation check
+      shell: bash
+      run: pnpm bundle:report
     - name: WAF smoke tests
       if: inputs.deploy-domain != ''
       shell: bash

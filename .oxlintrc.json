@@ -78,6 +78,164 @@
       "rules": {
         "vitest/valid-expect": "off"
       }
+    },
+    {
+      "files": ["src/app/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@sentry/solid",
+                "allowTypeImports": true,
+                "message": "Import from lib/sentry-facade instead of @sentry/solid directly so the Sentry SDK stays lazy-loaded."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],
+                "allowTypeImports": true,
+                "message": "Import expandEmoji/loadEmojiMap from lib/emoji instead of importing github-emoji-map.json directly so the emoji map stays lazy-loaded."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/app/lib/sentry-init.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],
+                "allowTypeImports": true,
+                "message": "Import expandEmoji/loadEmojiMap from lib/emoji instead of importing github-emoji-map.json directly so the emoji map stays lazy-loaded."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/app/lib/emoji.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@sentry/solid",
+                "allowTypeImports": true,
+                "message": "Import from lib/sentry-facade instead of @sentry/solid directly so the Sentry SDK stays lazy-loaded."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],
+                "importNamePattern": "^",
+                "allowTypeImports": true,
+                "message": "Lazily load github-emoji-map.json via dynamic import('./github-emoji-map.json') in lib/emoji."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/shared/schemas.ts",
+        "src/app/index.tsx",
+        "src/app/App.tsx",
+        "src/app/stores/**/*.ts",
+        "src/app/pages/**/*.tsx",
+        "src/app/lib/sentry.ts",
+        "src/app/lib/sentry-facade.ts",
+        "src/app/lib/use-credential-import.ts",
+        "src/app/lib/pat.ts",
+        "src/app/lib/oauth.ts",
+        "src/app/lib/proxy.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "zod",
+                "allowTypeImports": true,
+                "message": "Use 'import * as z from \"zod/mini\"' on the boot path so classic Zod is not bundled into initial boot chunks."
+              },
+              {
+                "name": "@sentry/solid",
+                "allowTypeImports": true,
+                "message": "Import from lib/sentry-facade instead of @sentry/solid directly so the Sentry SDK stays lazy-loaded."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@octokit/*",
+                  "bottleneck",
+                  "*/services/github",
+                  "./services/github",
+                  "../services/github",
+                  "*/lib/mcp-relay",
+                  "./lib/mcp-relay",
+                  "../lib/mcp-relay",
+                  "*/lib/settings-transfer",
+                  "./settings-transfer",
+                  "../lib/settings-transfer"
+                ],
+                "importNamePattern": "^",
+                "allowTypeImports": true,
+                "message": "Boot-path modules must dynamically import services/github, lib/mcp-relay, and lib/settings-transfer (or use import type) to keep initial boot chunks lean."
+              },
+              {
+                "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],
+                "allowTypeImports": true,
+                "message": "Import expandEmoji/loadEmojiMap from lib/emoji instead of importing github-emoji-map.json directly so the emoji map stays lazy-loaded."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "src/app/components/dashboard/DashboardPage.tsx",
+        "src/app/components/settings/CustomTabsSection.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@sentry/solid",
+                "allowTypeImports": true,
+                "message": "Import from lib/sentry-facade instead of @sentry/solid directly so the Sentry SDK stays lazy-loaded."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["*/CustomTabModal", "../shared/CustomTabModal"],
+                "importNamePattern": "^",
+                "allowTypeImports": true,
+                "message": "Lazy-load CustomTabModal via lazy(() => import('../shared/CustomTabModal')) so it is excluded from initial dashboard/settings chunks."
+              },
+              {
+                "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],
+                "allowTypeImports": true,
+                "message": "Import expandEmoji/loadEmojiMap from lib/emoji instead of importing github-emoji-map.json directly so the emoji map stays lazy-loaded."
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
