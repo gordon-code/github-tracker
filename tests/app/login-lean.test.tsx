@@ -154,4 +154,24 @@ describe("App — lean login path & authenticated-only initializers", () => {
 
     unmount();
   });
+
+  it("STRUCT-502: unmounting App before dynamic auth-init imports resolve does not run initializers on the disposed owner", async () => {
+    const { unmount } = render(() => <App />);
+
+    const tokenA = "ghp_" + "3".repeat(36);
+    authStore.setAuthFromPat(tokenA, {
+      login: "user-three",
+      avatar_url: "https://avatars.githubusercontent.com/u/3",
+      name: "User Three",
+    });
+
+    // Unmount immediately while Promise.all([import("./services/github"), import("./lib/mcp-relay")]) is pending
+    unmount();
+
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(evalCounts.initClientWatcherCalls).toBe(0);
+    expect(evalCounts.initMcpRelayCalls).toBe(0);
+  });
 });

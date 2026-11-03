@@ -88,7 +88,16 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
       opts.onReadError(READ_ERROR_MESSAGE);
       return;
     }
-    const { parseImportFile, CredentialsSectionSchema } = await import("./settings-transfer");
+    let parseImportFile: typeof import("./settings-transfer").parseImportFile;
+    let CredentialsSectionSchema: typeof import("./settings-transfer").CredentialsSectionSchema;
+    try {
+      ({ parseImportFile, CredentialsSectionSchema } = await import("./settings-transfer"));
+    } catch {
+      if (capturedGen === gen) {
+        opts.onReadError(READ_ERROR_MESSAGE);
+      }
+      return;
+    }
     if (capturedGen !== gen) return;
     const result = parseImportFile(text);
     if (!result.ok) {
@@ -157,7 +166,15 @@ export function createCredentialImport(opts: CreateCredentialImportOptions) {
     }
 
     // Client-side, retryable against the cached ciphertext (no re-unseal).
-    const { resolveImportedCredentials } = await import("./settings-transfer");
+    let resolveImportedCredentials: typeof import("./settings-transfer").resolveImportedCredentials;
+    try {
+      ({ resolveImportedCredentials } = await import("./settings-transfer"));
+    } catch {
+      if (capturedGen === gen) {
+        setError("Network problem — please try again.");
+      }
+      return;
+    }
     if (capturedGen !== gen) return;
     const resolved = await resolveImportedCredentials(ciphertext, cred.credentials.salt, code);
     // The resolve await is another window where a Cancel-then-reselect can change

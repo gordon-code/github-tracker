@@ -116,17 +116,24 @@ export default function LoginPage() {
     },
     onResolved: (bundle, identity, importedConfig, viewPreferences) => {
       void (async () => {
-        const { hasExistingLocalConfig } = await import("../lib/settings-transfer");
-        if (hasExistingLocalConfig(config)) {
-          // Prior local state to protect — confirm the identity switch first.
-          // Clear any error from a prior failed attempt so it can't render stale
-          // in the identity-confirm step's alert.
-          setImportError(null);
-          credentialImport.setResolvedCred({ bundle, identity });
-          return;
+        try {
+          const { hasExistingLocalConfig } = await import("../lib/settings-transfer");
+          if (!showImport() || credentialImport.credImport()?.config !== importedConfig) return;
+          if (hasExistingLocalConfig(config)) {
+            // Prior local state to protect — confirm the identity switch first.
+            // Clear any error from a prior failed attempt so it can't render stale
+            // in the identity-confirm step's alert.
+            setImportError(null);
+            credentialImport.setResolvedCred({ bundle, identity });
+            return;
+          }
+          // Genuinely fresh/incognito session — skip the dialog, commit straight through.
+          void finalizeImport(bundle, identity, importedConfig, viewPreferences);
+        } catch {
+          if (showImport() && credentialImport.credImport()?.config === importedConfig) {
+            setImportError("Something went wrong finishing the import — please try again.");
+          }
         }
-        // Genuinely fresh/incognito session — skip the dialog, commit straight through.
-        void finalizeImport(bundle, identity, importedConfig, viewPreferences);
       })();
     },
   });

@@ -11,10 +11,12 @@ import JiraCallback from "./pages/JiraCallback";
 import PrivacyPage from "./pages/PrivacyPage";
 
 let authInitStarted = false;
+let authInitGen = 0;
 
 /** @internal Test-only reset helper for authInitStarted across App renders */
 export function _resetAuthInitStartedForTests(): void {
   authInitStarted = false;
+  authInitGen++;
 }
 
 const CHUNK_RELOAD_KEY = "github-tracker:chunk-reload";
@@ -169,20 +171,29 @@ function RootRedirect() {
 
 export default function App() {
   const appOwner = getOwner();
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+  });
 
   createEffect(
     on(isAuthenticated, (authed) => {
       if (!authed || authInitStarted) return;
       authInitStarted = true;
+      const capturedGen = authInitGen;
       void Promise.all([import("./services/github"), import("./lib/mcp-relay")])
-        .then(([gh, relay]) =>
-          runWithOwner(appOwner, () => {
+        .then(([gh, relay]) => {
+          if (disposed || capturedGen !== authInitGen) return undefined;
+          return runWithOwner(appOwner, () => {
             gh.initClientWatcher();
             relay.initMcpRelay();
-          }),
-        )
+          });
+        })
         .catch(() => {
           // Non-fatal — dynamic import failure or test environment teardown
+          if (!disposed && capturedGen === authInitGen) {
+            authInitStarted = false;
+          }
         });
     }),
   );

@@ -755,6 +755,42 @@ describe("LoginPage — Import from backup", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
+  it("STRUCT-501: cancelling while onResolved is awaiting settings-transfer import does not commit or set resolvedCred", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    let finishResolve!: (v: { ok: true; bundle: CredentialBundle; identity: typeof IDENTITY }) => void;
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
+      new Promise((r) => { finishResolve = r; })
+    );
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(settingsTransfer.resolveImportedCredentials).toHaveBeenCalledTimes(1));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+
+    // Resolve credentials; after one microtask tick, handleCodeSubmit has passed its
+    // generation guard, invoked onResolved, and suspended at `await import("../lib/settings-transfer")`.
+    finishResolve({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    await Promise.resolve();
+
+    // User cancels while onResolved is awaiting the dynamic import.
+    fireEvent.click(cancelBtn);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settingsTransfer.hasExistingLocalConfig).not.toHaveBeenCalled();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
+  });
+
   it("Cancel is disabled while the unseal is in flight", async () => {
     mockValidCredsFile();
     let resolveUnseal!: (v: { ok: true; ciphertext: string }) => void;
