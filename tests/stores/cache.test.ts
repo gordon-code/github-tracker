@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { captureException } from "@sentry/solid";
+import { captureException } from "../../src/app/lib/sentry-facade";
 import {
   getDb,
   getCacheEntry,
@@ -17,8 +17,11 @@ import {
   type RawWorkflowRunsResponse,
 } from "../../src/app/services/api";
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 // Reset the DB singleton between tests by closing and clearing

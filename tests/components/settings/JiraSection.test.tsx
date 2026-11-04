@@ -176,13 +176,15 @@ vi.mock("../../../src/app/services/jira-keys", () => ({
   clearJiraKeyCache: vi.fn(),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
-  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 // Component imports after all mocks
-import * as Sentry from "@sentry/solid";
+import * as Sentry from "../../../src/app/lib/sentry-facade";
 import SettingsPage, { staleJiraScopeReset } from "../../../src/app/components/settings/SettingsPage";
 import { viewState, setTabFilter } from "../../../src/app/stores/view";
 import { pushNotification, dismissNotificationBySource } from "../../../src/app/lib/errors";

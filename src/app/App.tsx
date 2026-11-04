@@ -1,16 +1,23 @@
-import { createSignal, createEffect, on, onMount, onCleanup, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { createSignal, createEffect, on, onMount, onCleanup, getOwner, runWithOwner, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
+import { reportBoundaryError } from "./lib/sentry-facade";
 import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
 import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
-import { initClientWatcher } from "./services/github";
-import { initMcpRelay } from "./lib/mcp-relay";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import JiraCallback from "./pages/JiraCallback";
 import PrivacyPage from "./pages/PrivacyPage";
+
+let authInitStarted = false;
+let authInitGen = 0;
+
+/** @internal Test-only reset helper for authInitStarted across App renders */
+export function _resetAuthInitStartedForTests(): void {
+  authInitStarted = false;
+  authInitGen++;
+}
 
 const CHUNK_RELOAD_KEY = "github-tracker:chunk-reload";
 const CHUNK_RELOAD_MAX_AGE = 10_000;
@@ -32,8 +39,6 @@ function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
 const DashboardPage = lazyWithReload(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazyWithReload(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazyWithReload(() => import("./components/settings/SettingsPage"));
-
-const SentryErrorBoundary = Sentry.withSentryErrorBoundary(ErrorBoundary);
 
 function handleRouteError(err: unknown) {
   console.error("[app] Route render failed:", err);
@@ -165,6 +170,34 @@ function RootRedirect() {
 }
 
 export default function App() {
+  const appOwner = getOwner();
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+  });
+
+  createEffect(
+    on(isAuthenticated, (authed) => {
+      if (!authed || authInitStarted) return;
+      authInitStarted = true;
+      const capturedGen = authInitGen;
+      void Promise.all([import("./services/github"), import("./lib/mcp-relay")])
+        .then(([gh, relay]) => {
+          if (disposed || capturedGen !== authInitGen) return undefined;
+          return runWithOwner(appOwner, () => {
+            gh.initClientWatcher();
+            relay.initMcpRelay();
+          });
+        })
+        .catch(() => {
+          // Non-fatal — dynamic import failure or test environment teardown
+          if (!disposed && capturedGen === authInitGen) {
+            authInitStarted = false;
+          }
+        });
+    }),
+  );
+
   createEffect(() => {
     document.documentElement.setAttribute("data-theme", resolveTheme(config.theme));
   });
@@ -204,8 +237,6 @@ export default function App() {
     // All reactive init functions must be called inside the component tree
     initConfigPersistence();
     initViewPersistence();
-    initClientWatcher();
-    initMcpRelay();
     pruneStaleIgnoredItems();
 
     const staleCacheMaxAgeMs = 24 * 60 * 60 * 1000;
@@ -232,7 +263,12 @@ export default function App() {
   });
 
   return (
-    <SentryErrorBoundary fallback={handleRouteError}>
+    <ErrorBoundary
+      fallback={(err) => {
+        reportBoundaryError(err);
+        return handleRouteError(err);
+      }}
+    >
       <Suspense fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <span class="loading loading-spinner loading-lg" aria-label="Loading" />
@@ -250,6 +286,6 @@ export default function App() {
           <Route path="/*" component={() => <Navigate href="/" />} />
         </Router>
       </Suspense>
-    </SentryErrorBoundary>
+    </ErrorBoundary>
   );
 }

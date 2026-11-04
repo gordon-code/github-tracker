@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createRoot } from "solid-js";
+import * as z from "zod/mini";
 import {
   viewState,
   resetViewState,
@@ -157,7 +158,7 @@ describe("jira custom order store actions", () => {
     });
 
     it("schema pick + safeParse deduplicates for cross-tab sync path", () => {
-      const result = ViewStateSchema.pick({ jiraCustomOrder: true }).safeParse({
+      const result = z.pick(ViewStateSchema, { jiraCustomOrder: true }).safeParse({
         jiraCustomOrder: ["P-1", "P-2", "P-1", "P-3"],
       });
       expect(result.success).toBe(true);

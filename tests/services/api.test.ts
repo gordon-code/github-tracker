@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as Sentry from "@sentry/solid";
+import * as Sentry from "../../src/app/lib/sentry-facade";
 import {
   fetchOrgs,
   fetchRepos,
@@ -35,8 +35,11 @@ import orgsFixture from "../fixtures/github-orgs.json";
 import reposFixture from "../fixtures/github-repos.json";
 import runsFixture from "../fixtures/github-runs.json";
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 vi.mock("../../src/app/lib/errors", () => ({

@@ -4,7 +4,7 @@ import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, type RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
 import type { Config, ThemeId, CustomTab, JiraConfig, JiraCustomField } from "../../shared/schemas";
-import type { z } from "zod";
+import * as z from "zod/mini";
 
 // ── Re-exports from shared/schemas (backward compat for existing importers) ───
 export {
@@ -93,7 +93,7 @@ export function loadConfig(): Config {
 export const [config, setConfig] = createStore<Config>(loadConfig());
 
 export function updateConfig(partial: Partial<Config>): void {
-  const validated = ConfigSchema.partial().safeParse(partial);
+  const validated = z.partial(ConfigSchema).safeParse(partial);
   if (!validated.success) return;
   // Only merge keys the caller actually provided: Zod .partial().safeParse()
   // still applies per-field .default() values for absent keys, inflating

@@ -2,10 +2,10 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
-  clearSnapshot: vi.fn().mockResolvedValue(undefined),
-  loadSnapshot: vi.fn().mockResolvedValue(null),
-  writeSnapshot: vi.fn(),
-  flushSnapshot: vi.fn().mockResolvedValue(undefined),
+  clearSnapshot: () => Promise.resolve(),
+  loadSnapshot: () => Promise.resolve(null),
+  writeSnapshot: () => {},
+  flushSnapshot: () => Promise.resolve(),
 }));
 import { createRoot } from "solid-js";
 import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC, type ApiRequestInfo } from "../../src/app/services/github";
@@ -697,24 +697,78 @@ describe("getClient / initClientWatcher", () => {
     });
   });
 
-  it("initClientWatcher creates a client when token is set", async () => {
-    // We import and manipulate auth store signals
+  it("getClient synchronously syncs with token() after setAuthFromPat even before initClientWatcher runs", async () => {
     const authModule = await import("../../src/app/stores/auth");
+    authModule.clearAuth();
+    expect(getClient()).toBeNull();
 
-    // We can't directly set token (it's a read-only export of the internal signal).
-    // Instead, verify initClientWatcher does not throw when called in reactive root.
+    try {
+      authModule.setAuthFromPat("ghp_" + "a".repeat(36), {
+        login: "alice",
+        avatar_url: "https://avatars.githubusercontent.com/u/1",
+        name: "Alice",
+      });
+      const clientA = getClient();
+      expect(clientA).not.toBeNull();
+      expect(typeof clientA?.request).toBe("function");
+      // Calling getClient() again with the same token returns the cached instance
+      expect(getClient()).toBe(clientA);
+
+      // Logout clears token -> getClient() synchronously returns null
+      authModule.clearAuth();
+      expect(getClient()).toBeNull();
+
+      // Re-authenticate with a different token -> getClient() returns a new client instance
+      authModule.setAuthFromPat("ghp_" + "b".repeat(36), {
+        login: "bob",
+        avatar_url: "https://avatars.githubusercontent.com/u/2",
+        name: "Bob",
+      });
+      const clientB = getClient();
+      expect(clientB).not.toBeNull();
+      expect(clientB).not.toBe(clientA);
+    } finally {
+      authModule.clearAuth();
+    }
+  });
+
+  it("initClientWatcher creates a client when token is set and updates reactively on token changes", async () => {
+    const authModule = await import("../../src/app/stores/auth");
+    authModule.clearAuth();
+
     let errored = false;
     createRoot((dispose) => {
       try {
         initClientWatcher();
+        expect(getClient()).toBeNull();
+
+        authModule.setAuthFromPat("ghp_" + "c".repeat(36), {
+          login: "carol",
+          avatar_url: "https://avatars.githubusercontent.com/u/3",
+          name: "Carol",
+        });
+        const firstClient = getClient();
+        expect(firstClient).not.toBeNull();
+
+        authModule.clearAuth();
+        expect(getClient()).toBeNull();
+
+        authModule.setAuthFromPat("ghp_" + "d".repeat(36), {
+          login: "dave",
+          avatar_url: "https://avatars.githubusercontent.com/u/4",
+          name: "Dave",
+        });
+        const secondClient = getClient();
+        expect(secondClient).not.toBeNull();
+        expect(secondClient).not.toBe(firstClient);
       } catch {
         errored = true;
+      } finally {
+        authModule.clearAuth();
+        dispose();
       }
-      dispose();
     });
     expect(errored).toBe(false);
-    // Suppress unused import warning
-    void authModule;
   });
 });
 

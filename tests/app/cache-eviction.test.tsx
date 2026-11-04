@@ -26,14 +26,14 @@ vi.mock("../../src/app/stores/view", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/app/services/github", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/app/services/github")>();
-  return {
-    ...actual,
-    initClientWatcher: vi.fn(),
-    getClient: vi.fn().mockReturnValue(null),
-  };
-});
+vi.mock("../../src/app/services/github", () => ({
+  initClientWatcher: vi.fn(),
+  getClient: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../../src/app/lib/mcp-relay", () => ({
+  initMcpRelay: vi.fn(),
+}));
 
 vi.mock("../../src/app/stores/cache", () => ({
   evictStaleEntries: vi.fn().mockResolvedValue(0),

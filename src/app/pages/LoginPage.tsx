@@ -1,5 +1,5 @@
-import { createSignal, onMount, Show, Switch, Match } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { createSignal, Show, Switch, Match } from "solid-js";
+import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
 import { setAuthFromPat, type GitHubUser } from "../stores/auth";
 import { config } from "../stores/config";
@@ -10,27 +10,11 @@ import {
   GITHUB_FINE_GRAINED_PAT_URL,
 } from "../lib/pat";
 import { buildAuthorizeUrl } from "../lib/oauth";
-import { commitImportedSettings, hasExistingLocalConfig } from "../lib/settings-transfer";
 import type { CredentialBundle } from "../lib/settings-transfer";
 import { createCredentialImport } from "../lib/use-credential-import";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-
-  onMount(() => {
-    // Speculatively prefetch the dashboard chunk while the user is on the
-    // login page. By the time they authenticate, the chunk is cached.
-    const prefetch = () => {
-      import("../components/dashboard/DashboardPage").catch(() => {
-        console.warn("[app] Dashboard chunk prefetch failed");
-      });
-    };
-    if ("requestIdleCallback" in window) {
-      requestIdleCallback(prefetch);
-    } else {
-      setTimeout(prefetch, 2000);
-    }
-  });
 
   const [showPatForm, setShowPatForm] = createSignal(false);
   const [patInput, setPatInput] = createSignal("");
@@ -85,7 +69,7 @@ export default function LoginPage() {
       setPatInput("");
       navigate("/", { replace: true });
     } catch (err) {
-      Sentry.captureException(err, { tags: { source: "pat-validation" } });
+      captureException(err, { tags: { source: "pat-validation" } });
       setPatError("Network error — please try again");
     } finally {
       setSubmitting(false);
@@ -104,6 +88,7 @@ export default function LoginPage() {
     setImportCommitting(true);
     setImportError(null);
     try {
+      const { commitImportedSettings } = await import("../lib/settings-transfer");
       // commitImportedSettings awaits clearIdentityData() first when user() is
       // null (pre-auth) — clearing a prior identity's IndexedDB cache + poll
       // state BEFORE the imported identity/config/view-preferences are
@@ -130,16 +115,26 @@ export default function LoginPage() {
       );
     },
     onResolved: (bundle, identity, importedConfig, viewPreferences) => {
-      if (hasExistingLocalConfig(config)) {
-        // Prior local state to protect — confirm the identity switch first.
-        // Clear any error from a prior failed attempt so it can't render stale
-        // in the identity-confirm step's alert.
-        setImportError(null);
-        credentialImport.setResolvedCred({ bundle, identity });
-        return;
-      }
-      // Genuinely fresh/incognito session — skip the dialog, commit straight through.
-      void finalizeImport(bundle, identity, importedConfig, viewPreferences);
+      void (async () => {
+        try {
+          const { hasExistingLocalConfig } = await import("../lib/settings-transfer");
+          if (!showImport() || credentialImport.credImport()?.config !== importedConfig) return;
+          if (hasExistingLocalConfig(config)) {
+            // Prior local state to protect — confirm the identity switch first.
+            // Clear any error from a prior failed attempt so it can't render stale
+            // in the identity-confirm step's alert.
+            setImportError(null);
+            credentialImport.setResolvedCred({ bundle, identity });
+            return;
+          }
+          // Genuinely fresh/incognito session — skip the dialog, commit straight through.
+          void finalizeImport(bundle, identity, importedConfig, viewPreferences);
+        } catch {
+          if (showImport() && credentialImport.credImport()?.config === importedConfig) {
+            setImportError("Something went wrong finishing the import — please try again.");
+          }
+        }
+      })();
     },
   });
 

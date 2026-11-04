@@ -1,5 +1,5 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
-import * as Sentry from "@sentry/solid";
+import { captureException } from "../lib/sentry-facade";
 import { getClient, fetchRateLimitDetails } from "./github";
 import { fetchGitHubStatus } from "./github-status";
 import { config } from "../stores/config";
@@ -495,7 +495,7 @@ export function createPollCoordinator(
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
-      Sentry.captureException(err, { tags: { source: "poll-cycle" } });
+      captureException(err, { tags: { source: "poll-cycle" } });
       pushError("poll", message, true);
       // No reconciliation on catch — can't know what resolved
     } finally {
@@ -761,7 +761,7 @@ export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
     hadErrors = true;
     console.warn("[hot-poll] PR status fetch failed:", err);
     if (reportToSentry) {
-      Sentry.captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
+      captureException(err, { tags: { source: "hot-poll-pr-fetch" } });
     }
     // Items stay in _hotPRs for retry next cycle
   }
@@ -780,7 +780,7 @@ export async function fetchHotData(priorConsecutiveFailures = 0): Promise<{
       hadErrors = true;
       console.warn("[hot-poll] Workflow run fetch failed:", result.reason);
       if (reportToSentry) {
-        Sentry.captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
+        captureException(result.reason, { tags: { source: "hot-poll-run-fetch" } });
       }
     }
   }
@@ -929,7 +929,7 @@ export function createHotPollCoordinator(
         // Token invalid — same re-auth path as the full poll (poll.ts throw at
         // fetchAllData) and cross-tab sync (auth.ts storage listener): clear the
         // token and hard-redirect. Don't schedule another cycle — page is navigating.
-        Sentry.captureException(err, { tags: { source: "hot-poll-auth-expired" } });
+        captureException(err, { tags: { source: "hot-poll-auth-expired" } });
         expireToken();
         window.location.replace("/login");
         return;

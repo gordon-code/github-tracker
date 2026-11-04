@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { z } from "zod";
 
 // Mock cache so auth's identity-clear path never touches IndexedDB; the pre-auth
 // ordering test controls clearCache's timing directly via this mock.
@@ -12,10 +11,11 @@ vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
   writeSnapshot: vi.fn(),
   flushSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
-  captureMessage: vi.fn(),
-  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 import { ConfigSchema, JiraConfigSchema } from "../../src/shared/schemas";
@@ -1608,7 +1608,7 @@ describe("import-side stripped-item backfill guard", () => {
   afterEach(() => resetViewState());
 
   /** Fields a schema requires — i.e. omitting them (passing `undefined`) fails validation. Optional/`.default()` fields pass `undefined` and are excluded. */
-  function requiredKeys(shape: Record<string, z.ZodTypeAny>): string[] {
+  function requiredKeys(shape: Record<string, { safeParse: (val: unknown) => { success: boolean } }>): string[] {
     return Object.keys(shape).filter((key) => !shape[key].safeParse(undefined).success);
   }
 

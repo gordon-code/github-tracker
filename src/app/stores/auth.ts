@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
-import { z } from "zod";
-import * as Sentry from "@sentry/solid";
+import * as z from "zod/mini";
+import { captureException } from "../lib/sentry-facade";
 import { clearCache } from "./cache";
 import { clearSnapshot } from "../lib/dashboard-snapshot";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
@@ -13,13 +13,13 @@ import { DASHBOARD_BODIES_STORAGE_KEY } from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
-  accessToken: z.string().min(1),
+  accessToken: z.string().check(z.minLength(1)),
   sealedRefreshToken: z.string(),
   expiresAt: z.number(),
-  cloudId: z.string().min(1),
-  siteUrl: z.string().url(),
-  siteName: z.string().min(1),
-  email: z.string().optional(),
+  cloudId: z.string().check(z.minLength(1)),
+  siteUrl: z.url(),
+  siteName: z.string().check(z.minLength(1)),
+  email: z.optional(z.string()),
 });
 
 export type { JiraAuthState } from "../../shared/jira-types";
@@ -295,7 +295,7 @@ export async function clearIdentityData(): Promise<void> {
     await clearCache();
   } catch (err) {
     console.warn("[auth] Cache clear failed during identity data clear:", err);
-    Sentry.captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
+    captureException(err, { tags: { source: "auth-identity-data-cache-clear" } });
   }
   await snapshotClear;
 }
@@ -330,7 +330,7 @@ export function clearAuth(): void {
     // Clear IndexedDB cache and snapshot to prevent data leakage between users
     clearCache().catch((err) => {
       console.warn("[auth] Cache clear failed during logout:", err);
-      Sentry.captureException(err, { tags: { source: "auth-logout-cache-clear" } });
+      captureException(err, { tags: { source: "auth-logout-cache-clear" } });
     });
     void clearSnapshotLogged();
     // Run registered cleanup callbacks (e.g., poll state reset)

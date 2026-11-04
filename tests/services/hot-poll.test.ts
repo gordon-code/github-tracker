@@ -64,8 +64,11 @@ vi.mock("../../src/app/lib/notifications", () => ({
   _resetNotificationState: vi.fn(),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 vi.mock("../../src/app/stores/config", () => ({
@@ -1066,7 +1069,7 @@ describe("createHotPollCoordinator", () => {
       pullRequests: [makePullRequest({ id: 1, checkStatus: "running", enriched: true, nodeId: "PR_a" })],
     });
 
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
 
     await createRoot(async (dispose) => {
@@ -1544,7 +1547,7 @@ describe("fetchHotPRStatus edge cases", () => {
   });
 
   it("does not report to Sentry when reportToSentry option is omitted", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(undefined, () => Promise.reject(new Error("api error")));
 
@@ -1554,7 +1557,7 @@ describe("fetchHotPRStatus edge cases", () => {
   });
 
   it("does not report to Sentry when reportToSentry is false", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(undefined, () => Promise.reject(new Error("api error")));
 
@@ -1564,7 +1567,7 @@ describe("fetchHotPRStatus edge cases", () => {
   });
 
   it("reports to Sentry when reportToSentry is true", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const error = new Error("api error");
     const octokit = makeOctokit(undefined, () => Promise.reject(error));
@@ -2138,7 +2141,7 @@ describe("fetchHotData hadErrors", () => {
   });
 
   it("does not report PR fetch failure to Sentry below HOT_POLL_SENTRY_THRESHOLD", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(undefined, () => Promise.reject(new Error("graphql error")));
     mockGetClient.mockReturnValue(octokit);
@@ -2154,7 +2157,7 @@ describe("fetchHotData hadErrors", () => {
   });
 
   it("reports PR fetch failure to Sentry once priorConsecutiveFailures reaches HOT_POLL_SENTRY_THRESHOLD", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(undefined, () => Promise.reject(new Error("graphql error")));
     mockGetClient.mockReturnValue(octokit);
@@ -2173,7 +2176,7 @@ describe("fetchHotData hadErrors", () => {
   });
 
   it("does not report run fetch failure to Sentry below HOT_POLL_SENTRY_THRESHOLD", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(
       () => Promise.reject(new Error("network error")),
@@ -2192,7 +2195,7 @@ describe("fetchHotData hadErrors", () => {
   });
 
   it("reports run fetch failure to Sentry once priorConsecutiveFailures reaches HOT_POLL_SENTRY_THRESHOLD", async () => {
-    const Sentry = await import("@sentry/solid");
+    const Sentry = await import("../../src/app/lib/sentry-facade");
     (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
     const octokit = makeOctokit(
       () => Promise.reject(new Error("network error")),

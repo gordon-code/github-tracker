@@ -33,12 +33,20 @@ vi.mock("../../src/app/stores/view", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/app/services/github", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/app/services/github")>();
+vi.mock("../../src/app/services/github", () => ({
+  initClientWatcher: vi.fn(),
+  getClient: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../../src/app/lib/mcp-relay", () => ({
+  initMcpRelay: vi.fn(),
+}));
+
+vi.mock("../../src/app/lib/sentry-facade", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/lib/sentry-facade")>();
   return {
     ...actual,
-    initClientWatcher: vi.fn(),
-    getClient: vi.fn().mockReturnValue(null),
+    reportBoundaryError: vi.fn(),
   };
 });
 
@@ -78,12 +86,14 @@ import * as configStore from "../../src/app/stores/config";
 import * as githubService from "../../src/app/services/github";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as viewStore from "../../src/app/stores/view";
-import App from "../../src/app/App";
+import * as sentryFacade from "../../src/app/lib/sentry-facade";
+import App, { _resetAuthInitStartedForTests } from "../../src/app/App";
 
 describe("App", () => {
   beforeEach(() => {
     // Reset all mock state (implementations, calls, return values)
     vi.resetAllMocks();
+    _resetAuthInitStartedForTests();
     mockIsAuthenticated = false;
     mockValidateToken = async () => false;
     dashboardShouldThrow = false;
@@ -143,14 +153,23 @@ describe("App", () => {
     });
   });
 
-  it("App calls init functions on mount", async () => {
-    render(() => <App />);
+  it("App calls init functions on mount and defers initClientWatcher until authenticated", async () => {
+    const { unmount } = render(() => <App />);
 
     await waitFor(() => {
       expect(vi.mocked(configStore.initConfigPersistence)).toHaveBeenCalled();
       expect(vi.mocked(viewStore.initViewPersistence)).toHaveBeenCalled();
-      expect(vi.mocked(githubService.initClientWatcher)).toHaveBeenCalled();
       expect(vi.mocked(cacheStore.evictStaleEntries)).toHaveBeenCalled();
+    });
+    expect(vi.mocked(githubService.initClientWatcher)).not.toHaveBeenCalled();
+    unmount();
+
+    mockIsAuthenticated = true;
+    configStore.updateConfig({ onboardingComplete: true });
+    render(() => <App />);
+
+    await waitFor(() => {
+      expect(vi.mocked(githubService.initClientWatcher)).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -191,10 +210,14 @@ describe("App", () => {
       screen.getByRole("button", { name: "Reload page" });
     });
 
-    // Verify the error is logged (not silently swallowed) for observability
+    // Verify the error is logged and forwarded to Sentry boundary reporting
     expect(spy).toHaveBeenCalledWith(
       "[app] Route render failed:",
       expect.any(Error),
+    );
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
     );
 
     spy.mockRestore();
@@ -214,6 +237,11 @@ describe("App", () => {
       screen.getByText("Failed to load page");
     });
 
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
+    );
+
     spy.mockRestore();
   });
 
@@ -230,6 +258,11 @@ describe("App", () => {
     await waitFor(() => {
       screen.getByText("Failed to load page");
     });
+
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentryFacade.reportBoundaryError)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "chunk load failed" }),
+    );
 
     spy.mockRestore();
   });

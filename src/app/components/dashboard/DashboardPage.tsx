@@ -1,4 +1,4 @@
-import { batch, createSignal, createMemo, createEffect, on, Show, Switch, Match, onMount, onCleanup, untrack } from "solid-js";
+import { batch, createSignal, createMemo, createEffect, on, Show, Switch, Match, Suspense, lazy, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, reconcile, unwrap } from "solid-js/store";
 import { z } from "zod";
 import Header from "../layout/Header";
@@ -49,9 +49,11 @@ import { Tooltip } from "../shared/Tooltip";
 import { isIssueVisible, isPrVisible, isRunVisible, matchesActionsConclusionFilter } from "../../lib/filters";
 import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
-import CustomTabModal from "../shared/CustomTabModal";
+import { loadEmojiMap } from "../../lib/emoji";
 import { mergeActiveFilters } from "../../lib/tabFilters";
 import type { CustomTab } from "../../stores/config";
+
+const CustomTabModal = lazy(() => import("../shared/CustomTabModal"));
 
 // Hoisted to module scope — these are constant values (Zod schema defaults).
 const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
@@ -883,6 +885,10 @@ export default function DashboardPage() {
 
   const [clockTick, setClockTick] = createSignal(0);
   const [showCustomTabModal, setShowCustomTabModal] = createSignal(false);
+  const [customTabModalEverOpened, setCustomTabModalEverOpened] = createSignal(false);
+  createEffect(() => {
+    if (showCustomTabModal()) setCustomTabModalEverOpened(true);
+  });
   const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
   const editingTab = createMemo(() => {
     const id = editingTabId();
@@ -974,6 +980,8 @@ export default function DashboardPage() {
   });
 
   onMount(() => {
+    void loadEmojiMap();
+
     if (
       !realDataCommitted &&
       dashboardData.issues.length === 0 &&
@@ -2112,14 +2120,18 @@ export default function DashboardPage() {
             </Switch>
           </main>
 
-          <CustomTabModal
-            open={showCustomTabModal()}
-            onClose={() => { setShowCustomTabModal(false); setEditingTabId(null); }}
-            editingTab={editingTab()}
-            availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
-            availableRepos={config.selectedRepos}
-            enableActions={config.enableActions}
-          />
+          <Show when={customTabModalEverOpened()}>
+            <Suspense>
+              <CustomTabModal
+                open={showCustomTabModal()}
+                onClose={() => { setShowCustomTabModal(false); setEditingTabId(null); }}
+                editingTab={editingTab()}
+                availableOrgs={[...new Set(config.selectedRepos.map((r) => r.owner))]}
+                availableRepos={config.selectedRepos}
+                enableActions={config.enableActions}
+              />
+            </Suspense>
+          </Show>
         </div>
 
         <footer class="app-footer fixed bottom-0 left-0 right-0 z-30 border-t border-base-300 bg-base-100 py-3 text-xs text-base-content/50">

@@ -1,10 +1,11 @@
-import { createSignal, createMemo, For, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, For, Show, Suspense, lazy } from "solid-js";
 import { config, removeCustomTab, reorderCustomTab, isTabUnscoped } from "../../stores/config";
 import type { CustomTab } from "../../stores/config";
 import type { RepoRef } from "../../services/api";
-import CustomTabModal from "../shared/CustomTabModal";
 import { Tooltip } from "../shared/Tooltip";
 import { formatScopeSummary } from "../../lib/format";
+
+const CustomTabModal = lazy(() => import("../shared/CustomTabModal"));
 
 function baseTypeLabel(baseType: CustomTab["baseType"]): string {
   if (baseType === "issues") return "Issues";
@@ -25,6 +26,10 @@ interface CustomTabsSectionProps {
 
 export default function CustomTabsSection(props: CustomTabsSectionProps) {
   const [showModal, setShowModal] = createSignal(false);
+  const [modalEverOpened, setModalEverOpened] = createSignal(false);
+  createEffect(() => {
+    if (showModal()) setModalEverOpened(true);
+  });
   const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = createSignal<string | null>(null);
 
@@ -207,13 +212,17 @@ export default function CustomTabsSection(props: CustomTabsSectionProps) {
       </div>
 
       {/* Modal */}
-      <CustomTabModal
-        open={showModal()}
-        onClose={handleClose}
-        editingTab={editingTab()}
-        availableOrgs={props.availableOrgs}
-        availableRepos={props.availableRepos}
-      />
+      <Show when={modalEverOpened()}>
+        <Suspense>
+          <CustomTabModal
+            open={showModal()}
+            onClose={handleClose}
+            editingTab={editingTab()}
+            availableOrgs={props.availableOrgs}
+            availableRepos={props.availableRepos}
+          />
+        </Suspense>
+      </Show>
     </div>
   );
 }

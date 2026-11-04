@@ -40,9 +40,11 @@ vi.mock("../../src/app/stores/cache", () => ({
   clearCache: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@sentry/solid", () => ({
+vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
-  withSentryErrorBoundary: vi.fn((c: unknown) => c),
+  reportBoundaryError: vi.fn(),
+  installEarlyErrorCapture: vi.fn(),
+  startSentryLoad: vi.fn(),
 }));
 
 vi.mock("../../src/app/lib/pat", async (importOriginal) => {
@@ -153,27 +155,6 @@ describe("LoginPage — OAuth view (default)", () => {
     render(() => <LoginPage />);
     await user.click(screen.getByText("Sign in with GitHub"));
     expect(window.location.href).toContain("https://github.com/login/oauth/authorize");
-  });
-
-  it("schedules dashboard chunk prefetch on mount", () => {
-    // happy-dom lacks requestIdleCallback, so the setTimeout(prefetch, 2000) fallback fires
-    vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    render(() => <LoginPage />);
-
-    // The prefetch is scheduled via setTimeout with 2s delay
-    const timeoutCalls = vi.getTimerCount();
-    expect(timeoutCalls).toBeGreaterThan(0);
-
-    // Advancing the timer triggers the import — resolves to mock, no error
-    vi.advanceTimersByTime(2000);
-
-    // No console.warn means the .catch() didn't fire (import succeeded via mock)
-    expect(warnSpy).not.toHaveBeenCalledWith("[app] Dashboard chunk prefetch failed");
-
-    vi.useRealTimers();
-    warnSpy.mockRestore();
   });
 });
 
@@ -772,6 +753,42 @@ describe("LoginPage — Import from backup", () => {
 
     expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("cancelling while onResolved is awaiting settings-transfer import does not commit or set resolvedCred", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    let finishResolve!: (v: { ok: true; bundle: CredentialBundle; identity: typeof IDENTITY }) => void;
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockReturnValueOnce(
+      new Promise((r) => { finishResolve = r; })
+    );
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(false);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+
+    await waitFor(() => expect(settingsTransfer.resolveImportedCredentials).toHaveBeenCalledTimes(1));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+
+    // Resolve credentials; after one microtask tick, handleCodeSubmit has passed its
+    // generation guard, invoked onResolved, and suspended at `await import("../lib/settings-transfer")`.
+    finishResolve({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    await Promise.resolve();
+
+    // User cancels while onResolved is awaiting the dynamic import.
+    fireEvent.click(cancelBtn);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settingsTransfer.hasExistingLocalConfig).not.toHaveBeenCalled();
+    expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sign you in as/i)).toBeNull();
   });
 
   it("Cancel is disabled while the unseal is in flight", async () => {
