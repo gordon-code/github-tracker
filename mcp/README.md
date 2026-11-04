@@ -6,7 +6,7 @@ MCP server for [GitHub Tracker](https://github.com/gordon-code/github-tracker) â
 
 ```bash
 # Run without installing
-npx github-tracker-mcp
+npx github-tracker-mcp@latest
 
 # Or install globally
 npm install -g github-tracker-mcp

@@ -108,45 +108,34 @@ type(scope): description
 
 Scope is optional. Use imperative mood: "add feature", not "adds feature" or "added feature".
 
-## Releasing the MCP server
+## Releases
 
-The MCP server (`mcp/` package) is published to npm and GitHub Releases via CI.
+Both the root application (`github-tracker`) and the MCP server (`github-tracker-mcp` in `mcp/`) are released automatically with [release-please](https://github.com/googleapis/release-please) via `.github/workflows/release.yml` (`release-please-config.json` and `.release-please-manifest.json`).
 
-### First publish (manual)
+- **Never hand-edit versions or changelogs:** Do not manually edit `version` in `package.json`, `mcp/package.json`, `mcp/src/index.ts` (`// x-release-please-version`), or `.release-please-manifest.json`, and do not hand-edit `CHANGELOG.md` or `mcp/CHANGELOG.md`. Never manually create or push `github-tracker@*` or `github-tracker-mcp@*` tags.
+- **Conventional Commits drive release notes and version bumps:**
+  - `feat:` bumps the minor version and appears under **Features**
+  - `fix:` bumps the patch version and appears under **Bug Fixes**
+  - `perf:` bumps the patch version and appears under **Performance**
+  - `feat!:` / `fix!:` / `BREAKING CHANGE:` footer bumps the major version
+  - `docs:`, `chore:`, `ci:`, `refactor:`, `test:`, `build:`, `style:`, and `revert:` are hidden from changelog sections
+  - Changes under `mcp/` scope to `github-tracker-mcp`; all other paths scope to `github-tracker`
+- **Release PR flow:** When releasable commits land on `main`, `release.yml` opens or updates a release PR that bumps versions and updates `CHANGELOG.md` / `mcp/CHANGELOG.md`. Merging that release PR creates the git tag (`github-tracker@x.y.z` or `github-tracker-mcp@x.y.z`), publishes the GitHub Release, and—when `github-tracker-mcp` is released—publishes the package to npm via OIDC trusted publishing (`release.yml`, environment `npm-publish`).
 
-The very first publish must be done locally — OIDC trusted publishing can only be configured for packages that already exist on npm.
+See [DEPLOY.md](DEPLOY.md#releases) for the maintainer setup (GitHub App permissions, `release` and `npm-publish` environments, npm trusted publisher binding, and tag ruleset).
 
-1. Create an npm account at [npmjs.com](https://www.npmjs.com/signup) if you don't have one
-2. Log in locally: `npm login`
-3. Build and publish:
+### First publish for forks (manual, one-time)
+
+If you are publishing your own renamed MCP package from a fork, the very first publish to npm must be done locally because npm OIDC trusted publishing can only be configured for packages that already exist on npm:
+
+1. Create an npm account at [npmjs.com](https://www.npmjs.com/signup) and log in locally (`npm login`)
+2. Build and publish once:
    ```bash
    cd mcp
    pnpm run build
    pnpm publish --access public
    ```
-
-### Trusted publishing setup (one-time, after first publish)
-
-CI publishes via npm OIDC trusted publishing — no tokens or secrets needed.
-
-1. Go to **npmjs.com > github-tracker-mcp > Settings > Trusted Publishers**
-2. Add a trusted publisher:
-   - **Owner:** `gordon-code`
-   - **Repository:** `github-tracker`
-   - **Workflow filename:** `publish-mcp.yml`
-
-### Cutting a release
-
-```bash
-cd mcp
-pnpm version patch  # or minor|major, or manually bump version in package.json
-git add package.json
-git commit -m "chore(mcp): bump version to X.Y.Z"
-git tag github-tracker-mcp@X.Y.Z  # The tag _must_ match the github-tracker-mcp@X.Y.Z pattern.
-git push upstream main --follow-tags
-```
-
-`pnpm version` bumps `mcp/package.json`, commits, and creates a `github-tracker-mcp@X.Y.Z` tag. Pushing that tag to upstream triggers CI, which typechecks, builds, tests, publishes to npm, and creates a GitHub release.
+3. On **npmjs.com > your package > Settings > Trusted Publishers**, bind your repository's `release.yml` workflow and `npm-publish` environment.
 
 ## Pull requests
 
