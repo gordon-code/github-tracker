@@ -20,7 +20,7 @@ import { RepoRefSchema, TrackedUserSchema } from "../../src/shared/schemas.js";
 
 const server = new McpServer({
   name: "github-tracker",
-  version: "0.1.1", // x-release-please-version
+  version: "0.1.2", // x-release-please-version
 });
 
 // ── Config update validation schemas ──────────────────────────────────────────
