@@ -120,7 +120,7 @@ Both the root application (`github-tracker`) and the MCP server (`github-tracker
   - `feat!:` / `fix!:` / `BREAKING CHANGE:` footer bumps the major version
   - `docs:`, `chore:`, `ci:`, `refactor:`, `test:`, `build:`, `style:`, and `revert:` are hidden from changelog sections
   - Changes under `mcp/` scope to `github-tracker-mcp`; all other paths scope to `github-tracker`
-- **Release PR flow:** When releasable commits land on `main`, `release.yml` opens or updates a release PR that bumps versions and updates `CHANGELOG.md` / `mcp/CHANGELOG.md`. Merging that release PR creates the git tag (`github-tracker@x.y.z` or `github-tracker-mcp@x.y.z`), publishes the GitHub Release, and—when `github-tracker-mcp` is released—publishes the package to npm via OIDC trusted publishing (`release.yml`, environment `npm-publish`).
+- **Release PR flow:** When releasable commits land on `main`, `release.yml` opens or updates a release PR that bumps versions and updates `CHANGELOG.md` / `mcp/CHANGELOG.md`. Merging that release PR creates the git tag (`github-tracker@x.y.z` or `github-tracker-mcp@x.y.z`), publishes the GitHub Release, deploys the web application + Worker to Cloudflare (`deploy.yml` via `workflow_call`) when `github-tracker` is released, and publishes `github-tracker-mcp` to npm via OIDC trusted publishing (`release.yml`, environment `npm-publish`) when `mcp` is released. Emergency or out-of-band deployments can still be triggered manually from `main` via `workflow_dispatch` on `deploy.yml`.
 
 See [DEPLOY.md](DEPLOY.md#releases) for the maintainer setup (GitHub App permissions, `release` and `npm-publish` environments, npm trusted publisher binding, and tag ruleset).
 

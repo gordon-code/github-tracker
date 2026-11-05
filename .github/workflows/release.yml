@@ -14,6 +14,8 @@ jobs:
       contents: read
     environment: release
     outputs:
+      app_release_created: ${{ steps.rp.outputs.release_created }}
+      app_tag: ${{ steps.rp.outputs.tag_name }}
       mcp_release_created: ${{ steps.rp.outputs['mcp--release_created'] }}
       mcp_tag: ${{ steps.rp.outputs['mcp--tag_name'] }}
     steps:
@@ -32,6 +34,16 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  deploy:
+    needs: release-please
+    if: github.repository == 'gordon-code/github-tracker' && needs.release-please.outputs.app_release_created == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: ${{ needs.release-please.outputs.app_tag }}
+    secrets: inherit
 
   publish-mcp:
     needs: release-please

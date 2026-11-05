@@ -257,7 +257,7 @@ pnpm run build
 wrangler deploy
 ```
 
-In CI (`.github/workflows/deploy.yml`), production deployments run `pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"` with values passed via `env:` (`DEPLOY_TAG` truncated to 25 characters of `GITHUB_SHA`; `DEPLOY_MSG` taken from the first line of the commit message with ASCII control characters stripped and truncated to 100 UTF-8 characters under `LC_ALL=C.UTF-8`, or `manual deploy <tag>` on `workflow_dispatch`).
+In CI (`.github/workflows/deploy.yml`), production deployments are triggered automatically by `.github/workflows/release.yml` (`workflow_call`) when a `github-tracker@x.y.z` release PR merges, or manually via `workflow_dispatch`. The workflow runs `pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"` with values passed via `env:` (`DEPLOY_TAG` truncated to 25 characters of `GITHUB_SHA`; `DEPLOY_MSG` taken from the first line of the commit message with ASCII control characters stripped and truncated to 100 UTF-8 characters under `LC_ALL=C.UTF-8`, or `manual deploy <tag>` on `workflow_dispatch`).
 
 ## Releases
 
@@ -295,7 +295,9 @@ App (`github-tracker`) and MCP server (`github-tracker-mcp`) releases are automa
 
 1. **Conventional commits on `main` → Release PR:** Every push to `main` triggers `.github/workflows/release.yml`, which mints a short-lived installation token via `actions/create-github-app-token` and runs `googleapis/release-please-action`. Using a GitHub App token (rather than `GITHUB_TOKEN`) ensures `pull_request` CI workflows run automatically on the proposed release PR.
 2. **Bootstrap (`1.0.0`) and post-release cleanup:** `release-please-config.json` sets `"bootstrap-sha"` to `c63711d42eb125da7be9016a0d853a1cf8c6534d` and `"release-as": "1.0.0"` on the root `.` package. If only hidden commit types (`ci:`, `chore:`, `docs:`, `test:`, `refactor:`) exist after `bootstrap-sha`, release-please will wait for a `feat:`/`fix:`/`perf:` commit—or a commit with a `Release-As: 1.0.0` footer—before opening the initial root release PR. **After the first `github-tracker@1.0.0` release PR merges, remove `"release-as": "1.0.0"` from `release-please-config.json` in a `chore(release):` commit** so subsequent releases increment normally from commits.
-3. **Merging the Release PR:** When a release PR merges to `main`, `release-please` creates the git tag (`github-tracker@x.y.z` and/or `github-tracker-mcp@x.y.z`), writes `CHANGELOG.md` (and `mcp/CHANGELOG.md`), and publishes the GitHub Release. When `mcp--release_created` is `'true'`, the downstream `publish-mcp` job in `release.yml` checks out the new `github-tracker-mcp@x.y.z` tag, runs `pnpm typecheck`, `pnpm build`, and `pnpm test`, and publishes `github-tracker-mcp` to npm with OIDC provenance (`id-token: write`, no `NPM_TOKEN`).
+3. **Merging the Release PR:** When a release PR merges to `main`, `release-please` creates the git tag (`github-tracker@x.y.z` and/or `github-tracker-mcp@x.y.z`), writes `CHANGELOG.md` (and `mcp/CHANGELOG.md`), and publishes the GitHub Release:
+   - When the root `github-tracker` package is released (`release_created == 'true'`), the downstream `deploy` job in `release.yml` invokes `.github/workflows/deploy.yml` (`workflow_call`) at the new `github-tracker@x.y.z` tag, running full verification (`typecheck`, `lint`, `test`, WAF smoke, `test:e2e`), `pnpm validate:deploy`, `pnpm run build`, and `wrangler deploy`.
+   - When `mcp--release_created` is `'true'`, the downstream `publish-mcp` job in `release.yml` checks out the new `github-tracker-mcp@x.y.z` tag, runs `pnpm typecheck`, `pnpm build`, and `pnpm test`, and publishes `github-tracker-mcp` to npm with OIDC provenance (`id-token: write`, no `NPM_TOKEN`).
 
 ## Migration from GitHub App
 

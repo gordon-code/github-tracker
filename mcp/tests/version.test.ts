@@ -64,8 +64,17 @@ describe("MCP and release-please version synchronization", () => {
     expect(config.packages["."]["exclude-paths"]).toContain("mcp");
   });
 
-  it("retires legacy publish-mcp.yml workflow in favor of release.yml", () => {
+  it("retires legacy publish-mcp.yml workflow in favor of release.yml and gates deploy.yml on releases", () => {
     expect(existsSync(resolve(ROOT, ".github/workflows/publish-mcp.yml"))).toBe(false);
     expect(existsSync(resolve(ROOT, ".github/workflows/release.yml"))).toBe(true);
+
+    const releaseYml = readFile(".github/workflows/release.yml");
+    const deployYml = readFile(".github/workflows/deploy.yml");
+
+    expect(releaseYml).toContain("app_release_created: ${{ steps.rp.outputs.release_created }}");
+    expect(releaseYml).toContain("uses: ./.github/workflows/deploy.yml");
+    expect(deployYml).toContain("workflow_call:");
+    expect(deployYml).toContain("workflow_dispatch:");
+    expect(deployYml).not.toMatch(/^\s*push:/m);
   });
 });
