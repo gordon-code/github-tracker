@@ -23,7 +23,7 @@ A dashboard for tracking GitHub issues, PRs, and Actions workflow runs across ma
 
 ## Documentation
 
-For detailed feature documentation, see the [User Guide](docs/USER_GUIDE.md).
+For detailed feature documentation, see the [User Guide](docs/USER_GUIDE.md). For release history, see [CHANGELOG.md](./CHANGELOG.md).
 
 ## Features
 

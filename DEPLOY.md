@@ -257,6 +257,48 @@ pnpm run build
 wrangler deploy
 ```
 
+In CI (`.github/workflows/deploy.yml`), production deployments are triggered automatically by `.github/workflows/release.yml` (`workflow_call`) when a `github-tracker@x.y.z` release PR merges, or manually via `workflow_dispatch`. The workflow runs `pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"` with values passed via `env:` (`DEPLOY_TAG` truncated to 25 characters of `GITHUB_SHA`; `DEPLOY_MSG` taken from the first line of the commit message with ASCII control characters stripped and truncated to 100 UTF-8 characters under `LC_ALL=C.UTF-8`, or `manual deploy <tag>` on `workflow_dispatch`).
+
+## Releases
+
+App (`github-tracker`) and MCP server (`github-tracker-mcp`) releases are automated with [release-please](https://github.com/googleapis/release-please) in manifest mode (`release-please-config.json` and `.release-please-manifest.json`) via `.github/workflows/release.yml`.
+
+### One-time maintainer setup
+
+1. **Create a dedicated GitHub App on `gordon-code`:**
+   - Go to **Organization settings → Developer settings → GitHub Apps → New GitHub App** (with webhook disabled).
+   - Set **Repository permissions**:
+     - **Contents:** Read & write (creates release branches, tags, and GitHub Releases)
+     - **Pull requests:** Read & write (opens/updates release PRs and applies `autorelease: pending` / `autorelease: tagged` labels; if label creation fails, also grant **Issues: Read & write**)
+     - **Metadata:** Read-only (mandatory)
+   - Install the App on `gordon-code/github-tracker` **only**.
+   - Record the **Client ID** and generate a **Private key** (`.pem`).
+
+2. **Create protected GitHub Actions environments:**
+   - Go to **Settings → Environments** on `gordon-code/github-tracker`:
+     - **`release` environment:** restrict **Deployment branches and tags** to branch `main` only. Add environment variable `RELEASE_APP_CLIENT_ID` (the App's Client ID) and environment secret `RELEASE_APP_PRIVATE_KEY` (the full `.pem` private key).
+     - **`npm-publish` environment:** restrict **Deployment branches and tags** to branch `main` only, with an optional required reviewer gate.
+
+3. **Rebind the npm OIDC trusted publisher (before merging the first MCP release PR):**
+   - npm allows only one trusted publisher per package. On [npmjs.com](https://www.npmjs.com/) under **`github-tracker-mcp` → Settings → Trusted Publishers**, update the binding from `publish-mcp.yml` to:
+     - **Owner:** `gordon-code`
+     - **Repository:** `github-tracker`
+     - **Workflow filename:** `release.yml`
+     - **Environment name:** `npm-publish`
+
+4. **Configure a repository tag protection ruleset:**
+   - Go to **Settings → Rules → Rulesets → New ruleset → New tag ruleset**.
+   - Target tag patterns `github-tracker@*` and `github-tracker-mcp@*`.
+   - Enable **Restrict creations**, **Restrict updates**, and **Restrict deletions**, and add only the release GitHub App and repository admins to the **Bypass list** so manual tag pushes cannot impersonate a release.
+
+### How releases work
+
+1. **Conventional commits on `main` → Release PR:** Every push to `main` triggers `.github/workflows/release.yml`, which mints a short-lived installation token via `actions/create-github-app-token` and runs `googleapis/release-please-action`. Using a GitHub App token (rather than `GITHUB_TOKEN`) ensures `pull_request` CI workflows run automatically on the proposed release PR.
+2. **Bootstrap (`1.0.0`) and post-release cleanup:** `release-please-config.json` sets `"bootstrap-sha"` to `c63711d42eb125da7be9016a0d853a1cf8c6534d` and `"release-as": "1.0.0"` on the root `.` package. If only hidden commit types (`ci:`, `chore:`, `docs:`, `test:`, `refactor:`) exist after `bootstrap-sha`, release-please will wait for a `feat:`/`fix:`/`perf:` commit—or a commit with a `Release-As: 1.0.0` footer—before opening the initial root release PR. **After the first `github-tracker@1.0.0` release PR merges, remove `"release-as": "1.0.0"` from `release-please-config.json` in a `chore(release):` commit** so subsequent releases increment normally from commits.
+3. **Merging the Release PR:** When a release PR merges to `main`, `release-please` creates the git tag (`github-tracker@x.y.z` and/or `github-tracker-mcp@x.y.z`), writes `CHANGELOG.md` (and `mcp/CHANGELOG.md`), and publishes the GitHub Release:
+   - When the root `github-tracker` package is released (`release_created == 'true'`), the downstream `deploy` job in `release.yml` invokes `.github/workflows/deploy.yml` (`workflow_call`) at the new `github-tracker@x.y.z` tag, running full verification (`typecheck`, `lint`, `test`, WAF smoke, `test:e2e`), `pnpm validate:deploy`, `pnpm run build`, and `wrangler deploy`.
+   - When `mcp--release_created` is `'true'`, the downstream `publish-mcp` job in `release.yml` checks out the new `github-tracker-mcp@x.y.z` tag, runs `pnpm typecheck`, `pnpm build`, and `pnpm test`, and publishes `github-tracker-mcp` to npm with OIDC provenance (`id-token: write`, no `NPM_TOKEN`).
+
 ## Migration from GitHub App
 
 If you previously deployed with the GitHub App model (HttpOnly cookie refresh tokens), follow these steps:
