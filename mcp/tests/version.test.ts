@@ -16,11 +16,13 @@ interface ReleasePleaseManifest {
 
 interface ReleasePleasePackageConfig {
   component?: string;
+  "release-as"?: string;
   "extra-files"?: string[];
   "exclude-paths"?: string[];
 }
 
 interface ReleasePleaseConfig {
+  "separate-pull-requests"?: boolean;
   packages: {
     ".": ReleasePleasePackageConfig;
     mcp: ReleasePleasePackageConfig;
@@ -58,7 +60,9 @@ describe("MCP and release-please version synchronization", () => {
     const config = readJson("release-please-config.json") as ReleasePleaseConfig;
 
     expect(rootPkg.version).toBe(manifest["."]);
+    expect(config["separate-pull-requests"]).toBe(true);
     expect(config.packages["."]?.component).toBe(rootPkg.name);
+    expect(config.packages["."]["release-as"]).toBeUndefined();
     expect(config.packages.mcp?.component).toBe(mcpPkg.name);
     expect(config.packages.mcp["extra-files"]).toContain("src/index.ts");
     expect(config.packages["."]["exclude-paths"]).toContain("mcp");

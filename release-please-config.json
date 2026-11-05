@@ -4,6 +4,7 @@
   "include-v-in-tag": false,
   "tag-separator": "@",
   "include-component-in-tag": true,
+  "separate-pull-requests": true,
   "bootstrap-sha": "c63711d42eb125da7be9016a0d853a1cf8c6534d",
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
@@ -21,7 +22,6 @@
   "packages": {
     ".": {
       "component": "github-tracker",
-      "release-as": "1.0.0",
       "exclude-paths": ["mcp"],
       "changelog-path": "CHANGELOG.md"
     },
