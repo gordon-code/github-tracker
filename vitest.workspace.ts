@@ -11,6 +11,11 @@ export default defineConfig({
       // Browser/DOM tests (stores, services, UI)
       defineProject({
         plugins: [solid(), tailwindcss()],
+        define: {
+          __APP_VERSION__: JSON.stringify("0.1.0-test"),
+          __GIT_SHA__: JSON.stringify("abcdef123456"),
+          __BUILD_TIME__: JSON.stringify("2026-01-01T00:00:00.000Z"),
+        },
         test: {
           name: "browser",
           environment: "happy-dom",

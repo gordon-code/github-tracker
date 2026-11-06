@@ -3,9 +3,11 @@ import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { visualizer } from "rollup-plugin-visualizer";
+import { buildMeta } from "./vite-plugins/build-meta.ts";
 
 export default defineConfig({
   plugins: [
+    ...buildMeta(),
     solid(),
     tailwindcss(),
     cloudflare(),

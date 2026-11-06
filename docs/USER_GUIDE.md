@@ -710,7 +710,7 @@ The header shrinks as you scroll to maximize content space.
 
 ## Settings Reference
 
-Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**.
+Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**. The current build version (`<version>+<commit-sha>`) is shown in **Settings > Data > About** (alongside a link to the changelog) and in the dashboard footer, both linking to the GitHub Releases page.
 
 ### Config Settings
 

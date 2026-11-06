@@ -51,7 +51,11 @@ import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import { loadEmojiMap } from "../../lib/emoji";
 import { mergeActiveFilters } from "../../lib/tabFilters";
+import { isSafeGitHubUrl } from "../../lib/url";
+import { displayVersion } from "../../lib/version";
 import type { CustomTab } from "../../stores/config";
+
+const RELEASES_URL = "https://github.com/gordon-code/github-tracker/releases";
 
 const CustomTabModal = lazy(() => import("../shared/CustomTabModal"));
 
@@ -2161,6 +2165,15 @@ export default function DashboardPage() {
                 class="link link-hover"
               >
                 Privacy
+              </a>
+              <span aria-hidden="true">&middot;</span>
+              <a
+                href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-base-content/40 link link-hover"
+              >
+                v{displayVersion()}
               </a>
             </div>
             <div class="flex justify-end">
