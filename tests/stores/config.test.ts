@@ -63,6 +63,7 @@ describe("ConfigSchema", () => {
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
     expect(result.enableActions).toBe(true);
+    expect(result.lastSeenVersion).toBeNull();
     expect(result.dependencies.excludedOrgs).toEqual([]);
     expect(result.dependencies.excludedRepos).toEqual([]);
   });
@@ -152,6 +153,34 @@ describe("ConfigSchema", () => {
       const stored = ConfigSchema.parse({ hotPollInterval: 45 });
       const roundTripped = ConfigSchema.parse(JSON.parse(JSON.stringify(stored)));
       expect(roundTripped.hotPollInterval).toBe(45);
+    });
+  });
+
+  describe("lastSeenVersion", () => {
+    it("defaults to null and accepts valid version strings or null", () => {
+      expect(ConfigSchema.parse({}).lastSeenVersion).toBeNull();
+      expect(ConfigSchema.parse({ lastSeenVersion: null }).lastSeenVersion).toBeNull();
+      expect(ConfigSchema.parse({ lastSeenVersion: "0.1.0" }).lastSeenVersion).toBe("0.1.0");
+    });
+
+    it("rejects strings exceeding 32 characters", () => {
+      expect(() => ConfigSchema.parse({ lastSeenVersion: "v".repeat(33) })).toThrow(
+        /lastSeenVersion|Too big|<=32/i,
+      );
+    });
+
+    it("persists through loadConfig and updateConfig round-trip", () => {
+      const stored = ConfigSchema.parse({ lastSeenVersion: "0.1.1" });
+      localStorageMock.setItem(STORAGE_KEY, JSON.stringify(stored));
+      expect(loadConfig().lastSeenVersion).toBe("0.1.1");
+
+      createRoot((dispose) => {
+        resetConfig();
+        expect(config.lastSeenVersion).toBeNull();
+        updateConfig({ lastSeenVersion: "0.2.0" });
+        expect(config.lastSeenVersion).toBe("0.2.0");
+        dispose();
+      });
     });
   });
 });

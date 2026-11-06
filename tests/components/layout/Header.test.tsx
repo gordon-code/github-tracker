@@ -53,9 +53,13 @@ import Header from "../../../src/app/components/layout/Header";
 import * as authStore from "../../../src/app/stores/auth";
 import * as errorsModule from "../../../src/app/lib/errors";
 import * as githubStatusModule from "../../../src/app/services/github-status";
-import { render } from "@solidjs/testing-library";
+import { config, resetConfig, updateConfig } from "../../../src/app/stores/config";
+import { _resetChangelogCacheForTest } from "../../../src/app/lib/changelog";
+import { render, waitFor } from "@solidjs/testing-library";
 
 beforeEach(() => {
+  resetConfig();
+  _resetChangelogCacheForTest();
   mockNavigate.mockClear();
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
@@ -196,5 +200,32 @@ describe("Header", () => {
     expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231?s=56");
     expect(img.getAttribute("loading")).toBeNull();
     vi.mocked(authStore.user).mockRestore();
+  });
+
+  it("shows the What's new unseen dot when lastSeenVersion is null or older, and hides the dot after opening WhatsNewDialog", async () => {
+    const user = userEvent.setup();
+    render(() => <Header />);
+
+    const whatsNewBtn = screen.getByLabelText("What's new");
+    expect(whatsNewBtn.getAttribute("aria-expanded")).toBe("false");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+    });
+
+    await user.click(whatsNewBtn);
+
+    expect(whatsNewBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("What's New")).toBeDefined();
+    expect(config.lastSeenVersion).toBe("0.1.0");
+    expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+  });
+
+  it("hides the What's new dot when lastSeenVersion already matches the latest release", async () => {
+    updateConfig({ lastSeenVersion: "0.1.0" });
+    render(() => <Header />);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId("whats-new-dot")).toBeNull();
   });
 });

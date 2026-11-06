@@ -306,10 +306,10 @@ describe("DashboardPage — tab switching", () => {
 });
 
 describe("DashboardPage — footer", () => {
-  it("renders Source, Guide, Privacy, and the v0.1.0-test+abcdef1 release link in the footer", () => {
+  it("renders Source, Guide, Privacy, and the v0.1.0+abcdef1 release link in the footer", () => {
     render(() => <DashboardPage />);
 
-    const versionLink = screen.getByRole("link", { name: "v0.1.0-test+abcdef1" });
+    const versionLink = screen.getByRole("link", { name: "v0.1.0+abcdef1" });
     expect(versionLink.getAttribute("href")).toBe(
       "https://github.com/gordon-code/github-tracker/releases",
     );

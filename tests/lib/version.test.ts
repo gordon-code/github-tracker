@@ -37,14 +37,14 @@ describe("version metadata", () => {
   });
 
   it("exposes build-time constants from Vite defines", () => {
-    expect(APP_VERSION).toBe("0.1.0-test");
+    expect(APP_VERSION).toBe("0.1.0");
     expect(GIT_SHA).toBe("abcdef123456");
     expect(BUILD_TIME).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("formats displayVersion() as <APP_VERSION>+<7-char GIT_SHA>", () => {
     expect(displayVersion()).toBe(`${APP_VERSION}+${GIT_SHA.slice(0, 7)}`);
-    expect(displayVersion()).toBe("0.1.0-test+abcdef1");
+    expect(displayVersion()).toBe("0.1.0+abcdef1");
   });
 
   describe("VersionInfoSchema", () => {
@@ -95,7 +95,7 @@ describe("version metadata", () => {
     it("leaves updateAvailable null when remote SHA matches local GIT_SHA", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         makeJsonResponse({
-          version: "0.1.0-test",
+          version: "0.1.0",
           sha: GIT_SHA,
           builtAt: "2026-01-01T00:00:00.000Z",
         }),
@@ -303,7 +303,7 @@ describe("version metadata", () => {
       vi.useFakeTimers();
       const fetchMock = vi.fn().mockResolvedValue(
         makeJsonResponse({
-          version: "0.1.0-test",
+          version: "0.1.0",
           sha: GIT_SHA,
           builtAt: "2026-01-01T00:00:00.000Z",
         }),
@@ -320,7 +320,7 @@ describe("version metadata", () => {
       vi.useFakeTimers();
       const fetchMock = vi.fn().mockResolvedValue(
         makeJsonResponse({
-          version: "0.1.0-test",
+          version: "0.1.0",
           sha: GIT_SHA,
           builtAt: "2026-01-01T00:00:00.000Z",
         }),

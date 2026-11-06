@@ -710,7 +710,7 @@ The header shrinks as you scroll to maximize content space.
 
 ## Settings Reference
 
-Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**. The current build version (`<version>+<commit-sha>`) is shown in **Settings > Data > About** (alongside a link to the changelog) and in the dashboard footer, both linking to the GitHub Releases page.
+Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**. The current build version (`<version>+<commit-sha>`) is shown in **Settings > Data > About** (alongside a **What's new** button and a link to the changelog) and in the dashboard footer, both linking to the GitHub Releases page.
 
 ### Config Settings
 
@@ -844,6 +844,7 @@ GitHub Tracker checks `/version.json` in the background (30 seconds after load, 
 - **Update Banner:** When a newer deployment is detected, a banner appears at the bottom of the screen (*"A new version is available."*) with a **Reload** button and a link to the **Changelog**, and an informational entry is added to the Notification Drawer.
 - **Automatic Reload on Navigation:** If an update is waiting when you navigate between pages (for example, opening **Settings** or returning to the **Dashboard**), the app flushes any pending configuration or view-state changes to `localStorage` and performs a full page reload into the new build automatically.
 - **Stale Chunk Recovery:** If a lazy-loaded page chunk from a previous deployment is no longer available before a background check runs, the app automatically flushes pending state and reloads once to load the current bundle.
+- **What's New Dialog:** Click the **What's new** star icon in the dashboard header (or **What's new** in **Settings > Data > About**) to view recent release notes directly in the app. A small unread indicator dot appears on the header icon whenever a newer release has shipped since you last opened the dialog, and clears automatically once opened.
 - **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`) and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) or [GitHub Releases](https://github.com/gordon-code/github-tracker/releases) at any time from **Settings > Data > About** or the dashboard footer.
 
 ---

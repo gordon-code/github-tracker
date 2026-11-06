@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const mockExecFileSync = vi.hoisted(() => vi.fn());
 const mockReadFileSync = vi.hoisted(() => vi.fn());
+const mockExistsSync = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
@@ -13,6 +14,10 @@ vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
+    existsSync: (...args: Parameters<typeof actual.existsSync>) =>
+      mockExistsSync.getMockImplementation()
+        ? mockExistsSync(...args)
+        : actual.existsSync(...args),
     readFileSync: (...args: Parameters<typeof actual.readFileSync>) =>
       mockReadFileSync.getMockImplementation()
         ? mockReadFileSync(...args)
@@ -22,6 +27,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 import {
   buildMeta,
+  parseChangelog,
   resolveBuildMetadata,
   resolveGitSha,
   resolvePackageVersion,
@@ -39,6 +45,7 @@ describe("buildMeta Vite plugin", () => {
   beforeEach(() => {
     mockExecFileSync.mockReset();
     mockReadFileSync.mockReset();
+    mockExistsSync.mockReset();
     delete process.env.GITHUB_SHA;
   });
 
@@ -197,6 +204,208 @@ describe("buildMeta Vite plugin", () => {
       version: pkgVersion,
       sha: "abcdef012345",
       builtAt: "2026-04-14T12:34:56.789Z",
+    });
+  });
+
+  describe("parseChangelog and virtual:changelog", () => {
+    it("parses linked ## headings, unlinked ## headings, legacy ### patch headings, bold-scope and plain bullets, BREAKING CHANGES, PR numbers, and hex SHAs", () => {
+      const md = [
+        "# Changelog",
+        "",
+        "## [0.2.0](https://github.com/gordon-code/github-tracker/compare/github-tracker@0.1.1...github-tracker@0.2.0) (2026-11-10)",
+        "",
+        "### ⚠ BREAKING CHANGES",
+        "",
+        "* **api:** drop legacy v1 endpoint",
+        "",
+        "### Features",
+        "",
+        "* **dashboard:** add keyboard navigation ([#190](https://github.com/gordon-code/github-tracker/issues/190)) ([1a2b3c4](https://github.com/gordon-code/github-tracker/commit/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b))",
+        "- plain bullet with unlinked PR (#191) ([ABCDEF1](https://github.com/gordon-code/github-tracker/commit/abcdef1))",
+        "",
+        "### [0.1.1](https://github.com/gordon-code/github-tracker/compare/github-tracker@0.1.0...github-tracker@0.1.1) (2026-11-06)",
+        "",
+        "### Bug Fixes",
+        "",
+        "* **release:** sync MCP version ([#183](https://github.com/gordon-code/github-tracker/issues/183)) ([97050e3](https://github.com/gordon-code/github-tracker/commit/97050e373da849c1863a08ce1b0c44fa12f17507))",
+        "",
+        "## 0.1.0 (2026-11-01)",
+        "",
+        "### Features",
+        "",
+        "* initial release ([deadbeef](https://github.com/gordon-code/github-tracker/commit/deadbeef))",
+      ].join("\n");
+
+      const entries = parseChangelog(md);
+      expect(entries).toEqual([
+        {
+          version: "0.2.0",
+          date: "2026-11-10",
+          sections: [
+            {
+              title: "⚠ BREAKING CHANGES",
+              items: [{ text: "api: drop legacy v1 endpoint" }],
+            },
+            {
+              title: "Features",
+              items: [
+                {
+                  text: "dashboard: add keyboard navigation",
+                  pr: 190,
+                  sha: "1a2b3c4",
+                },
+                {
+                  text: "plain bullet with unlinked PR",
+                  pr: 191,
+                  sha: "abcdef1",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          version: "0.1.1",
+          date: "2026-11-06",
+          sections: [
+            {
+              title: "Bug Fixes",
+              items: [
+                {
+                  text: "release: sync MCP version",
+                  pr: 183,
+                  sha: "97050e3",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          version: "0.1.0",
+          date: "2026-11-01",
+          sections: [
+            {
+              title: "Features",
+              items: [
+                {
+                  text: "initial release",
+                  sha: "deadbeef",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("strips markdown link syntax (discarding URLs) and preserves raw HTML/XSS strings only as plain text", () => {
+      const md = [
+        "## 0.1.0 (2026-11-01)",
+        "",
+        "### Security",
+        "",
+        "* **xss:** sanitize [click here](javascript:alert(1)) and <script>alert('xss')</script> plus <img src=x onerror=alert(1)> and [docs](https://evil.example/phish) ([#42](https://github.com/gordon-code/github-tracker/pull/42))",
+      ].join("\n");
+
+      const entries = parseChangelog(md);
+      expect(entries).toHaveLength(1);
+      const item = entries[0].sections[0].items[0];
+      expect(item.text).toBe(
+        "xss: sanitize click here and <script>alert('xss')</script> plus <img src=x onerror=alert(1)> and docs",
+      );
+      expect(item.text).not.toContain("javascript:");
+      expect(item.text).not.toContain("https://evil.example");
+      expect(item.pr).toBe(42);
+    });
+
+    it("falls back to 'Changes' when bullets appear before any ### section heading, merges duplicate section headings, and filters out empty sections", () => {
+      const md = [
+        "## 0.3.0 (2026-11-12)",
+        "",
+        "* top-level change before any section heading (#200)",
+        "",
+        "### Empty Section",
+        "",
+        "* (#201)",
+        "",
+        "### Features",
+        "",
+        "* first feature",
+        "",
+        "### Features",
+        "",
+        "* second feature under duplicate heading",
+      ].join("\n");
+
+      const entries = parseChangelog(md);
+      expect(entries).toEqual([
+        {
+          version: "0.3.0",
+          date: "2026-11-12",
+          sections: [
+            {
+              title: "Changes",
+              items: [
+                {
+                  text: "top-level change before any section heading",
+                  pr: 200,
+                },
+              ],
+            },
+            {
+              title: "Features",
+              items: [
+                { text: "first feature" },
+                { text: "second feature under duplicate heading" },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("caps output at 20 releases and truncates bullet item text at 300 characters", () => {
+      const releaseBlocks: string[] = [];
+      for (let i = 25; i >= 1; i--) {
+        const longText = `item-${i}-` + "x".repeat(350);
+        releaseBlocks.push(
+          `## 0.${i}.0 (2026-10-${String((i % 28) + 1).padStart(2, "0")})\n\n### Features\n\n* ${longText} (#${i})`,
+        );
+      }
+      const entries = parseChangelog(releaseBlocks.join("\n\n"));
+      expect(entries).toHaveLength(20);
+      expect(entries[0].version).toBe("0.25.0");
+      expect(entries[19].version).toBe("0.6.0");
+      for (const entry of entries) {
+        for (const section of entry.sections) {
+          for (const item of section.items) {
+            expect(item.text.length).toBeLessThanOrEqual(300);
+          }
+        }
+      }
+    });
+
+    it("resolves virtual:changelog and loads parsed CHANGELOG.md or returns empty array when CHANGELOG.md is absent", () => {
+      const [, emitPlugin] = buildMeta();
+      const resolveId = emitPlugin.resolveId as unknown as (id: string) => string | null;
+      const load = emitPlugin.load as unknown as (
+        this: { addWatchFile: (p: string) => void },
+        id: string,
+      ) => string | null;
+
+      expect(resolveId("virtual:changelog")).toBe("\0virtual:changelog");
+      expect(resolveId("other-module")).toBeNull();
+      expect(load.call({ addWatchFile: vi.fn() }, "other-id")).toBeNull();
+
+      // Real CHANGELOG.md exists on disk
+      const watchSpy = vi.fn();
+      const loadedReal = load.call({ addWatchFile: watchSpy }, "\0virtual:changelog");
+      expect(watchSpy).toHaveBeenCalledWith(resolve(process.cwd(), "CHANGELOG.md"));
+      expect(loadedReal).toMatch(/^export default \[.*\];$/);
+
+      // Missing CHANGELOG.md returns "export default [];"
+      mockExistsSync.mockReturnValue(false);
+      const loadedMissing = load.call({ addWatchFile: vi.fn() }, "\0virtual:changelog");
+      expect(loadedMissing).toBe("export default [];");
     });
   });
 });

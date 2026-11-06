@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import * as z from "zod/mini";
 
-export const APP_VERSION: string = __APP_VERSION__;
+export let APP_VERSION: string = __APP_VERSION__;
 export const GIT_SHA: string = __GIT_SHA__;
 export const BUILD_TIME: string = __BUILD_TIME__;
 
@@ -92,6 +92,11 @@ export function _setUpdateAvailableForTest(info: VersionInfo | null): void {
   setUpdateAvailable(info);
 }
 
+/** @internal Test-only helper to override local build APP_VERSION */
+export function _setAppVersionForTest(version: string): void {
+  APP_VERSION = version;
+}
+
 /** @internal Test-only helper to override local build GIT_SHA */
 export function _setGitShaForTest(sha: string): void {
   currentGitSha = sha;
@@ -99,6 +104,7 @@ export function _setGitShaForTest(sha: string): void {
 
 /** @internal Test-only helper to reset version checker state */
 export function _resetVersionStateForTest(): void {
+  APP_VERSION = __APP_VERSION__;
   setUpdateAvailable(null);
   currentGitSha = GIT_SHA;
   checkInFlight = null;

@@ -2105,7 +2105,7 @@ describe("SettingsPage — Data: About", () => {
     renderSettings();
 
     screen.getByText("About");
-    const versionLink = screen.getByRole("link", { name: "0.1.0-test+abcdef1" });
+    const versionLink = screen.getByRole("link", { name: "0.1.0+abcdef1" });
     expect(versionLink.getAttribute("href")).toBe(
       "https://github.com/gordon-code/github-tracker/releases",
     );
@@ -2124,10 +2124,23 @@ describe("SettingsPage — Data: About", () => {
     vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(false);
     renderSettings();
 
-    const versionEl = screen.getByText("0.1.0-test+abcdef1");
+    const versionEl = screen.getByText("0.1.0+abcdef1");
     expect(versionEl.getAttribute("href")).toBeNull();
 
     const changelogEl = screen.getByText("Changelog");
     expect(changelogEl.getAttribute("href")).toBeNull();
+  });
+
+  it("opens WhatsNewDialog when clicking the What's new button in the About row", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const whatsNewBtn = screen.getByRole("button", { name: "What's new" });
+    await user.click(whatsNewBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("What's New")).toBeDefined();
+      expect(screen.getByText("v0.1.0")).toBeDefined();
+    });
   });
 });

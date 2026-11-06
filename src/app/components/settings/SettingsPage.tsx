@@ -36,6 +36,7 @@ import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
 import DependencyExclusionModal from "./DependencyExclusionModal";
+import WhatsNewDialog from "../shared/WhatsNewDialog";
 import { InfoTooltip } from "../shared/Tooltip";
 import { createJiraClient } from "../../lib/jira-utils";
 import { clearJiraKeyCache } from "../../services/jira-keys";
@@ -540,6 +541,7 @@ export default function SettingsPage() {
   const [showFieldPicker, setShowFieldPicker] = createSignal(false);
   const [showScopePicker, setShowScopePicker] = createSignal(false);
   const [showDependencyExclusionModal, setShowDependencyExclusionModal] = createSignal(false);
+  const [showWhatsNewDialog, setShowWhatsNewDialog] = createSignal(false);
 
   // Replace Jira API token panel
   const [showReplaceJiraToken, setShowReplaceJiraToken] = createSignal(false);
@@ -2141,6 +2143,14 @@ export default function SettingsPage() {
                 {displayVersion()}
               </a>
               <span aria-hidden="true" class="text-base-content/40">·</span>
+              <button
+                type="button"
+                onClick={() => setShowWhatsNewDialog(true)}
+                class="text-xs link link-hover"
+              >
+                What's new
+              </button>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
               <a
                 href={isSafeGitHubUrl(CHANGELOG_URL) ? CHANGELOG_URL : undefined}
                 target="_blank"
@@ -2154,6 +2164,11 @@ export default function SettingsPage() {
         </Section>
           </div>
         </div>
+
+        <WhatsNewDialog
+          open={showWhatsNewDialog()}
+          onOpenChange={setShowWhatsNewDialog}
+        />
 
         <DependencyExclusionModal
           open={showDependencyExclusionModal()}
