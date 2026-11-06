@@ -1,6 +1,5 @@
 import { captureException, init } from "@sentry/solid";
 import { beforeBreadcrumbHandler, beforeSendHandler } from "./sentry";
-import { GIT_SHA } from "./version";
 
 export interface SentrySdkClient {
   captureException: typeof captureException;
@@ -12,7 +11,7 @@ export function initSdk(): SentrySdkClient {
 
   init({
     dsn,
-    release: `github-tracker@${GIT_SHA}`,
+    release: `github-tracker@${__GIT_SHA__}`,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
     enhanceFetchErrorMessages: "report-only",

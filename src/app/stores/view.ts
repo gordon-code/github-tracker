@@ -847,6 +847,78 @@ export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
   );
 }
 
+// Baseline snapshot of what this tab last knew to be persisted to localStorage
+// (starts at the state this tab loaded at boot). Used by commitSnapshot() to work
+// out which top-level fields THIS tab actually changed, so a debounced write only
+// overlays those fields onto whatever is CURRENTLY on disk instead of blindly
+// overwriting with this tab's full (possibly stale) in-memory snapshot. Without
+// this, a full-object overwrite from Tab A could silently revert a newer value
+// Tab B wrote for some other field (e.g. jiraCustomOrder) in the gap between when
+// Tab A's debounce timer started and when it actually fires.
+let lastSyncedSnapshot: Record<string, unknown> = JSON.parse(JSON.stringify(untrack(() => viewState)));
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingSnapshot: Record<string, unknown> | undefined;
+
+function readOnDiskState(): Record<string, unknown> | undefined {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (raw === null) return undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    // Only trust keys that are part of the current ViewState schema AND whose value
+    // passes that field's own Zod validation. localStorage is writable by any
+    // same-origin script (extensions, a stale/incompatible schema version, manual
+    // tampering), and commitSnapshot() below folds this content into every future
+    // write for fields this tab doesn't happen to touch itself — without both the
+    // key-name allowlist and per-field value validation, unrecognized or malformed
+    // on-disk content would be perpetually re-persisted instead of self-healing on
+    // the next write, as it did before the merge-on-write logic existed. Validated
+    // one key at a time (not a single ViewStateSchema.pick(...).safeParse() over the
+    // whole object) so one malformed field can't cause every other valid field to be
+    // dropped too.
+    const filtered: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!VIEW_STATE_KEYS.has(key)) continue;
+      const validated = validateViewStateField(key as keyof ViewState, value);
+      if (validated !== undefined) filtered[key] = validated;
+    }
+    return filtered;
+  } catch {
+    return undefined;
+  }
+}
+
+function commitSnapshot(snapshot: Record<string, unknown>): void {
+  const onDisk = readOnDiskState();
+  // Start from whatever is currently on disk (may include newer values another tab
+  // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
+  const merged: Record<string, unknown> = { ...(onDisk ?? snapshot) };
+  for (const key of Object.keys(snapshot)) {
+    // Always include a key this tab knows about but that's missing from the on-disk
+    // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
+    // produces a ViewState with a top-level key truly absent, so treat that as
+    // recoverable staleness rather than silently dropping this tab's known value
+    // (which Zod's .default() would otherwise backfill on the next load).
+    if (!(key in merged) || JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])) {
+      merged[key] = snapshot[key];
+    }
+  }
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged));
+    lastSyncedSnapshot = merged;
+  } catch {
+    pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
+  }
+}
+
+export function flushViewPersistence(): void {
+  clearTimeout(debounceTimer);
+  debounceTimer = undefined;
+  pendingSnapshot = undefined;
+  const snapshot = JSON.parse(JSON.stringify(untrack(() => viewState))) as Record<string, unknown>;
+  commitSnapshot(snapshot);
+}
+
 export function initViewPersistence(): void {
   if (typeof window !== "undefined") {
     const handleViewStorage = (e: StorageEvent) => {
@@ -872,70 +944,8 @@ export function initViewPersistence(): void {
     onCleanup(() => window.removeEventListener("storage", handleViewStorage));
   }
 
-  // Baseline snapshot of what this tab last knew to be persisted to localStorage
-  // (starts at the state this tab loaded at boot). Used by commitSnapshot() to work
-  // out which top-level fields THIS tab actually changed, so a debounced write only
-  // overlays those fields onto whatever is CURRENTLY on disk instead of blindly
-  // overwriting with this tab's full (possibly stale) in-memory snapshot. Without
-  // this, a full-object overwrite from Tab A could silently revert a newer value
-  // Tab B wrote for some other field (e.g. jiraCustomOrder) in the gap between when
-  // Tab A's debounce timer started and when it actually fires.
-  let lastSyncedSnapshot: Record<string, unknown> = JSON.parse(JSON.stringify(untrack(() => viewState)));
+  lastSyncedSnapshot = JSON.parse(JSON.stringify(untrack(() => viewState)));
 
-  function readOnDiskState(): Record<string, unknown> | undefined {
-    try {
-      const raw = localStorage.getItem(VIEW_STORAGE_KEY);
-      if (raw === null) return undefined;
-      const parsed = JSON.parse(raw) as unknown;
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-      // Only trust keys that are part of the current ViewState schema AND whose value
-      // passes that field's own Zod validation. localStorage is writable by any
-      // same-origin script (extensions, a stale/incompatible schema version, manual
-      // tampering), and commitSnapshot() below folds this content into every future
-      // write for fields this tab doesn't happen to touch itself — without both the
-      // key-name allowlist and per-field value validation, unrecognized or malformed
-      // on-disk content would be perpetually re-persisted instead of self-healing on
-      // the next write, as it did before the merge-on-write logic existed. Validated
-      // one key at a time (not a single ViewStateSchema.pick(...).safeParse() over the
-      // whole object) so one malformed field can't cause every other valid field to be
-      // dropped too.
-      const filtered: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!VIEW_STATE_KEYS.has(key)) continue;
-        const validated = validateViewStateField(key as keyof ViewState, value);
-        if (validated !== undefined) filtered[key] = validated;
-      }
-      return filtered;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function commitSnapshot(snapshot: Record<string, unknown>): void {
-    const onDisk = readOnDiskState();
-    // Start from whatever is currently on disk (may include newer values another tab
-    // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
-    const merged: Record<string, unknown> = { ...(onDisk ?? snapshot) };
-    for (const key of Object.keys(snapshot)) {
-      // Always include a key this tab knows about but that's missing from the on-disk
-      // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
-      // produces a ViewState with a top-level key truly absent, so treat that as
-      // recoverable staleness rather than silently dropping this tab's known value
-      // (which Zod's .default() would otherwise backfill on the next load).
-      if (!(key in merged) || JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])) {
-        merged[key] = snapshot[key];
-      }
-    }
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged));
-      lastSyncedSnapshot = merged;
-    } catch {
-      pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
-    }
-  }
-
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingSnapshot: Record<string, unknown> | undefined;
   createEffect(() => {
     const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
     const snapshot = JSON.parse(json) as Record<string, unknown>;
@@ -958,6 +968,7 @@ export function initViewPersistence(): void {
   // describes.
   onCleanup(() => {
     clearTimeout(debounceTimer);
+    debounceTimer = undefined;
     // Flush pending write synchronously so HMR doesn't lose state
     if (pendingSnapshot !== undefined) {
       commitSnapshot(pendingSnapshot);

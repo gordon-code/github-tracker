@@ -837,6 +837,17 @@ Encrypted credentials are sealed by this deployment's server and can only be imp
 
 ---
 
+## Updates & What's New
+
+GitHub Tracker checks `/version.json` in the background (30 seconds after load, when returning to a tab, and on each full poll cycle) to detect when a new build has been deployed.
+
+- **Update Banner:** When a newer deployment is detected, a banner appears at the bottom of the screen (*"A new version is available."*) with a **Reload** button and a link to the **Changelog**, and an informational entry is added to the Notification Drawer.
+- **Automatic Reload on Navigation:** If an update is waiting when you navigate between pages (for example, opening **Settings** or returning to the **Dashboard**), the app flushes any pending configuration or view-state changes to `localStorage` and performs a full page reload into the new build automatically.
+- **Stale Chunk Recovery:** If a lazy-loaded page chunk from a previous deployment is no longer available before a background check runs, the app automatically flushes pending state and reloads once to load the current bundle.
+- **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`) and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) or [GitHub Releases](https://github.com/gordon-code/github-tracker/releases) at any time from **Settings > Data > About** or the dashboard footer.
+
+---
+
 ## Troubleshooting
 
 **Items I expect to see are not showing up.**
