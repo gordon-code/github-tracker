@@ -39,7 +39,10 @@ export function loadChangelog(): Promise<ChangelogEntry[]> {
         const parsed = z.safeParse(ChangelogSchema, mod.default);
         return parsed.success ? parsed.data : [];
       })
-      .catch(() => []);
+      .catch(() => {
+        cachedChangelogPromise = null;
+        return [];
+      });
   }
   return cachedChangelogPromise;
 }

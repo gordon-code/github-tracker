@@ -207,6 +207,8 @@ export type IgnoredItem = ViewState["ignoredItems"][number];
 
 const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"] as const;
 const VIEW_STATE_KEYS = new Set(Object.keys(ViewStateSchema.shape));
+let fullOverwritePending = false;
+const forcedKeysPending = new Set<string>();
 
 /**
  * Top-level ViewState keys included in a settings export's `_viewPreferences`
@@ -337,6 +339,7 @@ export function applyImportedViewState(raw: unknown): void {
       const validated = validateViewStateField(key, value);
       if (validated !== undefined) {
         patch[key] = validated;
+        forcedKeysPending.add(key);
       }
     }
     if (Object.keys(patch).length === 0) return;
@@ -407,6 +410,8 @@ export const [viewState, setViewState] = createStore<ViewState>(
 );
 
 export function resetViewState(): void {
+  fullOverwritePending = true;
+  forcedKeysPending.clear();
   setViewState(
     produce((draft) => {
       // Delete dynamic custom tab keys that Object.assign wouldn't clear
@@ -889,19 +894,31 @@ function readOnDiskState(): Record<string, unknown> | undefined {
 }
 
 function commitSnapshot(snapshot: Record<string, unknown>): void {
-  const onDisk = readOnDiskState();
-  // Start from whatever is currently on disk (may include newer values another tab
-  // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
-  const merged: Record<string, unknown> = { ...(onDisk ?? snapshot) };
-  for (const key of Object.keys(snapshot)) {
-    // Always include a key this tab knows about but that's missing from the on-disk
-    // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
-    // produces a ViewState with a top-level key truly absent, so treat that as
-    // recoverable staleness rather than silently dropping this tab's known value
-    // (which Zod's .default() would otherwise backfill on the next load).
-    if (!(key in merged) || JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])) {
-      merged[key] = snapshot[key];
+  let merged: Record<string, unknown>;
+  if (fullOverwritePending) {
+    fullOverwritePending = false;
+    forcedKeysPending.clear();
+    merged = { ...snapshot };
+  } else {
+    const onDisk = readOnDiskState();
+    // Start from whatever is currently on disk (may include newer values another tab
+    // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
+    merged = { ...(onDisk ?? snapshot) };
+    for (const key of Object.keys(snapshot)) {
+      // Always include a key this tab knows about but that's missing from the on-disk
+      // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
+      // produces a ViewState with a top-level key truly absent, so treat that as
+      // recoverable staleness rather than silently dropping this tab's known value
+      // (which Zod's .default() would otherwise backfill on the next load).
+      if (
+        !(key in merged) ||
+        forcedKeysPending.has(key) ||
+        JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])
+      ) {
+        merged[key] = snapshot[key];
+      }
     }
+    forcedKeysPending.clear();
   }
   try {
     localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged));
@@ -945,6 +962,8 @@ export function initViewPersistence(): void {
   }
 
   lastSyncedSnapshot = JSON.parse(JSON.stringify(untrack(() => viewState)));
+  fullOverwritePending = false;
+  forcedKeysPending.clear();
 
   createEffect(() => {
     const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS

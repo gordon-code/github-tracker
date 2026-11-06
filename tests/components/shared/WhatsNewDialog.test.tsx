@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import WhatsNewDialog from "../../../src/app/components/shared/WhatsNewDialog";
 import { config, resetConfig } from "../../../src/app/stores/config";
-import { _resetChangelogCacheForTest } from "../../../src/app/lib/changelog";
+import { _resetChangelogCacheForTest, loadChangelog } from "../../../src/app/lib/changelog";
 import {
   APP_VERSION,
   _resetVersionStateForTest,
@@ -168,6 +168,22 @@ describe("WhatsNewDialog", () => {
         ),
       ).toBeDefined();
     });
+  });
+
+  it("does not throw or update state after disposal when unmounted while loadChangelog() is in flight", async () => {
+    _resetChangelogCacheForTest();
+    const { unmount } = render(() => (
+      <WhatsNewDialog open={true} onOpenChange={() => {}} />
+    ));
+
+    // Unmount immediately while loadChangelog() is still pending
+    expect(() => unmount()).not.toThrow();
+
+    // Let the in-flight loadChangelog() promise settle and flush microtasks
+    await expect(loadChangelog()).resolves.toHaveLength(2);
+    await Promise.resolve();
+
+    expect(screen.queryByText("v0.1.0")).toBeNull();
   });
 
   it("contains zero occurrences of innerHTML in WhatsNewDialog.tsx source", () => {

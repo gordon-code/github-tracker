@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show, untrack } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
 import type { ChangelogEntry } from "../../../shared/changelog-schema";
 import { isStrictSemver, loadChangelog } from "../../lib/changelog";
@@ -37,9 +37,13 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
       updateConfig({ lastSeenVersion: APP_VERSION });
     }
     if (props.entries === undefined) {
+      let cancelled = false;
+      onCleanup(() => {
+        cancelled = true;
+      });
       void (async () => {
         const data = await loadChangelog();
-        setLoadedEntries(data);
+        if (!cancelled) setLoadedEntries(data);
       })();
     }
   });

@@ -17,9 +17,12 @@ export default function Header() {
   const [drawerOpen, setDrawerOpen] = createSignal(false);
   const [whatsNewOpen, setWhatsNewOpen] = createSignal(false);
   const [changelogEntries, setChangelogEntries] = createSignal<readonly ChangelogEntry[]>([]);
+  let cancelled = false;
+  onCleanup(() => {
+    cancelled = true;
+  });
 
   onMount(() => {
-    let cancelled = false;
     const load = () => {
       void (async () => {
         const entries = await loadChangelog();
@@ -51,7 +54,7 @@ export default function Header() {
     if (changelogEntries().length === 0) {
       void (async () => {
         const entries = await loadChangelog();
-        setChangelogEntries(entries);
+        if (!cancelled) setChangelogEntries(entries);
       })();
     }
     setWhatsNewOpen(true);

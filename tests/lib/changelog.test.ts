@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ChangelogEntry } from "../../src/shared/changelog-schema";
 import {
   compareSemver,
@@ -34,6 +34,11 @@ const SAMPLE_ENTRIES: ChangelogEntry[] = [
 
 describe("lib/changelog", () => {
   beforeEach(() => {
+    _resetChangelogCacheForTest();
+  });
+
+  afterEach(() => {
+    vi.doUnmock("virtual:changelog");
     _resetChangelogCacheForTest();
   });
 
@@ -87,5 +92,35 @@ describe("lib/changelog", () => {
     expect(first).toHaveLength(2);
     expect(first[0].version).toBe("0.1.0");
     expect(second).toBe(first);
+  });
+
+  it("returns [] when virtual:changelog is invalid or rejected and recovers cleanly on subsequent loads", async () => {
+    // 1. Rejection: loadChangelog() catches the rejection, returns [], and clears cachedChangelogPromise
+    vi.resetModules();
+    vi.doMock("virtual:changelog", () => {
+      throw new Error("chunk load failed");
+    });
+    const rejectedMod = await import("../../src/app/lib/changelog");
+    await expect(rejectedMod.loadChangelog()).resolves.toEqual([]);
+
+    // Without even calling _resetChangelogCacheForTest(), unmocking allows the next load to succeed
+    vi.doUnmock("virtual:changelog");
+    const recoveredAfterReject = await rejectedMod.loadChangelog();
+    expect(recoveredAfterReject).toHaveLength(2);
+    expect(recoveredAfterReject[0].version).toBe("0.1.0");
+
+    // 2. Invalid schema payload: loadChangelog() returns [] and recovers across _resetChangelogCacheForTest()
+    vi.resetModules();
+    vi.doMock("virtual:changelog", () => ({
+      default: { invalid: "not-an-array" },
+    }));
+    const invalidMod = await import("../../src/app/lib/changelog");
+    await expect(invalidMod.loadChangelog()).resolves.toEqual([]);
+
+    vi.doUnmock("virtual:changelog");
+    invalidMod._resetChangelogCacheForTest();
+    const recoveredAfterInvalid = await invalidMod.loadChangelog();
+    expect(recoveredAfterInvalid).toHaveLength(2);
+    expect(recoveredAfterInvalid[0].version).toBe("0.1.0");
   });
 });
