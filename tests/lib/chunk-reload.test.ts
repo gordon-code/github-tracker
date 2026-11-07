@@ -17,7 +17,9 @@ import {
   resetViewState,
   initViewPersistence,
 } from "../../src/app/stores/view";
-import { createRoot } from "solid-js";
+import { createRoot, ErrorBoundary, Suspense } from "solid-js";
+import { render, waitFor } from "@solidjs/testing-library";
+import { lazyWithReload } from "../../src/app/App";
 
 describe("chunk-reload", () => {
   const originalLocation = window.location;
@@ -133,5 +135,57 @@ describe("chunk-reload", () => {
     expect(savedView.lastActiveTab).toBe("pullRequests");
 
     dispose();
+  });
+
+  it("lazyWithReload triggers reload without invoking ErrorBoundary on first rejection, and rethrows to ErrorBoundary within 10s cooldown", async () => {
+    vi.useRealTimers();
+    const errorBoundarySpy = vi.fn();
+
+    const FailingLazy1 = lazyWithReload(() => Promise.reject(new Error("chunk load failed")));
+    render(() =>
+      ErrorBoundary({
+        fallback: (err) => {
+          errorBoundarySpy(err);
+          return "Fallback";
+        },
+        get children() {
+          return Suspense({
+            fallback: "Loading",
+            get children() {
+              return FailingLazy1({});
+            },
+          });
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(reloadMock).toHaveBeenCalledTimes(1);
+    });
+    expect(errorBoundarySpy).not.toHaveBeenCalled();
+
+    // Second rejection within the 10s cooldown rethrows to ErrorBoundary
+    const FailingLazy2 = lazyWithReload(() => Promise.reject(new Error("chunk load failed again")));
+    render(() =>
+      ErrorBoundary({
+        fallback: (err) => {
+          errorBoundarySpy(err);
+          return "Fallback";
+        },
+        get children() {
+          return Suspense({
+            fallback: "Loading",
+            get children() {
+              return FailingLazy2({});
+            },
+          });
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(errorBoundarySpy).toHaveBeenCalledTimes(1);
+    });
+    expect(reloadMock).toHaveBeenCalledTimes(1);
   });
 });

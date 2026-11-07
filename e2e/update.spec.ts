@@ -1,14 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
+import { resolveGitSha } from "../vite-plugins/build-meta";
 import { setupAuth } from "./helpers";
 
-const rawSha = (
-  process.env.GITHUB_SHA ??
-  execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })
-)
-  .trim()
-  .toLowerCase();
-const currentSha = rawSha.slice(0, 12);
+const currentSha = resolveGitSha();
 const differentSha =
   currentSha === "111111111111" ? "222222222222" : "111111111111";
 

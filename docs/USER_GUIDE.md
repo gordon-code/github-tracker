@@ -62,6 +62,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Keep the Export File Safe](#keep-the-export-file-safe)
   - [Jira Credentials and Staleness](#jira-credentials-and-staleness)
   - [Same-Deployment Only](#same-deployment-only)
+- [Updates & What's New](#updates--whats-new)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -845,7 +846,7 @@ GitHub Tracker checks `/version.json` in the background (30 seconds after load, 
 - **Automatic Reload on Navigation:** If an update is waiting when you navigate between pages (for example, opening **Settings** or returning to the **Dashboard**), the app flushes any pending configuration or view-state changes to `localStorage` and performs a full page reload into the new build automatically.
 - **Stale Chunk Recovery:** If a lazy-loaded page chunk from a previous deployment is no longer available before a background check runs, the app automatically flushes pending state and reloads once to load the current bundle.
 - **What's New Dialog:** Click the **What's new** star icon in the dashboard header (or **What's new** in **Settings > Data > About**) to view recent release notes directly in the app. A small unread indicator dot appears on the header icon whenever a newer release has shipped since you last opened the dialog, and clears automatically once opened.
-- **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`) and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) or [GitHub Releases](https://github.com/gordon-code/github-tracker/releases) at any time from **Settings > Data > About** or the dashboard footer.
+- **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`, linking to [GitHub Releases](https://github.com/gordon-code/github-tracker/releases)) in **Settings > Data > About** and in the dashboard footer, and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) directly from **Settings > Data > About** (as well as from the **What's New** dialog and the update banner).
 
 ---
 

@@ -228,4 +228,41 @@ describe("Header", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId("whats-new-dot")).toBeNull();
   });
+
+  it("uses requestIdleCallback when available, loads changelog on demand if clicked before idle, and calls cancelIdleCallback on unmount", async () => {
+    const user = userEvent.setup();
+    const requestIdleSpy = vi.fn(() => 42);
+    const cancelIdleSpy = vi.fn();
+    Object.defineProperty(window, "requestIdleCallback", {
+      value: requestIdleSpy,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      value: cancelIdleSpy,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const { unmount } = render(() => <Header />);
+      expect(requestIdleSpy).toHaveBeenCalledTimes(1);
+      // Idle callback has not run yet, so dot is not shown
+      expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+
+      // Clicking "What's new" before idle triggers on-demand loadChangelog()
+      const whatsNewBtn = screen.getByLabelText("What's new");
+      await user.click(whatsNewBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("v0.1.0")).toBeDefined();
+      });
+
+      unmount();
+      expect(cancelIdleSpy).toHaveBeenCalledWith(42);
+    } finally {
+      Reflect.deleteProperty(window, "requestIdleCallback");
+      Reflect.deleteProperty(window, "cancelIdleCallback");
+    }
+  });
 });

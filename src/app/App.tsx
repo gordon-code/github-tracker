@@ -22,7 +22,7 @@ export function _resetAuthInitStartedForTests(): void {
   authInitGen++;
 }
 
-function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
+export function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
   return lazy(() =>
     loader().catch((err) => {
       if (reloadOnceForStaleChunk()) {
