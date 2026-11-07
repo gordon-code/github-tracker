@@ -2,7 +2,7 @@ import { defineConfig, defineProject } from "vitest/config";
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
-import { buildMetaTestConfig } from "./tests/stubs/build-meta-test-config";
+import { buildMetaTestConfig } from "./tests/stubs/build-meta-test-config.ts";
 
 export default defineConfig({
   test: {

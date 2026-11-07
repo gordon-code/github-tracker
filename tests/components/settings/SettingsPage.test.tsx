@@ -100,6 +100,7 @@ import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
 import * as settingsTransfer from "../../../src/app/lib/settings-transfer";
 import * as proxyLib from "../../../src/app/lib/proxy";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../../src/app/lib/version";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -2097,6 +2098,51 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     // The Repositories summary is driven by the localRepos editor copy; without
     // the post-import resync it would still read the stale (empty) pre-import set.
     await waitFor(() => screen.getByText(/2 selected/i));
+  });
+});
+
+describe("SettingsPage — read-only while the stored-data schema is stale", () => {
+  afterEach(() => {
+    _resetVersionStateForTests();
+  });
+
+  it("wraps the settings in a fieldset that is disabled only while the schema is stale", () => {
+    renderSettings();
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const fieldset = signOut.closest("fieldset");
+    expect(fieldset).not.toBeNull();
+    expect(fieldset?.disabled).toBe(false);
+
+    expect(fieldset?.hasAttribute("inert")).toBe(false);
+
+    _setSchemaStaleForTests(true);
+    expect(fieldset?.disabled).toBe(true);
+    // `inert` also blocks widgets a disabled fieldset doesn't cover (custom selects, role="button").
+    expect(fieldset?.hasAttribute("inert")).toBe(true);
+
+    _setSchemaStaleForTests(false);
+    expect(fieldset?.disabled).toBe(false);
+    expect(fieldset?.hasAttribute("inert")).toBe(false);
+  });
+
+  it("disables the refresh-interval, items-per-page and default-tab selects themselves, not only the region around them", () => {
+    renderSettings();
+    const triggers = Array.from(document.querySelectorAll<HTMLButtonElement>("button.select"));
+    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(false);
+
+    _setSchemaStaleForTests(true);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(true);
+
+    _setSchemaStaleForTests(false);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(false);
+  });
+
+  it("keeps the page header outside the disabled region so the back link stays usable", () => {
+    renderSettings();
+    _setSchemaStaleForTests(true);
+    const back = screen.getByRole("link", { name: "Back to dashboard" });
+    expect(back.closest("fieldset")).toBeNull();
   });
 });
 

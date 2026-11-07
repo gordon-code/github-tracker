@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig, type ViteUserConfig } from "vitest/config";
-import baseConfig from "./vitest.config";
+import baseConfig from "./vitest.config.ts";
 
 // Standalone config for live-network smoke tests (e.g. github-status.smoke.test.ts).
 // These are deliberately excluded from vitest.workspace.ts's "browser" project

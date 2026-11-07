@@ -32,10 +32,12 @@ import {
   applyImportedViewState,
   EXPORTED_VIEW_PREF_KEYS,
   flushViewPersistence,
+  discardPendingViewPersistence,
   VIEW_STORAGE_KEY,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem, ViewState } from "../../src/app/stores/view";
 import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../src/app/lib/version";
 
 // view.ts uses createStore — setters work outside reactive context.
 // We use createRoot only for initViewPersistence (which calls createEffect).
@@ -406,8 +408,8 @@ describe("initViewPersistence", () => {
   it("drops unknown/unrecognized keys from the on-disk blob before merging (schema allowlist)", async () => {
     // Regression test: localStorage is writable by any same-origin script
     // (extensions, a stale/incompatible schema version, manual tampering).
-    // readOnDiskState() must filter the parsed blob down to known
-    // ViewStateSchema top-level keys before commitSnapshot() folds it into
+    // The on-disk read must filter the parsed blob down to known
+    // ViewStateSchema top-level keys before the commit folds it into
     // the merged write — otherwise unrecognized content would be perpetually
     // re-persisted instead of self-healing on the next write.
     await withViewPersistence(async (dispose) => {
@@ -418,7 +420,7 @@ describe("initViewPersistence", () => {
       // case) rather than produce JSON text containing a "__proto__" key. JSON.parse, by
       // contrast, does NOT apply that special-case magic: parsing `{"__proto__":{...}}`
       // creates a plain OWN property literally named "__proto__" — which is the actual
-      // shape a tampered localStorage blob would take, and what readOnDiskState() must
+      // shape a tampered localStorage blob would take, and what the on-disk read must
       // filter out via the schema allowlist rather than relying on spread's inertness alone.
       const tainted = taintedJson.slice(0, -1) + ',"__proto__":{"polluted":true}}';
       localStorageMock.setItem(VIEW_KEY, tainted);
@@ -438,7 +440,7 @@ describe("initViewPersistence", () => {
   });
 
   it("drops a known key's value from the on-disk blob when it fails that field's own schema validation", async () => {
-    // Regression test: the allowlist in readOnDiskState() must validate each
+    // Regression test: the allowlist applied to the on-disk blob must validate each
     // known key's VALUE against ViewStateSchema (not just its NAME) before
     // folding it into the merge — a structurally-valid-key-but-malformed-value
     // (e.g. jiraCustomOrder holding an object instead of a string array)
@@ -532,18 +534,19 @@ describe("initViewPersistence", () => {
   it("pushes a warning notification and does not throw when localStorage.setItem fails (e.g. quota exceeded)", async () => {
     await withViewPersistence(async (dispose) => {
       clearNotifications();
-      vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
         throw new Error("QuotaExceededError");
       });
+      try {
+        setGlobalFilter("org1", "repo1");
+        await Promise.resolve();
+        expect(() => vi.advanceTimersByTime(200)).not.toThrow();
 
-      setGlobalFilter("org1", "repo1");
-      await Promise.resolve();
-      expect(() => vi.advanceTimersByTime(200)).not.toThrow();
-
-      const notifications = getNotifications();
-      expect(notifications.some((n) => n.source === "localStorage:view")).toBe(true);
-
-      vi.mocked(localStorageMock.setItem).mockRestore();
+        const notifications = getNotifications();
+        expect(notifications.some((n) => n.source === "localStorage:view")).toBe(true);
+      } finally {
+        setItemSpy.mockRestore();
+      }
       dispose();
     });
   });
@@ -562,6 +565,287 @@ describe("initViewPersistence", () => {
       expect(parsed.globalFilter.repo).toBe("unmount-repo");
     });
   });
+
+  function dispatchViewStorage(newValue: string | null): void {
+    window.dispatchEvent(new StorageEvent("storage", { key: VIEW_KEY, newValue }));
+  }
+
+  it("does not revert another tab's value on a later write after merging it from disk", async () => {
+    await withViewPersistence(async () => {
+      seedOtherTabWrite({ jiraCustomOrder: ["OTHER-1"] });
+
+      setGlobalFilter("org1", "repo1");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      expect(JSON.parse(localStorageMock.getItem(VIEW_KEY)).jiraCustomOrder).toEqual(["OTHER-1"]);
+
+      // A second write from this tab, which still holds its own untouched [] in memory,
+      // must not treat jiraCustomOrder as changed.
+      setSortPreference("title", "asc");
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
+      expect(parsed.globalSort).toEqual({ field: "title", direction: "asc" });
+      expect(parsed.jiraCustomOrder).toEqual(["OTHER-1"]);
+
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      flushViewPersistence();
+      expect(setItemSpy).not.toHaveBeenCalled();
+      setItemSpy.mockRestore();
+    });
+  });
+
+  it("applies every valid key from another tab's storage event to the live store without writing it back", async () => {
+    await withViewPersistence(async () => {
+      vi.advanceTimersByTime(200); // settle this tab's boot write
+      const otherTabBlob = JSON.stringify({
+        ...currentOnDisk(),
+        showPrRuns: true,
+        globalSort: { field: "title", direction: "asc" },
+        lockedRepos: { issues: ["org/a"], pullRequests: [], actions: [], jiraAssigned: [] },
+      });
+      localStorageMock.setItem(VIEW_KEY, otherTabBlob);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+
+      dispatchViewStorage(otherTabBlob);
+      expect(viewState.showPrRuns).toBe(true);
+      expect(viewState.globalSort).toEqual({ field: "title", direction: "asc" });
+      expect(viewState.lockedRepos.issues).toEqual(["org/a"]);
+
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      flushViewPersistence();
+      expect(setItemSpy).not.toHaveBeenCalled();
+      expect(localStorageMock.getItem(VIEW_KEY)).toBe(otherTabBlob);
+      setItemSpy.mockRestore();
+    });
+  });
+
+  it("keeps this tab's pending change to a key when another tab's event carries a different value, then writes it", async () => {
+    await withViewPersistence(async () => {
+      setJiraCustomOrder(["MINE-1"]);
+      const otherTabBlob = JSON.stringify({ ...currentOnDisk(), jiraCustomOrder: ["OTHER-1"], showPrRuns: true });
+      localStorageMock.setItem(VIEW_KEY, otherTabBlob);
+
+      dispatchViewStorage(otherTabBlob);
+      expect(viewState.jiraCustomOrder).toEqual(["MINE-1"]);
+      expect(viewState.showPrRuns).toBe(true);
+
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_KEY));
+      expect(parsed.jiraCustomOrder).toEqual(["MINE-1"]);
+      expect(parsed.showPrRuns).toBe(true);
+    });
+  });
+
+  it("ignores removal, malformed, and non-object storage events, and drops individually invalid fields", async () => {
+    await withViewPersistence(async () => {
+      dispatchViewStorage(null);
+      dispatchViewStorage("{not valid json");
+      dispatchViewStorage("[1,2,3]");
+      dispatchViewStorage(JSON.stringify({ showPrRuns: "yes", lastActiveTab: "actions", unknownKey: 1 }));
+      expect(viewState.showPrRuns).toBe(false);
+      expect(viewState.lastActiveTab).toBe("actions");
+      expect("unknownKey" in viewState).toBe(false);
+    });
+  });
+
+  it("ignores another tab's storage event while a reset is waiting to be written", async () => {
+    await withViewPersistence(async () => {
+      resetViewState();
+      dispatchViewStorage(JSON.stringify({ showPrRuns: true }));
+      expect(viewState.showPrRuns).toBe(false);
+
+      await Promise.resolve();
+      vi.advanceTimersByTime(200);
+      dispatchViewStorage(JSON.stringify({ showPrRuns: true }));
+      expect(viewState.showPrRuns).toBe(true);
+    });
+  });
+
+  it("adopts another tab's write that landed between module load and initViewPersistence(), without writing", async () => {
+    localStorageMock.setItem(VIEW_KEY, JSON.stringify({ ...JSON.parse(JSON.stringify(viewState)), showPrRuns: true }));
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      await withViewPersistence(async () => {
+        expect(viewState.showPrRuns).toBe(true);
+        await Promise.resolve();
+        vi.advanceTimersByTime(200);
+        expect(setItemSpy).not.toHaveBeenCalled();
+      });
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  function throwQuotaError(): never {
+    throw new Error("QuotaExceededError");
+  }
+
+  it("keeps a resetViewState() full overwrite pending after a failed write, ignoring other tabs until it lands", async () => {
+    await withViewPersistence(() => {
+      updateViewState({ showPrRuns: true, lastActiveTab: "actions" });
+      vi.advanceTimersByTime(200);
+
+      resetViewState();
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementationOnce(throwQuotaError);
+      try {
+        flushViewPersistence();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+        expect(currentOnDisk().showPrRuns).toBe(true);
+
+        const otherTabBlob = JSON.stringify({ ...currentOnDisk(), showPrRuns: true, jiraCustomOrder: ["OTHER-1"] });
+        localStorageMock.setItem(VIEW_KEY, otherTabBlob);
+        dispatchViewStorage(otherTabBlob);
+        expect(viewState.showPrRuns).toBe(false);
+        expect(viewState.jiraCustomOrder).toEqual([]);
+
+        flushViewPersistence();
+        expect(currentOnDisk()).toEqual(JSON.parse(JSON.stringify(ViewStateSchema.parse({}))));
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
+
+  it("keeps an imported key forced after a failed write, so another tab's value neither overrides it nor survives the retry", async () => {
+    await withViewPersistence(() => {
+      vi.advanceTimersByTime(200);
+      // Disk holds showPrRuns: true while memory and this tab's last save hold false.
+      seedOtherTabWrite({ showPrRuns: true });
+
+      applyImportedViewState({ showPrRuns: false });
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementationOnce(throwQuotaError);
+      try {
+        flushViewPersistence();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+        expect(currentOnDisk().showPrRuns).toBe(true);
+
+        dispatchViewStorage(JSON.stringify({ ...currentOnDisk(), showPrRuns: true }));
+        expect(viewState.showPrRuns).toBe(false);
+
+        flushViewPersistence();
+        expect(currentOnDisk().showPrRuns).toBe(false);
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
+
+  it("does not adopt another tab's value for an imported key equal to the last save before the debounced write lands", async () => {
+    await withViewPersistence(() => {
+      vi.advanceTimersByTime(200);
+
+      applyImportedViewState({ jiraCustomOrder: [] });
+      const otherTabBlob = JSON.stringify({ ...currentOnDisk(), jiraCustomOrder: ["OTHER-1"] });
+      localStorageMock.setItem(VIEW_KEY, otherTabBlob);
+      dispatchViewStorage(otherTabBlob);
+      expect(viewState.jiraCustomOrder).toEqual([]);
+
+      vi.advanceTimersByTime(200);
+      expect(currentOnDisk().jiraCustomOrder).toEqual([]);
+    });
+  });
+
+  it("removes per-tab sub-keys that another tab's adopted value no longer holds", async () => {
+    await withViewPersistence(() => {
+      setCustomTabFilter("tabA", "scope", "all");
+      lockRepo("tabA", "o/r");
+      toggleExpandedRepo("tabA", "o/r");
+      vi.advanceTimersByTime(200);
+      expect("tabA" in viewState.customTabFilters).toBe(true);
+      expect("tabA" in viewState.lockedRepos).toBe(true);
+      expect("tabA" in viewState.expandedRepos).toBe(true);
+
+      const otherTabBlob = JSON.stringify({
+        ...currentOnDisk(),
+        customTabFilters: {},
+        lockedRepos: { issues: [], pullRequests: [], actions: [], jiraAssigned: [] },
+        expandedRepos: { issues: {}, pullRequests: {}, actions: {}, jiraAssigned: {} },
+      });
+      localStorageMock.setItem(VIEW_KEY, otherTabBlob);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        dispatchViewStorage(otherTabBlob);
+        expect("tabA" in viewState.customTabFilters).toBe(false);
+        expect("tabA" in viewState.lockedRepos).toBe(false);
+        expect("tabA" in viewState.expandedRepos).toBe(false);
+
+        vi.advanceTimersByTime(200);
+        flushViewPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
+
+  it("salvages the valid keys of a stored view state whose blob fails whole-schema validation", async () => {
+    localStorageMock.setItem(
+      VIEW_KEY,
+      JSON.stringify({ showPrRuns: "yes", lastActiveTab: "actions", hideDepDashboard: false }),
+    );
+    // loadViewState() rejects the whole blob, so a freshly loaded store starts from defaults...
+    vi.resetModules();
+    const fresh = await import("../../src/app/stores/view");
+    expect(fresh.viewState.lastActiveTab).toBe("issues");
+    expect(fresh.viewState.hideDepDashboard).toBe(true);
+
+    // ...which this module's store also holds (beforeEach reset); init adopts the valid keys.
+    await withViewPersistence(() => {
+      expect(viewState.lastActiveTab).toBe("actions");
+      expect(viewState.hideDepDashboard).toBe(false);
+      expect(viewState.showPrRuns).toBe(false);
+
+      vi.advanceTimersByTime(200);
+      expect(currentOnDisk()).toMatchObject({ lastActiveTab: "actions", hideDepDashboard: false, showPrRuns: false });
+    });
+  });
+
+  it("neither writes nor adopts while the stored schema is stale, then writes the pending change once it clears", async () => {
+    await withViewPersistence(() => {
+      vi.advanceTimersByTime(200);
+      _setSchemaStaleForTests(true);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        setGlobalFilter("org1", "repo1");
+        vi.advanceTimersByTime(200);
+        flushViewPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+
+        dispatchViewStorage(JSON.stringify({ ...currentOnDisk(), showPrRuns: true }));
+        expect(viewState.showPrRuns).toBe(false);
+
+        _setSchemaStaleForTests(false);
+        flushViewPersistence();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+        const onDisk = currentOnDisk();
+        expect(onDisk.globalFilter).toEqual({ org: "org1", repo: "repo1" });
+        expect(onDisk.showPrRuns).toBe(false);
+      } finally {
+        setItemSpy.mockRestore();
+        _resetVersionStateForTests();
+      }
+    });
+  });
+
+  it("discardPendingViewPersistence() drops this tab's unsaved change so it is never written", async () => {
+    await withViewPersistence(() => {
+      vi.advanceTimersByTime(200);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        setGlobalFilter("org1", "repo1");
+        discardPendingViewPersistence();
+        vi.advanceTimersByTime(200);
+        flushViewPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+        expect(currentOnDisk().globalFilter).toEqual({ org: null, repo: null });
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
 });
 
 describe("initViewPersistence — genuine two-tab concurrency", () => {
@@ -570,7 +854,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
   // representing an already-completed write), this describe block spins up
   // TWO fully independent module instances of stores/view.ts via
   // vi.resetModules() + fresh dynamic imports — each with its own in-memory
-  // viewState, its own commitSnapshot()/lastSyncedSnapshot closure, and its
+  // viewState, its own per-key persistence baseline, and its
   // own live createEffect/debounce timer — sharing only the same
   // localStorageMock (the one durable channel two real browser tabs would
   // actually share). This exercises the hardest case for the merge-on-write
@@ -584,7 +868,7 @@ describe("initViewPersistence — genuine two-tab concurrency", () => {
     return import("../../src/app/stores/view");
   }
 
-  it("whichever tab's commitSnapshot() actually runs last wins when both change the same field at the same tick", async () => {
+  it("whichever tab's debounced commit actually runs last wins when both change the same field at the same tick", async () => {
     vi.useFakeTimers();
     const tabA = await importFreshViewModule();
     const tabB = await importFreshViewModule();
@@ -1667,6 +1951,28 @@ describe("applyImportedViewState", () => {
       addedAt: 2000,
       title: "",
     });
+    expect("htmlUrl" in viewState.trackedItems[0]).toBe(false);
+    expect("jiraStatus" in viewState.trackedItems[0]).toBe(false);
+  });
+
+  it("strips htmlUrl and jiraStatus from an imported tracked item, keeping its other fields", () => {
+    applyImportedViewState({
+      trackedItems: [
+        {
+          id: 1,
+          type: "jiraIssue",
+          source: "jira",
+          repoFullName: "",
+          jiraKey: "PROJ-1",
+          addedAt: 1,
+          htmlUrl: "https://evil.example/x",
+          jiraStatus: "Done",
+        },
+      ],
+    });
+    expect(viewState.trackedItems).toEqual([
+      { id: 1, type: "jiraIssue", source: "jira", repoFullName: "", jiraKey: "PROJ-1", addedAt: 1, title: "" },
+    ]);
     expect("htmlUrl" in viewState.trackedItems[0]).toBe(false);
     expect("jiraStatus" in viewState.trackedItems[0]).toBe(false);
   });

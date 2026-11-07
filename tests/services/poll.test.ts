@@ -685,6 +685,8 @@ describe("createPollCoordinator", () => {
       const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
       await flushPromises();
       expect(checkForUpdateSpy).toHaveBeenCalledTimes(1);
+      // Poll-driven checks are throttled so they stay off the boot path and don't repeat.
+      expect(checkForUpdateSpy).toHaveBeenCalledWith({ throttled: true });
 
       coordinator.manualRefresh();
       await flushPromises();

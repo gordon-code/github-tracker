@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
   clearSnapshot: vi.fn().mockResolvedValue(undefined),
@@ -11,7 +11,9 @@ import {
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
   CustomTabSchema, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes,
   preParseConfigFixups, postParseConfigFixups, initConfigPersistence, flushConfigPersistence,
+  discardPendingConfigPersistence, requestConfigFullOverwrite, setConfig,
 } from "../../src/app/stores/config";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../src/app/lib/version";
 import { getNotifications, resetNotificationState } from "../../src/app/lib/errors";
 import type { CustomTab } from "../../src/app/stores/config";
 import { clearJiraAuth, clearJiraConfigFull } from "../../src/app/stores/auth";
@@ -1701,7 +1703,7 @@ describe("flushConfigPersistence", () => {
     }
   });
 
-  it("writes on flush after resetConfig + removeItem + updateConfig even when the resulting JSON matches lastPersistedJson", () => {
+  it("writes on flush after resetConfig + removeItem + updateConfig even when the config matches what this tab last wrote", () => {
     // Establish baseline with authMethod: "pat" and default settings
     updateConfig({ authMethod: "pat" });
     flushConfigPersistence();
@@ -1712,14 +1714,14 @@ describe("flushConfigPersistence", () => {
     localStorageMock.removeItem(STORAGE_KEY);
     updateConfig({ authMethod: "pat" });
 
-    // Even though JSON.stringify(config) matches the previous lastPersistedJson,
-    // setConfig marked the store dirty so flushConfigPersistence must write it.
+    // resetConfig() forces the next write to replace the whole stored config, so the
+    // flush must write even though nothing differs from this tab's last write.
     flushConfigPersistence();
     expect(localStorageMock.getItem(STORAGE_KEY)).not.toBeNull();
     expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").authMethod).toBe("pat");
   });
 
-  it("does not synchronously flush stale pendingJson on intermediate mutations while initConfigPersistence is active, and schedules a debounced write when resetConfig matches in-memory state", () => {
+  it("does not synchronously flush a stale pending write on intermediate mutations while initConfigPersistence is active, and schedules a debounced write when resetConfig matches in-memory state", () => {
     vi.useFakeTimers();
     let dispose!: () => void;
     createRoot((d) => {
@@ -1728,7 +1730,7 @@ describe("flushConfigPersistence", () => {
     });
     const setItemSpy = vi.spyOn(localStorageMock, "setItem");
     try {
-      // Mutate within the 200ms mount debounce window: effect re-run must NOT flush the stale initial pendingJson synchronously
+      // Mutate within the 200ms mount debounce window: effect re-run must NOT flush the stale initial pending write synchronously
       setItemSpy.mockClear();
       updateConfig({ theme: "dracula" });
       expect(setItemSpy).not.toHaveBeenCalled();
@@ -1768,5 +1770,452 @@ describe("flushConfigPersistence", () => {
     } finally {
       setItemSpy.mockRestore();
     }
+  });
+
+  it("keeps a change pending after a failed write and writes it on the next flush", () => {
+    // Settle the full overwrite queued by beforeEach's resetConfig() so the next write is per-key.
+    flushConfigPersistence();
+    expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("auto");
+
+    updateConfig({ theme: "forest" });
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+    try {
+      flushConfigPersistence();
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("auto");
+
+      // The failed write must not have been recorded as saved, so this flush retries it.
+      flushConfigPersistence();
+      expect(setItemSpy).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("forest");
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+});
+
+describe("config persistence — cross-tab sync and per-key writes", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    resetConfig();
+    resetNotificationState();
+  });
+
+  function dispatchConfigStorage(newValue: string | null): void {
+    window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY, newValue }));
+  }
+
+  // Hosts initConfigPersistence() in a root with fake timers; the root is always disposed so
+  // its storage listener and effect never outlive the test.
+  function withConfigPersistence(fn: () => void): void {
+    vi.useFakeTimers();
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initConfigPersistence();
+    });
+    try {
+      fn();
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  }
+
+  function configWith(overrides: Record<string, unknown>): string {
+    return JSON.stringify({ ...JSON.parse(JSON.stringify(config)), ...overrides });
+  }
+
+  it("flushes a pending debounced write synchronously on disposal, and a later flush does not write again", () => {
+    vi.useFakeTimers();
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    let dispose!: () => void;
+    try {
+      createRoot((d) => {
+        dispose = d;
+        initConfigPersistence();
+      });
+      updateConfig({ theme: "dracula" });
+      expect(setItemSpy).not.toHaveBeenCalled();
+
+      // Dispose before the 200ms debounce timer fires.
+      dispose();
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("dracula");
+
+      flushConfigPersistence();
+      vi.advanceTimersByTime(300);
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      setItemSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies another tab's config write to the live store without writing it back", () => {
+    withConfigPersistence(() => {
+      const otherTabJson = configWith({ theme: "dracula", refreshInterval: 120 });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        dispatchConfigStorage(otherTabJson);
+        expect(config.theme).toBe("dracula");
+        expect(config.refreshInterval).toBe(120);
+
+        vi.advanceTimersByTime(250);
+        flushConfigPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+        expect(localStorageMock.getItem(STORAGE_KEY)).toBe(otherTabJson);
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
+
+  it("keeps this tab's pending change to a key when another tab writes a different value, and writes it on top", () => {
+    withConfigPersistence(() => {
+      updateConfig({ theme: "forest" });
+      const otherTabJson = configWith({ theme: "dracula", refreshInterval: 120 });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+
+      dispatchConfigStorage(otherTabJson);
+      expect(config.theme).toBe("forest");
+      expect(config.refreshInterval).toBe(120);
+
+      vi.advanceTimersByTime(250);
+      const onDisk = JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}");
+      expect(onDisk.theme).toBe("forest");
+      expect(onDisk.refreshInterval).toBe(120);
+    });
+  });
+
+  it("only writes the keys this tab changed and never reverts another tab's value on a later write", () => {
+    updateConfig({ theme: "forest" });
+    flushConfigPersistence();
+    localStorageMock.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}"), refreshInterval: 120 }),
+    );
+
+    updateConfig({ itemsPerPage: 50 });
+    flushConfigPersistence();
+    let onDisk = JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}");
+    expect(onDisk).toMatchObject({ theme: "forest", itemsPerPage: 50, refreshInterval: 120 });
+
+    // A second write from this tab, which never saw the other tab's refreshInterval, must not revert it.
+    updateConfig({ viewDensity: "compact" });
+    flushConfigPersistence();
+    onDisk = JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}");
+    expect(onDisk).toMatchObject({ viewDensity: "compact", itemsPerPage: 50, refreshInterval: 120 });
+  });
+
+  it("adopts a config another tab saved between module load and initConfigPersistence(), without writing", () => {
+    localStorageMock.setItem(STORAGE_KEY, configWith({ theme: "dracula" }));
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      withConfigPersistence(() => {
+        expect(config.theme).toBe("dracula");
+        vi.advanceTimersByTime(250);
+        expect(setItemSpy).not.toHaveBeenCalled();
+      });
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it("ignores removal, malformed, and non-object storage events, and drops individually invalid fields", () => {
+    withConfigPersistence(() => {
+      dispatchConfigStorage(null);
+      dispatchConfigStorage("{not valid json");
+      dispatchConfigStorage("[1,2,3]");
+      dispatchConfigStorage(JSON.stringify({ theme: "dracula", refreshInterval: 99999, futureKey: true }));
+      expect(config.theme).toBe("dracula");
+      expect(config.refreshInterval).toBe(300);
+      expect("futureKey" in config).toBe(false);
+    });
+  });
+
+  it("ignores another tab's write while a resetConfig() is waiting to be written, then fully overwrites it", () => {
+    withConfigPersistence(() => {
+      updateConfig({ selectedOrgs: ["mine"] });
+      vi.advanceTimersByTime(250);
+
+      resetConfig();
+      const otherTabJson = configWith({ selectedOrgs: ["other-identity-org"] });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+      dispatchConfigStorage(otherTabJson);
+      expect(config.selectedOrgs).toEqual([]);
+
+      vi.advanceTimersByTime(250);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").selectedOrgs).toEqual([]);
+    });
+  });
+
+  afterEach(() => {
+    _resetVersionStateForTests();
+  });
+
+  function readDisk(): Record<string, unknown> {
+    return JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+  }
+
+  function configSnapshot(): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+  }
+
+  function throwQuotaError(): never {
+    throw new DOMException("QuotaExceededError", "QuotaExceededError");
+  }
+
+  const REPO_A = { owner: "alpha", name: "a", fullName: "alpha/a" };
+  const REPO_B = { owner: "beta", name: "b", fullName: "beta/b" };
+
+  it("keeps a resetConfig() full overwrite pending after a failed write, ignoring other tabs until it lands", () => {
+    withConfigPersistence(() => {
+      updateConfig({ selectedOrgs: ["mine"] });
+      vi.advanceTimersByTime(250);
+
+      resetConfig();
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementationOnce(throwQuotaError);
+      try {
+        flushConfigPersistence();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+        expect(readDisk().selectedOrgs).toEqual(["mine"]);
+
+        const otherTabJson = configWith({ selectedOrgs: ["other"], refreshInterval: 120 });
+        localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+        dispatchConfigStorage(otherTabJson);
+        expect(config.selectedOrgs).toEqual([]);
+        expect(config.refreshInterval).toBe(300);
+
+        flushConfigPersistence();
+        expect(readDisk()).toEqual(JSON.parse(JSON.stringify(ConfigSchema.parse({}))));
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+  });
+
+  it("an import that requests a full overwrite replaces a divergent on-disk value that memory and the last save already match", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250); // settle this tab's boot write (refreshInterval 300)
+      localStorageMock.setItem(STORAGE_KEY, configWith({ refreshInterval: 120 }));
+
+      requestConfigFullOverwrite();
+      setConfig(ConfigSchema.parse({ refreshInterval: 300 }));
+      flushConfigPersistence();
+
+      expect(readDisk().refreshInterval).toBe(300);
+    });
+  });
+
+  it("ignores another tab's write that arrives after a full-overwrite import but before its debounced write", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250);
+
+      requestConfigFullOverwrite();
+      setConfig(ConfigSchema.parse({ refreshInterval: 300, theme: "forest" }));
+      const otherTabJson = configWith({ refreshInterval: 120 });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+      dispatchConfigStorage(otherTabJson);
+      expect(config.refreshInterval).toBe(300);
+
+      vi.advanceTimersByTime(250);
+      expect(readDisk()).toMatchObject({ refreshInterval: 300, theme: "forest" });
+    });
+  });
+
+  it("schedules the full-overwrite write for an import identical to memory, so another tab's write is not ignored indefinitely", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250);
+
+      requestConfigFullOverwrite();
+      setConfig(ConfigSchema.parse({ refreshInterval: 300 }));
+      const otherTabJson = configWith({ refreshInterval: 120 });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+      dispatchConfigStorage(otherTabJson);
+      expect(config.refreshInterval).toBe(300);
+
+      vi.advanceTimersByTime(250);
+      expect(readDisk().refreshInterval).toBe(300);
+    });
+  });
+
+  it("drops unknown keys and a literal __proto__ key from the on-disk blob when writing", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250);
+      // A literal "__proto__" key spliced in at the JSON-text level, which JSON.parse turns
+      // into an own property (an object literal would set the prototype instead).
+      const tainted = configWith({ futureKey: "should not survive" }).slice(0, -1) + ',"__proto__":{"polluted":true}}';
+      localStorageMock.setItem(STORAGE_KEY, tainted);
+
+      updateConfig({ theme: "forest" });
+      vi.advanceTimersByTime(250);
+
+      const onDisk = readDisk();
+      expect(onDisk.theme).toBe("forest");
+      expect(Object.hasOwn(onDisk, "futureKey")).toBe(false);
+      expect(Object.hasOwn(onDisk, "__proto__")).toBe(false);
+      expect(Object.getPrototypeOf({})).not.toHaveProperty("polluted");
+    });
+  });
+
+  it("replaces an invalid on-disk value with this tab's value when writing", () => {
+    withConfigPersistence(() => {
+      updateConfig({ itemsPerPage: 50 });
+      vi.advanceTimersByTime(250);
+      localStorageMock.setItem(STORAGE_KEY, configWith({ itemsPerPage: 5, refreshInterval: "fast" }));
+
+      updateConfig({ theme: "forest" });
+      vi.advanceTimersByTime(250);
+
+      expect(readDisk()).toMatchObject({ theme: "forest", itemsPerPage: 50, refreshInterval: 300 });
+    });
+  });
+
+  it("writes this tab's value for a key missing from the on-disk blob even though it has not changed", () => {
+    withConfigPersistence(() => {
+      updateConfig({ itemsPerPage: 50 });
+      vi.advanceTimersByTime(250);
+      const stale = readDisk();
+      delete stale.itemsPerPage;
+      localStorageMock.setItem(STORAGE_KEY, JSON.stringify(stale));
+
+      updateConfig({ theme: "forest" });
+      vi.advanceTimersByTime(250);
+
+      expect(readDisk()).toMatchObject({ theme: "forest", itemsPerPage: 50 });
+    });
+  });
+
+  it.each([
+    ["malformed JSON", "{not valid json"],
+    ["a JSON array", "[1,2,3]"],
+  ])("writes the full snapshot when the on-disk blob is %s", (_label, raw) => {
+    withConfigPersistence(() => {
+      updateConfig({ itemsPerPage: 50 });
+      vi.advanceTimersByTime(250);
+      localStorageMock.setItem(STORAGE_KEY, raw);
+
+      updateConfig({ theme: "forest" });
+      vi.advanceTimersByTime(250);
+
+      const onDisk = readDisk();
+      expect(onDisk).toEqual(configSnapshot());
+      expect(onDisk).toMatchObject({ theme: "forest", itemsPerPage: 50, refreshInterval: 300 });
+    });
+  });
+
+  it("repairs a stored defaultTab naming a deleted custom tab on startup and writes the repair", () => {
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ defaultTab: "deleted-tab-id", customTabs: [] }));
+    setConfig(loadConfig());
+    withConfigPersistence(() => {
+      expect(config.defaultTab).toBe("issues");
+      vi.advanceTimersByTime(250);
+      expect(readDisk().defaultTab).toBe("issues");
+    });
+  });
+
+  it("salvages the valid keys of a stored config whose blob fails whole-schema validation", () => {
+    localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ refreshInterval: -999, itemsPerPage: 50 }));
+    // loadConfig() rejects the whole blob, so the store starts from defaults.
+    setConfig(loadConfig());
+    expect(config.itemsPerPage).toBe(25);
+    withConfigPersistence(() => {
+      expect(config.itemsPerPage).toBe(50);
+      expect(config.refreshInterval).toBe(300);
+      vi.advanceTimersByTime(250);
+      expect(readDisk()).toMatchObject({ itemsPerPage: 50, refreshInterval: 300 });
+    });
+  });
+
+  it("keeps monitored repos and custom-tab scopes within the selected repos after adopting another tab's values", () => {
+    withConfigPersistence(() => {
+      updateConfig({
+        selectedRepos: [REPO_A, REPO_B],
+        monitoredRepos: [REPO_A],
+        customTabs: [makeTab({ id: "scoped", orgScope: ["alpha", "beta"], repoScope: [REPO_A, REPO_B] })],
+      });
+      vi.advanceTimersByTime(250);
+
+      const otherTabJson = configWith({ selectedRepos: [REPO_A], monitoredRepos: [REPO_A, REPO_B] });
+      localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+      dispatchConfigStorage(otherTabJson);
+
+      expect(config.selectedRepos).toEqual([REPO_A]);
+      expect(config.monitoredRepos).toEqual([REPO_A]);
+      expect(config.customTabs[0].orgScope).toEqual(["alpha"]);
+      expect(config.customTabs[0].repoScope).toEqual([REPO_A]);
+
+      // The repaired values differ from what was adopted, so they are written back.
+      vi.advanceTimersByTime(250);
+      const onDisk = readDisk() as { selectedRepos: unknown; monitoredRepos: unknown; customTabs: CustomTab[] };
+      expect(onDisk.selectedRepos).toEqual([REPO_A]);
+      expect(onDisk.monitoredRepos).toEqual([REPO_A]);
+      expect(onDisk.customTabs[0].orgScope).toEqual(["alpha"]);
+      expect(onDisk.customTabs[0].repoScope).toEqual([REPO_A]);
+    });
+  });
+
+  it("falls back to the issues tab when an adopted defaultTab or customTabs leaves defaultTab naming a missing tab", () => {
+    withConfigPersistence(() => {
+      updateConfig({ customTabs: [makeTab({ id: "mine" })], defaultTab: "mine" });
+      vi.advanceTimersByTime(250);
+
+      dispatchConfigStorage(configWith({ defaultTab: "ghost" }));
+      expect(config.defaultTab).toBe("issues");
+      vi.advanceTimersByTime(250);
+      expect(readDisk().defaultTab).toBe("issues");
+
+      updateConfig({ defaultTab: "mine" });
+      vi.advanceTimersByTime(250);
+      dispatchConfigStorage(configWith({ customTabs: [] }));
+      expect(config.customTabs).toEqual([]);
+      expect(config.defaultTab).toBe("issues");
+    });
+  });
+
+  it("neither writes nor adopts while the stored schema is stale, then writes the pending change once it clears", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250);
+      _setSchemaStaleForTests(true);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        updateConfig({ theme: "forest" });
+        vi.advanceTimersByTime(250);
+        flushConfigPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+
+        dispatchConfigStorage(configWith({ refreshInterval: 120 }));
+        expect(config.refreshInterval).toBe(300);
+
+        _setSchemaStaleForTests(false);
+        flushConfigPersistence();
+        expect(setItemSpy).toHaveBeenCalledTimes(1);
+        expect(readDisk()).toMatchObject({ theme: "forest", refreshInterval: 300 });
+      } finally {
+        setItemSpy.mockRestore();
+        _setSchemaStaleForTests(false);
+      }
+    });
+  });
+
+  it("discardPendingConfigPersistence() drops this tab's unsaved change so it is never written", () => {
+    withConfigPersistence(() => {
+      vi.advanceTimersByTime(250);
+      const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+      try {
+        updateConfig({ theme: "forest" });
+        discardPendingConfigPersistence();
+        vi.advanceTimersByTime(250);
+        flushConfigPersistence();
+        expect(setItemSpy).not.toHaveBeenCalled();
+        expect(readDisk().theme).toBe("auto");
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
   });
 });

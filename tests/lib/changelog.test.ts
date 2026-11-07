@@ -5,7 +5,6 @@ import {
   hasUnseen,
   isStrictSemver,
   loadChangelog,
-  unseenEntries,
   _resetChangelogCacheForTests,
 } from "../../src/app/lib/changelog";
 
@@ -60,30 +59,25 @@ describe("lib/changelog", () => {
     expect(compareSemver("invalid", "0.1.0")).toBe(0);
   });
 
-  it("returns only the newest entry when lastSeen is null, undefined, or not strict x.y.z", () => {
-    expect(unseenEntries(SAMPLE_ENTRIES, null)).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries(SAMPLE_ENTRIES, undefined)).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "")).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "0.1.1-test")).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "v0.1.1")).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries([], null)).toEqual([]);
-  });
-
-  it("returns all entries with semver > lastSeen and empty array when up to date", () => {
-    expect(unseenEntries(SAMPLE_ENTRIES, "0.1.1")).toEqual([
-      SAMPLE_ENTRIES[0],
-      SAMPLE_ENTRIES[1],
-    ]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "0.2.0")).toEqual([SAMPLE_ENTRIES[0]]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "0.10.0")).toEqual([]);
-    expect(unseenEntries(SAMPLE_ENTRIES, "1.0.0")).toEqual([]);
-  });
-
-  it("computes hasUnseen boolean from unseenEntries", () => {
+  it("hasUnseen is true for any non-empty changelog when lastSeen is null, undefined, or not strict x.y.z", () => {
     expect(hasUnseen(SAMPLE_ENTRIES, null)).toBe(true);
-    expect(hasUnseen(SAMPLE_ENTRIES, "0.2.0")).toBe(true);
-    expect(hasUnseen(SAMPLE_ENTRIES, "0.10.0")).toBe(false);
+    expect(hasUnseen(SAMPLE_ENTRIES, undefined)).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "")).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "0.1.1-test")).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "v0.1.1")).toBe(true);
+  });
+
+  it("hasUnseen is false for an empty changelog whatever lastSeen is", () => {
     expect(hasUnseen([], null)).toBe(false);
+    expect(hasUnseen([], "0.1.0")).toBe(false);
+  });
+
+  it("hasUnseen is true only while a release is newer than lastSeen, comparing numerically", () => {
+    expect(hasUnseen(SAMPLE_ENTRIES, "0.1.1")).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "0.2.0")).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "0.9.9")).toBe(true);
+    expect(hasUnseen(SAMPLE_ENTRIES, "0.10.0")).toBe(false);
+    expect(hasUnseen(SAMPLE_ENTRIES, "1.0.0")).toBe(false);
   });
 
   it("loads and validates virtual:changelog and caches the result", async () => {

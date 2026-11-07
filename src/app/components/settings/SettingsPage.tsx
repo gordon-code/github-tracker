@@ -4,7 +4,7 @@ import { Dialog } from "@kobalte/core/dialog";
 import { captureException } from "../../lib/sentry-facade";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import { config, setConfig, requestConfigFullOverwrite, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config, JiraCustomField } from "../../../shared/schemas";
 import {
   buildExportPayload,
@@ -21,8 +21,8 @@ import { pushNotification, dismissNotificationBySource } from "../../lib/errors"
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
-import { CHANGELOG_URL, RELEASES_URL } from "../../lib/repo-links";
-import { BUILD_TIME, displayVersion } from "../../lib/version";
+import { CHANGELOG_URL, RELEASES_URL, REPO_URL, USER_GUIDE_URL } from "../../lib/repo-links";
+import { displayVersion, schemaStale } from "../../lib/version";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -409,7 +409,9 @@ export default function SettingsPage() {
       clearJiraAuth();
     }
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
-    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
+    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge). The
+    // overwrite request makes the next write replace the stored config instead of merging.
+    requestConfigFullOverwrite();
     setConfig(pending.config);
     // Identity is already established on this page (Settings is post-auth) —
     // applyImportedViewState is total/no-throw, so this is safe even when the
@@ -923,6 +925,9 @@ export default function SettingsPage() {
         <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
           <SettingsTOC />
           <div class="settings-content flex-1 min-w-0 flex flex-col gap-6 max-w-3xl">
+        {/* A tab on an older build than the deployed one must not change stored settings. `inert`
+            also stops pointer events on widgets a disabled fieldset doesn't cover (custom selects, role="button"). */}
+        <fieldset class="contents" disabled={schemaStale()} inert={schemaStale()}>
         {/* ── Data Sources ─────────────────────────────────────────────────── */}
         <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Data Sources</p>
         {/* Section 1: Orgs & Repos */}
@@ -1048,6 +1053,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={refreshOptions.find((opt) => opt.value === config.refreshInterval) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ refreshInterval: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -1177,6 +1183,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={itemsPerPageOptions.find((opt) => opt.value === config.itemsPerPage) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ itemsPerPage: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -1212,6 +1219,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={tabOptions().find((opt) => opt.value === config.defaultTab) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ defaultTab: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -2135,7 +2143,6 @@ export default function SettingsPage() {
             <div class="flex items-center gap-3 text-sm">
               <a
                 href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
-                title={`Built ${BUILD_TIME}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="font-mono text-xs link link-hover"
@@ -2162,6 +2169,7 @@ export default function SettingsPage() {
             </div>
           </SettingRow>
         </Section>
+        </fieldset>
           </div>
         </div>
 
@@ -2403,7 +2411,7 @@ export default function SettingsPage() {
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">
             <a
-              href="https://github.com/gordon-code/github-tracker"
+              href={REPO_URL}
               target="_blank"
               rel="noopener noreferrer"
               class="link link-hover"
@@ -2412,7 +2420,7 @@ export default function SettingsPage() {
             </a>
             <span aria-hidden="true">·</span>
             <a
-              href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+              href={USER_GUIDE_URL}
               target="_blank"
               rel="noopener noreferrer"
               class="link link-hover"

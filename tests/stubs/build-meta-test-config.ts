@@ -17,6 +17,6 @@ export const buildMetaTestConfig = {
   define: {
     __APP_VERSION__: JSON.stringify("0.1.0"),
     __GIT_SHA__: JSON.stringify("abcdef123456"),
-    __BUILD_TIME__: JSON.stringify("2026-01-01T00:00:00.000Z"),
+    __SCHEMA_FP__: JSON.stringify("0123456789ab"),
   },
 };

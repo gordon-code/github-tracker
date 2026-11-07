@@ -50,3 +50,25 @@ jobs:
           DEPLOY_MSG="${DEPLOY_MSG:0:100}"
           DEPLOY_MSG="${DEPLOY_MSG:-manual deploy ${DEPLOY_TAG}}"
           pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"
+      # Update detection ignores a /version.json that is missing or served as the SPA's HTML
+      # fallback, so confirm the live file is JSON and names the build that was just deployed.
+      - name: Verify deployed version.json
+        if: ${{ vars.DEPLOY_DOMAIN != '' }}
+        env:
+          DEPLOY_DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          expected="${EXPECTED_SHA:0:12}"
+          for attempt in 1 2 3 4 5 6; do
+            out="$(curl -sS --max-time 10 -w '\n%{content_type}' "https://${DEPLOY_DOMAIN}/version.json" || true)"
+            ctype="${out##*$'\n'}"
+            json="${out%$'\n'*}"
+            sha="$(jq -r '.sha // empty' <<< "$json" 2>/dev/null || true)"
+            if [[ "$ctype" == application/json* && "$sha" == "$expected" ]]; then
+              printf 'version.json OK (%s)\n' "$sha"
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          printf 'version.json did not report %s with a JSON content type\n' "$expected" >&2
+          exit 1

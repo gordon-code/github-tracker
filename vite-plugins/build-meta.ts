@@ -3,7 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
 import * as z from "zod/mini";
-import { BUILD_SHA_LENGTH, type VersionInfo } from "../src/shared/build-meta";
+import { createHash } from "node:crypto";
+import { BUILD_SHA_LENGTH, COMMIT_SHA_PATTERN, COMMIT_SHA_RE, type BuildInfo } from "../src/shared/build-meta.ts";
+import { ConfigSchema, TRACKED_USER_AVATAR_PREFIX } from "../src/shared/schemas.ts";
+import { PERSISTED_LIMITS, ViewStateSchema } from "../src/shared/view-schema.ts";
 import {
   CHANGELOG_MAX_ENTRIES,
   CHANGELOG_MAX_ITEM_TEXT_LENGTH,
@@ -12,10 +15,10 @@ import {
   type ChangelogEntry,
   type ChangelogItem,
   type ChangelogSection,
-} from "../src/shared/changelog-schema";
+} from "../src/shared/changelog-schema.ts";
 
 // Case-insensitive on purpose: GITHUB_SHA and `git rev-parse` output are normalized to lowercase below.
-const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i;
+const HEX_SHA_RE = new RegExp(COMMIT_SHA_RE.source, "i");
 const VIRTUAL_CHANGELOG_ID = "virtual:changelog";
 const RESOLVED_VIRTUAL_CHANGELOG_ID = "\0virtual:changelog";
 
@@ -23,7 +26,12 @@ const RELEASE_HEADING_RE =
   /^#{2,3}\s+(?:\[v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]\([^)]*\)|v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?))\s+\((\d{4}-\d{2}-\d{2})\)\s*$/;
 const SECTION_HEADING_RE = /^###\s+(.+?)\s*$/;
 const BULLET_LINE_RE = /^\s*[*-]\s+(.+?)\s*$/;
-const COMMIT_LINK_RE = /(?:\(\[([0-9a-f]{7,40})\]\([^)]*\)\)|\[([0-9a-f]{7,40})\]\([^)]*\))/i;
+const COMMIT_LINK_RE = new RegExp(
+  `(?:\\(\\[(${COMMIT_SHA_PATTERN})\\]\\([^)]*\\)\\)|\\[(${COMMIT_SHA_PATTERN})\\]\\([^)]*\\))`,
+  "i",
+);
+const COMMIT_LINK_PARENS_STRIP_RE = new RegExp(`\\s*\\(\\[${COMMIT_SHA_PATTERN}\\]\\([^)]*\\)\\)`, "gi");
+const COMMIT_LINK_TRAILING_STRIP_RE = new RegExp(`\\s+\\[${COMMIT_SHA_PATTERN}\\]\\([^)]*\\)\\s*$`, "gi");
 const PR_REF_RE = /(?:\(\[#(\d+)\]\([^)]*\)\)|\[#(\d+)\]\([^)]*\)|\(#(\d+)\))/;
 const MARKDOWN_LINK_RE = /!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*\)/g;
 
@@ -38,30 +46,16 @@ function stripMarkdownLinks(input: string): string {
 }
 
 function parseBulletLine(rawBullet: string): ChangelogItem | null {
-  let pr: number | undefined;
   const prMatch = PR_REF_RE.exec(rawBullet);
-  if (prMatch) {
-    const rawPr = prMatch[1] ?? prMatch[2] ?? prMatch[3];
-    if (rawPr) {
-      const parsedPr = Number.parseInt(rawPr, 10);
-      if (Number.isInteger(parsedPr) && parsedPr > 0) {
-        pr = parsedPr;
-      }
-    }
-  }
+  const parsedPr = Number.parseInt(prMatch?.[1] ?? prMatch?.[2] ?? prMatch?.[3] ?? "0", 10);
+  const pr = parsedPr > 0 ? parsedPr : undefined;
 
-  let sha: string | undefined;
   const shaMatch = COMMIT_LINK_RE.exec(rawBullet);
-  if (shaMatch) {
-    const rawSha = shaMatch[1] ?? shaMatch[2];
-    if (rawSha && HEX_SHA_RE.test(rawSha)) {
-      sha = rawSha.toLowerCase();
-    }
-  }
+  const sha = (shaMatch?.[1] ?? shaMatch?.[2])?.toLowerCase();
 
   let text = rawBullet
-    .replace(/\s*\(\[[0-9a-f]{7,40}\]\([^)]*\)\)/gi, "")
-    .replace(/\s+\[[0-9a-f]{7,40}\]\([^)]*\)\s*$/gi, "")
+    .replace(COMMIT_LINK_PARENS_STRIP_RE, "")
+    .replace(COMMIT_LINK_TRAILING_STRIP_RE, "")
     .replace(/\s*\(\[#\d+\]\([^)]*\)\)/g, "")
     .replace(/\s*\(#\d+\)/g, "");
 
@@ -171,16 +165,55 @@ export function resolvePackageVersion(): string {
     : "0.0.0";
 }
 
-export function resolveBuildMetadata(): VersionInfo {
+/**
+ * JSON with object keys, and JSON Schema `required` lists, in a fixed order, so reordering a
+ * schema's keys does not change the output.
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (key, v: unknown) => {
+    if (key === "required" && Array.isArray(v)) return (v as string[]).toSorted();
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      );
+    }
+    return v;
+  });
+}
+
+/**
+ * Fingerprint of what the persisted config and view-state blobs may contain. A tab running an
+ * older layout compares it with the deployed one to learn that a newer deployment stores data
+ * it can't safely read or write. It hashes:
+ *  - the JSON Schema of both schemas (`io: "input"`, the stored side): keys, types, enums,
+ *    patterns, array limits and defaults;
+ *  - `PERSISTED_LIMITS` and `TRACKED_USER_AVATAR_PREFIX`, the rules enforced by `.refine()`
+ *    checks that JSON Schema cannot express.
+ * Comments, formatting, helper code and key order don't affect it. A `.refine()` predicate that
+ * changes without changing one of those values is not detected, which is why every refine limit
+ * must live in `PERSISTED_LIMITS` (a unit test fails when a new refine appears).
+ */
+export function computeSchemaFingerprint(): string {
+  const payload = {
+    config: z.toJSONSchema(ConfigSchema, { unrepresentable: "any", io: "input" }),
+    view: z.toJSONSchema(ViewStateSchema, { unrepresentable: "any", io: "input" }),
+    limits: PERSISTED_LIMITS,
+    trackedUserAvatarPrefix: TRACKED_USER_AVATAR_PREFIX,
+  };
+  return createHash("sha256").update(stableStringify(payload)).digest("hex").slice(0, BUILD_SHA_LENGTH);
+}
+
+export function resolveBuildMetadata(): BuildInfo {
   return {
     version: resolvePackageVersion(),
     sha: resolveGitSha(),
     builtAt: new Date().toISOString(),
+    schemaFp: computeSchemaFingerprint(),
   };
 }
 
 export function buildMeta(): Plugin[] {
-  const { version, sha, builtAt } = resolveBuildMetadata();
+  const { version, sha, builtAt, schemaFp } = resolveBuildMetadata();
 
   return [
     {
@@ -190,7 +223,7 @@ export function buildMeta(): Plugin[] {
           define: {
             __APP_VERSION__: JSON.stringify(version),
             __GIT_SHA__: JSON.stringify(sha),
-            __BUILD_TIME__: JSON.stringify(builtAt),
+            __SCHEMA_FP__: JSON.stringify(schemaFp),
           },
         };
       },
@@ -223,7 +256,7 @@ export function buildMeta(): Plugin[] {
         this.emitFile({
           type: "asset",
           fileName: "version.json",
-          source: JSON.stringify({ version, sha, builtAt }),
+          source: JSON.stringify({ version, sha, builtAt, schemaFp }),
         });
       },
     },

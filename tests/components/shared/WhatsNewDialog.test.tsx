@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import WhatsNewDialog from "../../../src/app/components/shared/WhatsNewDialog";
-import { config, resetConfig } from "../../../src/app/stores/config";
+import { config, resetConfig, updateConfig } from "../../../src/app/stores/config";
 import * as changelogModule from "../../../src/app/lib/changelog";
 import { _resetChangelogCacheForTests } from "../../../src/app/lib/changelog";
 import {
@@ -147,6 +147,29 @@ describe("WhatsNewDialog", () => {
       <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />
     ));
     expect(config.lastSeenVersion).toBeNull();
+  });
+
+  it("only moves lastSeenVersion forward, never back to an older build's version", () => {
+    updateConfig({ lastSeenVersion: "0.2.0" });
+    const first = render(() => (
+      <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />
+    ));
+    expect(config.lastSeenVersion).toBe("0.2.0");
+    first.unmount();
+
+    updateConfig({ lastSeenVersion: "0.0.9" });
+    render(() => (
+      <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />
+    ));
+    expect(config.lastSeenVersion).toBe("0.1.0");
+  });
+
+  it("replaces a stored lastSeenVersion that is not strict x.y.z", () => {
+    updateConfig({ lastSeenVersion: "garbage" });
+    render(() => (
+      <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />
+    ));
+    expect(config.lastSeenVersion).toBe("0.1.0");
   });
 
   it("renders 'No release notes available.' empty state when entries is empty", () => {

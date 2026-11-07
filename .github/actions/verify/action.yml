@@ -36,7 +36,8 @@ runs:
         DEPLOY_DOMAIN: ${{ inputs.deploy-domain }}
     # No `playwright install` step: playwright.config.ts uses channel: "chrome",
     # which resolves to ubuntu-latest's preinstalled Google Chrome — Playwright's
-    # own bundled Chromium download is never used and would be wasted work.
+    # own bundled Chromium download is never used and would be wasted work. The
+    # Firefox/WebKit subset runs in its own `e2e-cross-browser` job in ci.yml.
     - name: Run E2E tests
       shell: bash
       run: pnpm test:e2e

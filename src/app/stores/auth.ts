@@ -3,8 +3,9 @@ import * as z from "zod/mini";
 import { captureException } from "../lib/sentry-facade";
 import { clearCache } from "./cache";
 import { clearSnapshot } from "../lib/dashboard-snapshot";
-import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
-import { VIEW_STORAGE_KEY, resetViewState } from "./view";
+import { resumePersistence, suspendPersistence } from "../lib/field-persistence";
+import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config, discardPendingConfigPersistence } from "./config";
+import { VIEW_STORAGE_KEY, resetViewState, discardPendingViewPersistence } from "./view";
 import { pushNotification } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
@@ -461,23 +462,40 @@ export const crossTabReload = {
 // Uses expireToken() (not clearAuth()) to avoid wiping config/view that may still be valid.
 // Also syncs Jira auth across tabs — critical for rotating refresh tokens: a stale tab
 // holding an already-invalidated token would fail on its next Jira request.
+// Another tab changing the signed-in identity makes this tab's unsaved config/view keys
+// stale: left to the debounce, they would be written on top of the new identity's data.
+const CROSS_TAB_USER_CHECK_TIMEOUT_MS = 10_000;
+
+function discardPendingPersistence(): void {
+  discardPendingConfigPersistence();
+  discardPendingViewPersistence();
+}
+
 function handleAuthStorage(e: StorageEvent): void {
   if (e.key === AUTH_STORAGE_KEY && e.newValue === null && _token()) {
     // Re-check: a rapid sign-out/sign-in may have already replaced the token
     if (localStorage.getItem(AUTH_STORAGE_KEY) !== null) return;
+    discardPendingPersistence();
     expireToken();
     window.location.replace("/login");
   } else if (e.key === AUTH_STORAGE_KEY && e.newValue !== null && e.newValue !== _token()) {
+    discardPendingPersistence();
+    // Until the /user check below says whose token this is, this tab's in-memory config/view
+    // may belong to a different identity than the data now in localStorage: pause persistence.
+    suspendPersistence();
     // Captured BEFORE the token/user update below, so the /user fetch result
     // can be compared against who THIS tab thought was signed in.
     const previousLogin = user()?.login;
     _setToken(e.newValue);
     const gen = ++_crossTabFetchGen;
     const newToken = e.newValue;
+    let reloading = false;
+    let confirmedSameUser = false;
     void (async () => {
       try {
         const r = await fetch("https://api.github.com/user", {
           headers: { ...VALIDATE_HEADERS, Authorization: `Bearer ${newToken}` },
+          signal: AbortSignal.timeout(CROSS_TAB_USER_CHECK_TIMEOUT_MS),
         });
         if (!r.ok) {
           void r.body?.cancel();
@@ -502,6 +520,7 @@ function handleAuthStorage(e: StorageEvent): void {
             // Same-identity token rotation — adopt the refreshed user data
             // in place, same as before. Must NOT reset config/view here.
             setUser({ login: data.login, avatar_url: data.avatar_url, name: data.name });
+            confirmedSameUser = true;
           } else {
             // A different GitHub identity signed in via another tab (e.g.
             // Settings > Replace token in that tab), OR this tab has no
@@ -514,6 +533,7 @@ function handleAuthStorage(e: StorageEvent): void {
             // data. Reload instead so it re-initializes cleanly from what the
             // active tab already persisted.
             _identityEpoch++;
+            reloading = true;
             // Drop any snapshot write still pending for the previous identity
             // so the reload's visibilitychange flush cannot persist it.
             void clearSnapshotLogged();
@@ -522,6 +542,21 @@ function handleAuthStorage(e: StorageEvent): void {
         }
       } catch {
         // Ignore network errors during passive cross-tab user check
+      } finally {
+        // Persistence resumes only once the same user is confirmed. If the check could not
+        // complete, this tab may hold another account's config/view, so it stays paused until a
+        // reload. A later token event owns the pause once it has started its own check.
+        if (!reloading && _crossTabFetchGen === gen) {
+          if (confirmedSameUser) {
+            resumePersistence();
+          } else {
+            pushNotification(
+              "auth:cross-tab-unconfirmed",
+              "Another tab changed the signed-in account and this tab couldn't confirm which one. Changes here aren't being saved — reload this tab to continue.",
+              "warning",
+            );
+          }
+        }
       }
     })();
   }

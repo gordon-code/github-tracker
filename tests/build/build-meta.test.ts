@@ -25,13 +25,17 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+import * as z from "zod/mini";
 import {
   buildMeta,
+  computeSchemaFingerprint,
   parseChangelog,
   resolveBuildMetadata,
   resolveGitSha,
   resolvePackageVersion,
 } from "../../vite-plugins/build-meta";
+import { ConfigSchema } from "../../src/shared/schemas";
+import { PERSISTED_LIMITS, ViewStateSchema } from "../../src/shared/view-schema";
 
 const pkgVersion = (
   JSON.parse(
@@ -138,12 +142,107 @@ describe("buildMeta Vite plugin", () => {
       version: pkgVersion,
       sha: "abcdef012345",
       builtAt: "2026-04-14T12:34:56.789Z",
+      schemaFp: computeSchemaFingerprint(),
     });
   });
 
-  it("returns define plugin that sets JSON-encoded __APP_VERSION__, __GIT_SHA__, and __BUILD_TIME__", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-14T12:34:56.789Z"));
+  describe("computeSchemaFingerprint", () => {
+    it("is a stable 12-character hex digest of the persisted config and view schema shape", () => {
+      const fingerprint = computeSchemaFingerprint();
+      expect(fingerprint).toMatch(/^[0-9a-f]{12}$/);
+      expect(computeSchemaFingerprint()).toBe(fingerprint);
+    });
+
+    it("represents transformed fields, so a piped field shows its stored shape and limits", () => {
+      const view = z.toJSONSchema(ViewStateSchema, { unrepresentable: "any", io: "input" });
+      const jiraCustomOrder = (view.properties as Record<string, Record<string, unknown>>).jiraCustomOrder;
+      expect(Object.keys(jiraCustomOrder).length).toBeGreaterThan(0);
+      expect(jiraCustomOrder.maxItems).toBe(500);
+    });
+
+    it("does not depend on the text of the schema sources (comments, formatting, helper code)", () => {
+      const original = computeSchemaFingerprint();
+      mockReadFileSync.mockImplementation(() => {
+        throw new Error("the fingerprint must not read source files");
+      });
+      expect(computeSchemaFingerprint()).toBe(original);
+    });
+
+    it("does not depend on the order of keys in the schemas", () => {
+      const original = computeSchemaFingerprint();
+      for (const schema of [ConfigSchema, ViewStateSchema]) {
+        const shape = schema.shape as Record<string, unknown>;
+        const entries = Object.entries(shape);
+        try {
+          for (const [key] of entries) delete shape[key];
+          for (const [key, value] of entries.toReversed()) shape[key] = value;
+          expect(computeSchemaFingerprint()).toBe(original);
+        } finally {
+          for (const [key] of Object.entries(shape)) delete shape[key];
+          for (const [key, value] of entries) shape[key] = value;
+        }
+      }
+      expect(computeSchemaFingerprint()).toBe(original);
+    });
+
+    it.each(Object.keys(PERSISTED_LIMITS))("changes when the %s limit changes", (limit) => {
+      const original = computeSchemaFingerprint();
+      const limits = PERSISTED_LIMITS as Record<string, number>;
+      const previous = limits[limit];
+      try {
+        limits[limit] = previous + 1;
+        expect(computeSchemaFingerprint()).not.toBe(original);
+      } finally {
+        limits[limit] = previous;
+      }
+      expect(computeSchemaFingerprint()).toBe(original);
+    });
+
+    it("changes when a stored enum value or default changes", () => {
+      const original = computeSchemaFingerprint();
+      const configShape = ConfigSchema.shape as Record<string, unknown>;
+      const previous = configShape.refreshInterval;
+      try {
+        configShape.refreshInterval = z._default(z.int(), 301);
+        expect(computeSchemaFingerprint()).not.toBe(original);
+      } finally {
+        configShape.refreshInterval = previous;
+      }
+      expect(computeSchemaFingerprint()).toBe(original);
+    });
+
+    it("accounts for every refine in the persisted schemas (add new refine limits to PERSISTED_LIMITS)", () => {
+      const sources = ["src/shared/schemas.ts", "src/shared/view-schema.ts"].map((file) =>
+        readFileSync(resolve(process.cwd(), file), "utf8"),
+      );
+      const refines = sources.join("\n").match(/\bz\.(refine|superRefine|custom)\(/g) ?? [];
+      // 4 limits in PERSISTED_LIMITS + the tracked-user avatar prefix. A new refine whose rule is not
+      // exposed as data in the fingerprint would let an older tab write data the newer build rejects.
+      expect(refines).toHaveLength(5);
+    });
+
+    it("changes when a persisted key is added to either schema", () => {
+      const original = computeSchemaFingerprint();
+      const configShape = ConfigSchema.shape as Record<string, unknown>;
+      const viewShape = ViewStateSchema.shape as Record<string, unknown>;
+      try {
+        configShape.fingerprintProbe = z.string();
+        expect(computeSchemaFingerprint()).not.toBe(original);
+      } finally {
+        delete configShape.fingerprintProbe;
+      }
+      expect(computeSchemaFingerprint()).toBe(original);
+      try {
+        viewShape.fingerprintProbe = z.string();
+        expect(computeSchemaFingerprint()).not.toBe(original);
+      } finally {
+        delete viewShape.fingerprintProbe;
+      }
+      expect(computeSchemaFingerprint()).toBe(original);
+    });
+  });
+
+  it("returns define plugin that sets only JSON-encoded __APP_VERSION__, __GIT_SHA__ and __SCHEMA_FP__", () => {
     process.env.GITHUB_SHA = "abcdef0123456789abcdef0123456789abcdef01";
 
     const [definePlugin] = buildMeta();
@@ -158,7 +257,7 @@ describe("buildMeta Vite plugin", () => {
       define: {
         __APP_VERSION__: JSON.stringify(pkgVersion),
         __GIT_SHA__: JSON.stringify("abcdef012345"),
-        __BUILD_TIME__: JSON.stringify("2026-04-14T12:34:56.789Z"),
+        __SCHEMA_FP__: JSON.stringify(computeSchemaFingerprint()),
       },
     });
   });
@@ -176,7 +275,7 @@ describe("buildMeta Vite plugin", () => {
     expect(applyToEnvironment({ name: "worker" })).toBe(false);
   });
 
-  it("emits version.json at the client root with exact keys ['version', 'sha', 'builtAt']", () => {
+  it("emits version.json at the client root with exact keys ['version', 'sha', 'builtAt', 'schemaFp']", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-14T12:34:56.789Z"));
     process.env.GITHUB_SHA = "abcdef0123456789abcdef0123456789abcdef01";
@@ -199,11 +298,12 @@ describe("buildMeta Vite plugin", () => {
     expect(emitted.fileName).toBe("version.json");
 
     const parsed = JSON.parse(emitted.source) as Record<string, unknown>;
-    expect(Object.keys(parsed)).toEqual(["version", "sha", "builtAt"]);
+    expect(Object.keys(parsed)).toEqual(["version", "sha", "builtAt", "schemaFp"]);
     expect(parsed).toEqual({
       version: pkgVersion,
       sha: "abcdef012345",
       builtAt: "2026-04-14T12:34:56.789Z",
+      schemaFp: computeSchemaFingerprint(),
     });
   });
 

@@ -1,11 +1,9 @@
 import * as z from "zod/mini";
+import { COMMIT_SHA_RE } from "./build-meta.js";
 
 export const CHANGELOG_MAX_ENTRIES = 20;
 export const CHANGELOG_MAX_ITEM_TEXT_LENGTH = 300;
 export const CHANGELOG_MAX_SECTION_TITLE_LENGTH = 100;
-
-/** Lowercase hex commit SHA, abbreviated (7) through full (40). */
-export const COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
 
 const ChangelogItemSchema = z.object({
   text: z.string().check(z.minLength(1), z.maxLength(CHANGELOG_MAX_ITEM_TEXT_LENGTH)),

@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
-import { MemoryRouter, Route, useNavigate, createMemoryHistory } from "@solidjs/router";
 import { createRoot } from "solid-js";
 import UpdateBanner from "../../../src/app/components/shared/UpdateBanner";
-import { UpdateNavigator } from "../../../src/app/App";
 import {
   _setUpdateAvailableForTests,
+  _setSchemaStaleForTests,
   _resetVersionStateForTests,
 } from "../../../src/app/lib/version";
 import {
@@ -25,10 +24,9 @@ import {
   initViewPersistence,
 } from "../../../src/app/stores/view";
 
-describe("UpdateBanner & UpdateNavigator", () => {
+describe("UpdateBanner", () => {
   const originalLocation = window.location;
   let reloadMock: ReturnType<typeof vi.fn>;
-  let assignMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -40,13 +38,11 @@ describe("UpdateBanner & UpdateNavigator", () => {
     resetViewState();
 
     reloadMock = vi.fn();
-    assignMock = vi.fn();
     Object.defineProperty(window, "location", {
       configurable: true,
       writable: true,
       value: {
         reload: reloadMock,
-        assign: assignMock,
         pathname: "/",
         search: "",
         hash: "",
@@ -66,7 +62,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
     vi.useRealTimers();
   });
 
-  describe("UpdateBanner", () => {
+  describe("banner and app-update notification", () => {
     it("is hidden when updateAvailable() is null", () => {
       render(() => <UpdateBanner />);
       expect(screen.queryByRole("status")).toBeNull();
@@ -98,6 +94,8 @@ describe("UpdateBanner & UpdateNavigator", () => {
       expect(notifs[0].message).toBe(
         "A new version of GitHub Tracker is available — reload to update.",
       );
+      // The banner already announces the update, so the notification must not also toast.
+      expect(notifs[0].silentToast).toBe(true);
 
       // Updating signal again must not duplicate or re-push the notification
       _setUpdateAvailableForTests({
@@ -106,6 +104,26 @@ describe("UpdateBanner & UpdateNavigator", () => {
         builtAt: "2026-01-03T00:00:00.000Z",
       });
       expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(1);
+    });
+
+    it("says Settings are read-only only while the stored-data schema is stale", () => {
+      render(() => <UpdateBanner />);
+      _setUpdateAvailableForTests({
+        version: "0.1.2",
+        sha: "fedcba987654",
+        builtAt: "2026-01-02T00:00:00.000Z",
+      });
+      const banner = screen.getByRole("status");
+      expect(banner.textContent).not.toContain("read-only");
+
+      _setSchemaStaleForTests(true);
+      expect(banner.textContent).toContain("A new version is available.");
+      expect(banner.textContent).toContain(
+        "This tab can't save changes, and Settings are read-only, until you reload.",
+      );
+
+      _setSchemaStaleForTests(false);
+      expect(banner.textContent).not.toContain("read-only");
     });
 
     it("hides the banner and dismisses the app-update notification when the update clears, then re-notifies if flagged again", () => {
@@ -126,7 +144,9 @@ describe("UpdateBanner & UpdateNavigator", () => {
 
       _setUpdateAvailableForTests(info);
       expect(screen.getByRole("status")).toBeDefined();
-      expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(1);
+      const renotified = getNotifications().filter((n) => n.source === "app-update");
+      expect(renotified).toHaveLength(1);
+      expect(renotified[0].silentToast).toBe(true);
     });
 
     it("flushes pending config and viewState persistence before calling window.location.reload()", () => {
@@ -167,163 +187,6 @@ describe("UpdateBanner & UpdateNavigator", () => {
       );
 
       disposePersistence();
-    });
-  });
-
-  describe("UpdateNavigator", () => {
-    function NavTestHarness() {
-      const navigate = useNavigate();
-      return (
-        <div>
-          <button type="button" onClick={() => navigate("/settings")}>
-            Go Settings
-          </button>
-          <button type="button" onClick={() => navigate("/settings?tab=general#jira")}>
-            Go Settings With Query And Hash
-          </button>
-          <button type="button" onClick={() => navigate("/?filter=open#top")}>
-            Same Path Query Change
-          </button>
-          <button type="button" onClick={() => navigate("/dashboard")}>
-            Go Dashboard
-          </button>
-        </div>
-      );
-    }
-
-    it("does not call location.assign when navigating with updateAvailable null", async () => {
-      const history = createMemoryHistory();
-      render(() => (
-        <MemoryRouter
-          history={history}
-          root={(props) => (
-            <>
-              <UpdateNavigator />
-              {props.children}
-            </>
-          )}
-        >
-          <Route path="/" component={NavTestHarness} />
-          <Route path="/settings" component={NavTestHarness} />
-          <Route path="/dashboard" component={NavTestHarness} />
-        </MemoryRouter>
-      ));
-
-      fireEvent.click(screen.getByRole("button", { name: "Go Settings" }));
-      await Promise.resolve();
-      expect(assignMock).not.toHaveBeenCalled();
-    });
-
-    it("flushes debounced config and viewState persistence and calls location.assign once per target SHA on navigation", async () => {
-      let disposePersistence!: () => void;
-      createRoot((d) => {
-        disposePersistence = d;
-        initConfigPersistence();
-        initViewPersistence();
-      });
-
-      // Seed stale previous-identity values in localStorage
-      localStorage.setItem(
-        CONFIG_STORAGE_KEY,
-        JSON.stringify({ theme: "corporate", onboardingComplete: false }),
-      );
-      localStorage.setItem(
-        VIEW_STORAGE_KEY,
-        JSON.stringify({ lastActiveTab: "issues" }),
-      );
-
-      let configAtAssign: string | null = null;
-      let viewAtAssign: string | null = null;
-      assignMock.mockImplementation(() => {
-        configAtAssign = localStorage.getItem(CONFIG_STORAGE_KEY);
-        viewAtAssign = localStorage.getItem(VIEW_STORAGE_KEY);
-      });
-
-      const history = createMemoryHistory();
-      render(() => (
-        <MemoryRouter
-          history={history}
-          root={(props) => (
-            <>
-              <UpdateNavigator />
-              {props.children}
-            </>
-          )}
-        >
-          <Route path="/" component={NavTestHarness} />
-          <Route path="/settings" component={NavTestHarness} />
-          <Route path="/dashboard" component={NavTestHarness} />
-        </MemoryRouter>
-      ));
-
-      _setUpdateAvailableForTests({
-        version: "0.1.2",
-        sha: "fedcba987654",
-        builtAt: "2026-01-02T00:00:00.000Z",
-      });
-
-      // Simulate commitImportedSettings mutating config + viewState right before navigating
-      updateConfig({ theme: "dracula", onboardingComplete: true });
-      updateViewState({ lastActiveTab: "pullRequests" });
-
-      // Navigate before the 200ms debounce timer elapses
-      fireEvent.click(screen.getByRole("button", { name: "Go Settings" }));
-      await Promise.resolve();
-
-      expect(assignMock).toHaveBeenCalledTimes(1);
-      expect(assignMock).toHaveBeenCalledWith("/settings");
-      expect(configAtAssign).not.toBeNull();
-      expect(viewAtAssign).not.toBeNull();
-      expect((JSON.parse(configAtAssign!) as { theme: string }).theme).toBe("dracula");
-      expect(
-        (JSON.parse(configAtAssign!) as { onboardingComplete: boolean }).onboardingComplete,
-      ).toBe(true);
-      expect((JSON.parse(viewAtAssign!) as { lastActiveTab: string }).lastActiveTab).toBe(
-        "pullRequests",
-      );
-
-      // Second navigation with the same target SHA must not trigger another assign
-      fireEvent.click(screen.getByRole("button", { name: "Go Dashboard" }));
-      await Promise.resolve();
-      expect(assignMock).toHaveBeenCalledTimes(1);
-
-      disposePersistence();
-    });
-
-    it("preserves location.search and location.hash when calling location.assign on pathname change and ignores same-path query/hash updates", async () => {
-      const history = createMemoryHistory();
-      render(() => (
-        <MemoryRouter
-          history={history}
-          root={(props) => (
-            <>
-              <UpdateNavigator />
-              {props.children}
-            </>
-          )}
-        >
-          <Route path="/" component={NavTestHarness} />
-          <Route path="/settings" component={NavTestHarness} />
-          <Route path="/dashboard" component={NavTestHarness} />
-        </MemoryRouter>
-      ));
-
-      _setUpdateAvailableForTests({
-        version: "0.1.2",
-        sha: "fedcba987654",
-        builtAt: "2026-01-02T00:00:00.000Z",
-      });
-
-      // Updating search/hash on the same pathname ("/") does not trigger location.assign
-      fireEvent.click(screen.getByRole("button", { name: "Same Path Query Change" }));
-      await Promise.resolve();
-      expect(assignMock).not.toHaveBeenCalled();
-
-      // Navigating to a new pathname with search and hash passes full path + search + hash
-      fireEvent.click(screen.getByRole("button", { name: "Go Settings With Query And Hash" }));
-      await Promise.resolve();
-      expect(assignMock).toHaveBeenCalledTimes(1);
-      expect(assignMock).toHaveBeenCalledWith("/settings?tab=general#jira");
     });
   });
 });

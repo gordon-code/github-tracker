@@ -76,6 +76,7 @@ import * as authStore from "../../src/app/stores/auth";
 import * as patLib from "../../src/app/lib/pat";
 import * as settingsTransfer from "../../src/app/lib/settings-transfer";
 import * as proxyLib from "../../src/app/lib/proxy";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../src/app/lib/version";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as configStore from "../../src/app/stores/config";
 import { ConfigSchema } from "../../src/shared/schemas";
@@ -267,6 +268,23 @@ describe("LoginPage — PAT form validation", () => {
       "ghp_" + "a".repeat(36),
       githubUser,
     );
+  });
+
+  it("a stale-schema tab refuses to sign in with a token and asks the user to reload", async () => {
+    vi.mocked(patLib.isValidPatFormat).mockReturnValue({ valid: true });
+    mockFetchOk();
+    const user = await openPatForm();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp_" + "a".repeat(36));
+
+    _setSchemaStaleForTests(true);
+    try {
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+      await waitFor(() => screen.getByText(/older version\. Reload this page, then sign in/i));
+      expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+      expect(mockNavigate).not.toHaveBeenCalled();
+    } finally {
+      _resetVersionStateForTests();
+    }
   });
 
   it("shows 'Verifying...' and disables button while submitting", async () => {
@@ -512,6 +530,32 @@ describe("LoginPage — Import from backup", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => screen.getByText(/something went wrong finishing the import/i));
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("a stale-schema tab refuses to commit the import and tells the user to reload", async () => {
+    mockValidCredsFile();
+    vi.mocked(proxyLib.unsealCredentialBundle).mockResolvedValue({ ok: true, ciphertext: "CT" });
+    vi.mocked(settingsTransfer.resolveImportedCredentials).mockResolvedValue({ ok: true, bundle: BUNDLE, identity: IDENTITY });
+    vi.mocked(settingsTransfer.hasExistingLocalConfig).mockReturnValue(true);
+    vi.mocked(settingsTransfer.commitImportedSettings).mockResolvedValue({ jiraRestored: true });
+
+    const user = userEvent.setup();
+    await openImport(user);
+    fireFileChange();
+    await waitFor(() => screen.getByLabelText("One-time code"));
+    await user.type(screen.getByLabelText("One-time code"), CODE);
+    await user.click(screen.getByRole("button", { name: "Restore credentials" }));
+    await waitFor(() => screen.getByText(/sign you in as/i));
+
+    _setSchemaStaleForTests(true);
+    try {
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await waitFor(() => screen.getByText(/older version and can't import settings/i));
+      expect(settingsTransfer.commitImportedSettings).not.toHaveBeenCalled();
+      expect(mockNavigate).not.toHaveBeenCalled();
+    } finally {
+      _resetVersionStateForTests();
+    }
   });
 
   it("declining the identity dialog leaves the page in place — no navigation, no commit", async () => {

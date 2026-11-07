@@ -17,11 +17,17 @@ export const RepoRefSchema = z.object({
   fullName: z.string().check(z.regex(/^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/)),
 });
 
+/**
+ * Prefix every stored tracked-user avatar URL must start with. It is enforced by a `.refine()`,
+ * which JSON Schema cannot express, so it is exported for the build's schema fingerprint.
+ */
+export const TRACKED_USER_AVATAR_PREFIX = "https://avatars.githubusercontent.com/";
+
 export const TrackedUserSchema = z.object({
   login: z.string().check(z.regex(VALID_TRACKED_LOGIN)),
   avatarUrl: z.url().check(
     z.refine(
-      (u) => u.startsWith("https://avatars.githubusercontent.com/"),
+      (u) => u.startsWith(TRACKED_USER_AVATAR_PREFIX),
       "Avatar URL must be from GitHub CDN"
     )
   ),

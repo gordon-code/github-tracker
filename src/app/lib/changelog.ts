@@ -47,22 +47,18 @@ export function loadChangelog(): Promise<ChangelogEntry[]> {
   return cachedChangelogPromise;
 }
 
-export function unseenEntries(
-  entries: readonly ChangelogEntry[],
-  lastSeen: string | null | undefined,
-): ChangelogEntry[] {
-  if (entries.length === 0) return [];
-  if (!lastSeen || !isStrictSemver(lastSeen)) {
-    return [entries[0]];
-  }
-  return entries.filter((entry) => compareSemver(entry.version, lastSeen) > 0);
-}
-
+/**
+ * Whether any release is newer than `lastSeen`. Without a usable last-seen version (never
+ * opened, or not strict x.y.z) only the newest release counts as unseen, so a first-time user
+ * sees a single unread indicator rather than the whole history.
+ */
 export function hasUnseen(
   entries: readonly ChangelogEntry[],
   lastSeen: string | null | undefined,
 ): boolean {
-  return unseenEntries(entries, lastSeen).length > 0;
+  if (entries.length === 0) return false;
+  if (!lastSeen || !isStrictSemver(lastSeen)) return true;
+  return entries.some((entry) => compareSemver(entry.version, lastSeen) > 0);
 }
 
 /** @internal Test-only helper to clear cached changelog promise */

@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   APP_VERSION,
   GIT_SHA,
-  BUILD_TIME,
+  SCHEMA_FP,
   displayVersion,
   getAppVersion,
-  VersionInfoSchema,
+  schemaStale,
   updateAvailable,
+  VERSION_CHECK_MIN_INTERVAL_MS,
+  _setLoadedAtForTests,
   checkForUpdate,
   reloadOncePerTarget,
   startVersionWatch,
@@ -15,6 +17,7 @@ import {
   _setGitShaForTests,
   _resetVersionStateForTests,
 } from "../../src/app/lib/version";
+import { BuildInfoSchema } from "../../src/shared/build-meta";
 
 function makeJsonResponse(
   body: unknown,
@@ -41,7 +44,6 @@ describe("version metadata", () => {
   it("exposes build-time constants from Vite defines", () => {
     expect(APP_VERSION).toBe("0.1.0");
     expect(GIT_SHA).toBe("abcdef123456");
-    expect(BUILD_TIME).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("formats displayVersion() as <APP_VERSION>+<7-char GIT_SHA>", () => {
@@ -58,16 +60,21 @@ describe("version metadata", () => {
     expect(getAppVersion()).toBe(APP_VERSION);
   });
 
-  describe("VersionInfoSchema", () => {
+  it("displayVersion() reflects the git SHA test override", () => {
+    _setGitShaForTests("1234567890ab");
+    expect(displayVersion()).toBe("0.1.0+1234567");
+  });
+
+  describe("BuildInfoSchema", () => {
     it("accepts valid version metadata with hex SHA or 'dev'", () => {
-      const validHex = VersionInfoSchema.safeParse({
+      const validHex = BuildInfoSchema.safeParse({
         version: "0.1.1",
         sha: "1234567890ab",
         builtAt: "2026-01-02T00:00:00.000Z",
       });
       expect(validHex.success).toBe(true);
 
-      const validDev = VersionInfoSchema.safeParse({
+      const validDev = BuildInfoSchema.safeParse({
         version: "0.1.1",
         sha: "dev",
         builtAt: "2026-01-02T00:00:00.000Z",
@@ -77,7 +84,7 @@ describe("version metadata", () => {
 
     it("rejects oversized strings or invalid SHA formats", () => {
       expect(
-        VersionInfoSchema.safeParse({
+        BuildInfoSchema.safeParse({
           version: "v".repeat(33),
           sha: "1234567890ab",
           builtAt: "2026-01-02T00:00:00.000Z",
@@ -85,7 +92,7 @@ describe("version metadata", () => {
       ).toBe(false);
 
       expect(
-        VersionInfoSchema.safeParse({
+        BuildInfoSchema.safeParse({
           version: "0.1.1",
           sha: "not-a-hex-sha",
           builtAt: "2026-01-02T00:00:00.000Z",
@@ -93,12 +100,116 @@ describe("version metadata", () => {
       ).toBe(false);
 
       expect(
-        VersionInfoSchema.safeParse({
+        BuildInfoSchema.safeParse({
           version: "0.1.1",
           sha: "1234567890ab",
           builtAt: "t".repeat(41),
         }).success,
       ).toBe(false);
+    });
+  });
+
+  describe("schemaStale", () => {
+    const remote = { version: "0.1.1", sha: "fedcba987654", builtAt: "2026-01-02T12:00:00.000Z" };
+
+    it("is false by default and when the deployed schema fingerprint matches this build", async () => {
+      expect(schemaStale()).toBe(false);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({ ...remote, schemaFp: SCHEMA_FP })));
+      await checkForUpdate();
+      expect(updateAvailable()).toEqual({ ...remote, schemaFp: SCHEMA_FP });
+      expect(schemaStale()).toBe(false);
+    });
+
+    it("is true when the deployed schema fingerprint differs from this build's", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({ ...remote, schemaFp: "ffffffffffff" })));
+      await checkForUpdate();
+      expect(schemaStale()).toBe(true);
+    });
+
+    it("stays false when the deployed version.json has no fingerprint", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse(remote)));
+      await checkForUpdate();
+      expect(updateAvailable()).toEqual(remote);
+      expect(schemaStale()).toBe(false);
+    });
+
+    it("clears when a later check reports a matching fingerprint, and survives an unusable response", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({ ...remote, schemaFp: "ffffffffffff" })));
+      await checkForUpdate();
+      expect(schemaStale()).toBe(true);
+
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      await checkForUpdate();
+      expect(schemaStale()).toBe(true);
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({ ...remote, schemaFp: SCHEMA_FP })));
+      await checkForUpdate();
+      expect(schemaStale()).toBe(false);
+    });
+
+    it("is never set by a dev build", async () => {
+      _setGitShaForTests("dev");
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse({ ...remote, schemaFp: "ffffffffffff" })));
+      await checkForUpdate();
+      expect(schemaStale()).toBe(false);
+    });
+
+    it("BuildInfoSchema accepts a 12-hex schemaFp and rejects other shapes", () => {
+      expect(BuildInfoSchema.safeParse({ ...remote, schemaFp: "0123456789ab" }).success).toBe(true);
+      expect(BuildInfoSchema.safeParse({ ...remote, schemaFp: "not-a-hash" }).success).toBe(false);
+      expect(BuildInfoSchema.safeParse({ ...remote, schemaFp: "ABCDEF123456" }).success).toBe(false);
+    });
+  });
+
+  describe("throttled checks", () => {
+    const sameBuild = () => makeJsonResponse({ version: "0.1.0", sha: GIT_SHA, builtAt: "2026-01-01T00:00:00.000Z" });
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    });
+
+    it("skips a throttled check during the boot window, but runs an unthrottled one", async () => {
+      const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(sameBuild()));
+      vi.stubGlobal("fetch", fetchMock);
+      _setLoadedAtForTests(Date.now());
+
+      await checkForUpdate({ throttled: true });
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await checkForUpdate();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs a throttled check once the boot window has passed, then skips repeats inside the minimum interval", async () => {
+      const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(sameBuild()));
+      vi.stubGlobal("fetch", fetchMock);
+      _setLoadedAtForTests(Date.now() - VERSION_WATCH_INITIAL_DELAY_MS - 1);
+
+      await checkForUpdate({ throttled: true });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(VERSION_CHECK_MIN_INTERVAL_MS - 1);
+      await checkForUpdate({ throttled: true });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1);
+      await checkForUpdate({ throttled: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("lets a visibility-driven check through right after a throttled one, and counts it toward the interval", async () => {
+      const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(sameBuild()));
+      vi.stubGlobal("fetch", fetchMock);
+      _setLoadedAtForTests(Date.now() - VERSION_WATCH_INITIAL_DELAY_MS - 1);
+
+      await checkForUpdate({ throttled: true });
+      await checkForUpdate();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(2_000);
+      await checkForUpdate({ throttled: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 

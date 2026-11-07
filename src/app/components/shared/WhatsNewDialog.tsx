@@ -1,11 +1,11 @@
 import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
+import { COMMIT_SHA_RE, DISPLAY_SHA_LENGTH } from "../../../shared/build-meta";
 import {
   CHANGELOG_MAX_ITEM_TEXT_LENGTH,
-  COMMIT_SHA_RE,
   type ChangelogEntry,
 } from "../../../shared/changelog-schema";
-import { isStrictSemver, loadChangelog } from "../../lib/changelog";
+import { compareSemver, isStrictSemver, loadChangelog } from "../../lib/changelog";
 import { CHANGELOG_URL, REPO_URL } from "../../lib/repo-links";
 import { isSafeGitHubUrl } from "../../lib/url";
 import { getAppVersion } from "../../lib/version";
@@ -22,7 +22,7 @@ function buildPrLink(pr: number | undefined): { href: string; label: string } | 
 function buildCommitLink(sha: string | undefined): { href: string; label: string } | undefined {
   if (typeof sha !== "string" || !COMMIT_SHA_RE.test(sha)) return undefined;
   const href = `${REPO_URL}/commit/${sha}`;
-  return isSafeGitHubUrl(href) ? { href, label: `(${sha.slice(0, 7)})` } : undefined;
+  return isSafeGitHubUrl(href) ? { href, label: `(${sha.slice(0, DISPLAY_SHA_LENGTH)})` } : undefined;
 }
 
 interface WhatsNewDialogProps {
@@ -37,7 +37,10 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
   createEffect(() => {
     if (!props.open) return;
     const appVersion = getAppVersion();
-    if (isStrictSemver(appVersion) && untrack(() => config.lastSeenVersion) !== appVersion) {
+    const lastSeen = untrack(() => config.lastSeenVersion);
+    // Only move forward: a tab running an older build must not roll back what a newer tab recorded.
+    const isBehind = !lastSeen || !isStrictSemver(lastSeen) || compareSemver(appVersion, lastSeen) > 0;
+    if (isStrictSemver(appVersion) && isBehind) {
       updateConfig({ lastSeenVersion: appVersion });
     }
     if (props.entries === undefined) {
