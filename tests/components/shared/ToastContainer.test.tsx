@@ -13,6 +13,10 @@ import ToastContainer, {
   resetToastState,
   TOAST_REPEAT_COOLDOWN_MS,
 } from "../../../src/app/components/shared/ToastContainer";
+import {
+  _setUpdateAvailableForTest,
+  _resetVersionStateForTest,
+} from "../../../src/app/lib/version";
 
 // Mirrors the private TOASTED_MESSAGES_KEY constant in ToastContainer.tsx —
 // hardcoded here the same way tests/stores/config.test.ts hardcodes STORAGE_KEY.
@@ -37,12 +41,14 @@ beforeEach(() => {
   clearNotifications();
   clearMutedSources();
   resetToastState();
+  _resetVersionStateForTest();
   vi.useFakeTimers();
   // Ensure matchMedia returns non-reduced-motion
   vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
 
 afterEach(() => {
+  _resetVersionStateForTest();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -532,5 +538,24 @@ describe("ToastContainer", () => {
     const { container } = render(() => <ToastContainer />);
     expect(container.firstElementChild?.getAttribute("aria-live")).toBeNull();
     expect(container.firstElementChild?.getAttribute("aria-atomic")).toBeNull();
+  });
+
+  it("uses bottom-4 when updateAvailable is null and shifts to bottom-20 when updateAvailable is set", () => {
+    const { container } = render(() => <ToastContainer />);
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("bottom-4");
+    expect(wrapper.className).not.toContain("bottom-20");
+
+    _setUpdateAvailableForTest({
+      version: "0.1.2",
+      sha: "fedcba987654",
+      builtAt: "2026-01-02T00:00:00.000Z",
+    });
+    expect(wrapper.className).toContain("bottom-20");
+    expect(wrapper.className).not.toContain("bottom-4");
+
+    _setUpdateAvailableForTest(null);
+    expect(wrapper.className).toContain("bottom-4");
+    expect(wrapper.className).not.toContain("bottom-20");
   });
 });

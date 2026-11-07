@@ -21,6 +21,7 @@ import { pushNotification, dismissNotificationBySource } from "../../lib/errors"
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
+import { displayVersion } from "../../lib/version";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -35,6 +36,7 @@ import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
 import DependencyExclusionModal from "./DependencyExclusionModal";
+import WhatsNewDialog from "../shared/WhatsNewDialog";
 import { InfoTooltip } from "../shared/Tooltip";
 import { createJiraClient } from "../../lib/jira-utils";
 import { clearJiraKeyCache } from "../../services/jira-keys";
@@ -47,6 +49,8 @@ import type { RepoRef } from "../../services/api";
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 const VALID_JIRA_SITE_URL_RE = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/i;
 const VALID_JIRA_CLOUD_ID_RE = /^[a-zA-Z0-9-]+$/;
+const RELEASES_URL = "https://github.com/gordon-code/github-tracker/releases";
+const CHANGELOG_URL = "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md";
 
 interface NumberSelectOption {
   value: number;
@@ -537,6 +541,7 @@ export default function SettingsPage() {
   const [showFieldPicker, setShowFieldPicker] = createSignal(false);
   const [showScopePicker, setShowScopePicker] = createSignal(false);
   const [showDependencyExclusionModal, setShowDependencyExclusionModal] = createSignal(false);
+  const [showWhatsNewDialog, setShowWhatsNewDialog] = createSignal(false);
 
   // Replace Jira API token panel
   const [showReplaceJiraToken, setShowReplaceJiraToken] = createSignal(false);
@@ -2122,9 +2127,48 @@ export default function SettingsPage() {
               Sign out
             </button>
           </SettingRow>
+
+          {/* About */}
+          <SettingRow
+            label="About"
+            description="Current build version and release history"
+          >
+            <div class="flex items-center gap-3 text-sm">
+              <a
+                href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-xs link link-hover"
+              >
+                {displayVersion()}
+              </a>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
+              <button
+                type="button"
+                onClick={() => setShowWhatsNewDialog(true)}
+                class="text-xs link link-hover"
+              >
+                What's new
+              </button>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
+              <a
+                href={isSafeGitHubUrl(CHANGELOG_URL) ? CHANGELOG_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs link link-hover"
+              >
+                Changelog
+              </a>
+            </div>
+          </SettingRow>
         </Section>
           </div>
         </div>
+
+        <WhatsNewDialog
+          open={showWhatsNewDialog()}
+          onOpenChange={setShowWhatsNewDialog}
+        />
 
         <DependencyExclusionModal
           open={showDependencyExclusionModal()}

@@ -10,8 +10,9 @@ import {
   ConfigSchema, TrackedUserSchema, loadConfig, config, updateConfig, resetConfig, setMonitoredRepo,
   addCustomTab, updateCustomTab, removeCustomTab, reorderCustomTab, getCustomTab, isBuiltinTab,
   CustomTabSchema, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes,
-  preParseConfigFixups, postParseConfigFixups,
+  preParseConfigFixups, postParseConfigFixups, initConfigPersistence, flushConfigPersistence,
 } from "../../src/app/stores/config";
+import { getNotifications, resetNotificationState } from "../../src/app/lib/errors";
 import type { CustomTab } from "../../src/app/stores/config";
 import { clearJiraAuth, clearJiraConfigFull } from "../../src/app/stores/auth";
 import { JiraConfigSchema, JiraCustomFieldSchema } from "../../src/shared/schemas";
@@ -63,6 +64,7 @@ describe("ConfigSchema", () => {
     expect(result.onboardingComplete).toBe(false);
     expect(result.authMethod).toBe("oauth");
     expect(result.enableActions).toBe(true);
+    expect(result.lastSeenVersion).toBeNull();
     expect(result.dependencies.excludedOrgs).toEqual([]);
     expect(result.dependencies.excludedRepos).toEqual([]);
   });
@@ -152,6 +154,34 @@ describe("ConfigSchema", () => {
       const stored = ConfigSchema.parse({ hotPollInterval: 45 });
       const roundTripped = ConfigSchema.parse(JSON.parse(JSON.stringify(stored)));
       expect(roundTripped.hotPollInterval).toBe(45);
+    });
+  });
+
+  describe("lastSeenVersion", () => {
+    it("defaults to null and accepts valid version strings or null", () => {
+      expect(ConfigSchema.parse({}).lastSeenVersion).toBeNull();
+      expect(ConfigSchema.parse({ lastSeenVersion: null }).lastSeenVersion).toBeNull();
+      expect(ConfigSchema.parse({ lastSeenVersion: "0.1.0" }).lastSeenVersion).toBe("0.1.0");
+    });
+
+    it("rejects strings exceeding 32 characters", () => {
+      expect(() => ConfigSchema.parse({ lastSeenVersion: "v".repeat(33) })).toThrow(
+        /lastSeenVersion|Too big|<=32/i,
+      );
+    });
+
+    it("persists through loadConfig and updateConfig round-trip", () => {
+      const stored = ConfigSchema.parse({ lastSeenVersion: "0.1.1" });
+      localStorageMock.setItem(STORAGE_KEY, JSON.stringify(stored));
+      expect(loadConfig().lastSeenVersion).toBe("0.1.1");
+
+      createRoot((dispose) => {
+        resetConfig();
+        expect(config.lastSeenVersion).toBeNull();
+        updateConfig({ lastSeenVersion: "0.2.0" });
+        expect(config.lastSeenVersion).toBe("0.2.0");
+        dispose();
+      });
     });
   });
 });
@@ -1607,5 +1637,54 @@ describe("clearJiraConfigFull — wipes all Jira config", () => {
       expect(config.jira.cloudId).toBeUndefined();
       dispose();
     });
+  });
+});
+
+describe("flushConfigPersistence", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    resetConfig();
+    resetNotificationState();
+  });
+
+  it("cancels pending 200ms debounce timer and writes config synchronously once", () => {
+    vi.useFakeTimers();
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      let dispose!: () => void;
+      createRoot((d) => {
+        dispose = d;
+        initConfigPersistence();
+      });
+
+      updateConfig({ theme: "dracula" });
+      setItemSpy.mockClear();
+
+      flushConfigPersistence();
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("dracula");
+
+      // Advancing past 200ms should not fire a second debounced write
+      vi.advanceTimersByTime(300);
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+
+      dispose();
+    } finally {
+      setItemSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("catches localStorage quota errors and pushes localStorage:config warning notification without throwing", () => {
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+    try {
+      expect(() => flushConfigPersistence()).not.toThrow();
+      const notifications = getNotifications();
+      expect(notifications.some((n) => n.source === "localStorage:config")).toBe(true);
+    } finally {
+      setItemSpy.mockRestore();
+    }
   });
 });

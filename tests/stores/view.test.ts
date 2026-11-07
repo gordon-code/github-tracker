@@ -31,6 +31,8 @@ import {
   setJiraCustomOrder,
   applyImportedViewState,
   EXPORTED_VIEW_PREF_KEYS,
+  flushViewPersistence,
+  VIEW_STORAGE_KEY,
 } from "../../src/app/stores/view";
 import type { IgnoredItem, TrackedItem, ViewState } from "../../src/app/stores/view";
 import { getNotifications, clearNotifications } from "../../src/app/lib/errors";
@@ -871,6 +873,37 @@ describe("resetViewState", () => {
     // Tab defaults reset: Jira back to expanded, GitHub tabs back to collapsed
     expect(viewState.expandDefault).toEqual({ jiraAssigned: true });
   });
+
+  it("overwrites a stale on-disk value on flushViewPersistence() even when the in-memory baseline already matches the reset value", () => {
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initViewPersistence();
+    });
+    try {
+      // In-memory baseline already has default globalFilter ({ org: null, repo: null }).
+      // Simulate another tab or prior session writing a stale globalFilter to disk.
+      localStorageMock.setItem(
+        VIEW_STORAGE_KEY,
+        JSON.stringify({
+          ...JSON.parse(JSON.stringify(viewState)),
+          globalFilter: { org: "stale-org", repo: "stale-repo" },
+          jiraCustomOrder: ["STALE-1"],
+        }),
+      );
+
+      resetViewState();
+      flushViewPersistence();
+
+      const raw = localStorageMock.getItem(VIEW_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw);
+      expect(parsed.globalFilter).toEqual({ org: null, repo: null });
+      expect(parsed.jiraCustomOrder).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
 });
 
 describe("resetAllTabFilters — scope reset", () => {
@@ -1675,5 +1708,36 @@ describe("applyImportedViewState", () => {
     expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("lastActiveTab");
     expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("globalSort");
     expect(EXPORTED_VIEW_PREF_KEYS).not.toContain("globalFilter");
+  });
+
+  it("overwrites a stale on-disk value on flushViewPersistence() when an imported key matches the in-memory baseline", () => {
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initViewPersistence();
+    });
+    try {
+      // In-memory baseline already has jiraCustomOrder: [] and showPrRuns: false.
+      // Simulate another tab or prior session writing stale values on disk.
+      localStorageMock.setItem(
+        VIEW_STORAGE_KEY,
+        JSON.stringify({
+          ...JSON.parse(JSON.stringify(viewState)),
+          jiraCustomOrder: ["STALE-1"],
+          showPrRuns: true,
+        }),
+      );
+
+      applyImportedViewState({ jiraCustomOrder: [], showPrRuns: false });
+      flushViewPersistence();
+
+      const raw = localStorageMock.getItem(VIEW_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw);
+      expect(parsed.jiraCustomOrder).toEqual([]);
+      expect(parsed.showPrRuns).toBe(false);
+    } finally {
+      dispose();
+    }
   });
 });

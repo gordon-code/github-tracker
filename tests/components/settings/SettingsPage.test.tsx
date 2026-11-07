@@ -2099,3 +2099,48 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await waitFor(() => screen.getByText(/2 selected/i));
   });
 });
+
+describe("SettingsPage — Data: About", () => {
+  it("renders the About row with displayVersion() and links to Releases and Changelog", () => {
+    renderSettings();
+
+    screen.getByText("About");
+    const versionLink = screen.getByRole("link", { name: "0.1.0+abcdef1" });
+    expect(versionLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/releases",
+    );
+    expect(versionLink.getAttribute("target")).toBe("_blank");
+    expect(versionLink.getAttribute("rel")).toBe("noopener noreferrer");
+
+    const changelogLink = screen.getByRole("link", { name: "Changelog" });
+    expect(changelogLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md",
+    );
+    expect(changelogLink.getAttribute("target")).toBe("_blank");
+    expect(changelogLink.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("omits href on About links when isSafeGitHubUrl returns false", () => {
+    vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(false);
+    renderSettings();
+
+    const versionEl = screen.getByText("0.1.0+abcdef1");
+    expect(versionEl.getAttribute("href")).toBeNull();
+
+    const changelogEl = screen.getByText("Changelog");
+    expect(changelogEl.getAttribute("href")).toBeNull();
+  });
+
+  it("opens WhatsNewDialog when clicking the What's new button in the About row", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const whatsNewBtn = screen.getByRole("button", { name: "What's new" });
+    await user.click(whatsNewBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("What's New")).toBeDefined();
+      expect(screen.getByText("v0.1.0")).toBeDefined();
+    });
+  });
+});

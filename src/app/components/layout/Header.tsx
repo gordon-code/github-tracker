@@ -1,16 +1,64 @@
-import { createSignal, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { user, clearAuth } from "../../stores/auth";
+import { config } from "../../stores/config";
 import { getUnreadCount, markAllAsRead } from "../../lib/errors";
+import { hasUnseen, loadChangelog } from "../../lib/changelog";
+import type { ChangelogEntry } from "../../../shared/changelog-schema";
 import { sizedAvatarUrl } from "../../lib/url";
 import NotificationDrawer from "../shared/NotificationDrawer";
 import ToastContainer from "../shared/ToastContainer";
 import { Tooltip } from "../shared/Tooltip";
 import GitHubStatusBadge from "../shared/GitHubStatusBadge";
+import WhatsNewDialog from "../shared/WhatsNewDialog";
 
 export default function Header() {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = createSignal(false);
+  const [whatsNewOpen, setWhatsNewOpen] = createSignal(false);
+  const [changelogEntries, setChangelogEntries] = createSignal<readonly ChangelogEntry[]>([]);
+  let cancelled = false;
+  onCleanup(() => {
+    cancelled = true;
+  });
+
+  onMount(() => {
+    const load = () => {
+      void (async () => {
+        const entries = await loadChangelog();
+        if (!cancelled) setChangelogEntries(entries);
+      })();
+    };
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(load);
+      onCleanup(() => {
+        cancelled = true;
+        if (typeof window.cancelIdleCallback === "function") {
+          window.cancelIdleCallback(idleId);
+        }
+      });
+    } else {
+      const timerId = setTimeout(load, 0);
+      onCleanup(() => {
+        cancelled = true;
+        clearTimeout(timerId);
+      });
+    }
+  });
+
+  const showWhatsNewDot = createMemo(() =>
+    hasUnseen(changelogEntries(), config.lastSeenVersion),
+  );
+
+  function handleWhatsNewClick() {
+    if (changelogEntries().length === 0) {
+      void (async () => {
+        const entries = await loadChangelog();
+        if (!cancelled) setChangelogEntries(entries);
+      })();
+    }
+    setWhatsNewOpen(true);
+  }
 
   function handleLogout() {
     clearAuth();
@@ -109,6 +157,34 @@ export default function Header() {
           </button>
         </Tooltip>
 
+        {/* What's new button with unseen dot */}
+        <Tooltip content="What's new">
+          <button
+            type="button"
+            onClick={handleWhatsNewClick}
+            class="btn btn-ghost btn-sm shrink-0 relative"
+            aria-label="What's new"
+            aria-expanded={whatsNewOpen()}
+            aria-haspopup="dialog"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+            </svg>
+            <Show when={showWhatsNewDot()}>
+              <span
+                data-testid="whats-new-dot"
+                class="badge badge-primary badge-xs absolute top-1 right-1 h-2 w-2 p-0 rounded-full"
+              />
+            </Show>
+          </button>
+        </Tooltip>
+
         <Tooltip content="Sign out">
           <button
             type="button"
@@ -134,6 +210,11 @@ export default function Header() {
         </div>
       </header>
       <NotificationDrawer open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
+      <WhatsNewDialog
+        open={whatsNewOpen()}
+        onOpenChange={setWhatsNewOpen}
+        entries={changelogEntries()}
+      />
       <ToastContainer />
     </>
   );

@@ -1,5 +1,5 @@
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, onCleanup, untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, type RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
@@ -228,9 +228,22 @@ export function reorderCustomTab(id: string, direction: "up" | "down"): void {
   );
 }
 
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingJson: string | undefined;
+
+export function flushConfigPersistence(): void {
+  clearTimeout(debounceTimer);
+  debounceTimer = undefined;
+  pendingJson = undefined;
+  try {
+    const json = JSON.stringify(untrack(() => config));
+    localStorage.setItem(CONFIG_STORAGE_KEY, json);
+  } catch {
+    pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
+  }
+}
+
 export function initConfigPersistence(): void {
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingJson: string | undefined;
   createEffect(() => {
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
     const json = JSON.stringify(snapshot);
@@ -246,6 +259,7 @@ export function initConfigPersistence(): void {
     }, 200);
     onCleanup(() => {
       clearTimeout(debounceTimer);
+      debounceTimer = undefined;
       if (pendingJson !== undefined) {
         try { localStorage.setItem(CONFIG_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
         pendingJson = undefined;

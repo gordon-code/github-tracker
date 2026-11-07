@@ -62,6 +62,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Keep the Export File Safe](#keep-the-export-file-safe)
   - [Jira Credentials and Staleness](#jira-credentials-and-staleness)
   - [Same-Deployment Only](#same-deployment-only)
+- [Updates & What's New](#updates--whats-new)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -710,7 +711,7 @@ The header shrinks as you scroll to maximize content space.
 
 ## Settings Reference
 
-Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**.
+Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**. The current build version (`<version>+<commit-sha>`) is shown in **Settings > Data > About** (alongside a **What's new** button and a link to the changelog) and in the dashboard footer, both linking to the GitHub Releases page.
 
 ### Config Settings
 
@@ -834,6 +835,18 @@ Jira **OAuth** credentials in an export often go stale quickly. Atlassian rotate
 ### Same-Deployment Only
 
 Encrypted credentials are sealed by this deployment's server and can only be imported back into **the same deployment**. Credentials exported from `gh.gordoncode.dev` cannot be imported into a different deployment (a self-hosted fork or a different domain). Plaintext configuration is portable across deployments; credentials are not.
+
+---
+
+## Updates & What's New
+
+GitHub Tracker checks `/version.json` in the background (30 seconds after load, when returning to a tab, and on each full poll cycle) to detect when a new build has been deployed.
+
+- **Update Banner:** When a newer deployment is detected, a banner appears at the bottom of the screen (*"A new version is available."*) with a **Reload** button and a link to the **Changelog**, and an informational entry is added to the Notification Drawer.
+- **Automatic Reload on Navigation:** If an update is waiting when you navigate between pages (for example, opening **Settings** or returning to the **Dashboard**), the app flushes any pending configuration or view-state changes to `localStorage` and performs a full page reload into the new build automatically.
+- **Stale Chunk Recovery:** If a lazy-loaded page chunk from a previous deployment is no longer available before a background check runs, the app automatically flushes pending state and reloads once to load the current bundle.
+- **What's New Dialog:** Click the **What's new** star icon in the dashboard header (or **What's new** in **Settings > Data > About**) to view recent release notes directly in the app. A small unread indicator dot appears on the header icon whenever a newer release has shipped since you last opened the dialog, and clears automatically once opened.
+- **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`, linking to [GitHub Releases](https://github.com/gordon-code/github-tracker/releases)) in **Settings > Data > About** and in the dashboard footer, and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) directly from **Settings > Data > About** (as well as from the **What's New** dialog and the update banner).
 
 ---
 

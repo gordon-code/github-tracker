@@ -7,6 +7,7 @@ import {
   type NotificationSeverity,
 } from "../../lib/errors";
 import { onAuthCleared } from "../../stores/auth";
+import { updateAvailable } from "../../lib/version";
 
 export interface SeverityConfig {
   path: string;
@@ -315,7 +316,9 @@ export default function ToastContainer() {
   });
 
   return (
-    <div class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96">
+    <div
+      class={`fixed ${updateAvailable() ? "bottom-20" : "bottom-4"} right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96`}
+    >
       <For each={[...visibleToasts().values()]}>
         {(item) => {
           const cfg = severityConfig(item.notification.severity);

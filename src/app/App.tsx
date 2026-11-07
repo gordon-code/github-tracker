@@ -1,10 +1,13 @@
 import { createSignal, createEffect, on, onMount, onCleanup, getOwner, runWithOwner, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
 import { reportBoundaryError } from "./lib/sentry-facade";
-import { Router, Route, Navigate, useNavigate } from "@solidjs/router";
+import { reloadOnceForStaleChunk } from "./lib/chunk-reload";
+import { updateAvailable, reloadOncePerTarget, startVersionWatch } from "./lib/version";
+import { Router, Route, Navigate, useNavigate, useLocation } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
-import { config, initConfigPersistence, resolveTheme } from "./stores/config";
-import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
+import { config, initConfigPersistence, flushConfigPersistence, resolveTheme } from "./stores/config";
+import { initViewPersistence, flushViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
+import UpdateBanner from "./components/shared/UpdateBanner";
 import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import JiraCallback from "./pages/JiraCallback";
@@ -19,21 +22,34 @@ export function _resetAuthInitStartedForTests(): void {
   authInitGen++;
 }
 
-const CHUNK_RELOAD_KEY = "github-tracker:chunk-reload";
-const CHUNK_RELOAD_MAX_AGE = 10_000;
-
-function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
+export function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
   return lazy(() =>
     loader().catch((err) => {
-      const last = sessionStorage.getItem(CHUNK_RELOAD_KEY);
-      if (!last || Date.now() - Number(last) > CHUNK_RELOAD_MAX_AGE) {
-        sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
-        window.location.reload();
+      if (reloadOnceForStaleChunk()) {
         return new Promise<never>(() => {});
       }
       throw err;
     }),
   );
+}
+
+export function UpdateNavigator() {
+  const location = useLocation();
+  createEffect(
+    on(
+      () => location.pathname,
+      (path, prev) => {
+        if (prev === undefined || path === prev) return;
+        const info = updateAvailable();
+        if (info && reloadOncePerTarget(info.sha)) {
+          flushConfigPersistence();
+          flushViewPersistence();
+          window.location.assign(path + location.search + location.hash);
+        }
+      },
+    ),
+  );
+  return null;
 }
 
 const DashboardPage = lazyWithReload(() => import("./components/dashboard/DashboardPage"));
@@ -238,6 +254,8 @@ export default function App() {
     initConfigPersistence();
     initViewPersistence();
     pruneStaleIgnoredItems();
+    const stopVersionWatch = startVersionWatch();
+    onCleanup(stopVersionWatch);
 
     const staleCacheMaxAgeMs = 24 * 60 * 60 * 1000;
     const staleEvictionIntervalMs = 60 * 60 * 1000;
@@ -269,12 +287,13 @@ export default function App() {
         return handleRouteError(err);
       }}
     >
+      <UpdateBanner />
       <Suspense fallback={
         <div class="min-h-screen flex items-center justify-center bg-base-200">
           <span class="loading loading-spinner loading-lg" aria-label="Loading" />
         </div>
       }>
-        <Router>
+        <Router root={(props) => <><UpdateNavigator />{props.children}</>}>
           <Route path="/" component={RootRedirect} />
           <Route path="/login" component={LoginPage} />
           <Route path="/oauth/callback" component={OAuthCallback} />
