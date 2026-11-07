@@ -1,6 +1,6 @@
 import * as z from "zod/mini";
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup, untrack } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
@@ -209,6 +209,7 @@ const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"]
 const VIEW_STATE_KEYS = new Set(Object.keys(ViewStateSchema.shape));
 let fullOverwritePending = false;
 const forcedKeysPending = new Set<string>();
+const [persistTrigger, setPersistTrigger] = createSignal(0);
 
 /**
  * Top-level ViewState keys included in a settings export's `_viewPreferences`
@@ -348,6 +349,7 @@ export function applyImportedViewState(raw: unknown): void {
         Object.assign(draft, patch);
       })
     );
+    setPersistTrigger((n) => n + 1);
   } catch {
     // Silent no-op, matching this function's documented silent-skip semantics.
   }
@@ -457,6 +459,7 @@ export function resetViewState(): void {
       });
     })
   );
+  setPersistTrigger((n) => n + 1);
 }
 
 // KNOWN LIMITATION: ViewStateSchema.pick() only prevents inflation of TOP-LEVEL fields
@@ -933,6 +936,13 @@ export function flushViewPersistence(): void {
   debounceTimer = undefined;
   pendingSnapshot = undefined;
   const snapshot = JSON.parse(JSON.stringify(untrack(() => viewState))) as Record<string, unknown>;
+  if (
+    !fullOverwritePending &&
+    forcedKeysPending.size === 0 &&
+    JSON.stringify(snapshot) === JSON.stringify(lastSyncedSnapshot)
+  ) {
+    return;
+  }
   commitSnapshot(snapshot);
 }
 
@@ -966,6 +976,7 @@ export function initViewPersistence(): void {
   forcedKeysPending.clear();
 
   createEffect(() => {
+    persistTrigger();
     const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
     const snapshot = JSON.parse(json) as Record<string, unknown>;
     pendingSnapshot = snapshot;

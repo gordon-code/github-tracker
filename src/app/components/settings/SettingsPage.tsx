@@ -21,7 +21,8 @@ import { pushNotification, dismissNotificationBySource } from "../../lib/errors"
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
-import { displayVersion } from "../../lib/version";
+import { CHANGELOG_URL, RELEASES_URL } from "../../lib/repo-links";
+import { BUILD_TIME, displayVersion } from "../../lib/version";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -49,8 +50,6 @@ import type { RepoRef } from "../../services/api";
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 const VALID_JIRA_SITE_URL_RE = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/i;
 const VALID_JIRA_CLOUD_ID_RE = /^[a-zA-Z0-9-]+$/;
-const RELEASES_URL = "https://github.com/gordon-code/github-tracker/releases";
-const CHANGELOG_URL = "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md";
 
 interface NumberSelectOption {
   value: number;
@@ -2136,6 +2135,7 @@ export default function SettingsPage() {
             <div class="flex items-center gap-3 text-sm">
               <a
                 href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
+                title={`Built ${BUILD_TIME}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="font-mono text-xs link link-hover"

@@ -400,7 +400,15 @@ describe("buildMeta Vite plugin", () => {
       const watchSpy = vi.fn();
       const loadedReal = load.call({ addWatchFile: watchSpy }, "\0virtual:changelog");
       expect(watchSpy).toHaveBeenCalledWith(resolve(process.cwd(), "CHANGELOG.md"));
+      // The committed release-please format must parse into real entries, not fall back to `[]`.
       expect(loadedReal).toMatch(/^export default \[.*\];$/);
+      expect(loadedReal).not.toBe("export default [];");
+      const realEntries = JSON.parse(
+        (loadedReal ?? "").replace(/^export default /, "").replace(/;$/, ""),
+      ) as Array<{ version: string; sections: unknown[] }>;
+      expect(realEntries.length).toBeGreaterThan(0);
+      expect(realEntries[0].version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(realEntries[0].sections.length).toBeGreaterThan(0);
 
       // Missing CHANGELOG.md returns "export default [];"
       mockExistsSync.mockReturnValue(false);

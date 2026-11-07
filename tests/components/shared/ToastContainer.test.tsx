@@ -14,8 +14,8 @@ import ToastContainer, {
   TOAST_REPEAT_COOLDOWN_MS,
 } from "../../../src/app/components/shared/ToastContainer";
 import {
-  _setUpdateAvailableForTest,
-  _resetVersionStateForTest,
+  _setUpdateAvailableForTests,
+  _resetVersionStateForTests,
 } from "../../../src/app/lib/version";
 
 // Mirrors the private TOASTED_MESSAGES_KEY constant in ToastContainer.tsx —
@@ -41,14 +41,14 @@ beforeEach(() => {
   clearNotifications();
   clearMutedSources();
   resetToastState();
-  _resetVersionStateForTest();
+  _resetVersionStateForTests();
   vi.useFakeTimers();
   // Ensure matchMedia returns non-reduced-motion
   vi.spyOn(window, "matchMedia").mockReturnValue({ matches: false } as MediaQueryList);
 });
 
 afterEach(() => {
-  _resetVersionStateForTest();
+  _resetVersionStateForTests();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -546,7 +546,7 @@ describe("ToastContainer", () => {
     expect(wrapper.className).toContain("bottom-4");
     expect(wrapper.className).not.toContain("bottom-20");
 
-    _setUpdateAvailableForTest({
+    _setUpdateAvailableForTests({
       version: "0.1.2",
       sha: "fedcba987654",
       builtAt: "2026-01-02T00:00:00.000Z",
@@ -554,7 +554,7 @@ describe("ToastContainer", () => {
     expect(wrapper.className).toContain("bottom-20");
     expect(wrapper.className).not.toContain("bottom-4");
 
-    _setUpdateAvailableForTest(null);
+    _setUpdateAvailableForTests(null);
     expect(wrapper.className).toContain("bottom-4");
     expect(wrapper.className).not.toContain("bottom-20");
   });

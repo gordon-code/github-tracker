@@ -1,5 +1,5 @@
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup, untrack } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, type RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
@@ -90,7 +90,18 @@ export function loadConfig(): Config {
   }
 }
 
-export const [config, setConfig] = createStore<Config>(loadConfig());
+const [config, _setConfig] = createStore<Config>(loadConfig());
+let configDirty = false;
+const [persistTrigger, setPersistTrigger] = createSignal(0);
+
+export { config };
+
+export const setConfig: typeof _setConfig = (...args: unknown[]) => {
+  const result = (_setConfig as (...a: unknown[]) => unknown)(...args);
+  configDirty = true;
+  setPersistTrigger((n) => n + 1);
+  return result;
+};
 
 export function updateConfig(partial: Partial<Config>): void {
   const validated = z.partial(ConfigSchema).safeParse(partial);
@@ -230,40 +241,64 @@ export function reorderCustomTab(id: string, direction: "up" | "down"): void {
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingJson: string | undefined;
+// The config this tab last loaded from, or wrote to, localStorage. Config is not synced
+// between tabs, so writing this tab's whole config when it has no changes of its own
+// would overwrite a newer config another tab saved in the meantime.
+let lastPersistedJson = JSON.stringify(config);
 
+function writeConfigJson(json: string): boolean {
+  try {
+    localStorage.setItem(CONFIG_STORAGE_KEY, json);
+    lastPersistedJson = json;
+    configDirty = false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Synchronously commits a debounced config change before the page unloads. A no-op
+ * when this tab has not changed its config since it loaded or last wrote it.
+ */
 export function flushConfigPersistence(): void {
   clearTimeout(debounceTimer);
   debounceTimer = undefined;
   pendingJson = undefined;
-  try {
-    const json = JSON.stringify(untrack(() => config));
-    localStorage.setItem(CONFIG_STORAGE_KEY, json);
-  } catch {
+  const json = JSON.stringify(untrack(() => config));
+  if (!configDirty && json === lastPersistedJson) return;
+  if (!writeConfigJson(json)) {
     pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
   }
 }
 
 export function initConfigPersistence(): void {
+  lastPersistedJson = JSON.stringify(untrack(() => config));
+  configDirty = false;
+
   createEffect(() => {
+    persistTrigger();
     const snapshot = JSON.parse(JSON.stringify(config)) as Config;
     const json = JSON.stringify(snapshot);
     pendingJson = json;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       pendingJson = undefined;
-      try {
-        localStorage.setItem(CONFIG_STORAGE_KEY, json);
-      } catch {
+      if (!writeConfigJson(json)) {
         pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
       }
     }, 200);
-    onCleanup(() => {
-      clearTimeout(debounceTimer);
-      debounceTimer = undefined;
-      if (pendingJson !== undefined) {
-        try { localStorage.setItem(CONFIG_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
-        pendingJson = undefined;
-      }
-    });
+  });
+
+  // Registered on the outer owner rather than inside createEffect so effect
+  // re-runs on intermediate config mutations do not synchronously flush stale
+  // pendingJson or prematurely clear configDirty.
+  onCleanup(() => {
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    if (pendingJson !== undefined) {
+      writeConfigJson(pendingJson);
+      pendingJson = undefined;
+    }
   });
 }

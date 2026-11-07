@@ -66,6 +66,6 @@ export function hasUnseen(
 }
 
 /** @internal Test-only helper to clear cached changelog promise */
-export function _resetChangelogCacheForTest(): void {
+export function _resetChangelogCacheForTests(): void {
   cachedChangelogPromise = null;
 }

@@ -1,11 +1,12 @@
 import { createSignal, createEffect, on, onMount, onCleanup, getOwner, runWithOwner, Show, ErrorBoundary, Suspense, lazy, type JSX } from "solid-js";
 import { reportBoundaryError } from "./lib/sentry-facade";
 import { reloadOnceForStaleChunk } from "./lib/chunk-reload";
+import { flushPersistedState } from "./lib/flush-persistence";
 import { updateAvailable, reloadOncePerTarget, startVersionWatch } from "./lib/version";
 import { Router, Route, Navigate, useNavigate, useLocation } from "@solidjs/router";
 import { isAuthenticated, validateToken, AUTH_STORAGE_KEY } from "./stores/auth";
-import { config, initConfigPersistence, flushConfigPersistence, resolveTheme } from "./stores/config";
-import { initViewPersistence, flushViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
+import { config, initConfigPersistence, resolveTheme } from "./stores/config";
+import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
 import UpdateBanner from "./components/shared/UpdateBanner";
 import LoginPage from "./pages/LoginPage";
@@ -24,12 +25,22 @@ export function _resetAuthInitStartedForTests(): void {
 
 export function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
   return lazy(() =>
-    loader().catch((err) => {
-      if (reloadOnceForStaleChunk()) {
-        return new Promise<never>(() => {});
-      }
-      throw err;
-    }),
+    loader()
+      .then((mod) => {
+        // A cancelled `vite:preloadError` (see installChunkReloadHandler) makes Vite's
+        // preload helper resolve the import with `undefined` while the page reloads.
+        // Stay on the Suspense fallback instead of failing on a missing module.
+        if (mod === undefined) {
+          return new Promise<never>(() => {});
+        }
+        return mod;
+      })
+      .catch((err) => {
+        if (reloadOnceForStaleChunk()) {
+          return new Promise<never>(() => {});
+        }
+        throw err;
+      }),
   );
 }
 
@@ -42,8 +53,7 @@ export function UpdateNavigator() {
         if (prev === undefined || path === prev) return;
         const info = updateAvailable();
         if (info && reloadOncePerTarget(info.sha)) {
-          flushConfigPersistence();
-          flushViewPersistence();
+          flushPersistedState();
           window.location.assign(path + location.search + location.hash);
         }
       },

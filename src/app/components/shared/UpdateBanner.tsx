@@ -1,11 +1,11 @@
 import { createEffect, Show } from "solid-js";
 import { updateAvailable } from "../../lib/version";
-import { pushNotification } from "../../lib/errors";
+import { dismissNotificationBySource, pushNotification } from "../../lib/errors";
+import { flushPersistedState } from "../../lib/flush-persistence";
+import { CHANGELOG_URL } from "../../lib/repo-links";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { flushConfigPersistence } from "../../stores/config";
-import { flushViewPersistence } from "../../stores/view";
 
-export const CHANGELOG_URL = "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md";
+const UPDATE_NOTIFICATION_SOURCE = "app-update";
 
 export default function UpdateBanner() {
   let notified = false;
@@ -15,16 +15,18 @@ export default function UpdateBanner() {
     if (info && !notified) {
       notified = true;
       pushNotification(
-        "app-update",
+        UPDATE_NOTIFICATION_SOURCE,
         "A new version of GitHub Tracker is available — reload to update.",
         "info",
       );
+    } else if (!info && notified) {
+      notified = false;
+      dismissNotificationBySource(UPDATE_NOTIFICATION_SOURCE);
     }
   });
 
   const handleReload = () => {
-    flushConfigPersistence();
-    flushViewPersistence();
+    flushPersistedState();
     window.location.reload();
   };
 

@@ -87,6 +87,7 @@ import * as githubService from "../../src/app/services/github";
 import * as cacheStore from "../../src/app/stores/cache";
 import * as viewStore from "../../src/app/stores/view";
 import * as sentryFacade from "../../src/app/lib/sentry-facade";
+import * as versionModule from "../../src/app/lib/version";
 import App, { _resetAuthInitStartedForTests } from "../../src/app/App";
 
 describe("App", () => {
@@ -171,6 +172,37 @@ describe("App", () => {
     await waitFor(() => {
       expect(vi.mocked(githubService.initClientWatcher)).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("starts the version watch on mount, stops it on unmount, and renders the update banner when an update is flagged", async () => {
+    const stopVersionWatch = vi.fn();
+    const startSpy = vi
+      .spyOn(versionModule, "startVersionWatch")
+      .mockReturnValue(stopVersionWatch);
+    try {
+      const { unmount } = render(() => <App />);
+
+      await waitFor(() => {
+        expect(startSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(screen.queryByText("A new version is available.")).toBeNull();
+
+      versionModule._setUpdateAvailableForTests({
+        version: "0.1.2",
+        sha: "fedcba987654",
+        builtAt: "2026-01-02T00:00:00.000Z",
+      });
+      await waitFor(() => {
+        screen.getByText("A new version is available.");
+      });
+
+      expect(stopVersionWatch).not.toHaveBeenCalled();
+      unmount();
+      expect(stopVersionWatch).toHaveBeenCalledTimes(1);
+    } finally {
+      startSpy.mockRestore();
+      versionModule._resetVersionStateForTests();
+    }
   });
 
   it("redirects to /dashboard when not initially authenticated but validateToken succeeds", async () => {

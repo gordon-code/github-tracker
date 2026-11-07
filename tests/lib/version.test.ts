@@ -4,14 +4,16 @@ import {
   GIT_SHA,
   BUILD_TIME,
   displayVersion,
+  getAppVersion,
   VersionInfoSchema,
   updateAvailable,
   checkForUpdate,
   reloadOncePerTarget,
   startVersionWatch,
   VERSION_WATCH_INITIAL_DELAY_MS,
-  _setGitShaForTest,
-  _resetVersionStateForTest,
+  _setAppVersionForTests,
+  _setGitShaForTests,
+  _resetVersionStateForTests,
 } from "../../src/app/lib/version";
 
 function makeJsonResponse(
@@ -28,11 +30,11 @@ function makeJsonResponse(
 
 describe("version metadata", () => {
   beforeEach(() => {
-    _resetVersionStateForTest();
+    _resetVersionStateForTests();
   });
 
   afterEach(() => {
-    _resetVersionStateForTest();
+    _resetVersionStateForTests();
     vi.useRealTimers();
   });
 
@@ -45,6 +47,15 @@ describe("version metadata", () => {
   it("formats displayVersion() as <APP_VERSION>+<7-char GIT_SHA>", () => {
     expect(displayVersion()).toBe(`${APP_VERSION}+${GIT_SHA.slice(0, 7)}`);
     expect(displayVersion()).toBe("0.1.0+abcdef1");
+  });
+
+  it("getAppVersion() tracks the running build version and the test override resets", () => {
+    expect(getAppVersion()).toBe(APP_VERSION);
+    _setAppVersionForTests("9.9.9");
+    expect(getAppVersion()).toBe("9.9.9");
+    expect(displayVersion()).toBe("9.9.9+abcdef1");
+    _resetVersionStateForTests();
+    expect(getAppVersion()).toBe(APP_VERSION);
   });
 
   describe("VersionInfoSchema", () => {
@@ -124,6 +135,53 @@ describe("version metadata", () => {
       expect(updateAvailable()).toEqual(remoteInfo);
     });
 
+    it("clears updateAvailable when a later check reports the running build again", async () => {
+      const remoteInfo = {
+        version: "0.1.1",
+        sha: "fedcba987654",
+        builtAt: "2026-01-02T12:00:00.000Z",
+      };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse(remoteInfo)));
+      await checkForUpdate();
+      expect(updateAvailable()).toEqual(remoteInfo);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          makeJsonResponse({
+            version: "0.1.0",
+            sha: GIT_SHA,
+            builtAt: "2026-01-01T00:00:00.000Z",
+          }),
+        ),
+      );
+      await checkForUpdate();
+      expect(updateAvailable()).toBeNull();
+    });
+
+    it("keeps a flagged update when a later response is unusable", async () => {
+      const remoteInfo = {
+        version: "0.1.1",
+        sha: "fedcba987654",
+        builtAt: "2026-01-02T12:00:00.000Z",
+      };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeJsonResponse(remoteInfo)));
+      await checkForUpdate();
+
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      await checkForUpdate();
+      expect(updateAvailable()).toEqual(remoteInfo);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          makeJsonResponse({ version: "0.1.1", sha: "dev", builtAt: "2026-01-02T12:00:00.000Z" }),
+        ),
+      );
+      await checkForUpdate();
+      expect(updateAvailable()).toEqual(remoteInfo);
+    });
+
     it("ignores non-OK HTTP responses and text/html SPA fallbacks", async () => {
       vi.stubGlobal(
         "fetch",
@@ -164,7 +222,7 @@ describe("version metadata", () => {
     });
 
     it("compares 12-char SHA prefixes case-insensitively", async () => {
-      _setGitShaForTest("ABCDEF1234567890ABCDEF1234567890ABCDEF12");
+      _setGitShaForTests("ABCDEF1234567890ABCDEF1234567890ABCDEF12");
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
@@ -211,7 +269,7 @@ describe("version metadata", () => {
     });
 
     it("never flags an update when local GIT_SHA or remote SHA is 'dev'", async () => {
-      _setGitShaForTest("dev");
+      _setGitShaForTests("dev");
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
@@ -225,7 +283,7 @@ describe("version metadata", () => {
       await checkForUpdate();
       expect(updateAvailable()).toBeNull();
 
-      _setGitShaForTest(GIT_SHA);
+      _setGitShaForTests(GIT_SHA);
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(

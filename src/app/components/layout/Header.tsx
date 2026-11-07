@@ -18,31 +18,31 @@ export default function Header() {
   const [whatsNewOpen, setWhatsNewOpen] = createSignal(false);
   const [changelogEntries, setChangelogEntries] = createSignal<readonly ChangelogEntry[]>([]);
   let cancelled = false;
+  let cancelScheduledLoad: (() => void) | undefined;
   onCleanup(() => {
     cancelled = true;
+    cancelScheduledLoad?.();
   });
 
+  function refreshChangelog() {
+    void (async () => {
+      const entries = await loadChangelog();
+      if (!cancelled) setChangelogEntries(entries);
+    })();
+  }
+
+  // The changelog chunk is not needed to render the header, so load it when the browser is idle.
   onMount(() => {
-    const load = () => {
-      void (async () => {
-        const entries = await loadChangelog();
-        if (!cancelled) setChangelogEntries(entries);
-      })();
-    };
-    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(load);
-      onCleanup(() => {
-        cancelled = true;
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(refreshChangelog);
+      cancelScheduledLoad = () => {
         if (typeof window.cancelIdleCallback === "function") {
           window.cancelIdleCallback(idleId);
         }
-      });
+      };
     } else {
-      const timerId = setTimeout(load, 0);
-      onCleanup(() => {
-        cancelled = true;
-        clearTimeout(timerId);
-      });
+      const timerId = setTimeout(refreshChangelog, 0);
+      cancelScheduledLoad = () => clearTimeout(timerId);
     }
   });
 
@@ -51,12 +51,7 @@ export default function Header() {
   );
 
   function handleWhatsNewClick() {
-    if (changelogEntries().length === 0) {
-      void (async () => {
-        const entries = await loadChangelog();
-        if (!cancelled) setChangelogEntries(entries);
-      })();
-    }
+    if (changelogEntries().length === 0) refreshChangelog();
     setWhatsNewOpen(true);
   }
 
@@ -163,7 +158,7 @@ export default function Header() {
             type="button"
             onClick={handleWhatsNewClick}
             class="btn btn-ghost btn-sm shrink-0 relative"
-            aria-label="What's new"
+            aria-label={showWhatsNewDot() ? "What's new, unread release notes" : "What's new"}
             aria-expanded={whatsNewOpen()}
             aria-haspopup="dialog"
           >

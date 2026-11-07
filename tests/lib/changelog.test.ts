@@ -6,7 +6,7 @@ import {
   isStrictSemver,
   loadChangelog,
   unseenEntries,
-  _resetChangelogCacheForTest,
+  _resetChangelogCacheForTests,
 } from "../../src/app/lib/changelog";
 
 const SAMPLE_ENTRIES: ChangelogEntry[] = [
@@ -34,12 +34,12 @@ const SAMPLE_ENTRIES: ChangelogEntry[] = [
 
 describe("lib/changelog", () => {
   beforeEach(() => {
-    _resetChangelogCacheForTest();
+    _resetChangelogCacheForTests();
   });
 
   afterEach(() => {
     vi.doUnmock("virtual:changelog");
-    _resetChangelogCacheForTest();
+    _resetChangelogCacheForTests();
   });
 
   it("validates strict x.y.z semver strings", () => {
@@ -103,13 +103,13 @@ describe("lib/changelog", () => {
     const rejectedMod = await import("../../src/app/lib/changelog");
     await expect(rejectedMod.loadChangelog()).resolves.toEqual([]);
 
-    // Without even calling _resetChangelogCacheForTest(), unmocking allows the next load to succeed
+    // Without even calling _resetChangelogCacheForTests(), unmocking allows the next load to succeed
     vi.doUnmock("virtual:changelog");
     const recoveredAfterReject = await rejectedMod.loadChangelog();
     expect(recoveredAfterReject).toHaveLength(2);
     expect(recoveredAfterReject[0].version).toBe("0.1.0");
 
-    // 2. Invalid schema payload: loadChangelog() returns [] and recovers across _resetChangelogCacheForTest()
+    // 2. Invalid schema payload: loadChangelog() returns [] and recovers across _resetChangelogCacheForTests()
     vi.resetModules();
     vi.doMock("virtual:changelog", () => ({
       default: { invalid: "not-an-array" },
@@ -118,7 +118,7 @@ describe("lib/changelog", () => {
     await expect(invalidMod.loadChangelog()).resolves.toEqual([]);
 
     vi.doUnmock("virtual:changelog");
-    invalidMod._resetChangelogCacheForTest();
+    invalidMod._resetChangelogCacheForTests();
     const recoveredAfterInvalid = await invalidMod.loadChangelog();
     expect(recoveredAfterInvalid).toHaveLength(2);
     expect(recoveredAfterInvalid[0].version).toBe("0.1.0");

@@ -1740,4 +1740,62 @@ describe("applyImportedViewState", () => {
       dispose();
     }
   });
+
+  it("schedules a debounced write on applyImportedViewState even when imported primitive values already match in-memory viewState", () => {
+    vi.useFakeTimers();
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initViewPersistence();
+    });
+    try {
+      // Let initial mount persistence settle
+      vi.advanceTimersByTime(250);
+
+      // Simulate another tab writing showPrRuns: true to disk while this tab still has false in memory
+      localStorageMock.setItem(
+        VIEW_STORAGE_KEY,
+        JSON.stringify({
+          ...JSON.parse(JSON.stringify(viewState)),
+          showPrRuns: true,
+        }),
+      );
+
+      // Importing showPrRuns: false matches in-memory viewState.showPrRuns (false),
+      // so without persistTrigger the persistence effect would not re-run.
+      applyImportedViewState({ showPrRuns: false });
+      vi.advanceTimersByTime(250);
+
+      const parsed = JSON.parse(localStorageMock.getItem(VIEW_STORAGE_KEY) ?? "{}");
+      expect(parsed.showPrRuns).toBe(false);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not write or strip another tab's on-disk view state on flushViewPersistence() when this tab has no changes of its own", () => {
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initViewPersistence();
+    });
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      const otherTabBlob = JSON.stringify({
+        ...JSON.parse(JSON.stringify(viewState)),
+        showPrRuns: true,
+        futureSchemaKey: "preserved",
+      });
+      localStorageMock.setItem(VIEW_STORAGE_KEY, otherTabBlob);
+      setItemSpy.mockClear();
+
+      flushViewPersistence();
+      expect(setItemSpy).not.toHaveBeenCalled();
+      expect(localStorageMock.getItem(VIEW_STORAGE_KEY)).toBe(otherTabBlob);
+    } finally {
+      setItemSpy.mockRestore();
+      dispose();
+    }
+  });
 });

@@ -1,28 +1,31 @@
 import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
-import type { ChangelogEntry } from "../../../shared/changelog-schema";
+import {
+  CHANGELOG_MAX_ITEM_TEXT_LENGTH,
+  COMMIT_SHA_RE,
+  type ChangelogEntry,
+} from "../../../shared/changelog-schema";
 import { isStrictSemver, loadChangelog } from "../../lib/changelog";
+import { CHANGELOG_URL, REPO_URL } from "../../lib/repo-links";
 import { isSafeGitHubUrl } from "../../lib/url";
-import { APP_VERSION } from "../../lib/version";
+import { getAppVersion } from "../../lib/version";
 import { config, updateConfig } from "../../stores/config";
 
-const REPO_BASE_URL = "https://github.com/gordon-code/github-tracker";
-const CHANGELOG_URL = `${REPO_BASE_URL}/blob/main/CHANGELOG.md`;
-const HEX_SHA_RE = /^[0-9a-f]{7,40}$/;
-
-function buildPrUrl(pr: number | undefined): string | undefined {
+// Entries arrive schema-validated, but the `entries` prop is public, so every link
+// derived from entry data is re-checked here before it reaches an href.
+function buildPrLink(pr: number | undefined): { href: string; label: string } | undefined {
   if (typeof pr !== "number" || !Number.isInteger(pr) || pr <= 0) return undefined;
-  const url = `${REPO_BASE_URL}/pull/${pr}`;
-  return isSafeGitHubUrl(url) ? url : undefined;
+  const href = `${REPO_URL}/pull/${pr}`;
+  return isSafeGitHubUrl(href) ? { href, label: `#${pr}` } : undefined;
 }
 
-function buildCommitUrl(sha: string | undefined): string | undefined {
-  if (typeof sha !== "string" || !HEX_SHA_RE.test(sha)) return undefined;
-  const url = `${REPO_BASE_URL}/commit/${sha}`;
-  return isSafeGitHubUrl(url) ? url : undefined;
+function buildCommitLink(sha: string | undefined): { href: string; label: string } | undefined {
+  if (typeof sha !== "string" || !COMMIT_SHA_RE.test(sha)) return undefined;
+  const href = `${REPO_URL}/commit/${sha}`;
+  return isSafeGitHubUrl(href) ? { href, label: `(${sha.slice(0, 7)})` } : undefined;
 }
 
-export interface WhatsNewDialogProps {
+interface WhatsNewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   entries?: readonly ChangelogEntry[];
@@ -33,8 +36,9 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
 
   createEffect(() => {
     if (!props.open) return;
-    if (isStrictSemver(APP_VERSION) && untrack(() => config.lastSeenVersion) !== APP_VERSION) {
-      updateConfig({ lastSeenVersion: APP_VERSION });
+    const appVersion = getAppVersion();
+    if (isStrictSemver(appVersion) && untrack(() => config.lastSeenVersion) !== appVersion) {
+      updateConfig({ lastSeenVersion: appVersion });
     }
     if (props.entries === undefined) {
       let cancelled = false;
@@ -49,7 +53,6 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
   });
 
   const entries = () => props.entries ?? loadedEntries();
-  const fullChangelogHref = () => (isSafeGitHubUrl(CHANGELOG_URL) ? CHANGELOG_URL : undefined);
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
@@ -109,37 +112,37 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
                           <ul class="list-disc list-inside space-y-1 text-sm text-base-content">
                             <For each={section.items}>
                               {(item) => {
-                                const prHref = () => buildPrUrl(item.pr);
-                                const shaHref = () => buildCommitUrl(item.sha);
+                                const prLink = () => buildPrLink(item.pr);
+                                const commitLink = () => buildCommitLink(item.sha);
                                 return (
                                   <li class="leading-relaxed">
-                                    <span>{item.text.slice(0, 300)}</span>
-                                    <Show when={prHref()}>
-                                      {(href) => (
+                                    <span>{item.text.slice(0, CHANGELOG_MAX_ITEM_TEXT_LENGTH)}</span>
+                                    <Show when={prLink()}>
+                                      {(link) => (
                                         <>
                                           {" "}
                                           <a
-                                            href={href()}
+                                            href={link().href}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             class="link link-primary font-mono text-xs"
                                           >
-                                            #{item.pr}
+                                            {link().label}
                                           </a>
                                         </>
                                       )}
                                     </Show>
-                                    <Show when={shaHref()}>
-                                      {(href) => (
+                                    <Show when={commitLink()}>
+                                      {(link) => (
                                         <>
                                           {" "}
                                           <a
-                                            href={href()}
+                                            href={link().href}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             class="link link-hover font-mono text-xs text-base-content/50"
                                           >
-                                            ({item.sha!.slice(0, 7)})
+                                            {link().label}
                                           </a>
                                         </>
                                       )}
@@ -159,23 +162,19 @@ export default function WhatsNewDialog(props: WhatsNewDialogProps) {
           </div>
 
           {/* Footer */}
-          <Show when={fullChangelogHref()}>
-            {(href) => (
-              <div class="px-5 py-3 border-t border-base-300 shrink-0 flex items-center justify-between text-xs">
-                <a
-                  href={href()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="link link-primary font-medium"
-                >
-                  Full changelog on GitHub
-                </a>
-                <Dialog.CloseButton class="btn btn-sm btn-ghost">
-                  Close
-                </Dialog.CloseButton>
-              </div>
-            )}
-          </Show>
+          <div class="px-5 py-3 border-t border-base-300 shrink-0 flex items-center justify-between text-xs">
+            <a
+              href={isSafeGitHubUrl(CHANGELOG_URL) ? CHANGELOG_URL : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="link link-primary font-medium"
+            >
+              Full changelog on GitHub
+            </a>
+            <Dialog.CloseButton class="btn btn-sm btn-ghost">
+              Close
+            </Dialog.CloseButton>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog>

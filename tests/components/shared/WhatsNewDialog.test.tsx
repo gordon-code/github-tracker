@@ -1,28 +1,29 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import WhatsNewDialog from "../../../src/app/components/shared/WhatsNewDialog";
 import { config, resetConfig } from "../../../src/app/stores/config";
-import { _resetChangelogCacheForTest, loadChangelog } from "../../../src/app/lib/changelog";
+import * as changelogModule from "../../../src/app/lib/changelog";
+import { _resetChangelogCacheForTests } from "../../../src/app/lib/changelog";
 import {
   APP_VERSION,
-  _resetVersionStateForTest,
-  _setAppVersionForTest,
+  _resetVersionStateForTests,
+  _setAppVersionForTests,
 } from "../../../src/app/lib/version";
 import type { ChangelogEntry } from "../../../src/shared/changelog-schema";
 
 describe("WhatsNewDialog", () => {
   beforeEach(() => {
     resetConfig();
-    _resetVersionStateForTest();
-    _resetChangelogCacheForTest();
+    _resetVersionStateForTests();
+    _resetChangelogCacheForTests();
   });
 
   afterEach(() => {
     resetConfig();
-    _resetVersionStateForTest();
-    _resetChangelogCacheForTest();
+    _resetVersionStateForTests();
+    _resetChangelogCacheForTests();
   });
 
   it("renders entries with version, date, section headings, items, PR link, commit SHA link, and full changelog link", () => {
@@ -141,7 +142,7 @@ describe("WhatsNewDialog", () => {
 
     // Reset and test non-strict APP_VERSION
     resetConfig();
-    _setAppVersionForTest("0.1.0-dev");
+    _setAppVersionForTests("0.1.0-dev");
     render(() => (
       <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />
     ));
@@ -170,20 +171,41 @@ describe("WhatsNewDialog", () => {
     });
   });
 
-  it("does not throw or update state after disposal when unmounted while loadChangelog() is in flight", async () => {
-    _resetChangelogCacheForTest();
-    const { unmount } = render(() => (
-      <WhatsNewDialog open={true} onOpenChange={() => {}} />
-    ));
+  it("settles an in-flight loadChangelog() after unmount without throwing or logging errors", async () => {
+    let resolveLoad!: (entries: ChangelogEntry[]) => void;
+    const loadSpy = vi.spyOn(changelogModule, "loadChangelog").mockReturnValue(
+      new Promise<ChangelogEntry[]>((settle) => {
+        resolveLoad = settle;
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { unmount } = render(() => (
+        <WhatsNewDialog open={true} onOpenChange={() => {}} />
+      ));
+      expect(loadSpy).toHaveBeenCalledTimes(1);
 
-    // Unmount immediately while loadChangelog() is still pending
-    expect(() => unmount()).not.toThrow();
+      // Unmount while the load is still pending, then let it settle.
+      expect(() => unmount()).not.toThrow();
+      resolveLoad([]);
+      await Promise.resolve();
+      await Promise.resolve();
 
-    // Let the in-flight loadChangelog() promise settle and flush microtasks
-    await expect(loadChangelog()).resolves.toHaveLength(2);
-    await Promise.resolve();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      loadSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
 
-    expect(screen.queryByText("v0.1.0")).toBeNull();
+  it("keeps the footer Close button and full-changelog link available", () => {
+    render(() => <WhatsNewDialog open={true} onOpenChange={() => {}} entries={[]} />);
+
+    // Kobalte's CloseButton carries aria-label="Dismiss", so the footer button is found by its text.
+    expect(screen.getByText("Close").closest("button")).not.toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Full changelog on GitHub" }).getAttribute("href"),
+    ).toBe("https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md");
   });
 
   it("contains zero occurrences of innerHTML in WhatsNewDialog.tsx source", () => {

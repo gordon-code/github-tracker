@@ -41,27 +41,39 @@ test("does not show update banner when version.json matches the running build SH
   page,
 }) => {
   await setupAuth(page);
-  let versionFetched = false;
-  await page.route("**/version.json", (route) => {
-    versionFetched = true;
-    return route.fulfill({
+  let reportedSha = currentSha;
+  await page.route("**/version.json", (route) =>
+    route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         version: "0.1.1",
-        sha: currentSha,
+        sha: reportedSha,
         builtAt: "2026-01-01T00:00:00.000Z",
       }),
-    });
-  });
+    }),
+  );
 
+  const banner = page
+    .getByRole("status")
+    .filter({ hasText: "A new version is available." });
+
+  const firstResponse = page.waitForResponse("**/version.json");
   await page.goto("/dashboard");
   await expect(page.getByRole("tablist")).toBeVisible();
-  await expect.poll(() => versionFetched).toBe(true);
+  await (await firstResponse).finished();
+  // Two animation frames let the page parse the response and apply any state change.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(banner).toHaveCount(0);
 
-  await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: "A new version is available." }),
-  ).toHaveCount(0);
+  // Control: the same check flags a different SHA, so the absence above reflects the
+  // SHA comparison and not a check that never ran.
+  reportedSha = differentSha;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(banner).toBeVisible();
 });

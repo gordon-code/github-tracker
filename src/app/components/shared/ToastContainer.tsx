@@ -316,8 +316,10 @@ export default function ToastContainer() {
   });
 
   return (
+    // bottom-20 lifts the stack above the fixed bottom strip rendered by UpdateBanner.
     <div
-      class={`fixed ${updateAvailable() ? "bottom-20" : "bottom-4"} right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96`}
+      class="fixed right-4 z-[60] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-96"
+      classList={{ "bottom-20": !!updateAvailable(), "bottom-4": !updateAvailable() }}
     >
       <For each={[...visibleToasts().values()]}>
         {(item) => {

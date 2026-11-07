@@ -1,5 +1,4 @@
-import { flushConfigPersistence } from "../stores/config";
-import { flushViewPersistence } from "../stores/view";
+import { flushPersistedState } from "./flush-persistence";
 
 export const CHUNK_RELOAD_KEY = "github-tracker:chunk-reload";
 export const CHUNK_RELOAD_MAX_AGE = 10_000;
@@ -10,8 +9,7 @@ export function reloadOnceForStaleChunk(): boolean {
     const last = sessionStorage.getItem(CHUNK_RELOAD_KEY);
     if (!last || now - Number(last) > CHUNK_RELOAD_MAX_AGE) {
       sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now));
-      flushConfigPersistence();
-      flushViewPersistence();
+      flushPersistedState();
       window.location.reload();
       return true;
     }
@@ -21,7 +19,7 @@ export function reloadOnceForStaleChunk(): boolean {
   return false;
 }
 
-export function handleVitePreloadError(event: Event): void {
+function handleVitePreloadError(event: Event): void {
   if (reloadOnceForStaleChunk()) {
     event.preventDefault();
   }

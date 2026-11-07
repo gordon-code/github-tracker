@@ -1675,7 +1675,89 @@ describe("flushConfigPersistence", () => {
     }
   });
 
+  it("does not overwrite a newer config another tab saved when this tab has no changes of its own", () => {
+    // Establish this tab's baseline: its own config is what it last wrote.
+    updateConfig({ theme: "forest" });
+    flushConfigPersistence();
+
+    // Another tab saves a different config for the same key.
+    const otherTabJson = JSON.stringify({ ...config, theme: "dracula" });
+    localStorageMock.setItem(STORAGE_KEY, otherTabJson);
+
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      // This tab only reloads (e.g. for an update) without having changed anything.
+      flushConfigPersistence();
+      expect(setItemSpy).not.toHaveBeenCalled();
+      expect(localStorageMock.getItem(STORAGE_KEY)).toBe(otherTabJson);
+
+      // Once this tab changes its config, the flush writes it.
+      updateConfig({ theme: "nord" });
+      flushConfigPersistence();
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("nord");
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it("writes on flush after resetConfig + removeItem + updateConfig even when the resulting JSON matches lastPersistedJson", () => {
+    // Establish baseline with authMethod: "pat" and default settings
+    updateConfig({ authMethod: "pat" });
+    flushConfigPersistence();
+    expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").authMethod).toBe("pat");
+
+    // Simulate identity switch in setAuthFromPat: resetConfig -> removeItem -> updateConfig({ authMethod: "pat" })
+    resetConfig();
+    localStorageMock.removeItem(STORAGE_KEY);
+    updateConfig({ authMethod: "pat" });
+
+    // Even though JSON.stringify(config) matches the previous lastPersistedJson,
+    // setConfig marked the store dirty so flushConfigPersistence must write it.
+    flushConfigPersistence();
+    expect(localStorageMock.getItem(STORAGE_KEY)).not.toBeNull();
+    expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").authMethod).toBe("pat");
+  });
+
+  it("does not synchronously flush stale pendingJson on intermediate mutations while initConfigPersistence is active, and schedules a debounced write when resetConfig matches in-memory state", () => {
+    vi.useFakeTimers();
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      initConfigPersistence();
+    });
+    const setItemSpy = vi.spyOn(localStorageMock, "setItem");
+    try {
+      // Mutate within the 200ms mount debounce window: effect re-run must NOT flush the stale initial pendingJson synchronously
+      setItemSpy.mockClear();
+      updateConfig({ theme: "dracula" });
+      expect(setItemSpy).not.toHaveBeenCalled();
+
+      // Settle the 200ms debounce
+      vi.advanceTimersByTime(250);
+      expect(setItemSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("dracula");
+
+      // Reset to defaults and let it settle
+      resetConfig();
+      vi.advanceTimersByTime(250);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("auto");
+
+      // Another tab writes theme: "nord" while this tab is already at defaults in memory.
+      // Calling resetConfig() again must still schedule a debounced write via persistTrigger.
+      localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ ...config, theme: "nord" }));
+      resetConfig();
+      vi.advanceTimersByTime(250);
+      expect(JSON.parse(localStorageMock.getItem(STORAGE_KEY) ?? "{}").theme).toBe("auto");
+    } finally {
+      setItemSpy.mockRestore();
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("catches localStorage quota errors and pushes localStorage:config warning notification without throwing", () => {
+    updateConfig({ theme: "forest" });
     const setItemSpy = vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
       throw new DOMException("QuotaExceededError", "QuotaExceededError");
     });

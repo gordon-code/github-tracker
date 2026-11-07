@@ -3,19 +3,21 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
 import * as z from "zod/mini";
+import { BUILD_SHA_LENGTH, type VersionInfo } from "../src/shared/build-meta";
 import {
+  CHANGELOG_MAX_ENTRIES,
+  CHANGELOG_MAX_ITEM_TEXT_LENGTH,
+  CHANGELOG_MAX_SECTION_TITLE_LENGTH,
   ChangelogSchema,
   type ChangelogEntry,
   type ChangelogItem,
   type ChangelogSection,
 } from "../src/shared/changelog-schema";
 
+// Case-insensitive on purpose: GITHUB_SHA and `git rev-parse` output are normalized to lowercase below.
 const HEX_SHA_RE = /^[0-9a-f]{7,40}$/i;
 const VIRTUAL_CHANGELOG_ID = "virtual:changelog";
 const RESOLVED_VIRTUAL_CHANGELOG_ID = "\0virtual:changelog";
-const MAX_CHANGELOG_ENTRIES = 20;
-const MAX_ITEM_TEXT_LENGTH = 300;
-const MAX_SECTION_TITLE_LENGTH = 100;
 
 const RELEASE_HEADING_RE =
   /^#{2,3}\s+(?:\[v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]\([^)]*\)|v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?))\s+\((\d{4}-\d{2}-\d{2})\)\s*$/;
@@ -68,7 +70,7 @@ function parseBulletLine(rawBullet: string): ChangelogItem | null {
     .replace(/__([^_]+)__/g, "$1")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, MAX_ITEM_TEXT_LENGTH)
+    .slice(0, CHANGELOG_MAX_ITEM_TEXT_LENGTH)
     .trim();
 
   if (text.length === 0) {
@@ -106,7 +108,7 @@ export function parseChangelog(markdown: string): ChangelogEntry[] {
       const title = stripMarkdownLinks(sectionMatch[1])
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, MAX_SECTION_TITLE_LENGTH)
+        .slice(0, CHANGELOG_MAX_SECTION_TITLE_LENGTH)
         .trim();
       if (title.length > 0) {
         const existing = currentEntry.sections.find((s) => s.title === title);
@@ -135,15 +137,9 @@ export function parseChangelog(markdown: string): ChangelogEntry[] {
   for (const entry of entries) {
     entry.sections = entry.sections.filter((s) => s.items.length > 0);
   }
-  const cleaned = entries.slice(0, MAX_CHANGELOG_ENTRIES);
+  const cleaned = entries.slice(0, CHANGELOG_MAX_ENTRIES);
 
   return z.parse(ChangelogSchema, cleaned);
-}
-
-export interface BuildMetadata {
-  version: string;
-  sha: string;
-  builtAt: string;
 }
 
 export function resolveGitSha(): string {
@@ -164,7 +160,7 @@ export function resolveGitSha(): string {
   if (!HEX_SHA_RE.test(rawSha)) {
     return "dev";
   }
-  return rawSha.toLowerCase().slice(0, 12);
+  return rawSha.toLowerCase().slice(0, BUILD_SHA_LENGTH);
 }
 
 export function resolvePackageVersion(): string {
@@ -175,7 +171,7 @@ export function resolvePackageVersion(): string {
     : "0.0.0";
 }
 
-export function resolveBuildMetadata(): BuildMetadata {
+export function resolveBuildMetadata(): VersionInfo {
   return {
     version: resolvePackageVersion(),
     sha: resolveGitSha(),
@@ -215,9 +211,7 @@ export function buildMeta(): Plugin[] {
           return null;
         }
         const changelogPath = resolve(process.cwd(), "CHANGELOG.md");
-        if (typeof this.addWatchFile === "function") {
-          this.addWatchFile(changelogPath);
-        }
+        this.addWatchFile(changelogPath);
         if (!existsSync(changelogPath)) {
           return "export default [];";
         }

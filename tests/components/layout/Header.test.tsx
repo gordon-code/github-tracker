@@ -54,12 +54,12 @@ import * as authStore from "../../../src/app/stores/auth";
 import * as errorsModule from "../../../src/app/lib/errors";
 import * as githubStatusModule from "../../../src/app/services/github-status";
 import { config, resetConfig, updateConfig } from "../../../src/app/stores/config";
-import { _resetChangelogCacheForTest } from "../../../src/app/lib/changelog";
+import { _resetChangelogCacheForTests, loadChangelog } from "../../../src/app/lib/changelog";
 import { render, waitFor } from "@solidjs/testing-library";
 
 beforeEach(() => {
   resetConfig();
-  _resetChangelogCacheForTest();
+  _resetChangelogCacheForTests();
   mockNavigate.mockClear();
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
@@ -225,8 +225,30 @@ describe("Header", () => {
     updateConfig({ lastSeenVersion: "0.1.0" });
     render(() => <Header />);
 
-    await new Promise((r) => setTimeout(r, 20));
+    // Header's own load was scheduled first (setTimeout 0), so once this tick passes the entries are applied.
+    await loadChangelog();
+    await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+
+    // Control: the same loaded entries do flag an older lastSeenVersion, so the absence above
+    // comes from hasUnseen() and not from a changelog that never loaded.
+    updateConfig({ lastSeenVersion: "0.0.9" });
+    expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+  });
+
+  it("announces unread release notes in the What's new button label only while the dot is shown", async () => {
+    render(() => <Header />);
+
+    expect(screen.getByLabelText("What's new")).toBeDefined();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("What's new, unread release notes")).toBeDefined();
+    });
+    expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+
+    updateConfig({ lastSeenVersion: "0.1.0" });
+    expect(screen.queryByLabelText("What's new, unread release notes")).toBeNull();
+    expect(screen.getByLabelText("What's new")).toBeDefined();
   });
 
   it("uses requestIdleCallback when available, loads changelog on demand if clicked before idle, and calls cancelIdleCallback on unmount", async () => {

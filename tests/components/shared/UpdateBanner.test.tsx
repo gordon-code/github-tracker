@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
 import { MemoryRouter, Route, useNavigate, createMemoryHistory } from "@solidjs/router";
 import { createRoot } from "solid-js";
-import UpdateBanner, { CHANGELOG_URL } from "../../../src/app/components/shared/UpdateBanner";
+import UpdateBanner from "../../../src/app/components/shared/UpdateBanner";
 import { UpdateNavigator } from "../../../src/app/App";
 import {
-  _setUpdateAvailableForTest,
-  _resetVersionStateForTest,
+  _setUpdateAvailableForTests,
+  _resetVersionStateForTests,
 } from "../../../src/app/lib/version";
 import {
   getNotifications,
@@ -34,7 +34,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
     vi.useFakeTimers();
     sessionStorage.clear();
     localStorage.clear();
-    _resetVersionStateForTest();
+    _resetVersionStateForTests();
     resetNotificationState();
     resetConfig();
     resetViewState();
@@ -56,7 +56,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
   });
 
   afterEach(() => {
-    _resetVersionStateForTest();
+    _resetVersionStateForTests();
     resetNotificationState();
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -76,7 +76,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
     it("renders banner with Reload button and exact Changelog link when updateAvailable is set, and pushes app-update notification once", () => {
       render(() => <UpdateBanner />);
 
-      _setUpdateAvailableForTest({
+      _setUpdateAvailableForTests({
         version: "0.1.2",
         sha: "fedcba987654",
         builtAt: "2026-01-02T00:00:00.000Z",
@@ -86,7 +86,9 @@ describe("UpdateBanner & UpdateNavigator", () => {
       expect(banner.textContent).toContain("A new version is available.");
 
       const changelogLink = screen.getByRole("link", { name: "Changelog" });
-      expect(changelogLink.getAttribute("href")).toBe(CHANGELOG_URL);
+      expect(changelogLink.getAttribute("href")).toBe(
+        "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md",
+      );
       expect(changelogLink.getAttribute("target")).toBe("_blank");
       expect(changelogLink.getAttribute("rel")).toBe("noopener noreferrer");
 
@@ -98,11 +100,32 @@ describe("UpdateBanner & UpdateNavigator", () => {
       );
 
       // Updating signal again must not duplicate or re-push the notification
-      _setUpdateAvailableForTest({
+      _setUpdateAvailableForTests({
         version: "0.1.3",
         sha: "111122223333",
         builtAt: "2026-01-03T00:00:00.000Z",
       });
+      expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(1);
+    });
+
+    it("hides the banner and dismisses the app-update notification when the update clears, then re-notifies if flagged again", () => {
+      render(() => <UpdateBanner />);
+      const info = {
+        version: "0.1.2",
+        sha: "fedcba987654",
+        builtAt: "2026-01-02T00:00:00.000Z",
+      };
+
+      _setUpdateAvailableForTests(info);
+      expect(screen.getByRole("status")).toBeDefined();
+      expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(1);
+
+      _setUpdateAvailableForTests(null);
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(0);
+
+      _setUpdateAvailableForTests(info);
+      expect(screen.getByRole("status")).toBeDefined();
       expect(getNotifications().filter((n) => n.source === "app-update")).toHaveLength(1);
     });
 
@@ -114,7 +137,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
         initViewPersistence();
       });
 
-      _setUpdateAvailableForTest({
+      _setUpdateAvailableForTests({
         version: "0.1.2",
         sha: "fedcba987654",
         builtAt: "2026-01-02T00:00:00.000Z",
@@ -233,7 +256,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
         </MemoryRouter>
       ));
 
-      _setUpdateAvailableForTest({
+      _setUpdateAvailableForTests({
         version: "0.1.2",
         sha: "fedcba987654",
         builtAt: "2026-01-02T00:00:00.000Z",
@@ -285,7 +308,7 @@ describe("UpdateBanner & UpdateNavigator", () => {
         </MemoryRouter>
       ));
 
-      _setUpdateAvailableForTest({
+      _setUpdateAvailableForTests({
         version: "0.1.2",
         sha: "fedcba987654",
         builtAt: "2026-01-02T00:00:00.000Z",

@@ -1,11 +1,8 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineConfig, defineProject } from "vitest/config";
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
-
-const rootDir = dirname(fileURLToPath(import.meta.url));
+import { buildMetaTestConfig } from "./tests/stubs/build-meta-test-config";
 
 export default defineConfig({
   test: {
@@ -15,16 +12,7 @@ export default defineConfig({
       // Browser/DOM tests (stores, services, UI)
       defineProject({
         plugins: [solid(), tailwindcss()],
-        resolve: {
-          alias: {
-            "virtual:changelog": resolve(rootDir, "tests/stubs/virtual-changelog.ts"),
-          },
-        },
-        define: {
-          __APP_VERSION__: JSON.stringify("0.1.0"),
-          __GIT_SHA__: JSON.stringify("abcdef123456"),
-          __BUILD_TIME__: JSON.stringify("2026-01-01T00:00:00.000Z"),
-        },
+        ...buildMetaTestConfig,
         test: {
           name: "browser",
           environment: "happy-dom",

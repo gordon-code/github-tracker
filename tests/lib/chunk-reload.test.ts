@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   CHUNK_RELOAD_KEY,
@@ -137,6 +139,36 @@ describe("chunk-reload", () => {
     dispose();
   });
 
+  it("lazyWithReload stays on the Suspense fallback, never reaching the ErrorBoundary, when a cancelled vite:preloadError resolves the import to undefined", async () => {
+    vi.useRealTimers();
+    const errorBoundarySpy = vi.fn();
+
+    // Vite's preload helper resolves `import()` with `undefined` once a listener calls preventDefault().
+    const PreventedLazy = lazyWithReload(() => Promise.resolve(undefined as never));
+    const { container } = render(() =>
+      ErrorBoundary({
+        fallback: (err) => {
+          errorBoundarySpy(err);
+          return "Fallback";
+        },
+        get children() {
+          return Suspense({
+            fallback: "Loading",
+            get children() {
+              return PreventedLazy({});
+            },
+          });
+        },
+      }),
+    );
+
+    await new Promise((done) => setTimeout(done, 20));
+
+    expect(errorBoundarySpy).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Loading");
+    expect(container.textContent).not.toContain("Fallback");
+  });
+
   it("lazyWithReload triggers reload without invoking ErrorBoundary on first rejection, and rethrows to ErrorBoundary within 10s cooldown", async () => {
     vi.useRealTimers();
     const errorBoundarySpy = vi.fn();
@@ -187,5 +219,13 @@ describe("chunk-reload", () => {
       expect(errorBoundarySpy).toHaveBeenCalledTimes(1);
     });
     expect(reloadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("index.tsx installs the chunk reload handler before mounting App", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/index.tsx"), "utf8");
+    const installIdx = source.indexOf("installChunkReloadHandler()");
+    const renderIdx = source.indexOf("render(");
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(renderIdx).toBeGreaterThan(installIdx);
   });
 });
