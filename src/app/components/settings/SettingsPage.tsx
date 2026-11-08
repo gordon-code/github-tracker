@@ -149,22 +149,9 @@ export default function SettingsPage() {
   onMount(() => checkAndResetIfExpired());
   const usageSnapshot = createMemo(() => getUsageSnapshot());
 
-  // Local copies for org/repo editing (committed on blur/change)
-  const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
-  const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
-  const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
-
-  // These local editor copies are captured once at mount. An in-place import
-  // (handleConfirmImport / handleConfirmCredImport / handleContinueWithoutCredentials)
-  // replaces config wholesale via setConfig without a reload, so they must be
-  // resynced afterward — otherwise the next org/repo edit would save the stale,
-  // pre-import selection and silently discard the imported repos/orgs.
-  // setConfig is synchronous, so config already reflects the import here.
-  function resyncLocalEditors() {
-    setLocalOrgs(config.selectedOrgs);
-    setLocalRepos(config.selectedRepos);
-    setLocalUpstream(config.upstreamRepos);
-  }
+  // The org/repo editors read the config store directly: a settings import in this tab or a
+  // change adopted from another tab replaces these arrays without a reload, and an editor
+  // holding its own copy would save the stale selection on the next edit.
 
   const monitoredRepoNames = createMemo(() =>
     config.monitoredRepos.map(r => r.fullName).join(", ")
@@ -201,7 +188,6 @@ export default function SettingsPage() {
         .filter((login) => !currentSet.has(login.toLowerCase()));
       if (newOrgs.length > 0) {
         const merged = [...snapshot, ...newOrgs];
-        setLocalOrgs(merged);
         saveWithFeedback({ selectedOrgs: merged });
         console.info(`[settings] merged ${newOrgs.length} new org(s)`);
       }
@@ -230,17 +216,14 @@ export default function SettingsPage() {
   }
 
   function handleOrgsChange(orgs: string[]) {
-    setLocalOrgs(orgs);
     saveWithFeedback({ selectedOrgs: orgs });
   }
 
   function handleReposChange(repos: RepoRef[]) {
-    setLocalRepos(repos);
     saveWithFeedback({ selectedRepos: repos });
   }
 
   function handleUpstreamChange(repos: RepoRef[]) {
-    setLocalUpstream(repos);
     saveWithFeedback({ upstreamRepos: repos });
   }
 
@@ -417,7 +400,6 @@ export default function SettingsPage() {
     // applyImportedViewState is total/no-throw, so this is safe even when the
     // file carries no _viewPreferences section at all.
     applyImportedViewState(pending.viewPreferences);
-    resyncLocalEditors();
     setPendingImport(null);
     pushNotification("settings-import", "Settings imported", "info");
   }
@@ -434,7 +416,6 @@ export default function SettingsPage() {
     setCommitting(true);
     try {
       await commitImportedSettings(rc, cred.config, cred.viewPreferences);
-      resyncLocalEditors();
       credentialImport.reset();
       pushNotification("settings-import", "Settings and credentials imported", "info");
     } catch {
@@ -937,7 +918,7 @@ export default function SettingsPage() {
               <div>
                 <p class="text-sm font-medium text-base-content">Organizations</p>
                 <p class="text-xs text-base-content/60">
-                  {localOrgs().length} selected
+                  {config.selectedOrgs.length} selected
                 </p>
               </div>
               <button
@@ -951,7 +932,7 @@ export default function SettingsPage() {
             <Show when={orgPanelOpen()}>
               <div class="rounded-lg border border-base-300 p-4">
                 <OrgSelector
-                  selected={localOrgs()}
+                  selected={config.selectedOrgs}
                   onChange={handleOrgsChange}
                 />
               </div>
@@ -985,11 +966,11 @@ export default function SettingsPage() {
                 <div>
                   <p class="text-sm font-medium text-base-content">Repositories</p>
                   <p class="text-xs text-base-content/60">
-                    {localRepos().length + localUpstream().length} selected{localUpstream().length > 0 ? ` (${localUpstream().length} upstream)` : ""}
+                    {config.selectedRepos.length + config.upstreamRepos.length} selected{config.upstreamRepos.length > 0 ? ` (${config.upstreamRepos.length} upstream)` : ""}
                   </p>
-                  <Show when={localRepos().length > 50}>
+                  <Show when={config.selectedRepos.length > 50}>
                     <p class="text-xs text-warning">
-                      Tracking {localRepos().length} repos will use significant API quota per poll cycle
+                      Tracking {config.selectedRepos.length} repos will use significant API quota per poll cycle
                     </p>
                   </Show>
                   <Show when={config.monitoredRepos.length > 0}>
@@ -1014,11 +995,11 @@ export default function SettingsPage() {
             <Show when={repoPanelOpen()}>
               <div class="rounded-lg border border-base-300 p-4">
                 <RepoSelector
-                  selectedOrgs={localOrgs()}
-                  selected={localRepos()}
+                  selectedOrgs={config.selectedOrgs}
+                  selected={config.selectedRepos}
                   onChange={handleReposChange}
                   showUpstreamDiscovery={true}
-                  upstreamRepos={localUpstream()}
+                  upstreamRepos={config.upstreamRepos}
                   onUpstreamChange={handleUpstreamChange}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}

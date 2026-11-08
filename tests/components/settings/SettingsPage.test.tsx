@@ -2095,9 +2095,27 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await user.click(screen.getByRole("button", { name: "Yes, import" }));
 
     expect(config.selectedRepos).toHaveLength(2);
-    // The Repositories summary is driven by the localRepos editor copy; without
-    // the post-import resync it would still read the stale (empty) pre-import set.
     await waitFor(() => screen.getByText(/2 selected/i));
+  });
+
+  it("reflects org/repo changes written to the config store after mount (as another tab's adoption does)", async () => {
+    updateConfig({ selectedOrgs: ["acme"], selectedRepos: [], upstreamRepos: [] });
+    renderSettings();
+    await waitFor(() => screen.getByText(/0 selected/i));
+
+    // Another tab's write is adopted into the store without this page re-mounting;
+    // the editors must follow it or the next edit here would save the stale list.
+    updateConfig({
+      selectedOrgs: ["acme", "globex"],
+      selectedRepos: [
+        { owner: "acme", name: "api", fullName: "acme/api" },
+        { owner: "globex", name: "web", fullName: "globex/web" },
+      ],
+      upstreamRepos: [{ owner: "upstream", name: "lib", fullName: "upstream/lib" }],
+    });
+
+    await waitFor(() => screen.getByText(/3 selected \(1 upstream\)/i));
+    expect(screen.getByText(/^2 selected$/i)).toBeTruthy();
   });
 });
 
