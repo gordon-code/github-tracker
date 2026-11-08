@@ -51,6 +51,7 @@ describe("buildMeta Vite plugin", () => {
     mockReadFileSync.mockReset();
     mockExistsSync.mockReset();
     delete process.env.GITHUB_SHA;
+    delete process.env.BUILD_GIT_SHA;
   });
 
   afterEach(() => {
@@ -59,7 +60,16 @@ describe("buildMeta Vite plugin", () => {
     } else {
       process.env.GITHUB_SHA = originalGithubSha;
     }
+    delete process.env.BUILD_GIT_SHA;
     vi.useRealTimers();
+  });
+
+  it("prefers BUILD_GIT_SHA over GITHUB_SHA so a deploy of an older tag is stamped with that tag's commit", () => {
+    process.env.BUILD_GIT_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+    process.env.GITHUB_SHA = "1234567890abcdef1234567890abcdef12345678";
+
+    expect(resolveGitSha()).toBe("abcdef123456");
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
   it("prefers GITHUB_SHA over git rev-parse HEAD and slices to 12 hex characters", () => {

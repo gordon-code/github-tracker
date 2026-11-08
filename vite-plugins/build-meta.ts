@@ -136,8 +136,12 @@ export function parseChangelog(markdown: string): ChangelogEntry[] {
   return z.parse(ChangelogSchema, cleaned);
 }
 
+/**
+ * Build SHA source order: `BUILD_GIT_SHA` (set by deploy.yml to the checked-out commit, since
+ * GitHub Actions forbids overriding `GITHUB_SHA`), then `GITHUB_SHA`, then `git rev-parse HEAD`.
+ */
 export function resolveGitSha(): string {
-  const envSha = process.env.GITHUB_SHA?.trim();
+  const envSha = process.env.BUILD_GIT_SHA?.trim() || process.env.GITHUB_SHA?.trim();
   let rawSha: string;
   if (envSha) {
     rawSha = envSha;

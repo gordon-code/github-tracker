@@ -258,7 +258,7 @@ pnpm run build
 wrangler deploy
 ```
 
-In CI (`.github/workflows/deploy.yml`), production deployments are triggered automatically by `.github/workflows/release.yml` (`workflow_call`) when a `github-tracker@x.y.z` release PR merges, or manually via `workflow_dispatch`. The workflow runs `pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"` with values passed via `env:` (`DEPLOY_TAG` truncated to 25 characters of `GITHUB_SHA`; `DEPLOY_MSG` taken from the first line of the commit message with ASCII control characters stripped and truncated to 100 UTF-8 characters under `LC_ALL=C.UTF-8`, or `manual deploy <tag>` on `workflow_dispatch`).
+In CI (`.github/workflows/deploy.yml`), production deployments are triggered automatically by `.github/workflows/release.yml` (`workflow_call`) when a `github-tracker@x.y.z` release PR merges, or manually via `workflow_dispatch`. The workflow runs `pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"` with values passed via `env:` (`DEPLOY_TAG` truncated to 25 characters of the checked-out commit — resolved with `git rev-parse HEAD` after checkout and also passed to the build as `BUILD_GIT_SHA` (read before `GITHUB_SHA`, which Actions does not allow overriding), checked against `dist/client/version.json` before deploying, and used as the expected SHA of the post-deploy `version.json` check, so a manual re-deploy of an older tag is stamped with that tag's commit rather than the caller's; `DEPLOY_MSG` taken from the first line of the commit message with ASCII control characters stripped and truncated to 100 UTF-8 characters under `LC_ALL=C.UTF-8`, or `manual deploy <tag>` on `workflow_dispatch`).
 
 ## Releases
 
