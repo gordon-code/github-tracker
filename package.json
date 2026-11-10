@@ -2,7 +2,7 @@
   "name": "github-tracker",
   "version": "0.1.1",
   "private": true,
-  "packageManager": "pnpm@12.14.0",
+  "packageManager": "pnpm@12.16.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -28,8 +28,8 @@
     "@octokit/plugin-paginate-rest": "16.0.0",
     "@octokit/plugin-retry": "8.1.1",
     "@octokit/plugin-throttling": "11.0.5",
-    "@sentry/cloudflare": "11.8.0",
-    "@sentry/solid": "11.8.0",
+    "@sentry/cloudflare": "11.9.0",
+    "@sentry/solid": "11.9.0",
     "@solidjs/router": "1.0.0",
     "idb": "8.0.4",
     "solid-js": "1.9.17",
@@ -37,8 +37,8 @@
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "8.0.0",
-    "@cloudflare/vite-plugin": "1.64.0",
-    "@cloudflare/vitest-plugin": "1.4.5",
+    "@cloudflare/vite-plugin": "1.65.0",
+    "@cloudflare/vitest-plugin": "1.4.8",
     "@fast-check/vitest": "0.5.0",
     "@playwright/test": "1.64.1",
     "@solidjs/testing-library": "0.8.10",
@@ -53,9 +53,9 @@
     "rollup-plugin-visualizer": "7.1.1",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.4",
+    "vite": "8.3.5",
     "vite-plugin-solid": "2.11.14",
     "vitest": "5.0.5",
-    "wrangler": "4.151.2"
+    "wrangler": "4.153.0"
   }
 }

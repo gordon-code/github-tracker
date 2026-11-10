@@ -34,7 +34,7 @@
     "node": "v26.12.1"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "ws": "8.22.0",
     "zod": "4.6.7"
   },
