@@ -36,8 +36,13 @@ runs:
         DEPLOY_DOMAIN: ${{ inputs.deploy-domain }}
     # No `playwright install` step: playwright.config.ts uses channel: "chrome",
     # which resolves to ubuntu-latest's preinstalled Google Chrome — Playwright's
-    # own bundled Chromium download is never used and would be wasted work.
-    - name: Run E2E tests
+    # own bundled Chromium download is never used and would be wasted work. The
+    # Firefox/WebKit subset runs in its own `e2e-cross-browser` job in ci.yml.
+    # `pnpm test:e2e` runs both Chromium projects: `chromium` against `vite dev`, and
+    # `chromium-preview` (e2e/*.preview.spec.ts) against `pnpm build && vite preview`,
+    # whose web server builds dist/ itself. Keeping both in this step covers ci.yml and
+    # the deploy.yml gate alike.
+    - name: Run E2E tests (dev server and production preview)
       shell: bash
       run: pnpm test:e2e
       env:

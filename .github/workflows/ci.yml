@@ -12,3 +12,17 @@ jobs:
         with:
           vite-github-client-id: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           deploy-domain: ${{ vars.DEPLOY_DOMAIN }}
+  # Runs the E2E tests tagged @cross-browser on Firefox and WebKit. Those use Playwright's own
+  # browser builds, which the Chromium-only `ci` job never needs to download. CROSS_BROWSER=1
+  # leaves out the preview project and its build.
+  e2e-cross-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Install Firefox and WebKit
+        run: pnpm exec playwright install --with-deps firefox webkit
+      - name: Run cross-browser E2E tests
+        run: pnpm test:e2e:cross-browser
+        env:
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}

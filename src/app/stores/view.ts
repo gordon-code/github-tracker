@@ -1,209 +1,71 @@
 import * as z from "zod/mini";
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup, untrack } from "solid-js";
+import { untrack } from "solid-js";
 import { pushNotification } from "../lib/errors";
+import { createFieldPersistence } from "../lib/field-persistence";
+import { schemaStale } from "../lib/version";
 
 export const VIEW_STORAGE_KEY = "github-tracker:view";
-const IGNORED_ITEMS_CAP = 500;
-const TRACKED_ITEMS_CAP = 200;
-export const LOCKED_REPOS_CAP = 50;
-export const JIRA_CUSTOM_ORDER_CAP = 500;
-// customTabFilters/expandedRepos are Records, not arrays — Zod v4's z.record()
-// has no built-in .max(), so these are enforced via .refine() below instead.
-// Outer keys are tab IDs (built-ins + customTabs, itself capped at 10 in
-// shared/schemas.ts), generously capped well above any realistic tab count.
-const CUSTOM_TAB_FILTERS_TABS_CAP = 50;
-// Inner keys are filter field names for a single tab's baseType — every
-// *FiltersSchema above has well under 10 fields.
-const CUSTOM_TAB_FILTERS_FIELDS_CAP = 50;
-const EXPANDED_REPOS_TABS_CAP = 50;
-// Inner keys are repoFullName — unlike lockedRepos (a deliberately small
-// pinned subset), this tracks expand/collapse state for every repo in a tab,
-// so it needs headroom well above LOCKED_REPOS_CAP.
-const EXPANDED_REPOS_REPOS_CAP = 1000;
-export const JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH = 50;
-export const JIRA_CUSTOM_ORDER_SCOPE = "assigned" as const;
-export const JIRA_CUSTOM_SORT_FIELD = "custom" as const;
+import {
+  IGNORED_ITEMS_CAP,
+  TRACKED_ITEMS_CAP,
+  LOCKED_REPOS_CAP,
+  JIRA_CUSTOM_ORDER_CAP,
+  JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH,
+  JIRA_CUSTOM_ORDER_SCOPE,
+  JIRA_CUSTOM_SORT_FIELD,
+  TrackedItemSchema,
+  IgnoredItemSchema,
+  IssueFiltersSchema,
+  PullRequestFiltersSchema,
+  ActionsFiltersSchema,
+  DependencyFiltersSchema,
+  JiraFiltersSchema,
+  ViewStateSchema,
+  type DependencyFilters,
+  type DependencyFilterField,
+  type IssueFilters,
+  type IssueFilterField,
+  type PullRequestFilters,
+  type PullRequestFilterField,
+  type ActionsFilters,
+  type ActionsFilterField,
+  type JiraFilters,
+  type JiraFilterField,
+  type TrackedItem,
+  type ViewState,
+  type IgnoredItem,
+} from "../../shared/view-schema";
 
-export const TrackedItemSchema = z.object({
-  id: z.number(),
-  number: z.optional(z.number()),
-  type: z.enum(["issue", "pullRequest", "jiraIssue"]),
-  source: z._default(z.enum(["github", "jira"]), "github"),
-  repoFullName: z.string(),
-  title: z.string(),
-  addedAt: z.number(),
-  jiraKey: z.optional(z.string()),
-  jiraProjectKey: z.optional(z.string()),
-  jiraStatus: z.optional(z.string()),
-  htmlUrl: z.optional(z.string()),
-});
-
-export type TrackedItem = z.infer<typeof TrackedItemSchema>;
-
-export const IgnoredItemSchema = z.object({
-  id: z.coerce.number(),
-  type: z.enum(["issue", "pullRequest", "workflowRun"]),
-  repo: z.string(),
-  title: z.string(),
-  ignoredAt: z.number(),
-});
-
-export const IssueFiltersSchema = z.object({
-  scope: z._default(z.enum(["involves_me", "all"]), "involves_me"),
-  role: z._default(z.enum(["all", "author", "assignee"]), "all"),
-  comments: z._default(z.enum(["all", "has", "none"]), "all"),
-  user: z._default(z.union([z.enum(["all"]), z.string()]), "all"),
-});
-
-export const PullRequestFiltersSchema = z.object({
-  scope: z._default(z.enum(["involves_me", "all"]), "involves_me"),
-  role: z._default(z.enum(["all", "author", "reviewer", "assignee"]), "all"),
-  reviewDecision: z._default(z.enum(["all", "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", "mergeable"]), "all"),
-  draft: z._default(z.enum(["all", "draft", "ready"]), "all"),
-  checkStatus: z._default(z.enum(["all", "success", "failure", "running", "waiting", "pending", "conflict", "blocked", "none"]), "all"),
-  sizeCategory: z._default(z.enum(["all", "XS", "S", "M", "L", "XL", "XXL"]), "all"),
-  user: z._default(z.union([z.enum(["all"]), z.string()]), "all"),
-});
-
-export const ActionsFiltersSchema = z.object({
-  conclusion: z._default(z.enum(["all", "success", "failure", "cancelled", "running", "waiting", "pending", "other"]), "all"),
-  event: z._default(z.enum(["all", "push", "pull_request", "schedule", "workflow_dispatch", "other"]), "all"),
-});
-
-export const DependencyFiltersSchema = z.object({
-  updateType: z._default(z.enum(["all", "major", "minor", "patch", "pin", "digest", "maintenance", "other"]), "all"),
-  bot: z._default(z.string(), "all"),
-});
-
-export type DependencyFilters = z.infer<typeof DependencyFiltersSchema>;
-export type DependencyFilterField = keyof DependencyFilters;
-
-// "done" intentionally excluded — JQL `statusCategory != Done` never returns Done items
-export const JiraFiltersSchema = z.object({
-  scope: z._default(
-    z.union([
-      z.enum(["assigned", "reported", "watching"]),
-      z.string().check(z.regex(/^[a-zA-Z0-9_-]+$/), z.maxLength(100)),
-    ]),
-    "assigned"
-  ),
-  statusCategory: z._default(z.enum(["all", "new", "indeterminate"]), "all"),
-  priority: z._default(z.enum(["all", "Highest", "High", "Medium", "Low", "Lowest"]), "all"),
-  sortField: z._default(z.string(), JIRA_CUSTOM_SORT_FIELD),
-  sortDirection: z._default(z.enum(["asc", "desc"]), "asc"),
-});
-
-export type IssueFilters = z.infer<typeof IssueFiltersSchema>;
-export type IssueFilterField = keyof IssueFilters;
-export type PullRequestFilters = z.infer<typeof PullRequestFiltersSchema>;
-export type PullRequestFilterField = keyof PullRequestFilters;
-export type ActionsFilters = z.infer<typeof ActionsFiltersSchema>;
-export type ActionsFilterField = keyof ActionsFilters;
-export type JiraFilters = z.infer<typeof JiraFiltersSchema>;
-export type JiraFilterField = keyof JiraFilters;
-
-export const ViewStateSchema = z.object({
-  lastActiveTab: z._default(z.string(), "issues"),
-  globalSort: z._default(
-    z.object({
-      field: z.string(),
-      direction: z.enum(["asc", "desc"]),
-    }),
-    { field: "updatedAt", direction: "desc" }
-  ),
-  ignoredItems: z._default(
-    z.array(IgnoredItemSchema).check(z.maxLength(IGNORED_ITEMS_CAP)),
-    []
-  ),
-  globalFilter: z._default(
-    z.object({
-      org: z._default(z.nullable(z.string()), null),
-      repo: z._default(z.nullable(z.string()), null),
-    }),
-    { org: null, repo: null }
-  ),
-  tabFilters: z._default(
-    z.object({
-      issues: z._default(IssueFiltersSchema, { scope: "involves_me", role: "all", comments: "all", user: "all" }),
-      pullRequests: z._default(PullRequestFiltersSchema, { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" }),
-      actions: z._default(ActionsFiltersSchema, { conclusion: "all", event: "all" }),
-      jiraAssigned: z._default(JiraFiltersSchema, { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" }),
-      dependencies: z._default(DependencyFiltersSchema, { updateType: "all", bot: "all" }),
-    }),
-    {
-      issues: { scope: "involves_me", role: "all", comments: "all", user: "all" },
-      pullRequests: { scope: "involves_me", role: "all", reviewDecision: "all", draft: "all", checkStatus: "all", sizeCategory: "all", user: "all" },
-      actions: { conclusion: "all", event: "all" },
-      jiraAssigned: { scope: "assigned", statusCategory: "all", priority: "all", sortField: JIRA_CUSTOM_SORT_FIELD, sortDirection: "asc" },
-      dependencies: { updateType: "all", bot: "all" },
-    }
-  ),
-  showPrRuns: z._default(z.boolean(), false),
-  hideDepDashboard: z._default(z.boolean(), true),
-  customTabFilters: z._default(
-    z.record(
-      z.string(),
-      z.record(z.string(), z.string()).check(
-        z.refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_FIELDS_CAP, {
-          message: `Too many filter fields for a single tab (max ${CUSTOM_TAB_FILTERS_FIELDS_CAP})`,
-        })
-      )
-    ).check(
-      z.refine((v) => Object.keys(v).length <= CUSTOM_TAB_FILTERS_TABS_CAP, {
-        message: `Too many tabs with saved filters (max ${CUSTOM_TAB_FILTERS_TABS_CAP})`,
-      })
-    ),
-    {}
-  ),
-  expandedRepos: z._default(
-    z.record(
-      z.string(),
-      z._default(
-        z.record(z.string(), z.boolean()).check(
-          z.refine((v) => Object.keys(v).length <= EXPANDED_REPOS_REPOS_CAP, {
-            message: `Too many expanded repos for a single tab (max ${EXPANDED_REPOS_REPOS_CAP})`,
-          })
-        ),
-        {}
-      )
-    ).check(
-      z.refine((v) => Object.keys(v).length <= EXPANDED_REPOS_TABS_CAP, {
-        message: `Too many tabs with expanded-repo state (max ${EXPANDED_REPOS_TABS_CAP})`,
-      })
-    ),
-    {
-      issues: {},
-      pullRequests: {},
-      actions: {},
-      jiraAssigned: {},
-    }
-  ),
-  // Per-tab default expand state. A repo with no entry in `expandedRepos[tab]` follows
-  // this default (a tab with no entry here defaults to collapsed). Expand All / Collapse
-  // All set this default so repos that appear later inherit it; a manual per-repo toggle
-  // records an exception in `expandedRepos[tab]`. Jira project groups default to expanded.
-  expandDefault: z._default(z.record(z.string(), z.boolean()), { jiraAssigned: true }),
-  lockedRepos: z._default(
-    z.record(
-      z.string(),
-      z.array(z.string().check(z.maxLength(200))).check(z.maxLength(LOCKED_REPOS_CAP))
-    ),
-    { issues: [], pullRequests: [], actions: [], jiraAssigned: [] }
-  ),
-  trackedItems: z._default(z.array(TrackedItemSchema).check(z.maxLength(TRACKED_ITEMS_CAP)), []),
-  dependencyExpandedGroups: z._default(z.array(z.string()), ["mergeable"]),
-  jiraCustomOrder: z.pipe(
-    z._default(
-      z.array(z.string().check(z.maxLength(JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH))).check(z.maxLength(JIRA_CUSTOM_ORDER_CAP)),
-      []
-    ),
-    z.transform((arr) => [...new Set(arr)])
-  ),
-});
-
-export type ViewState = z.infer<typeof ViewStateSchema>;
-export type IgnoredItem = ViewState["ignoredItems"][number];
+// Re-exported so existing importers of the view store keep one import site.
+export {
+  LOCKED_REPOS_CAP,
+  JIRA_CUSTOM_ORDER_CAP,
+  JIRA_CUSTOM_ORDER_KEY_MAX_LENGTH,
+  JIRA_CUSTOM_ORDER_SCOPE,
+  JIRA_CUSTOM_SORT_FIELD,
+  TrackedItemSchema,
+  IgnoredItemSchema,
+  IssueFiltersSchema,
+  PullRequestFiltersSchema,
+  ActionsFiltersSchema,
+  DependencyFiltersSchema,
+  JiraFiltersSchema,
+  ViewStateSchema,
+  type DependencyFilters,
+  type DependencyFilterField,
+  type IssueFilters,
+  type IssueFilterField,
+  type PullRequestFilters,
+  type PullRequestFilterField,
+  type ActionsFilters,
+  type ActionsFilterField,
+  type JiraFilters,
+  type JiraFilterField,
+  type TrackedItem,
+  type ViewState,
+  type IgnoredItem,
+};
 
 const REPO_STATE_TAB_IDS = ["issues", "pullRequests", "actions", "jiraAssigned"] as const;
 const VIEW_STATE_KEYS = new Set(Object.keys(ViewStateSchema.shape));
@@ -250,18 +112,21 @@ export const EXPORTED_VIEW_PREF_KEYS = [
  * TRACKED_ITEM_EXPORT_KEEP_LIST / IGNORED_ITEM_EXPORT_KEEP_LIST allowlists in
  * settings-transfer.ts. Both TrackedItemSchema and IgnoredItemSchema require
  * `title`, so re-validating a stripped entry as-is would reject it outright.
- * This coerces a MISSING `title` to `""` before validation — defensive: only
- * touches a plain object that's actually missing the key; anything else
- * (wrong type, not an object at all) is passed through unchanged for Zod to
- * reject on its own terms. Accepted UX tradeoff (not a bug): TrackedTab
- * re-hydrates the real title from live data on next fetch; the Ignored Items
- * management list shows a blank title until that item is re-encountered.
+ * This coerces a MISSING `title` to `""` before validation, and drops `htmlUrl` and
+ * `jiraStatus` (an export never carries them, and `htmlUrl` becomes a link target, so an
+ * import file must not be able to introduce one). Only a plain object is touched; anything
+ * else (wrong type, not an object at all) is passed through unchanged for Zod to reject on
+ * its own terms. Accepted UX tradeoff (not a bug): TrackedTab re-hydrates the real title
+ * from live data on next fetch; the Ignored Items management list shows a blank title until
+ * that item is re-encountered.
  */
 function coerceStrippedItemEntry(raw: unknown): unknown {
-  if (raw !== null && typeof raw === "object" && !Array.isArray(raw) && !("title" in raw)) {
-    return { ...raw, title: "" };
-  }
-  return raw;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const entry = { ...(raw as Record<string, unknown>) };
+  delete entry.htmlUrl;
+  delete entry.jiraStatus;
+  if (!("title" in entry)) entry.title = "";
+  return entry;
 }
 
 function coerceStrippedItemsArray(raw: unknown): unknown {
@@ -271,8 +136,8 @@ function coerceStrippedItemsArray(raw: unknown): unknown {
 /**
  * Validates a single top-level ViewState field in isolation, via
  * `ViewStateSchema.pick({ [key]: true }).safeParse({ [key]: value })`.
- * Shared by `applyImportedViewState` (import path) and `readOnDiskState`
- * (cross-tab merge-on-write path) below — both need the same "validate one
+ * Shared by `applyImportedViewState` (import path) and `validateViewStateFields`
+ * (on-disk merge-on-write and cross-tab sync paths) below — both need the same "validate one
  * field against the live schema, independent of every other field" behavior
  * so one malformed/version-skewed field can't reject the rest. Every
  * ViewStateSchema field carries its own `.default(...)`, so a successful
@@ -296,7 +161,7 @@ function validateViewStateField<K extends keyof ViewState>(key: K, value: unknow
  *
  * Validates PER-KEY: each of EXPORTED_VIEW_PREF_KEYS is safeParse'd
  * independently against ViewStateSchema's own field validation (via
- * `.pick()`, mirroring `readOnDiskState`'s per-field validation above) and
+ * `.pick()`, mirroring `validateViewStateFields`'s per-field validation below) and
  * only applied if it passes. One invalid/malformed key is skipped WITHOUT
  * dropping every other valid key — a version-skewed or hand-edited export
  * file degrades gracefully instead of failing the whole import.
@@ -340,11 +205,13 @@ export function applyImportedViewState(raw: unknown): void {
       }
     }
     if (Object.keys(patch).length === 0) return;
+    viewPersistence.forceKeys(Object.keys(patch));
     setViewState(
       produce((draft) => {
         Object.assign(draft, patch);
       })
     );
+    viewPersistence.schedule();
   } catch {
     // Silent no-op, matching this function's documented silent-skip semantics.
   }
@@ -407,6 +274,7 @@ export const [viewState, setViewState] = createStore<ViewState>(
 );
 
 export function resetViewState(): void {
+  viewPersistence.requestFullOverwrite();
   setViewState(
     produce((draft) => {
       // Delete dynamic custom tab keys that Object.assign wouldn't clear
@@ -452,6 +320,7 @@ export function resetViewState(): void {
       });
     })
   );
+  viewPersistence.schedule();
 }
 
 // KNOWN LIMITATION: ViewStateSchema.pick() only prevents inflation of TOP-LEVEL fields
@@ -847,121 +716,46 @@ export function pruneClosedTrackedItems(pruneKeys: Set<string>): void {
   );
 }
 
-export function initViewPersistence(): void {
-  if (typeof window !== "undefined") {
-    const handleViewStorage = (e: StorageEvent) => {
-      if (e.key !== VIEW_STORAGE_KEY || e.newValue === null) return;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(e.newValue);
-      } catch {
-        return;
-      }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
-      // Guard: if the incoming blob doesn't contain jiraCustomOrder at all, skip sync.
-      // Without this, Zod's .default([]) would backfill the missing key with an empty
-      // array and silently wipe the current tab's real order.
-      if (!("jiraCustomOrder" in (parsed as Record<string, unknown>))) return;
-      const result = z.pick(ViewStateSchema, { jiraCustomOrder: true }).safeParse(parsed);
-      if (!result.success) return;
-      const incoming = result.data.jiraCustomOrder;
-      if (JSON.stringify(incoming) === JSON.stringify(untrack(() => viewState.jiraCustomOrder))) return;
-      setViewState(produce((draft) => { draft.jiraCustomOrder = incoming; }));
-    };
-    window.addEventListener("storage", handleViewStorage);
-    onCleanup(() => window.removeEventListener("storage", handleViewStorage));
+/**
+ * Validates a parsed view-state blob (read from localStorage or carried by another tab's
+ * `storage` event) one top-level key at a time. Only keys that are part of the current
+ * ViewState schema AND whose value passes that field's own Zod validation are kept:
+ * localStorage is writable by any same-origin script (extensions, a stale/incompatible
+ * schema version, manual tampering), and the persistence layer folds this content into
+ * future writes and the live store, so unrecognized or malformed content must never be
+ * adopted or re-persisted. Validated per key (not one ViewStateSchema.pick(...).safeParse()
+ * over the whole object) so one malformed field can't cause every other valid field to be
+ * dropped too. Returns undefined for anything that is not a plain object.
+ */
+function validateViewStateFields(parsed: unknown): Record<string, unknown> | undefined {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!VIEW_STATE_KEYS.has(key)) continue;
+    const validated = validateViewStateField(key as keyof ViewState, value);
+    if (validated !== undefined) filtered[key] = validated;
   }
-
-  // Baseline snapshot of what this tab last knew to be persisted to localStorage
-  // (starts at the state this tab loaded at boot). Used by commitSnapshot() to work
-  // out which top-level fields THIS tab actually changed, so a debounced write only
-  // overlays those fields onto whatever is CURRENTLY on disk instead of blindly
-  // overwriting with this tab's full (possibly stale) in-memory snapshot. Without
-  // this, a full-object overwrite from Tab A could silently revert a newer value
-  // Tab B wrote for some other field (e.g. jiraCustomOrder) in the gap between when
-  // Tab A's debounce timer started and when it actually fires.
-  let lastSyncedSnapshot: Record<string, unknown> = JSON.parse(JSON.stringify(untrack(() => viewState)));
-
-  function readOnDiskState(): Record<string, unknown> | undefined {
-    try {
-      const raw = localStorage.getItem(VIEW_STORAGE_KEY);
-      if (raw === null) return undefined;
-      const parsed = JSON.parse(raw) as unknown;
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-      // Only trust keys that are part of the current ViewState schema AND whose value
-      // passes that field's own Zod validation. localStorage is writable by any
-      // same-origin script (extensions, a stale/incompatible schema version, manual
-      // tampering), and commitSnapshot() below folds this content into every future
-      // write for fields this tab doesn't happen to touch itself — without both the
-      // key-name allowlist and per-field value validation, unrecognized or malformed
-      // on-disk content would be perpetually re-persisted instead of self-healing on
-      // the next write, as it did before the merge-on-write logic existed. Validated
-      // one key at a time (not a single ViewStateSchema.pick(...).safeParse() over the
-      // whole object) so one malformed field can't cause every other valid field to be
-      // dropped too.
-      const filtered: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!VIEW_STATE_KEYS.has(key)) continue;
-        const validated = validateViewStateField(key as keyof ViewState, value);
-        if (validated !== undefined) filtered[key] = validated;
-      }
-      return filtered;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function commitSnapshot(snapshot: Record<string, unknown>): void {
-    const onDisk = readOnDiskState();
-    // Start from whatever is currently on disk (may include newer values another tab
-    // wrote); fall back to this tab's own snapshot if disk is unreadable/absent.
-    const merged: Record<string, unknown> = { ...(onDisk ?? snapshot) };
-    for (const key of Object.keys(snapshot)) {
-      // Always include a key this tab knows about but that's missing from the on-disk
-      // blob entirely (stale/corrupted/version-skewed data) — no legitimate flow ever
-      // produces a ViewState with a top-level key truly absent, so treat that as
-      // recoverable staleness rather than silently dropping this tab's known value
-      // (which Zod's .default() would otherwise backfill on the next load).
-      if (!(key in merged) || JSON.stringify(snapshot[key]) !== JSON.stringify(lastSyncedSnapshot[key])) {
-        merged[key] = snapshot[key];
-      }
-    }
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged));
-      lastSyncedSnapshot = merged;
-    } catch {
-      pushNotification("localStorage:view", "View state write failed — storage may be full", "warning");
-    }
-  }
-
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingSnapshot: Record<string, unknown> | undefined;
-  createEffect(() => {
-    const json = JSON.stringify(viewState); // synchronous read → tracked by SolidJS
-    const snapshot = JSON.parse(json) as Record<string, unknown>;
-    pendingSnapshot = snapshot;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      pendingSnapshot = undefined;
-      commitSnapshot(snapshot);
-    }, 200);
-  });
-
-  // Registered on the OUTER owner, as a sibling of createEffect rather than
-  // nested inside it (matching the storage-listener cleanup above). Solid
-  // invokes a computation's onCleanup on BOTH disposal AND recomputation —
-  // nesting this inside createEffect would flush the stale pending snapshot
-  // synchronously on every dependency change (any viewState mutation),
-  // defeating the 200ms debounce for every change except the trailing one.
-  // Registered here instead, it only fires once, when this owner (the App
-  // component) is truly disposed — the unmount/HMR case the comment below
-  // describes.
-  onCleanup(() => {
-    clearTimeout(debounceTimer);
-    // Flush pending write synchronously so HMR doesn't lose state
-    if (pendingSnapshot !== undefined) {
-      commitSnapshot(pendingSnapshot);
-      pendingSnapshot = undefined;
-    }
-  });
+  return filtered;
 }
+
+const viewPersistence = createFieldPersistence({
+  storageKey: VIEW_STORAGE_KEY,
+  snapshot: () => JSON.parse(JSON.stringify(untrack(() => viewState))) as Record<string, unknown>,
+  trackedSnapshot: () => JSON.parse(JSON.stringify(viewState)) as Record<string, unknown>,
+  validate: validateViewStateFields,
+  apply: (patch) =>
+    setViewState(
+      produce((draft) => {
+        Object.assign(draft, patch);
+      })
+    ),
+  isReadOnly: () => schemaStale(),
+  failureSource: "localStorage:view",
+  failureMessage: "View state write failed — storage may be full",
+});
+
+export const initViewPersistence = viewPersistence.init;
+/** Synchronously commits this tab's pending view-state changes before the page unloads. */
+export const flushViewPersistence = viewPersistence.flush;
+/** Drops this tab's unsaved view-state changes (used when another tab changes the signed-in identity). */
+export const discardPendingViewPersistence = viewPersistence.discardPending;

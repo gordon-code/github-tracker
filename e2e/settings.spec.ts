@@ -3,7 +3,7 @@ import { setupAuth } from "./helpers";
 
 // ── Settings page renders ────────────────────────────────────────────────────
 
-test("settings page renders section headings", async ({ page }) => {
+test("settings page renders section headings", { tag: "@cross-browser" }, async ({ page }) => {
   await setupAuth(page);
   await page.goto("/settings");
   await page.waitForLoadState("networkidle");
@@ -45,7 +45,7 @@ test("back link navigates to dashboard", async ({ page }) => {
 
 // ── Theme change ─────────────────────────────────────────────────────────────
 
-test("changing theme to dark applies data-theme attribute", async ({
+test("changing theme to dark applies data-theme attribute", { tag: "@cross-browser" }, async ({
   page,
 }) => {
   await setupAuth(page);

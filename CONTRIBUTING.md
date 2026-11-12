@@ -36,7 +36,10 @@ Fine-grained PATs need Actions (read), Contents (read), Issues (read), and Pull 
 
 ```bash
 pnpm test              # unit tests (Vitest — root + mcp/)
-pnpm test:e2e          # Playwright E2E tests (chromium)
+pnpm test:e2e          # Playwright E2E tests (chromium against vite dev, plus *.preview.spec.ts against pnpm build && vite preview; rebuilds dist/)
+pnpm test:e2e:preview  # Only the *.preview.spec.ts E2E tests (stale-chunk and offline handling on the production build)
+E2E_SERVERS=dev pnpm test:e2e  # Skip the production build and preview server (dev-server specs only)
+pnpm test:e2e:cross-browser  # Only the @cross-browser-tagged E2E tests, on Firefox + WebKit (first run: pnpm exec playwright install firefox webkit)
 pnpm test:status-smoke # Live-network check that githubstatus.com still reports the tracked component names (also runs on a weekly schedule in CI)
 pnpm run typecheck     # TypeScript validation (root + mcp/)
 pnpm lint              # Type-aware lint check (oxlint — root + mcp/)
@@ -52,7 +55,7 @@ To test MCP tools interactively, use the MCP Inspector:
 npx @modelcontextprotocol/inspector tsx mcp/src/index.ts
 ```
 
-CI runs typecheck, lint (`oxlint`), unit tests, and E2E tests on every PR, and lint is also enforced pre-commit via `prek` alongside typecheck and unit tests. Make sure they pass locally before pushing.
+CI runs typecheck, lint (`oxlint`), unit tests, and E2E tests (Chromium, plus the `@cross-browser` subset on Firefox and WebKit in a separate job) on every PR, and lint is also enforced pre-commit via `prek` alongside typecheck and unit tests. Make sure they pass locally before pushing.
 
 To run a specific test file:
 
@@ -75,6 +78,8 @@ pnpm test -- tests/path/to/test.ts
 - Don't reach for a custom implementation when Kobalte has a well-tested one
 
 **Validation:** Zod v4 for all runtime validation. Note that nested `.default({})` doesn't apply inner field defaults — be explicit.
+
+**Persisted schemas (`src/shared/schemas.ts`, `src/shared/view-schema.ts`):** the build fingerprints what `ConfigSchema` and `ViewStateSchema` accept; when a deploy changes it, tabs still on the older build turn read-only until reloaded. Keys, types, enums, patterns, array limits and defaults are covered automatically. A limit enforced by `.refine()` is invisible to that, so put it in `PERSISTED_LIMITS` (or export it like `TRACKED_USER_AVATAR_PREFIX`) and let the refine read it; a test fails if a refine is added without being accounted for. Tag a new E2E test `{ tag: "@cross-browser" }` to also run it on Firefox and WebKit in CI.
 
 ## Testing
 

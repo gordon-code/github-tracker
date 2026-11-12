@@ -17,11 +17,17 @@ export const RepoRefSchema = z.object({
   fullName: z.string().check(z.regex(/^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/)),
 });
 
+/**
+ * Prefix every stored tracked-user avatar URL must start with. It is enforced by a `.refine()`,
+ * which JSON Schema cannot express, so it is exported for the build's schema fingerprint.
+ */
+export const TRACKED_USER_AVATAR_PREFIX = "https://avatars.githubusercontent.com/";
+
 export const TrackedUserSchema = z.object({
   login: z.string().check(z.regex(VALID_TRACKED_LOGIN)),
   avatarUrl: z.url().check(
     z.refine(
-      (u) => u.startsWith("https://avatars.githubusercontent.com/"),
+      (u) => u.startsWith(TRACKED_USER_AVATAR_PREFIX),
       "Avatar URL must be from GitHub CDN"
     )
   ),
@@ -124,6 +130,7 @@ export const ConfigSchema = z.object({
   customTabs: z._default(z.array(CustomTabSchema).check(z.maxLength(10)), []),
   mcpRelayEnabled: z._default(z.boolean(), false),
   mcpRelayPort: z._default(z.int().check(z.minimum(1024), z.maximum(65535)), 9876),
+  lastSeenVersion: z._default(z.nullable(z.string().check(z.maxLength(32))), null),
   // Explicit defaults (NOT .default({})) — inner field defaults don't apply with .default({}) per BUG-001
   jira: z._default(JiraConfigSchema, { enabled: false, authMethod: "oauth", issueKeyDetection: true, expandIssueDetails: false, customFields: [], customScopes: [] }),
   dependencies: z._default(DependencyConfigSchema, { enabled: true, rebaseLabel: "rebase", excludedOrgs: [], excludedRepos: [] }),

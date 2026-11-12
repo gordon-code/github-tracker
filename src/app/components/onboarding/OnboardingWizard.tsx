@@ -6,10 +6,10 @@ import {
   Switch,
   Match,
 } from "solid-js";
-import { config, updateConfig, CONFIG_STORAGE_KEY } from "../../stores/config";
-import { pushNotification } from "../../lib/errors";
+import { config, updateConfig, flushConfigPersistence } from "../../stores/config";
 import { fetchOrgs, type OrgEntry, type RepoRef } from "../../services/api";
 import { getClient } from "../../services/github";
+import { schemaStale } from "../../lib/version";
 import RepoSelector from "./RepoSelector";
 import LoadingSpinner from "../shared/LoadingSpinner";
 
@@ -56,6 +56,11 @@ export default function OnboardingWizard() {
   });
 
   function handleFinish() {
+    if (schemaStale()) {
+      // A tab on an older build can't save, so finishing would navigate away and lose the choices.
+      setError("This tab is on an older version and can't save your choices. Reload this page, then finish setup.");
+      return;
+    }
     const uniqueOrgs = [...new Set(selectedRepos().map((r) => r.owner))];
     updateConfig({
       selectedOrgs: uniqueOrgs,
@@ -65,11 +70,7 @@ export default function OnboardingWizard() {
       onboardingComplete: true,
     });
     // Flush synchronously — the debounced persistence effect won't fire before page unload
-    try {
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
-    } catch {
-      pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
-    }
+    flushConfigPersistence();
     window.location.replace("/dashboard");
   }
 

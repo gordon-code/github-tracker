@@ -17,6 +17,12 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
+      # The build stamp, the Worker deploy tag and the post-deploy check must all name the
+      # commit that was checked out. github.sha is the caller's commit, which differs from
+      # inputs.tag on a manual re-deploy of an older release.
+      - name: Resolve deployed commit
+        id: rev
+        run: printf 'sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/verify
         with:
           vite-github-client-id: ${{ vars.VITE_GITHUB_CLIENT_ID }}
@@ -32,16 +38,29 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - run: pnpm run build
         env:
+          # GITHUB_SHA itself cannot be overridden, so the build reads this variable first.
+          BUILD_GIT_SHA: ${{ steps.rev.outputs.sha }}
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           VITE_JIRA_CLIENT_ID: ${{ vars.VITE_JIRA_CLIENT_ID }}
           VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+      # Fail before deploying if the bundle was stamped with any other commit.
+      - name: Verify build stamp
+        env:
+          EXPECTED_SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          expected="${EXPECTED_SHA:0:12}"
+          sha="$(jq -r '.sha // empty' dist/client/version.json)"
+          if [[ "$sha" != "$expected" ]]; then
+            printf 'dist/client/version.json names %s, expected %s\n' "$sha" "$expected" >&2
+            exit 1
+          fi
       - name: Deploy to Cloudflare Workers
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           LC_ALL: C.UTF-8
-          DEPLOY_TAG: ${{ github.sha }}
+          DEPLOY_TAG: ${{ steps.rev.outputs.sha }}
           RAW_MSG: ${{ github.event.head_commit.message }}
         run: |
           DEPLOY_TAG="${DEPLOY_TAG:0:25}"
@@ -50,3 +69,25 @@ jobs:
           DEPLOY_MSG="${DEPLOY_MSG:0:100}"
           DEPLOY_MSG="${DEPLOY_MSG:-manual deploy ${DEPLOY_TAG}}"
           pnpm exec wrangler deploy --tag "$DEPLOY_TAG" --message "$DEPLOY_MSG"
+      # Update detection ignores a /version.json that is missing or served as the SPA's HTML
+      # fallback, so confirm the live file is JSON and names the build that was just deployed.
+      - name: Verify deployed version.json
+        if: ${{ vars.DEPLOY_DOMAIN != '' }}
+        env:
+          DEPLOY_DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
+          EXPECTED_SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          expected="${EXPECTED_SHA:0:12}"
+          for attempt in 1 2 3 4 5 6; do
+            out="$(curl -sS --max-time 10 -w '\n%{content_type}' "https://${DEPLOY_DOMAIN}/version.json" || true)"
+            ctype="${out##*$'\n'}"
+            json="${out%$'\n'*}"
+            sha="$(jq -r '.sha // empty' <<< "$json" 2>/dev/null || true)"
+            if [[ "$ctype" == application/json* && "$sha" == "$expected" ]]; then
+              printf 'version.json OK (%s)\n' "$sha"
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          printf 'version.json did not report %s with a JSON content type\n' "$expected" >&2
+          exit 1

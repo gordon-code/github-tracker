@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot } from "solid-js";
 
 // Mock cache.ts so clearAuth() doesn't try to open IndexedDB
 const mockClearCache = vi.fn().mockResolvedValue(undefined);
@@ -533,6 +534,76 @@ describe("cross-tab auth sync", () => {
 
     expect(mod.token()).toBeNull();
     expect(replaceMock).toHaveBeenCalledWith("/login");
+  });
+
+  describe("unsaved config/view changes when another tab changes the signed-in identity", () => {
+    async function withPendingChanges(fn: (stores: {
+      config: typeof import("../../src/app/stores/config");
+      view: typeof import("../../src/app/stores/view");
+    }) => Promise<void> | void): Promise<void> {
+      const config = await import("../../src/app/stores/config");
+      const view = await import("../../src/app/stores/view");
+      let dispose!: () => void;
+      createRoot((d) => {
+        dispose = d;
+        config.initConfigPersistence();
+        view.initViewPersistence();
+      });
+      try {
+        mod.setAuth({ access_token: "ghs_abc" });
+        config.updateConfig({ theme: "dracula" });
+        view.updateViewState({ lastActiveTab: "actions" });
+        await fn({ config, view });
+        // Let the debounce window pass: a discarded change must stay unwritten.
+        await new Promise((r) => setTimeout(r, 300));
+        expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+        expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+      } finally {
+        dispose();
+      }
+    }
+
+    it("drops them when another tab replaces the token", async () => {
+      await withPendingChanges(({ config, view }) => {
+        window.dispatchEvent(new StorageEvent("storage", {
+          key: "github-tracker:auth-token",
+          newValue: "ghs_replacement",
+        }));
+        config.flushConfigPersistence();
+        view.flushViewPersistence();
+      });
+    });
+
+    it("drops them when another tab signs out", async () => {
+      vi.stubGlobal("location", { href: window.location.href, replace: vi.fn() });
+      await withPendingChanges(({ config, view }) => {
+        localStorageMock.removeItem("github-tracker:auth-token");
+        window.dispatchEvent(new StorageEvent("storage", {
+          key: "github-tracker:auth-token",
+          newValue: null,
+        }));
+        config.flushConfigPersistence();
+        view.flushViewPersistence();
+      });
+    });
+
+    it("keeps them when an unrelated key changes", async () => {
+      const config = await import("../../src/app/stores/config");
+      const view = await import("../../src/app/stores/view");
+      mod.setAuth({ access_token: "ghs_abc" });
+      config.updateConfig({ theme: "dracula" });
+      view.updateViewState({ lastActiveTab: "actions" });
+
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "github-tracker:some-other-key",
+        newValue: "x",
+      }));
+      config.flushConfigPersistence();
+      view.flushViewPersistence();
+
+      expect(JSON.parse(localStorageMock.getItem("github-tracker:config") ?? "{}").theme).toBe("dracula");
+      expect(JSON.parse(localStorageMock.getItem("github-tracker:view") ?? "{}").lastActiveTab).toBe("actions");
+    });
   });
 
   it("does not call expireToken when key does not match", () => {
@@ -1631,6 +1702,126 @@ describe("identityEpoch and clearSnapshot integration", () => {
     expect(reloadSpy).not.toHaveBeenCalled();
     expect(mod.identityEpoch()).toBe(beforeEpoch);
     expect(mockClearSnapshot).not.toHaveBeenCalled();
+  });
+
+  describe("persistence while a cross-tab token change is being checked", () => {
+    const ALICE = { login: "alice", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "Alice" };
+
+    // `userResponse` may be a factory so a rejection is only created when fetch is called.
+    async function setup(userResponse: Promise<unknown> | (() => Promise<unknown>)) {
+      const config = await import("../../src/app/stores/config");
+      mod.setAuthFromPat("ghs_old", ALICE);
+      config.flushConfigPersistence();
+      localStorageMock.removeItem("github-tracker:config");
+
+      vi.spyOn(mod.crossTabReload, "reloadForIdentitySwitch").mockImplementation(() => {});
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation(() => (typeof userResponse === "function" ? userResponse() : userResponse)),
+      );
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "github-tracker:auth-token",
+        newValue: "ghs_rotated",
+      }));
+
+      // A change made while the check is outstanding must not be written.
+      config.updateConfig({ theme: "dracula" });
+      config.flushConfigPersistence();
+      expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+      return config;
+    }
+
+    it("resumes writes once the /user check confirms the same user", async () => {
+      const okAlice = { ok: true, status: 200, json: () => Promise.resolve({ ...ALICE, login: "ALICE" }) };
+      const config = await setup(Promise.resolve(okAlice));
+      await new Promise((r) => setTimeout(r, 50));
+
+      config.updateConfig({ theme: "forest" });
+      config.flushConfigPersistence();
+      expect(JSON.parse(localStorageMock.getItem("github-tracker:config") ?? "{}").theme).toBe("forest");
+    });
+
+    it("stays paused when the check finds a different identity and the tab is reloading", async () => {
+      const okBob = {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ login: "bob", avatar_url: "https://avatars.githubusercontent.com/u/2", name: "Bob" }),
+      };
+      const config = await setup(Promise.resolve(okBob));
+      await new Promise((r) => setTimeout(r, 50));
+
+      config.updateConfig({ theme: "forest" });
+      config.flushConfigPersistence();
+      expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+    });
+
+    it("stays paused and warns when the /user check fails, because the account was never confirmed", async () => {
+      mockPushNotification.mockClear();
+      const config = await setup(Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) }));
+      await new Promise((r) => setTimeout(r, 50));
+
+      config.updateConfig({ theme: "forest" });
+      config.flushConfigPersistence();
+      expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        "auth:cross-tab-unconfirmed",
+        expect.stringContaining("couldn't confirm which one"),
+        "warning",
+      );
+    });
+
+    it("stays paused and warns when the /user request errors or times out", async () => {
+      mockPushNotification.mockClear();
+      const config = await setup(() => Promise.reject(new DOMException("timed out", "TimeoutError")));
+      await new Promise((r) => setTimeout(r, 50));
+
+      config.updateConfig({ theme: "forest" });
+      config.flushConfigPersistence();
+      expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+      expect(mockPushNotification).toHaveBeenCalledWith(
+        "auth:cross-tab-unconfirmed",
+        expect.any(String),
+        "warning",
+      );
+    });
+
+    it("sends the /user check with a timeout signal", async () => {
+      const okAlice = { ok: true, status: 200, json: () => Promise.resolve({ ...ALICE, login: "ALICE" }) };
+      await setup(Promise.resolve(okAlice));
+      const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    it("on resume, adopts what the other tab saved meanwhile and writes this tab's own change", async () => {
+      const configModule = await import("../../src/app/stores/config");
+      let dispose!: () => void;
+      createRoot((d) => {
+        dispose = d;
+        configModule.initConfigPersistence();
+      });
+      try {
+        let release!: (value: unknown) => void;
+        const held = new Promise((resolve) => {
+          release = resolve;
+        });
+        await setup(() => held);
+        // Another tab saves while this tab's identity check is outstanding.
+        localStorageMock.setItem(
+          "github-tracker:config",
+          JSON.stringify({ ...JSON.parse(JSON.stringify(configModule.config)), refreshInterval: 120 }),
+        );
+        expect(configModule.config.refreshInterval).not.toBe(120);
+
+        release({ ok: true, status: 200, json: () => Promise.resolve({ ...ALICE, login: "ALICE" }) });
+        await new Promise((r) => setTimeout(r, 400));
+
+        expect(configModule.config.refreshInterval).toBe(120);
+        expect(JSON.parse(localStorageMock.getItem("github-tracker:config") ?? "{}").theme).toBe("dracula");
+      } finally {
+        dispose();
+      }
+    });
   });
 
   it("clearIdentityData() invokes clearSnapshot() synchronously before clearCache() resolves, awaits both, and survives either rejecting", async () => {

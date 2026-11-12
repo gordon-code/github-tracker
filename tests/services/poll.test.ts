@@ -13,6 +13,7 @@ import {
 import { PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MESSAGE } from "../../src/shared/types";
 import * as githubMod from "../../src/app/services/github";
 import * as githubStatusMod from "../../src/app/services/github-status";
+import * as versionMod from "../../src/app/lib/version";
 import { makePullRequest } from "../helpers/factories";
 
 // Mock pushError and pushNotification so we can spy on them
@@ -57,6 +58,11 @@ vi.mock("../../src/app/services/github", () => ({
 // in doFetch, same pattern as fetchRateLimitDetails above.
 vi.mock("../../src/app/services/github-status", () => ({
   fetchGitHubStatus: vi.fn(() => Promise.resolve()),
+}));
+
+// Mock version module — checkForUpdate runs concurrently (fire-and-forget) in doFetch.
+vi.mock("../../src/app/lib/version", () => ({
+  checkForUpdate: vi.fn(() => Promise.resolve()),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
@@ -665,6 +671,27 @@ describe("createPollCoordinator", () => {
       await flushPromises();
 
       expect(fetchGitHubStatusSpy).toHaveBeenCalledTimes(2);
+      dispose();
+    });
+  });
+
+  it("checkForUpdate is called once per doFetch cycle", async () => {
+    const checkForUpdateSpy = vi.mocked(versionMod.checkForUpdate);
+    checkForUpdateSpy.mockClear();
+
+    const fetchAll = makeFetchAll();
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+      expect(checkForUpdateSpy).toHaveBeenCalledTimes(1);
+      // Poll-driven checks are throttled so they stay off the boot path and don't repeat.
+      expect(checkForUpdateSpy).toHaveBeenCalledWith({ throttled: true });
+
+      coordinator.manualRefresh();
+      await flushPromises();
+
+      expect(checkForUpdateSpy).toHaveBeenCalledTimes(2);
       dispose();
     });
   });

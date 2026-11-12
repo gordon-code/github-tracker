@@ -100,6 +100,7 @@ import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
 import * as settingsTransfer from "../../../src/app/lib/settings-transfer";
 import * as proxyLib from "../../../src/app/lib/proxy";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../../src/app/lib/version";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -2094,8 +2095,116 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     await user.click(screen.getByRole("button", { name: "Yes, import" }));
 
     expect(config.selectedRepos).toHaveLength(2);
-    // The Repositories summary is driven by the localRepos editor copy; without
-    // the post-import resync it would still read the stale (empty) pre-import set.
     await waitFor(() => screen.getByText(/2 selected/i));
+  });
+
+  it("reflects org/repo changes written to the config store after mount (as another tab's adoption does)", async () => {
+    updateConfig({ selectedOrgs: ["acme"], selectedRepos: [], upstreamRepos: [] });
+    renderSettings();
+    await waitFor(() => screen.getByText(/0 selected/i));
+
+    // Another tab's write is adopted into the store without this page re-mounting;
+    // the editors must follow it or the next edit here would save the stale list.
+    updateConfig({
+      selectedOrgs: ["acme", "globex"],
+      selectedRepos: [
+        { owner: "acme", name: "api", fullName: "acme/api" },
+        { owner: "globex", name: "web", fullName: "globex/web" },
+      ],
+      upstreamRepos: [{ owner: "upstream", name: "lib", fullName: "upstream/lib" }],
+    });
+
+    await waitFor(() => screen.getByText(/3 selected \(1 upstream\)/i));
+    expect(screen.getByText(/^2 selected$/i)).toBeTruthy();
+  });
+});
+
+describe("SettingsPage — read-only while the stored-data schema is stale", () => {
+  afterEach(() => {
+    _resetVersionStateForTests();
+  });
+
+  it("wraps the settings in a fieldset that is disabled only while the schema is stale", () => {
+    renderSettings();
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    const fieldset = signOut.closest("fieldset");
+    expect(fieldset).not.toBeNull();
+    expect(fieldset?.disabled).toBe(false);
+
+    expect(fieldset?.hasAttribute("inert")).toBe(false);
+
+    _setSchemaStaleForTests(true);
+    expect(fieldset?.disabled).toBe(true);
+    // `inert` also blocks widgets a disabled fieldset doesn't cover (custom selects, role="button").
+    expect(fieldset?.hasAttribute("inert")).toBe(true);
+
+    _setSchemaStaleForTests(false);
+    expect(fieldset?.disabled).toBe(false);
+    expect(fieldset?.hasAttribute("inert")).toBe(false);
+  });
+
+  it("disables the refresh-interval, items-per-page and default-tab selects themselves, not only the region around them", () => {
+    renderSettings();
+    const triggers = Array.from(document.querySelectorAll<HTMLButtonElement>("button.select"));
+    expect(triggers.length).toBeGreaterThanOrEqual(3);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(false);
+
+    _setSchemaStaleForTests(true);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(true);
+
+    _setSchemaStaleForTests(false);
+    for (const trigger of triggers) expect(trigger.disabled).toBe(false);
+  });
+
+  it("keeps the page header outside the disabled region so the back link stays usable", () => {
+    renderSettings();
+    _setSchemaStaleForTests(true);
+    const back = screen.getByRole("link", { name: "Back to dashboard" });
+    expect(back.closest("fieldset")).toBeNull();
+  });
+});
+
+describe("SettingsPage — Data: About", () => {
+  it("renders the About row with displayVersion() and links to Releases and Changelog", () => {
+    renderSettings();
+
+    screen.getByText("About");
+    const versionLink = screen.getByRole("link", { name: "0.1.0+abcdef1" });
+    expect(versionLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/releases",
+    );
+    expect(versionLink.getAttribute("target")).toBe("_blank");
+    expect(versionLink.getAttribute("rel")).toBe("noopener noreferrer");
+
+    const changelogLink = screen.getByRole("link", { name: "Changelog" });
+    expect(changelogLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md",
+    );
+    expect(changelogLink.getAttribute("target")).toBe("_blank");
+    expect(changelogLink.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("omits href on About links when isSafeGitHubUrl returns false", () => {
+    vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(false);
+    renderSettings();
+
+    const versionEl = screen.getByText("0.1.0+abcdef1");
+    expect(versionEl.getAttribute("href")).toBeNull();
+
+    const changelogEl = screen.getByText("Changelog");
+    expect(changelogEl.getAttribute("href")).toBeNull();
+  });
+
+  it("opens WhatsNewDialog when clicking the What's new button in the About row", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    const whatsNewBtn = screen.getByRole("button", { name: "What's new" });
+    await user.click(whatsNewBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("What's New")).toBeDefined();
+      expect(screen.getByText("v0.1.0")).toBeDefined();
+    });
   });
 });

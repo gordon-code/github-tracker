@@ -231,7 +231,7 @@
                 "group": ["*/CustomTabModal", "../shared/CustomTabModal"],
                 "importNamePattern": "^",
                 "allowTypeImports": true,
-                "message": "Lazy-load CustomTabModal via lazy(() => import('../shared/CustomTabModal')) so it is excluded from initial dashboard/settings chunks."
+                "message": "Lazy-load CustomTabModal via lazyWithReload(() => import('../shared/CustomTabModal')) so it is excluded from initial dashboard/settings chunks."
               },
               {
                 "group": ["./github-emoji-map.json", "**/github-emoji-map.json"],

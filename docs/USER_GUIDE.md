@@ -62,6 +62,7 @@ GitHub Tracker is a dashboard that aggregates open issues, pull requests, and Gi
   - [Keep the Export File Safe](#keep-the-export-file-safe)
   - [Jira Credentials and Staleness](#jira-credentials-and-staleness)
   - [Same-Deployment Only](#same-deployment-only)
+- [Updates & What's New](#updates--whats-new)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -710,7 +711,7 @@ The header shrinks as you scroll to maximize content space.
 
 ## Settings Reference
 
-Settings are saved automatically to `localStorage` and persist across sessions. All settings can be exported as a JSON file via **Settings > Data > Export**.
+Settings are saved automatically to `localStorage` and persist across sessions. Changes you make in one browser tab, including dashboard view preferences such as filters, sort order, and expanded groups, are applied to your other open tabs automatically; if two tabs change the same setting at almost the same moment, the later change wins. All settings can be exported as a JSON file via **Settings > Data > Export**. The current build version (`<version>+<commit-sha>`) is shown in **Settings > Data > About** (alongside a **What's new** button and a link to the changelog) and in the dashboard footer, both linking to the GitHub Releases page.
 
 ### Config Settings
 
@@ -834,6 +835,20 @@ Jira **OAuth** credentials in an export often go stale quickly. Atlassian rotate
 ### Same-Deployment Only
 
 Encrypted credentials are sealed by this deployment's server and can only be imported back into **the same deployment**. Credentials exported from `gh.gordoncode.dev` cannot be imported into a different deployment (a self-hosted fork or a different domain). Plaintext configuration is portable across deployments; credentials are not.
+
+---
+
+## Updates & What's New
+
+GitHub Tracker checks `/version.json` in the background (30 seconds after load, when returning to a tab, and on full poll cycles, at most once a minute) to detect when a new build has been deployed.
+
+- **Update Banner:** When the deployed build differs from the one you are running, a banner appears at the bottom of the screen (*"A new version is available."*) with a **Reload** button and a link to the **Changelog**, and an informational entry is added to the Notification Drawer (without a pop-up toast, since the banner is already showing). If a later check reports the build you are running again (for example after a rollback), the banner and the notification go away.
+- **Automatic Reload on Navigation:** If an update is waiting when you navigate between pages (for example, opening **Settings** or returning to the **Dashboard**), the app saves any pending configuration or view-state changes from this tab to `localStorage` (except in a read-only tab, see below) and performs a full page reload into the new build automatically. This happens once per new version in a tab. Only the settings this tab changed are written before the reload, so settings you changed in other tabs are kept (if two tabs changed the same setting, the one that saves last wins).
+- **Read-Only Older Tabs:** When a new build changes how settings and view preferences are stored, a tab still running the older build stops saving and loading them so it can't corrupt the newer data. The banner then adds *"This tab can't save changes, and Settings are read-only, until you reload."* and everything on the **Settings** page is disabled, including **Sign out** and **Export**. Nothing you change in that tab is saved (dashboard filters, ignored or tracked items, and so on), and finishing onboarding, signing in with a token, or importing settings on the login page shows a message asking you to reload first. Reload the tab (or open another page, which reloads automatically) to continue.
+- **Account Changes in Other Tabs:** If you sign in, sign out, or replace your token in another tab, any unsaved settings changes in this tab are discarded rather than written over that account's settings. After a sign-in or token replacement, this tab stops saving until it has confirmed the account is still the same user, then catches up with what the other tab saved; if it can't confirm (for example the check times out), a warning asks you to reload the tab. After a sign-out, this tab expires its token and goes to the sign-in page.
+- **Stale Chunk Recovery:** If a lazily loaded part of the app (a page, a dialog, or another on-demand module) fails to load and a newer version has been deployed, the app saves pending state and reloads once to load the current bundle. When no newer version is known yet, it checks first and reloads only if the check finds one, so a blocked or flaky request doesn't cause a reload; a page that cannot load at all reloads once on its own. It reloads at most once every 10 seconds and never while your browser reports being offline; in those cases the usual load-failure handling applies instead (for pages, a **Failed to load page** card with a **Reload page** button).
+- **What's New Dialog:** Click the **What's new** star icon in the dashboard header (or **What's new** in **Settings > Data > About**) to view recent release notes directly in the app. A small unread indicator dot appears on the header icon whenever a newer release has shipped since you last opened the dialog, and clears automatically once opened. The icon's accessible label reads "What's new, unread release notes" while the dot is shown.
+- **Version & Changelog:** You can view the running build version (`<version>+<commit-sha>`, linking to [GitHub Releases](https://github.com/gordon-code/github-tracker/releases)) in **Settings > Data > About** and in the dashboard footer, and open the [Changelog](https://github.com/gordon-code/github-tracker/blob/main/CHANGELOG.md) directly from **Settings > Data > About** (as well as from the **What's New** dialog and the update banner).
 
 ---
 

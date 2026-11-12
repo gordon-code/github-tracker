@@ -2,6 +2,7 @@ import { createSignal, createEffect, createRoot, untrack, onCleanup } from "soli
 import { captureException } from "../lib/sentry-facade";
 import { getClient, fetchRateLimitDetails } from "./github";
 import { fetchGitHubStatus } from "./github-status";
+import { checkForUpdate } from "../lib/version";
 import { config } from "../stores/config";
 import { user, onAuthCleared, expireToken, identityEpoch } from "../stores/auth";
 import { checkAndResetIfExpired } from "./api-usage";
@@ -186,6 +187,8 @@ let _trackedUsersMounted = false;
 let _trackedUsersKey = "";
 let _monitoredReposMounted = false;
 let _monitoredReposKey = "";
+let _repoScopeMounted = false;
+let _repoScopeKey = "";
 let _enableActionsMounted = false;
 let _enableActionsKey = true;
 createRoot(() => {
@@ -227,6 +230,27 @@ createRoot(() => {
     }
     if (key !== _monitoredReposKey) {
       _monitoredReposKey = key;
+      untrack(() => {
+        _resetNotificationState();
+        resetEventsState();
+      });
+    }
+  });
+
+  // Repos added from another tab (config syncs live across tabs) or from Settings would
+  // otherwise notify for every item that already existed in them.
+  createEffect(() => {
+    const key = [...(config.selectedRepos ?? []), ...(config.upstreamRepos ?? [])]
+      .map((r) => r.fullName)
+      .toSorted()
+      .join(",");
+    if (!_repoScopeMounted) {
+      _repoScopeMounted = true;
+      _repoScopeKey = key;
+      return;
+    }
+    if (key !== _repoScopeKey) {
+      _repoScopeKey = key;
       untrack(() => {
         _resetNotificationState();
         resetEventsState();
@@ -464,6 +488,7 @@ export function createPollCoordinator(
     // own notification push/dismiss) — no interaction with this cycle's error
     // handling or the fetchAll() try/catch below.
     void fetchGitHubStatus();
+    void checkForUpdate({ throttled: true });
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(

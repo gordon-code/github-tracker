@@ -2,6 +2,7 @@ import { defineConfig, defineProject } from "vitest/config";
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
+import { buildMetaTestConfig } from "./tests/stubs/build-meta-test-config.ts";
 
 export default defineConfig({
   test: {
@@ -11,6 +12,7 @@ export default defineConfig({
       // Browser/DOM tests (stores, services, UI)
       defineProject({
         plugins: [solid(), tailwindcss()],
+        ...buildMetaTestConfig,
         test: {
           name: "browser",
           environment: "happy-dom",
