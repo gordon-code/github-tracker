@@ -13,7 +13,8 @@ jobs:
           vite-github-client-id: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           deploy-domain: ${{ vars.DEPLOY_DOMAIN }}
   # Runs the E2E tests tagged @cross-browser on Firefox and WebKit. Those use Playwright's own
-  # browser builds, which the Chromium-only `ci` job never needs to download.
+  # browser builds, which the Chromium-only `ci` job never needs to download. CROSS_BROWSER=1
+  # leaves out the preview project and its build.
   e2e-cross-browser:
     runs-on: ubuntu-latest
     steps:

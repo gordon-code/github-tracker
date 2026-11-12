@@ -36,7 +36,9 @@ Fine-grained PATs need Actions (read), Contents (read), Issues (read), and Pull 
 
 ```bash
 pnpm test              # unit tests (Vitest — root + mcp/)
-pnpm test:e2e          # Playwright E2E tests (chromium)
+pnpm test:e2e          # Playwright E2E tests (chromium against vite dev, plus *.preview.spec.ts against pnpm build && vite preview; rebuilds dist/)
+pnpm test:e2e:preview  # Only the *.preview.spec.ts E2E tests (stale-chunk and offline handling on the production build)
+E2E_SERVERS=dev pnpm test:e2e  # Skip the production build and preview server (dev-server specs only)
 pnpm test:e2e:cross-browser  # Only the @cross-browser-tagged E2E tests, on Firefox + WebKit (first run: pnpm exec playwright install firefox webkit)
 pnpm test:status-smoke # Live-network check that githubstatus.com still reports the tracked component names (also runs on a weekly schedule in CI)
 pnpm run typecheck     # TypeScript validation (root + mcp/)
