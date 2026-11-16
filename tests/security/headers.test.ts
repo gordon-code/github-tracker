@@ -143,4 +143,9 @@ describe("public/_headers CSP validation", () => {
     expect(hsts).toContain("max-age=");
     expect(hsts).toContain("includeSubDomains");
   });
+
+  it("serves /version.json with Cache-Control: no-store", () => {
+    const versionHeaders = headersMap.get("/version.json");
+    expect(versionHeaders?.get("Cache-Control")).toBe("no-store");
+  });
 });

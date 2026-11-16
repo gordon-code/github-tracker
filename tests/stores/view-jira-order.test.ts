@@ -174,6 +174,7 @@ describe("cross-tab sync for jiraCustomOrder", () => {
 
   beforeEach(() => {
     resetViewState();
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -220,15 +221,12 @@ describe("cross-tab sync for jiraCustomOrder", () => {
     expect(viewState.jiraCustomOrder).toEqual(["PROJ-1"]);
   });
 
-  it("does not touch other viewState fields when syncing jiraCustomOrder", () => {
+  it("applies every key present in another tab's write and leaves absent keys untouched", () => {
     setupPersistence();
-    const blob = JSON.stringify({
-      lastActiveTab: "actions",
-      jiraCustomOrder: ["PROJ-Z"],
-    });
-    dispatchStorageEvent(blob);
+    dispatchStorageEvent(JSON.stringify({ lastActiveTab: "actions", jiraCustomOrder: ["PROJ-Z"] }));
     expect(viewState.jiraCustomOrder).toEqual(["PROJ-Z"]);
-    expect(viewState.lastActiveTab).toBe("issues");
+    expect(viewState.lastActiveTab).toBe("actions");
+    expect(viewState.globalSort).toEqual({ field: "updatedAt", direction: "desc" });
   });
 
   it("handles malformed JSON in newValue without throwing", () => {

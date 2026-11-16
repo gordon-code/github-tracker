@@ -1,6 +1,7 @@
 import { createStore, produce } from "solid-js/store";
-import { createEffect, onCleanup } from "solid-js";
-import { pushNotification } from "../lib/errors";
+import { batch, untrack } from "solid-js";
+import { createFieldPersistence } from "../lib/field-persistence";
+import { schemaStale } from "../lib/version";
 import { viewState, updateViewState } from "./view";
 import { ConfigSchema, type RepoRefSchema, THEME_OPTIONS, BUILTIN_TAB_IDS, CustomTabSchema } from "../../shared/schemas";
 import type { Config, ThemeId, CustomTab, JiraConfig, JiraCustomField } from "../../shared/schemas";
@@ -92,6 +93,26 @@ export function loadConfig(): Config {
 
 export const [config, setConfig] = createStore<Config>(loadConfig());
 
+/**
+ * Drops monitored repos and custom-tab scope entries that no longer correspond to a
+ * selected repo. customTabs scope is derived from selectedRepos (see CustomTabModal's
+ * availableOrgs/availableRepos props).
+ */
+function pruneToSelectedRepos(draft: Config): void {
+  const selectedSet = new Set(draft.selectedRepos.map((r) => r.fullName));
+  draft.monitoredRepos = draft.monitoredRepos.filter((r) => selectedSet.has(r.fullName));
+
+  const ownerSet = new Set(draft.selectedRepos.map((r) => r.owner.toLowerCase()));
+  draft.customTabs = draft.customTabs.map((tab) => {
+    const filteredOrgScope = tab.orgScope.filter((o) => ownerSet.has(o.toLowerCase()));
+    const filteredRepoScope = tab.repoScope.filter((r) => selectedSet.has(r.fullName));
+    if (filteredOrgScope.length === tab.orgScope.length && filteredRepoScope.length === tab.repoScope.length) {
+      return tab;
+    }
+    return { ...tab, orgScope: filteredOrgScope, repoScope: filteredRepoScope };
+  });
+}
+
 export function updateConfig(partial: Partial<Config>): void {
   const validated = z.partial(ConfigSchema).safeParse(partial);
   if (!validated.success) return;
@@ -104,23 +125,7 @@ export function updateConfig(partial: Partial<Config>): void {
   setConfig(
     produce((draft) => {
       Object.assign(draft, filtered);
-      if ("selectedRepos" in partial) {
-        const selectedSet = new Set(draft.selectedRepos.map((r) => r.fullName));
-        draft.monitoredRepos = draft.monitoredRepos.filter((r) => selectedSet.has(r.fullName));
-
-        // customTabs scope is derived from selectedRepos (see CustomTabModal's
-        // availableOrgs/availableRepos props) — prune scope entries that no
-        // longer correspond to a tracked repo, same as monitoredRepos above.
-        const ownerSet = new Set(draft.selectedRepos.map((r) => r.owner.toLowerCase()));
-        draft.customTabs = draft.customTabs.map((tab) => {
-          const filteredOrgScope = tab.orgScope.filter((o) => ownerSet.has(o.toLowerCase()));
-          const filteredRepoScope = tab.repoScope.filter((r) => selectedSet.has(r.fullName));
-          if (filteredOrgScope.length === tab.orgScope.length && filteredRepoScope.length === tab.repoScope.length) {
-            return tab;
-          }
-          return { ...tab, orgScope: filteredOrgScope, repoScope: filteredRepoScope };
-        });
-      }
+      if ("selectedRepos" in partial) pruneToSelectedRepos(draft);
     })
   );
 }
@@ -164,8 +169,12 @@ export function updateJiraCustomScopes(scopes: JiraCustomField[]): void {
 }
 
 export function resetConfig(): void {
-  const defaults = ConfigSchema.parse({});
-  setConfig(defaults);
+  configPersistence.requestFullOverwrite();
+  // schedule() queues the full write even when the store already holds the defaults.
+  batch(() => {
+    setConfig(ConfigSchema.parse({}));
+    configPersistence.schedule();
+  });
 }
 
 export function getCustomTab(id: string): CustomTab | undefined {
@@ -228,28 +237,74 @@ export function reorderCustomTab(id: string, direction: "up" | "down"): void {
   );
 }
 
-export function initConfigPersistence(): void {
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingJson: string | undefined;
-  createEffect(() => {
-    const snapshot = JSON.parse(JSON.stringify(config)) as Config;
-    const json = JSON.stringify(snapshot);
-    pendingJson = json;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      pendingJson = undefined;
-      try {
-        localStorage.setItem(CONFIG_STORAGE_KEY, json);
-      } catch {
-        pushNotification("localStorage:config", "Config write failed — storage may be full", "warning");
+const CONFIG_KEYS = new Set(Object.keys(ConfigSchema.shape));
+
+function validateConfigField<K extends keyof Config>(key: K, value: unknown): Config[K] | undefined {
+  const mask = { [key]: true } as Record<keyof Config, true>;
+  const result = z.pick(ConfigSchema, mask).safeParse({ [key]: value });
+  // Every ConfigSchema field has a default, so undefined only ever means validation failed.
+  return result.success ? ((result.data as Record<string, unknown>)[key] as Config[K]) : undefined;
+}
+
+/**
+ * Validates a parsed config blob (read from localStorage or carried by another tab's
+ * `storage` event) one top-level key at a time, after the same pre-parse fixups
+ * loadConfig() applies, so one malformed or version-skewed field cannot discard the rest.
+ * Unknown keys are dropped. Returns undefined for anything that is not a plain object.
+ */
+function validateConfigFields(parsed: unknown): Record<string, unknown> | undefined {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const fixed = preParseConfigFixups(parsed) as Record<string, unknown>;
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fixed)) {
+    if (!CONFIG_KEYS.has(key)) continue;
+    const validated = validateConfigField(key as keyof Config, value);
+    if (validated !== undefined) filtered[key] = validated;
+  }
+  return filtered;
+}
+
+/**
+ * Applies another tab's validated values key by key, then restores the rules that span
+ * keys: monitored repos and custom-tab scopes must stay within the selected repos, and
+ * `defaultTab` must name an existing tab. A repair that changes a value leaves it pending,
+ * so it is written on the next commit.
+ */
+function applyForeignConfig(patch: Record<string, unknown>): void {
+  setConfig(
+    produce((draft) => {
+      Object.assign(draft, patch);
+      if ("selectedRepos" in patch || "monitoredRepos" in patch || "customTabs" in patch) {
+        pruneToSelectedRepos(draft);
       }
-    }, 200);
-    onCleanup(() => {
-      clearTimeout(debounceTimer);
-      if (pendingJson !== undefined) {
-        try { localStorage.setItem(CONFIG_STORAGE_KEY, pendingJson); } catch { /* best-effort */ }
-        pendingJson = undefined;
+      if ("defaultTab" in patch || "customTabs" in patch) {
+        draft.defaultTab = postParseConfigFixups(draft).defaultTab;
       }
-    });
-  });
+    })
+  );
+}
+
+const configPersistence = createFieldPersistence({
+  storageKey: CONFIG_STORAGE_KEY,
+  snapshot: () => JSON.parse(JSON.stringify(untrack(() => config))) as Record<string, unknown>,
+  trackedSnapshot: () => JSON.parse(JSON.stringify(config)) as Record<string, unknown>,
+  validate: validateConfigFields,
+  apply: applyForeignConfig,
+  isReadOnly: () => schemaStale(),
+  failureSource: "localStorage:config",
+  failureMessage: "Config write failed — storage may be full",
+});
+
+export const initConfigPersistence = configPersistence.init;
+/** Synchronously commits this tab's pending config changes before the page unloads. */
+export const flushConfigPersistence = configPersistence.flush;
+/** Drops this tab's unsaved config changes (used when another tab changes the signed-in identity). */
+export const discardPendingConfigPersistence = configPersistence.discardPending;
+/**
+ * Makes the next write replace the whole stored config, and schedules it even when the
+ * replacement equals what the store already holds. Call before replacing the config wholesale.
+ */
+export function requestConfigFullOverwrite(): void {
+  configPersistence.requestFullOverwrite();
+  configPersistence.schedule();
 }

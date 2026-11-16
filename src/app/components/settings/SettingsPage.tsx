@@ -4,7 +4,7 @@ import { Dialog } from "@kobalte/core/dialog";
 import { captureException } from "../../lib/sentry-facade";
 import { getRelayStatus } from "../../lib/mcp-relay";
 import { useNavigate } from "@solidjs/router";
-import { config, setConfig, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
+import { config, setConfig, requestConfigFullOverwrite, updateConfig, updateJiraConfig, updateJiraCustomFields, updateJiraCustomScopes, setMonitoredRepo, isActionsBasedTab } from "../../stores/config";
 import type { Config, JiraCustomField } from "../../../shared/schemas";
 import {
   buildExportPayload,
@@ -21,6 +21,8 @@ import { pushNotification, dismissNotificationBySource } from "../../lib/errors"
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
+import { CHANGELOG_URL, RELEASES_URL, REPO_URL, USER_GUIDE_URL } from "../../lib/repo-links";
+import { displayVersion, schemaStale } from "../../lib/version";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -35,6 +37,7 @@ import DensityPicker from "./DensityPicker";
 import TrackedUsersSection from "./TrackedUsersSection";
 import CustomTabsSection from "./CustomTabsSection";
 import DependencyExclusionModal from "./DependencyExclusionModal";
+import WhatsNewDialog from "../shared/WhatsNewDialog";
 import { InfoTooltip } from "../shared/Tooltip";
 import { createJiraClient } from "../../lib/jira-utils";
 import { clearJiraKeyCache } from "../../services/jira-keys";
@@ -146,22 +149,9 @@ export default function SettingsPage() {
   onMount(() => checkAndResetIfExpired());
   const usageSnapshot = createMemo(() => getUsageSnapshot());
 
-  // Local copies for org/repo editing (committed on blur/change)
-  const [localOrgs, setLocalOrgs] = createSignal<string[]>(config.selectedOrgs);
-  const [localRepos, setLocalRepos] = createSignal<RepoRef[]>(config.selectedRepos);
-  const [localUpstream, setLocalUpstream] = createSignal<RepoRef[]>(config.upstreamRepos);
-
-  // These local editor copies are captured once at mount. An in-place import
-  // (handleConfirmImport / handleConfirmCredImport / handleContinueWithoutCredentials)
-  // replaces config wholesale via setConfig without a reload, so they must be
-  // resynced afterward — otherwise the next org/repo edit would save the stale,
-  // pre-import selection and silently discard the imported repos/orgs.
-  // setConfig is synchronous, so config already reflects the import here.
-  function resyncLocalEditors() {
-    setLocalOrgs(config.selectedOrgs);
-    setLocalRepos(config.selectedRepos);
-    setLocalUpstream(config.upstreamRepos);
-  }
+  // The org/repo editors read the config store directly: a settings import in this tab or a
+  // change adopted from another tab replaces these arrays without a reload, and an editor
+  // holding its own copy would save the stale selection on the next edit.
 
   const monitoredRepoNames = createMemo(() =>
     config.monitoredRepos.map(r => r.fullName).join(", ")
@@ -198,7 +188,6 @@ export default function SettingsPage() {
         .filter((login) => !currentSet.has(login.toLowerCase()));
       if (newOrgs.length > 0) {
         const merged = [...snapshot, ...newOrgs];
-        setLocalOrgs(merged);
         saveWithFeedback({ selectedOrgs: merged });
         console.info(`[settings] merged ${newOrgs.length} new org(s)`);
       }
@@ -227,17 +216,14 @@ export default function SettingsPage() {
   }
 
   function handleOrgsChange(orgs: string[]) {
-    setLocalOrgs(orgs);
     saveWithFeedback({ selectedOrgs: orgs });
   }
 
   function handleReposChange(repos: RepoRef[]) {
-    setLocalRepos(repos);
     saveWithFeedback({ selectedRepos: repos });
   }
 
   function handleUpstreamChange(repos: RepoRef[]) {
-    setLocalUpstream(repos);
     saveWithFeedback({ upstreamRepos: repos });
   }
 
@@ -406,13 +392,14 @@ export default function SettingsPage() {
       clearJiraAuth();
     }
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
-    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
+    // top-level key present), so setConfig is safe (NOT updateConfig's partial merge). The
+    // overwrite request makes the next write replace the stored config instead of merging.
+    requestConfigFullOverwrite();
     setConfig(pending.config);
     // Identity is already established on this page (Settings is post-auth) —
     // applyImportedViewState is total/no-throw, so this is safe even when the
     // file carries no _viewPreferences section at all.
     applyImportedViewState(pending.viewPreferences);
-    resyncLocalEditors();
     setPendingImport(null);
     pushNotification("settings-import", "Settings imported", "info");
   }
@@ -429,7 +416,6 @@ export default function SettingsPage() {
     setCommitting(true);
     try {
       await commitImportedSettings(rc, cred.config, cred.viewPreferences);
-      resyncLocalEditors();
       credentialImport.reset();
       pushNotification("settings-import", "Settings and credentials imported", "info");
     } catch {
@@ -537,6 +523,7 @@ export default function SettingsPage() {
   const [showFieldPicker, setShowFieldPicker] = createSignal(false);
   const [showScopePicker, setShowScopePicker] = createSignal(false);
   const [showDependencyExclusionModal, setShowDependencyExclusionModal] = createSignal(false);
+  const [showWhatsNewDialog, setShowWhatsNewDialog] = createSignal(false);
 
   // Replace Jira API token panel
   const [showReplaceJiraToken, setShowReplaceJiraToken] = createSignal(false);
@@ -919,6 +906,9 @@ export default function SettingsPage() {
         <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
           <SettingsTOC />
           <div class="settings-content flex-1 min-w-0 flex flex-col gap-6 max-w-3xl">
+        {/* A tab on an older build than the deployed one must not change stored settings. `inert`
+            also stops pointer events on widgets a disabled fieldset doesn't cover (custom selects, role="button"). */}
+        <fieldset class="contents" disabled={schemaStale()} inert={schemaStale()}>
         {/* ── Data Sources ─────────────────────────────────────────────────── */}
         <p class="text-xs font-semibold uppercase tracking-wider text-base-content/40 px-1">Data Sources</p>
         {/* Section 1: Orgs & Repos */}
@@ -928,7 +918,7 @@ export default function SettingsPage() {
               <div>
                 <p class="text-sm font-medium text-base-content">Organizations</p>
                 <p class="text-xs text-base-content/60">
-                  {localOrgs().length} selected
+                  {config.selectedOrgs.length} selected
                 </p>
               </div>
               <button
@@ -942,7 +932,7 @@ export default function SettingsPage() {
             <Show when={orgPanelOpen()}>
               <div class="rounded-lg border border-base-300 p-4">
                 <OrgSelector
-                  selected={localOrgs()}
+                  selected={config.selectedOrgs}
                   onChange={handleOrgsChange}
                 />
               </div>
@@ -976,11 +966,11 @@ export default function SettingsPage() {
                 <div>
                   <p class="text-sm font-medium text-base-content">Repositories</p>
                   <p class="text-xs text-base-content/60">
-                    {localRepos().length + localUpstream().length} selected{localUpstream().length > 0 ? ` (${localUpstream().length} upstream)` : ""}
+                    {config.selectedRepos.length + config.upstreamRepos.length} selected{config.upstreamRepos.length > 0 ? ` (${config.upstreamRepos.length} upstream)` : ""}
                   </p>
-                  <Show when={localRepos().length > 50}>
+                  <Show when={config.selectedRepos.length > 50}>
                     <p class="text-xs text-warning">
-                      Tracking {localRepos().length} repos will use significant API quota per poll cycle
+                      Tracking {config.selectedRepos.length} repos will use significant API quota per poll cycle
                     </p>
                   </Show>
                   <Show when={config.monitoredRepos.length > 0}>
@@ -1005,11 +995,11 @@ export default function SettingsPage() {
             <Show when={repoPanelOpen()}>
               <div class="rounded-lg border border-base-300 p-4">
                 <RepoSelector
-                  selectedOrgs={localOrgs()}
-                  selected={localRepos()}
+                  selectedOrgs={config.selectedOrgs}
+                  selected={config.selectedRepos}
                   onChange={handleReposChange}
                   showUpstreamDiscovery={true}
-                  upstreamRepos={localUpstream()}
+                  upstreamRepos={config.upstreamRepos}
                   onUpstreamChange={handleUpstreamChange}
                   trackedUsers={config.trackedUsers}
                   monitoredRepos={config.monitoredRepos}
@@ -1044,6 +1034,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={refreshOptions.find((opt) => opt.value === config.refreshInterval) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ refreshInterval: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -1173,6 +1164,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={itemsPerPageOptions.find((opt) => opt.value === config.itemsPerPage) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ itemsPerPage: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -1208,6 +1200,7 @@ export default function SettingsPage() {
               optionValue="value"
               optionTextValue="label"
               value={tabOptions().find((opt) => opt.value === config.defaultTab) ?? null}
+              disabled={schemaStale()}
               onChange={(opt) => opt && saveWithFeedback({ defaultTab: opt.value })}
               itemComponent={(itemProps) => (
                 <Select.Item
@@ -2122,9 +2115,49 @@ export default function SettingsPage() {
               Sign out
             </button>
           </SettingRow>
+
+          {/* About */}
+          <SettingRow
+            label="About"
+            description="Current build version and release history"
+          >
+            <div class="flex items-center gap-3 text-sm">
+              <a
+                href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-xs link link-hover"
+              >
+                {displayVersion()}
+              </a>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
+              <button
+                type="button"
+                onClick={() => setShowWhatsNewDialog(true)}
+                class="text-xs link link-hover"
+              >
+                What's new
+              </button>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
+              <a
+                href={isSafeGitHubUrl(CHANGELOG_URL) ? CHANGELOG_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs link link-hover"
+              >
+                Changelog
+              </a>
+            </div>
+          </SettingRow>
         </Section>
+        </fieldset>
           </div>
         </div>
+
+        <WhatsNewDialog
+          open={showWhatsNewDialog()}
+          onOpenChange={setShowWhatsNewDialog}
+        />
 
         <DependencyExclusionModal
           open={showDependencyExclusionModal()}
@@ -2359,7 +2392,7 @@ export default function SettingsPage() {
         <footer class="mt-8 border-t border-base-300 pt-4 pb-8 text-xs text-base-content/50 text-center">
           <div class="flex items-center justify-center gap-3">
             <a
-              href="https://github.com/gordon-code/github-tracker"
+              href={REPO_URL}
               target="_blank"
               rel="noopener noreferrer"
               class="link link-hover"
@@ -2368,7 +2401,7 @@ export default function SettingsPage() {
             </a>
             <span aria-hidden="true">·</span>
             <a
-              href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+              href={USER_GUIDE_URL}
               target="_blank"
               rel="noopener noreferrer"
               class="link link-hover"

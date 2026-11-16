@@ -53,9 +53,13 @@ import Header from "../../../src/app/components/layout/Header";
 import * as authStore from "../../../src/app/stores/auth";
 import * as errorsModule from "../../../src/app/lib/errors";
 import * as githubStatusModule from "../../../src/app/services/github-status";
-import { render } from "@solidjs/testing-library";
+import { config, resetConfig, updateConfig } from "../../../src/app/stores/config";
+import { _resetChangelogCacheForTests, loadChangelog } from "../../../src/app/lib/changelog";
+import { render, waitFor } from "@solidjs/testing-library";
 
 beforeEach(() => {
+  resetConfig();
+  _resetChangelogCacheForTests();
   mockNavigate.mockClear();
   vi.mocked(authStore.clearAuth).mockClear();
   vi.mocked(errorsModule.getUnreadCount).mockReturnValue(0);
@@ -196,5 +200,91 @@ describe("Header", () => {
     expect(img.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231?s=56");
     expect(img.getAttribute("loading")).toBeNull();
     vi.mocked(authStore.user).mockRestore();
+  });
+
+  it("shows the What's new unseen dot when lastSeenVersion is null or older, and hides the dot after opening WhatsNewDialog", async () => {
+    const user = userEvent.setup();
+    render(() => <Header />);
+
+    const whatsNewBtn = screen.getByLabelText("What's new");
+    expect(whatsNewBtn.getAttribute("aria-expanded")).toBe("false");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+    });
+
+    await user.click(whatsNewBtn);
+
+    expect(whatsNewBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("What's New")).toBeDefined();
+    expect(config.lastSeenVersion).toBe("0.1.0");
+    expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+  });
+
+  it("hides the What's new dot when lastSeenVersion already matches the latest release", async () => {
+    updateConfig({ lastSeenVersion: "0.1.0" });
+    render(() => <Header />);
+
+    // Header's own load was scheduled first (setTimeout 0), so once this tick passes the entries are applied.
+    await loadChangelog();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+
+    // Control: the same loaded entries do flag an older lastSeenVersion, so the absence above
+    // comes from hasUnseen() and not from a changelog that never loaded.
+    updateConfig({ lastSeenVersion: "0.0.9" });
+    expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+  });
+
+  it("announces unread release notes in the What's new button label only while the dot is shown", async () => {
+    render(() => <Header />);
+
+    expect(screen.getByLabelText("What's new")).toBeDefined();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("What's new, unread release notes")).toBeDefined();
+    });
+    expect(screen.getByTestId("whats-new-dot")).toBeDefined();
+
+    updateConfig({ lastSeenVersion: "0.1.0" });
+    expect(screen.queryByLabelText("What's new, unread release notes")).toBeNull();
+    expect(screen.getByLabelText("What's new")).toBeDefined();
+  });
+
+  it("uses requestIdleCallback when available, loads changelog on demand if clicked before idle, and calls cancelIdleCallback on unmount", async () => {
+    const user = userEvent.setup();
+    const requestIdleSpy = vi.fn(() => 42);
+    const cancelIdleSpy = vi.fn();
+    Object.defineProperty(window, "requestIdleCallback", {
+      value: requestIdleSpy,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, "cancelIdleCallback", {
+      value: cancelIdleSpy,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const { unmount } = render(() => <Header />);
+      expect(requestIdleSpy).toHaveBeenCalledTimes(1);
+      // Idle callback has not run yet, so dot is not shown
+      expect(screen.queryByTestId("whats-new-dot")).toBeNull();
+
+      // Clicking "What's new" before idle triggers on-demand loadChangelog()
+      const whatsNewBtn = screen.getByLabelText("What's new");
+      await user.click(whatsNewBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("v0.1.0")).toBeDefined();
+      });
+
+      unmount();
+      expect(cancelIdleSpy).toHaveBeenCalledWith(42);
+    } finally {
+      Reflect.deleteProperty(window, "requestIdleCallback");
+      Reflect.deleteProperty(window, "cancelIdleCallback");
+    }
   });
 });

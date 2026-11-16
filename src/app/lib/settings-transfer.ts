@@ -17,7 +17,7 @@
 import { z } from "zod";
 import { ConfigSchema } from "../../shared/schemas";
 import type { Config } from "../../shared/schemas";
-import { preParseConfigFixups, postParseConfigFixups, config, setConfig } from "../stores/config";
+import { preParseConfigFixups, postParseConfigFixups, config, setConfig, requestConfigFullOverwrite } from "../stores/config";
 import { EXPORTED_VIEW_PREF_KEYS, applyImportedViewState, resetViewState } from "../stores/view";
 import type { ViewState, TrackedItem, IgnoredItem } from "../stores/view";
 import {
@@ -714,6 +714,7 @@ export async function commitImportedSettings(
       ...(jira.authMethod === "token" && jira.email ? { email: jira.email } : {}),
     };
   }
+  requestConfigFullOverwrite();
   setConfig(importedConfig);
   applyImportedViewState(viewPreferences);
 

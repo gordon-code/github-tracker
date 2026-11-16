@@ -3,6 +3,7 @@ import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
 import { setAuthFromPat, type GitHubUser } from "../stores/auth";
 import { config } from "../stores/config";
+import { schemaStale } from "../lib/version";
 import type { Config } from "../../shared/schemas";
 import {
   isValidPatFormat,
@@ -39,6 +40,11 @@ export default function LoginPage() {
   async function handlePatSubmit(e: Event) {
     e.preventDefault();
     if (submitting()) return;
+    if (schemaStale()) {
+      // A tab on an older build can't save the auth method chosen at sign-in.
+      setPatError("This tab is on an older version. Reload this page, then sign in.");
+      return;
+    }
     const validation = isValidPatFormat(patInput());
     if (!validation.valid) {
       setPatError(validation.error);
@@ -85,6 +91,11 @@ export default function LoginPage() {
     viewPreferences: unknown
   ) {
     if (importCommitting()) return;
+    if (schemaStale()) {
+      // A tab on an older build can't save the imported settings, so committing would lose them.
+      setImportError("This tab is on an older version and can't import settings. Reload this page, then try again.");
+      return;
+    }
     setImportCommitting(true);
     setImportError(null);
     try {
