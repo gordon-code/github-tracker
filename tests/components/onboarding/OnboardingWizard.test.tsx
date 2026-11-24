@@ -62,9 +62,11 @@ vi.mock("../../../src/app/stores/config", () => ({
   CONFIG_STORAGE_KEY: "github-tracker:config",
   config: { selectedOrgs: [], selectedRepos: [], upstreamRepos: [], monitoredRepos: [], trackedUsers: [] },
   updateConfig: vi.fn(),
+  flushConfigPersistence: vi.fn(),
 }));
 
 import * as configStore from "../../../src/app/stores/config";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../../src/app/lib/version";
 import * as apiModule from "../../../src/app/services/api";
 import OnboardingWizard from "../../../src/app/components/onboarding/OnboardingWizard";
 
@@ -251,10 +253,40 @@ describe("OnboardingWizard", () => {
       screen.getByText(/Finish Setup \(1 repo\)/);
     });
     await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
-    expect(localStorage.setItem).toHaveBeenCalledWith(
-      "github-tracker:config",
-      expect.any(String)
-    );
+    expect(vi.mocked(configStore.flushConfigPersistence)).toHaveBeenCalledTimes(1);
+
+    // The flush must come after the config update (so it has something to write) and
+    // before the page navigates away (so the write is not lost).
+    const updateOrder = vi.mocked(configStore.updateConfig).mock.invocationCallOrder.at(-1) ?? 0;
+    const flushOrder = vi.mocked(configStore.flushConfigPersistence).mock.invocationCallOrder[0];
+    const replaceOrder = vi.mocked(window.location.replace).mock.invocationCallOrder[0];
+    expect(updateOrder).toBeGreaterThan(0);
+    expect(updateOrder).toBeLessThan(flushOrder);
+    expect(flushOrder).toBeLessThan(replaceOrder);
+  });
+
+  it("on finish in a stale-schema tab: does not save or navigate, and asks the user to reload", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiModule.fetchOrgs).mockResolvedValue(mockOrgs);
+    render(() => <OnboardingWizard />);
+    await waitFor(() => {
+      screen.getByTestId("repo-selector");
+    });
+    await user.click(screen.getByText("Select Repo"));
+    await waitFor(() => {
+      screen.getByText(/Finish Setup \(1 repo\)/);
+    });
+
+    _setSchemaStaleForTests(true);
+    try {
+      await user.click(screen.getByText(/Finish Setup \(1 repo\)/));
+      await waitFor(() => screen.getByText(/older version and can't save your choices/i));
+      expect(configStore.updateConfig).not.toHaveBeenCalled();
+      expect(configStore.flushConfigPersistence).not.toHaveBeenCalled();
+      expect(window.location.replace).not.toHaveBeenCalledWith("/dashboard");
+    } finally {
+      _resetVersionStateForTests();
+    }
   });
 
   it("on finish: navigates to /dashboard via window.location.replace", async () => {

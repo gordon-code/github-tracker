@@ -11,6 +11,7 @@ export function initSdk(): SentrySdkClient {
 
   init({
     dsn,
+    release: `github-tracker@${__GIT_SHA__}`,
     tunnel: "/api/error-reporting",
     environment: import.meta.env.MODE,
     enhanceFetchErrorMessages: "report-only",

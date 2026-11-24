@@ -1,4 +1,4 @@
-import { batch, createSignal, createMemo, createEffect, on, Show, Switch, Match, Suspense, lazy, onMount, onCleanup, untrack } from "solid-js";
+import { batch, createSignal, createMemo, createEffect, on, Show, Switch, Match, Suspense, onMount, onCleanup, untrack } from "solid-js";
 import { createStore, produce, reconcile, unwrap } from "solid-js/store";
 import { z } from "zod";
 import Header from "../layout/Header";
@@ -51,9 +51,13 @@ import { isUserInvolved } from "../../lib/grouping";
 import { KNOWN_CONCLUSIONS, KNOWN_EVENTS } from "../shared/filterTypes";
 import { loadEmojiMap } from "../../lib/emoji";
 import { mergeActiveFilters } from "../../lib/tabFilters";
+import { RELEASES_URL, REPO_URL, USER_GUIDE_URL } from "../../lib/repo-links";
+import { isSafeGitHubUrl } from "../../lib/url";
+import { displayVersion } from "../../lib/version";
+import { lazyWithReload } from "../../lib/chunk-reload";
 import type { CustomTab } from "../../stores/config";
 
-const CustomTabModal = lazy(() => import("../shared/CustomTabModal"));
+const CustomTabModal = lazyWithReload(() => import("../shared/CustomTabModal"));
 
 // Hoisted to module scope — these are constant values (Zod schema defaults).
 const ISSUE_FILTER_DEFAULTS = IssueFiltersSchema.parse({});
@@ -2139,7 +2143,7 @@ export default function DashboardPage() {
             <div />
             <div class="flex items-center justify-center gap-3">
               <a
-                href="https://github.com/gordon-code/github-tracker"
+                href={REPO_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="link link-hover"
@@ -2148,7 +2152,7 @@ export default function DashboardPage() {
               </a>
               <span aria-hidden="true">&middot;</span>
               <a
-                href="https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md"
+                href={USER_GUIDE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="link link-hover"
@@ -2161,6 +2165,15 @@ export default function DashboardPage() {
                 class="link link-hover"
               >
                 Privacy
+              </a>
+              <span aria-hidden="true">&middot;</span>
+              <a
+                href={isSafeGitHubUrl(RELEASES_URL) ? RELEASES_URL : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-base-content/40 link link-hover"
+              >
+                v{displayVersion()}
               </a>
             </div>
             <div class="flex justify-end">

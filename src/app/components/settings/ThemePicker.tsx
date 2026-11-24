@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import { config, setConfig, THEME_OPTIONS, DARK_THEMES } from "../../stores/config";
 import type { ThemeId } from "../../stores/config";
+import { schemaStale } from "../../lib/version";
 
 const CONCRETE_THEMES = THEME_OPTIONS.filter((t): t is Exclude<ThemeId, "auto"> => t !== "auto");
 const LIGHT_THEMES = CONCRETE_THEMES.filter((t) => !DARK_THEMES.has(t));
@@ -10,10 +11,11 @@ export default function ThemePicker() {
   return (
     <div class="px-4 py-3 space-y-3">
       {/* Auto mode banner */}
-      <div
-        class={`flex items-center justify-between rounded-lg border-2 p-3 cursor-pointer transition-colors ${config.theme === "auto" ? "border-primary ring-2 ring-primary/30 bg-base-200" : "border-base-300"}`}
+      <button
+        type="button"
+        class={`flex w-full items-center justify-between rounded-lg border-2 p-3 text-left cursor-pointer transition-colors ${config.theme === "auto" ? "border-primary ring-2 ring-primary/30 bg-base-200" : "border-base-300"}`}
         onClick={() => setConfig("theme", "auto")}
-        role="button"
+        disabled={schemaStale()}
         aria-pressed={config.theme === "auto"}
         aria-label="Theme: auto (follows system)"
       >
@@ -27,7 +29,7 @@ export default function ThemePicker() {
         <Show when={config.theme !== "auto"}>
           <span class="text-xs text-primary cursor-pointer hover:underline">reset</span>
         </Show>
-      </div>
+      </button>
 
       {/* Light themes */}
       <div>
@@ -59,6 +61,7 @@ function ThemeSwatch(props: { theme: Exclude<ThemeId, "auto"> }) {
       data-theme={props.theme}
       class={`rounded-lg border-2 p-2 cursor-pointer transition-colors ${isActive() ? "border-primary ring-2 ring-primary/30" : "border-base-300"}`}
       onClick={() => setConfig("theme", props.theme)}
+      disabled={schemaStale()}
       aria-label={`Theme: ${props.theme}`}
       aria-pressed={isActive()}
     >

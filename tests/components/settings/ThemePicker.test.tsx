@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
@@ -12,6 +12,7 @@ vi.mock("../../../src/app/stores/config", () => ({
 }));
 
 import ThemePicker from "../../../src/app/components/settings/ThemePicker";
+import { _resetVersionStateForTests, _setSchemaStaleForTests } from "../../../src/app/lib/version";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -51,6 +52,49 @@ describe("ThemePicker", () => {
     const darkBtn = screen.getByRole("button", { name: "Theme: dark" });
     await user.click(darkBtn);
     expect(mockSetConfig).toHaveBeenCalledWith("theme", "dark");
+  });
+
+  it("renders the Auto option as a native button so disabling and keyboard activation work", () => {
+    render(() => <ThemePicker />);
+    const autoBtn = screen.getByRole("button", { name: "Theme: auto (follows system)" });
+    expect(autoBtn.tagName).toBe("BUTTON");
+    expect(autoBtn.getAttribute("type")).toBe("button");
+  });
+
+  it("calls setConfig with 'auto' when the Auto option is clicked", async () => {
+    const user = userEvent.setup();
+    render(() => <ThemePicker />);
+    await user.click(screen.getByRole("button", { name: "Theme: auto (follows system)" }));
+    expect(mockSetConfig).toHaveBeenCalledWith("theme", "auto");
+  });
+
+  describe("while the stored-data schema is stale", () => {
+    afterEach(() => {
+      _resetVersionStateForTests();
+    });
+
+    it("disables the Auto option and every theme swatch, and clicking changes nothing", async () => {
+      const user = userEvent.setup();
+      render(() => <ThemePicker />);
+      _setSchemaStaleForTests(true);
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(9);
+      for (const button of buttons) expect((button as HTMLButtonElement).disabled).toBe(true);
+
+      await user.click(screen.getByRole("button", { name: "Theme: auto (follows system)" }));
+      await user.click(screen.getByRole("button", { name: "Theme: dark" }));
+      expect(mockSetConfig).not.toHaveBeenCalled();
+    });
+
+    it("re-enables the options once the schema matches again", () => {
+      render(() => <ThemePicker />);
+      _setSchemaStaleForTests(true);
+      _setSchemaStaleForTests(false);
+      for (const button of screen.getAllByRole("button")) {
+        expect((button as HTMLButtonElement).disabled).toBe(false);
+      }
+    });
   });
 
   it("renders theme name as visible text in each button", () => {

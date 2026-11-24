@@ -86,6 +86,7 @@ const EXPECTED_CONFIG_KEYS = [
   "hotPollInterval",
   "itemsPerPage",
   "jira",
+  "lastSeenVersion",
   "maxRunsPerWorkflow",
   "maxWorkflowsPerRepo",
   "mcpRelayEnabled",
@@ -266,6 +267,18 @@ describe("buildExportPayload", () => {
     expect(Object.prototype.hasOwnProperty.call(out, "onboardingComplete")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayEnabled")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayPort")).toBe(true);
+  });
+
+  it("round-trips lastSeenVersion through buildExportPayload and parseImportFile", () => {
+    const cfg = ConfigSchema.parse({ lastSeenVersion: "0.1.1" });
+    const out = buildExportPayload(cfg, viewState);
+    expect(out.lastSeenVersion).toBe("0.1.1");
+
+    const parsed = parseImportFile(JSON.stringify(out));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.config.lastSeenVersion).toBe("0.1.1");
+    }
   });
 });
 

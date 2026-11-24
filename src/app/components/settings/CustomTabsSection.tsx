@@ -1,11 +1,12 @@
-import { createSignal, createMemo, createEffect, For, Show, Suspense, lazy } from "solid-js";
+import { createSignal, createMemo, createEffect, For, Show, Suspense } from "solid-js";
 import { config, removeCustomTab, reorderCustomTab, isTabUnscoped } from "../../stores/config";
 import type { CustomTab } from "../../stores/config";
 import type { RepoRef } from "../../services/api";
 import { Tooltip } from "../shared/Tooltip";
 import { formatScopeSummary } from "../../lib/format";
+import { lazyWithReload } from "../../lib/chunk-reload";
 
-const CustomTabModal = lazy(() => import("../shared/CustomTabModal"));
+const CustomTabModal = lazyWithReload(() => import("../shared/CustomTabModal"));
 
 function baseTypeLabel(baseType: CustomTab["baseType"]): string {
   if (baseType === "issues") return "Issues";

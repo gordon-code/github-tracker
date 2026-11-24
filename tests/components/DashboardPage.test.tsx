@@ -305,6 +305,34 @@ describe("DashboardPage — tab switching", () => {
   });
 });
 
+describe("DashboardPage — footer", () => {
+  it("renders Source, Guide, Privacy, and the v0.1.0+abcdef1 release link in the footer", () => {
+    render(() => <DashboardPage />);
+
+    const versionLink = screen.getByRole("link", { name: "v0.1.0+abcdef1" });
+    expect(versionLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/releases",
+    );
+    expect(versionLink.getAttribute("target")).toBe("_blank");
+    expect(versionLink.getAttribute("rel")).toBe("noopener noreferrer");
+
+    const sourceLink = screen.getByRole("link", { name: "Source" });
+    expect(sourceLink.getAttribute("href")).toBe("https://github.com/gordon-code/github-tracker");
+    expect(sourceLink.getAttribute("target")).toBe("_blank");
+    expect(sourceLink.getAttribute("rel")).toBe("noopener noreferrer");
+
+    const guideLink = screen.getByRole("link", { name: "Guide" });
+    expect(guideLink.getAttribute("href")).toBe(
+      "https://github.com/gordon-code/github-tracker/blob/main/docs/USER_GUIDE.md",
+    );
+    expect(guideLink.getAttribute("target")).toBe("_blank");
+    expect(guideLink.getAttribute("rel")).toBe("noopener noreferrer");
+
+    const privacyLink = screen.getByRole("link", { name: "Privacy" });
+    expect(privacyLink.getAttribute("href")).toBe("/privacy");
+  });
+});
+
 describe("DashboardPage — clock tick", () => {
   it("creates a 60s interval to keep relative time displays fresh", () => {
     const spy = vi.spyOn(globalThis, "setInterval");

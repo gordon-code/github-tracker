@@ -93,6 +93,7 @@ TESTS=(
   "403|GET /eval-stdin.php|${BASE}/eval-stdin.php"
   "403|GET /.aws/credentials|${BASE}/.aws/credentials"
   "403|GET /.ssh/id_rsa|${BASE}/.ssh/id_rsa"
+  "200|GET /version.json|${BASE}/version.json"
   "200|GET /robots.txt|${BASE}/robots.txt"
   "200|GET /sitemap.xml|${BASE}/sitemap.xml"
   "200|GET /favicon.ico|${BASE}/favicon.ico"

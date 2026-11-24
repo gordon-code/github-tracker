@@ -475,7 +475,7 @@ describe("initSdk", () => {
     expect(mockInit).not.toHaveBeenCalled();
   });
 
-  it("calls Sentry.init with correct DSN and enhanceFetchErrorMessages: 'report-only' when VITE_SENTRY_DSN is set", () => {
+  it("calls Sentry.init with correct DSN, release tag, and enhanceFetchErrorMessages: 'report-only' when VITE_SENTRY_DSN is set", () => {
     vi.stubEnv("DEV", false);
     vi.stubEnv("VITE_SENTRY_DSN", "https://test-key@o1.ingest.us.sentry.io/1");
     initSdk();
@@ -483,6 +483,7 @@ describe("initSdk", () => {
     expect(mockInit).toHaveBeenCalledWith(
       expect.objectContaining({
         dsn: "https://test-key@o1.ingest.us.sentry.io/1",
+        release: "github-tracker@abcdef123456",
         enhanceFetchErrorMessages: "report-only",
       }),
     );

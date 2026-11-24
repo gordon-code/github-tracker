@@ -143,6 +143,11 @@ describe("sentry-facade", () => {
       expect(mockSentryInit).toHaveBeenCalledOnce();
       expect(mockSentryCaptureException).toHaveBeenCalledTimes(2);
     });
+    expect(mockSentryInit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        release: "github-tracker@abcdef123456",
+      }),
+    );
 
     expect(_getSentryQueueForTests()).toHaveLength(0);
     expect((mockSentryCaptureException.mock.calls[0][0] as Error).message).toBe(
