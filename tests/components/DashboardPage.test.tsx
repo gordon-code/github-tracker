@@ -111,9 +111,18 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearMutedSources: vi.fn(),
 }));
 
+// Mock github-status lib with reactive signal so DashboardPage effects react to outage transitions
+const [mockApiOutage, setMockApiOutage] = createSignal(false);
+vi.mock("../../src/app/services/github-status", () => ({
+  getGitHubStatus: vi.fn(() => null),
+  isGitHubApiOutage: () => mockApiOutage(),
+  fetchGitHubStatus: vi.fn(() => Promise.resolve()),
+}));
+
 // capturedFetchAll is populated by the createPollCoordinator mock each time
 // the module is reset and DashboardPage re-mounts, creating a fresh coordinator.
 let capturedFetchAll: (() => Promise<DashboardData>) | null = null;
+let capturedOnOutagePaused: (() => void) | null = null;
 // capturedOnHotData is populated by the createHotPollCoordinator mock
 let capturedOnHotData: ((
   prUpdates: Map<number, HotPRStatusUpdate>,
@@ -181,8 +190,9 @@ beforeEach(async () => {
       errors: [],
     }),
     createPollCoordinator: vi.fn().mockImplementation(
-      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>) => {
+      (_getInterval: unknown, fetchAll: () => Promise<DashboardData>, options?: { onOutagePaused?: () => void }) => {
         capturedFetchAll = fetchAll;
+        capturedOnOutagePaused = options?.onOutagePaused ?? null;
         // Invoke immediately so the dashboard fetches on mount.
         // .catch prevents unhandled rejection when auth error tests reject.
         void fetchAll().catch(() => {});
@@ -233,7 +243,9 @@ beforeEach(async () => {
   notificationsLib = await import("../../src/app/lib/notifications");
 
   mockLocationReplace.mockClear();
+  setMockApiOutage(false);
   capturedFetchAll = null;
+  capturedOnOutagePaused = null;
   capturedOnHotData = null;
   capturedOnTargetedData = null;
   vi.mocked(authStore.clearAuth).mockClear();
@@ -7912,5 +7924,156 @@ describe("DashboardPage — identity-scoped snapshot and identityEpoch guards", 
       expect(dashCallCount).toBe(2);
       expect(depCallCount).toBe(2);
     });
+  });
+});
+
+describe("DashboardPage — GitHub API outage pause & recovery", () => {
+  it("skips abandonedDeps and depBodies GraphQL fetches while isGitHubApiOutage() is true and re-runs once it flips to false", async () => {
+    const dashIssue = makeIssue({
+      id: 801,
+      number: 801,
+      title: "Dependency Dashboard",
+      userLogin: "renovate[bot]",
+      nodeId: "DASH_OUTAGE_1",
+      repoFullName: "owner/repo",
+      state: "OPEN",
+      updatedAt: "2026-04-01T00:00:00Z",
+    });
+    const depPR = makePullRequest({
+      id: 802,
+      nodeId: "PR_OUTAGE_1",
+      repoFullName: "owner/repo",
+      title: "Update dependency pkg-outage",
+      userLogin: "dependabot[bot]",
+      headRef: "dependabot/npm_and_yarn/pkg-outage",
+      enriched: true,
+    });
+
+    const graphqlSpy = vi.fn().mockResolvedValue({
+      nodes: [
+        { id: "DASH_OUTAGE_1", body: "No abandoned packages" },
+        { id: "PR_OUTAGE_1", databaseId: 802, body: "| Package | Change |\n| --- | --- |\n| pkg-outage | `1.0.0` -> `1.1.0` |" },
+      ],
+      rateLimit: null,
+    });
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [dashIssue],
+      pullRequests: [depPR],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    const [lastRefreshSig, setLastRefreshSig] = createSignal<Date | null>(null);
+    vi.mocked(pollService.createPollCoordinator).mockImplementation((_getInterval, fetchAll) => {
+      capturedFetchAll = async () => {
+        const res = await fetchAll();
+        setLastRefreshSig(new Date());
+        return res;
+      };
+      void capturedFetchAll().catch(() => {});
+      return {
+        isRefreshing: () => false,
+        lastRefreshAt: lastRefreshSig,
+        manualRefresh: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+
+    // Outage active when dashboard mounts and data arrives
+    setMockApiOutage(true);
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(lastRefreshSig()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Both abandonedDeps and depBodies must skip GraphQL calls during outage
+    expect(graphqlSpy).not.toHaveBeenCalled();
+
+    // Flip outage off -> both reactive effects automatically re-run
+    setMockApiOutage(false);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it("skips fetchOrgs on mount during API outage and clears loading via onOutagePaused when no snapshot exists", async () => {
+    setMockApiOutage(true);
+    configStore.updateConfig({ onboardingComplete: true });
+    const apiMod = await import("../../src/app/services/api");
+    const fetchOrgsSpy = vi.spyOn(apiMod, "fetchOrgs").mockResolvedValue([]);
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { request: vi.fn(), graphql: vi.fn() } as unknown as ReturnType<typeof githubService.getClient>,
+    );
+
+    // Override createPollCoordinator to NOT run fetchAll immediately (simulating outage pause)
+    vi.mocked(pollService.createPollCoordinator).mockImplementation(
+      (_getInterval, _fetchAll, options?: { onOutagePaused?: () => void }) => {
+        capturedOnOutagePaused = options?.onOutagePaused ?? null;
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        };
+      },
+    );
+
+    try {
+      render(() => <DashboardPage />);
+      expect(fetchOrgsSpy).not.toHaveBeenCalled();
+      expect(capturedOnOutagePaused).toBeTypeOf("function");
+
+      // Before onOutagePaused: skeleton loading rows (role="status") are shown
+      expect(screen.getByRole("status")).toBeDefined();
+
+      // Invoking onOutagePaused clears loading -> empty state renders instead of skeletons
+      capturedOnOutagePaused!();
+      await waitFor(() => {
+        expect(screen.queryByRole("status")).toBeNull();
+      });
+    } finally {
+      fetchOrgsSpy.mockRestore();
+    }
+  });
+
+  it("preserves hydrated snapshot items and lastRefreshedAt when onOutagePaused() is invoked", async () => {
+    setMockApiOutage(true);
+    const cachedIssue = makeIssue({ id: 991, title: "Cached outage issue", state: "OPEN" });
+    const cachedRefreshedAt = new Date("2026-04-01T12:00:00Z");
+    vi.mocked(snapshotLib.loadSnapshot).mockResolvedValue({
+      _v: 1,
+      login: "testuser",
+      savedAt: Date.now(),
+      issues: [cachedIssue],
+      pullRequests: [],
+      workflowRuns: [],
+      lastRefreshedAt: cachedRefreshedAt,
+    });
+
+    vi.mocked(pollService.createPollCoordinator).mockImplementation(
+      (_getInterval, _fetchAll, options?: { onOutagePaused?: () => void }) => {
+        capturedOnOutagePaused = options?.onOutagePaused ?? null;
+        return {
+          isRefreshing: () => false,
+          lastRefreshAt: () => null,
+          manualRefresh: vi.fn(),
+          destroy: vi.fn(),
+        };
+      },
+    );
+
+    render(() => <DashboardPage />);
+    await waitFor(() => {
+      expect(screen.getByText("owner/repo")).toBeDefined();
+      expect(screen.getByText("1 issue")).toBeDefined();
+      expect(screen.queryByText("Last refreshed: Never")).toBeNull();
+    });
+
+    capturedOnOutagePaused!();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByText("owner/repo")).toBeDefined();
+    expect(screen.getByText("1 issue")).toBeDefined();
+    expect(screen.queryByText("Last refreshed: Never")).toBeNull();
   });
 });

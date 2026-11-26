@@ -44,6 +44,7 @@ import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification, pushError, dismissNotificationBySource, getNotifications } from "../../lib/errors";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
+import { isGitHubApiOutage } from "../../services/github-status";
 import { canApprovePR, canMarkPRReady, formatCount, prSizeCategory, rateLimitCssClass, stripParenthetical } from "../../lib/format";
 import { setsEqual } from "../../lib/collections";
 import { Tooltip } from "../shared/Tooltip";
@@ -993,7 +994,11 @@ export default function DashboardPage() {
     }
 
     if (!_coordinator()) {
-      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch));
+      _setCoordinator(createPollCoordinator(() => config.refreshInterval, pollFetch, {
+        onOutagePaused: () => {
+          if (dashboardData.loading) setDashboardData("loading", false);
+        },
+      }));
     }
 
     if (!_eventsCoordinator()) {
@@ -1075,7 +1080,7 @@ export default function DashboardPage() {
     // after re-auth, scope changes, or org policy updates.
     // Only adds orgs to the filter list — repos are user-selected via Settings.
     const client = getClient();
-    if (client && config.onboardingComplete) {
+    if (client && config.onboardingComplete && !isGitHubApiOutage()) {
       void (async () => {
         try {
           const allOrgs = await fetchOrgs(client);
@@ -1478,8 +1483,9 @@ export default function DashboardPage() {
 
   // Renovate Dashboard issue body fetch: fires after each full refresh cycle
   createEffect(on(
-    () => _coordinator()?.lastRefreshAt(),
-    () => {
+    [() => _coordinator()?.lastRefreshAt(), isGitHubApiOutage] as const,
+    ([lastRefresh, apiOutage]) => {
+      if (!lastRefresh || apiOutage) return;
       if (!config.dependencies.enabled) return;
       if (_fetchingDashboardBodies) return;
       const octokit = getClient();
@@ -1589,12 +1595,14 @@ export default function DashboardPage() {
   // Parses bodies immediately into VersionInfo and persists to localStorage so
   // classification survives page refresh without visual jank.
   createEffect(() => {
-    if (!config.dependencies.enabled) return;
+    const depsEnabled = config.dependencies.enabled;
     const meta = depMeta();
     const depPrs = dependencyPullRequests();
     const visibleDepPrs = visibleDependencyPullRequests();
     const enrichmentPending = awaitingEnrichment();
     void dashboardData.lastRefreshedAt;
+    const apiOutage = isGitHubApiOutage();
+    if (!depsEnabled || apiOutage) return;
     if (_fetchingDepBodies) {
       console.debug("[dashboard] depBodies effect: skipped — fetch already in flight");
       return;

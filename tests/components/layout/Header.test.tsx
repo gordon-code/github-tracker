@@ -47,6 +47,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
 // Mock github-status module so Header's GitHubStatusBadge import works
 vi.mock("../../../src/app/services/github-status", () => ({
   getGitHubStatus: vi.fn(() => null),
+  isGitHubApiOutage: vi.fn(() => false),
 }));
 
 import Header from "../../../src/app/components/layout/Header";

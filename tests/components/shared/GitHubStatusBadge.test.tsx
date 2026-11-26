@@ -6,6 +6,10 @@ const mockGetGitHubStatus = vi.fn<() => GitHubStatusSummary | null>(() => null);
 
 vi.mock("../../../src/app/services/github-status", () => ({
   getGitHubStatus: () => mockGetGitHubStatus(),
+  isGitHubApiOutage: () => {
+    const s = mockGetGitHubStatus()?.apiSeverity;
+    return s === "major" || s === "critical";
+  },
 }));
 
 import GitHubStatusBadge from "../../../src/app/components/shared/GitHubStatusBadge";
@@ -232,5 +236,47 @@ describe("GitHubStatusBadge", () => {
     // The tooltip must not flash back open from the now-stale hover state.
     const tooltipContent = document.querySelector('[role="tooltip"]');
     expect(tooltipContent?.hasAttribute("data-expanded")).not.toBe(true);
+  });
+
+  it("displays paused-sync notice in popover when apiSeverity is 'major' or 'critical'", () => {
+    for (const apiSeverity of ["major", "critical"] as const) {
+      mockGetGitHubStatus.mockReturnValue({
+        severity: apiSeverity,
+        apiSeverity,
+        incidents: [{ id: "1", name: "API outage", latestUpdateBody: "", affectedComponents: ["API Requests"] }],
+        fetchedAt: new Date(),
+      });
+      const { unmount } = render(() => <GitHubStatusBadge />);
+      const label = apiSeverity === "major" ? "Major GitHub service outage" : "Critical GitHub service outage";
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      vi.advanceTimersByTime(0);
+      expect(document.body.textContent).toContain(
+        "Background sync paused during GitHub API outage. Use Refresh to retry manually.",
+      );
+      unmount();
+    }
+  });
+
+  it("does not display paused-sync notice when apiSeverity is 'none' or 'minor' (including Actions outage)", () => {
+    const cases: Array<{ severity: "none" | "minor" | "critical"; apiSeverity: "none" | "minor"; label: string; components: string[] }> = [
+      { severity: "none", apiSeverity: "none", label: "All systems operational", components: [] },
+      { severity: "minor", apiSeverity: "minor", label: "Minor GitHub service disruption", components: ["API Requests"] },
+      { severity: "critical", apiSeverity: "none", label: "Critical GitHub service outage", components: ["Actions"] },
+    ];
+    for (const c of cases) {
+      mockGetGitHubStatus.mockReturnValue({
+        severity: c.severity,
+        apiSeverity: c.apiSeverity,
+        incidents: c.components.length > 0 ? [{ id: "1", name: "Incident", latestUpdateBody: "", affectedComponents: c.components }] : [],
+        fetchedAt: new Date(),
+      });
+      const { unmount } = render(() => <GitHubStatusBadge />);
+      fireEvent.click(screen.getByRole("button", { name: c.label }));
+      vi.advanceTimersByTime(0);
+      expect(document.body.textContent).not.toContain(
+        "Background sync paused during GitHub API outage. Use Refresh to retry manually.",
+      );
+      unmount();
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { Show, For, createMemo, createSignal } from "solid-js";
 import { Popover } from "@kobalte/core/popover";
 import { Tooltip } from "./Tooltip";
-import { getGitHubStatus, type GitHubStatusSeverity } from "../../services/github-status";
+import { getGitHubStatus, isGitHubApiOutage, type GitHubStatusSeverity } from "../../services/github-status";
 
 const SEVERITY_CONFIG: Record<GitHubStatusSeverity, { bg: string; label: string; pulse: boolean }> = {
   none: { bg: "bg-success", label: "All systems operational", pulse: false },
@@ -60,6 +60,11 @@ export default function GitHubStatusBadge() {
                 </For>
               </ul>
             )}
+          </Show>
+          <Show when={isGitHubApiOutage()}>
+            <p class="mt-2 text-xs text-warning font-medium" role="status">
+              Background sync paused during GitHub API outage. Use Refresh to retry manually.
+            </p>
           </Show>
           <a href="https://www.githubstatus.com" target="_blank" rel="noopener noreferrer" class="link link-hover text-xs mt-2 inline-block">
             View githubstatus.com

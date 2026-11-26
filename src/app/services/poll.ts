@@ -360,6 +360,7 @@ export async function fetchAllData(
 
 const REJITTER_WINDOW_MS = 30_000; // ±30 seconds jitter
 const REVISIT_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+const OUTAGE_PROBE_INTERVAL_MS = 60_000; // 60s status probe when refreshInterval === 0 during API outage
 
 // Sources managed by the poll coordinator — used for reconciliation
 const POLL_MANAGED_SOURCES = new Set([
@@ -390,7 +391,8 @@ function withJitter(intervalMs: number): number {
  */
 export function createPollCoordinator(
   getInterval: () => number,
-  fetchAll: (force?: boolean) => Promise<DashboardData>
+  fetchAll: (force?: boolean) => Promise<DashboardData>,
+  options?: { onOutagePaused?: () => void },
 ): PollCoordinator {
   const [isRefreshing, setIsRefreshing] = createSignal(false);
   const [lastRefreshAt, setLastRefreshAt] = createSignal<Date | null>(null);
@@ -402,6 +404,44 @@ export function createPollCoordinator(
   let hiddenAt: number | null = null;
   let destroyed = false;
   let pendingForce = false;
+  let statusProbeInFlight = false;
+  let fetchStartCount = 0;
+  let outageProbeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  function clearOutageProbeTimer(): void {
+    if (outageProbeTimeoutId !== null) {
+      clearTimeout(outageProbeTimeoutId);
+      outageProbeTimeoutId = null;
+    }
+  }
+
+  function scheduleOutageProbe(): void {
+    clearOutageProbeTimer();
+    if (destroyed || getInterval() !== 0 || !isGitHubApiOutage()) return;
+    outageProbeTimeoutId = setTimeout(() => {
+      outageProbeTimeoutId = null;
+      void runOutageProbe();
+    }, OUTAGE_PROBE_INTERVAL_MS);
+  }
+
+  async function runOutageProbe(): Promise<void> {
+    if (destroyed || getInterval() !== 0 || !isGitHubApiOutage()) return;
+    if (document.visibilityState === "hidden" || (typeof navigator !== "undefined" && !navigator.onLine)) {
+      scheduleOutageProbe();
+      return;
+    }
+    if (!statusProbeInFlight) {
+      statusProbeInFlight = true;
+      try {
+        await fetchGitHubStatus();
+      } finally {
+        statusProbeInFlight = false;
+      }
+    }
+    if (!destroyed && getInterval() === 0 && isGitHubApiOutage()) {
+      scheduleOutageProbe();
+    }
+  }
 
   function clearWakeAndOnlineTimers(): void {
     if (wakeTimeoutId !== null) {
@@ -454,7 +494,31 @@ export function createPollCoordinator(
       }
       return;
     }
+    let probedStatusThisTick = false;
+    if (!force && isGitHubApiOutage()) {
+      if (statusProbeInFlight) return;
+      const priorFetchStarts = fetchStartCount;
+      statusProbeInFlight = true;
+      try {
+        await fetchGitHubStatus();
+      } finally {
+        statusProbeInFlight = false;
+      }
+      if (destroyed || isRefreshing() || fetchStartCount !== priorFetchStarts) {
+        if (!destroyed && getInterval() === 0 && isGitHubApiOutage() && outageProbeTimeoutId === null) {
+          scheduleOutageProbe();
+        }
+        return;
+      }
+      if (isGitHubApiOutage()) {
+        options?.onOutagePaused?.();
+        if (getInterval() === 0) scheduleOutageProbe();
+        return;
+      }
+      probedStatusThisTick = true;
+    }
     checkAndResetIfExpired();
+    fetchStartCount++;
     setIsRefreshing(true);
     // Fire-and-forget: seeds footer signals concurrently with fetchAll. If GET /rate_limit
     // resolves after a GraphQL response, the footer briefly shows pre-query remaining (cosmetic).
@@ -463,7 +527,9 @@ export function createPollCoordinator(
     // outages affecting tracked components. Fully self-contained (own try/catch,
     // own notification push/dismiss) — no interaction with this cycle's error
     // handling or the fetchAll() try/catch below.
-    void fetchGitHubStatus();
+    if (!probedStatusThisTick) {
+      void fetchGitHubStatus();
+    }
 
     // Snapshot sources of notifications from previous cycle (for reconciliation)
     const previousSources = new Set(
@@ -588,6 +654,15 @@ export function createPollCoordinator(
     startTimer(intervalSec);
   });
 
+  // Reactive effect: run 60s status probe in manual mode (interval === 0) during API outage
+  createEffect(() => {
+    if (getInterval() === 0 && isGitHubApiOutage() && !destroyed) {
+      scheduleOutageProbe();
+    } else {
+      clearOutageProbeTimer();
+    }
+  });
+
   // Immediate fetch on init
   void doFetch();
 
@@ -595,6 +670,7 @@ export function createPollCoordinator(
     destroyed = true;
     pendingForce = false;
     clearTimer();
+    clearOutageProbeTimer();
     clearWakeAndOnlineTimers();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
@@ -900,6 +976,12 @@ export function createHotPollCoordinator(
       return;
     }
 
+    if (isGitHubApiOutage()) {
+      consecutiveFailures = 0;
+      schedule(myGeneration);
+      return;
+    }
+
     // Skip fetch when no authenticated client (e.g., mid-logout)
     // Guarded: getClient() can throw during auth state transitions
     let client: ReturnType<typeof getClient>;
@@ -1195,6 +1277,12 @@ export function createEventsPollCoordinator(
       return;
     }
 
+    if (isGitHubApiOutage()) {
+      consecutiveFailures = 0;
+      schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+      return;
+    }
+
     const cycleEpoch = identityEpoch();
 
     try {
@@ -1215,6 +1303,12 @@ export function createEventsPollCoordinator(
       }
 
       if (isFullRefreshing()) {
+        consecutiveFailures = 0;
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
+
+      if (isGitHubApiOutage()) {
         consecutiveFailures = 0;
         schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
         return;
@@ -1242,6 +1336,10 @@ export function createEventsPollCoordinator(
       consecutiveFailures = 0;
     } catch (err) {
       if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
+      if (isUnauthorizedError(err) && isGitHubApiOutage()) {
+        schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);
+        return;
+      }
       consecutiveFailures++;
       if (isUnauthorizedError(err)) {
         console.warn("[events-poll] GitHub authentication check failed temporarily");
