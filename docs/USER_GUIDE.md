@@ -899,5 +899,5 @@ Go to **Settings > Repositories > Manage Repositories**, find the repo, and dese
 
 **How do I sign out or reset everything?**
 
-- **Sign out**: Settings > Data > Sign out. This clears your auth token and returns you to the login page. Your config is preserved.
+- **Sign out**: Settings > Data > Sign out. This clears your GitHub token, Jira credentials, and cached data, resets your local config and view preferences, and returns you to the login page (whereas automatic token expiry preserves your config, view preferences, and Jira connection for same-user re-authentication).
 - **Reset all**: Settings > Data > Reset all. This clears all settings, cache, auth tokens, API usage data, and reloads the page. All configuration is lost.
