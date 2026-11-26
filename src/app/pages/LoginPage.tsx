@@ -13,10 +13,13 @@ import { config } from "../stores/config";
 import type { Config } from "../../shared/schemas";
 import {
   isValidPatFormat,
+  isValidPatExpiryDate,
+  PAT_EXPIRY_INVALID_MESSAGE,
   GITHUB_PAT_URL,
   GITHUB_FINE_GRAINED_PAT_URL,
 } from "../lib/pat";
 import { buildAuthorizeUrl } from "../lib/oauth";
+import { discardResponseBody } from "../lib/http-errors";
 import type { CredentialBundle } from "../lib/settings-transfer";
 import { createCredentialImport } from "../lib/use-credential-import";
 
@@ -27,6 +30,7 @@ export default function LoginPage() {
   const [patInput, setPatInput] = createSignal("");
   const [patExpiryInput, setPatExpiryInput] = createSignal("");
   const [patError, setPatError] = createSignal<string | null>(null);
+  const [patExpiryError, setPatExpiryError] = createSignal<string | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
 
   // ── Import from backup (pre-auth) ─────────────────────────────────────────
@@ -68,10 +72,16 @@ export default function LoginPage() {
       setPatError(validation.error);
       return;
     }
+    const nextExpiry = patExpiryInput() || null;
+    if (nextExpiry !== null && !isValidPatExpiryDate(nextExpiry)) {
+      setPatError(null);
+      setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+      return;
+    }
     setSubmitting(true);
     setPatError(null);
+    setPatExpiryError(null);
     const trimmedToken = patInput().trim();
-    const nextExpiry = patExpiryInput() || null;
     try {
       const resp = await fetch("https://api.github.com/user", {
         headers: {
@@ -81,6 +91,7 @@ export default function LoginPage() {
         },
       });
       if (!resp.ok) {
+        discardResponseBody(resp);
         setPatError(
           resp.status === 401
             ? "Token is invalid — check that you entered it correctly"
@@ -167,6 +178,7 @@ export default function LoginPage() {
   function openImport() {
     setShowPatForm(false);
     setPatError(null);
+    setPatExpiryError(null);
     setPatInput("");
     setPatExpiryInput("");
     setImportError(null);
@@ -282,11 +294,21 @@ export default function LoginPage() {
                   <input
                     id="pat-expiry-input"
                     type="date"
-                    class="input input-bordered w-full"
-                    aria-describedby="pat-expiry-help"
+                    max="9999-12-31"
+                    class={`input input-bordered w-full${patExpiryError() !== null ? " input-error" : ""}`}
+                    aria-invalid={patExpiryError() !== null}
+                    aria-describedby={patExpiryError() !== null ? "pat-expiry-error pat-expiry-help" : "pat-expiry-help"}
                     value={patExpiryInput()}
-                    onInput={(e) => setPatExpiryInput(e.currentTarget.value)}
+                    onInput={(e) => {
+                      setPatExpiryInput(e.currentTarget.value);
+                      setPatExpiryError(null);
+                    }}
                   />
+                  <Show when={patExpiryError() !== null}>
+                    <p id="pat-expiry-error" role="alert" class="text-error text-xs mt-1">
+                      {patExpiryError()}
+                    </p>
+                  </Show>
                   <p id="pat-expiry-help" class="text-xs text-base-content/60 mt-1">
                     Stored locally to remind you before your token expires.
                   </p>
@@ -334,7 +356,7 @@ export default function LoginPage() {
 
                 <button
                   type="button"
-                  onClick={() => { setShowPatForm(false); setPatError(null); setPatInput(""); setPatExpiryInput(""); }}
+                  onClick={() => { setShowPatForm(false); setPatError(null); setPatExpiryError(null); setPatInput(""); setPatExpiryInput(""); }}
                   class="link link-primary text-sm mt-2"
                 >
                   Use OAuth instead

@@ -28,6 +28,18 @@ export interface PatExpiryStatus {
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MS_PER_DAY = 86_400_000;
 
+// Tier lower bounds in whole days until expiry: more than 7 → ok, 4-7 → "7d",
+// 2-3 → "3d", 0-1 → "1d", negative → expired.
+const OK_ABOVE_DAYS = 7;
+const SEVEN_DAY_TIER_MIN_DAYS = 4;
+const THREE_DAY_TIER_MIN_DAYS = 2;
+const ONE_DAY_TIER_MIN_DAYS = 0;
+
+let _dismissedPatExpiryKey: string | null = null;
+let _activePatExpiryKey: string | null = null;
+let _unsubscribeDismiss: (() => void) | null = null;
+let _authClearRegistered = false;
+
 export function daysUntilPatExpiry(dateStr: string, now = new Date()): number | null {
   const match = ISO_DATE_RE.exec(dateStr);
   if (!match) return null;
@@ -54,7 +66,7 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
   const days = daysUntilPatExpiry(dateStr, now);
   if (days === null) return null;
 
-  if (days > 7) {
+  if (days > OK_ABOVE_DAYS) {
     return {
       tier: "ok",
       daysRemaining: days,
@@ -62,7 +74,7 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
       message: `Expires in ${days} days (${dateStr})`,
     };
   }
-  if (days >= 4) {
+  if (days >= SEVEN_DAY_TIER_MIN_DAYS) {
     return {
       tier: "7d",
       daysRemaining: days,
@@ -70,7 +82,7 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
       message: `Your GitHub PAT expires on ${dateStr} (within 7 days).`,
     };
   }
-  if (days >= 2) {
+  if (days >= THREE_DAY_TIER_MIN_DAYS) {
     return {
       tier: "3d",
       daysRemaining: days,
@@ -78,7 +90,7 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
       message: `Your GitHub PAT expires on ${dateStr} (within 3 days).`,
     };
   }
-  if (days >= 0) {
+  if (days >= ONE_DAY_TIER_MIN_DAYS) {
     return {
       tier: "1d",
       daysRemaining: days,
@@ -95,6 +107,13 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
     severity: "error",
     message: `Your GitHub PAT expired on ${dateStr}. Replace it in Settings.`,
   };
+}
+
+export function formatPatExpiryBadgeLabel(status: PatExpiryStatus): string {
+  if (status.tier === "expired") return `Expired (${Math.abs(status.daysRemaining)}d ago)`;
+  if (status.daysRemaining === 0) return "Expires today";
+  if (status.daysRemaining === 1) return "Expires tomorrow";
+  return `Expires in ${status.daysRemaining}d`;
 }
 
 function readDismissedKey(): string | null {
@@ -127,18 +146,20 @@ function dismissKeyFor(dateStr: string, tier: PatExpiryTier): string {
   return `${dateStr}:${tier}`;
 }
 
-let _dismissedPatExpiryKey: string | null = null;
-let _activePatExpiryKey: string | null = null;
-let _unsubscribeDismiss: (() => void) | null = null;
-let _authClearRegistered = false;
+function dismissActiveNotification(): void {
+  if (_activePatExpiryKey !== null) {
+    dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
+  }
+}
 
 function ensureDismissListener(): void {
   if (_unsubscribeDismiss === null) {
-    const unsub = onNotificationDismissed(PAT_EXPIRY_NOTIFICATION_SOURCE, () => {
+    _unsubscribeDismiss = onNotificationDismissed(PAT_EXPIRY_NOTIFICATION_SOURCE, () => {
       if (_activePatExpiryKey) writeDismissedKey(_activePatExpiryKey);
     });
-    _unsubscribeDismiss = typeof unsub === "function" ? unsub : () => {};
   }
+  // onAuthCleared has no unregister, so this callback is registered once for the
+  // module's lifetime (_resetPatExpiryState intentionally leaves the flag set).
   if (!_authClearRegistered) {
     _authClearRegistered = true;
     onAuthCleared(() => {
@@ -161,9 +182,7 @@ export function checkPatExpiryReminder(
   now = new Date()
 ): void {
   if (authMethod !== "pat" || !patExpiresAt) {
-    if (_activePatExpiryKey !== null) {
-      dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
-    }
+    dismissActiveNotification();
     _activePatExpiryKey = null;
     _dismissedPatExpiryKey = null;
     return;
@@ -171,9 +190,7 @@ export function checkPatExpiryReminder(
 
   const status = getPatExpiryStatus(patExpiresAt, now);
   if (!status || status.tier === "ok") {
-    if (_activePatExpiryKey !== null) {
-      dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
-    }
+    dismissActiveNotification();
     _activePatExpiryKey = null;
     return;
   }
@@ -182,9 +199,7 @@ export function checkPatExpiryReminder(
   const key = dismissKeyFor(patExpiresAt, status.tier);
 
   if (readDismissedKey() === key) {
-    if (_activePatExpiryKey !== null && _activePatExpiryKey !== key) {
-      dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
-    }
+    if (_activePatExpiryKey !== key) dismissActiveNotification();
     _activePatExpiryKey = key;
     return;
   }

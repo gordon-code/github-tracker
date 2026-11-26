@@ -1,5 +1,5 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
-import { isUnauthorizedError } from "../lib/http-errors";
+import { isUnauthorizedError, rethrowIfUnauthorized } from "../lib/http-errors";
 import { captureException } from "../lib/sentry-facade";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { deleteCacheEntry } from "../stores/cache";
@@ -847,11 +847,7 @@ async function runForkPRFallback(
     }
   }));
 
-  for (const s of settled) {
-    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
-      throw s.reason;
-    }
-  }
+  rethrowIfUnauthorized(settled);
 }
 
 // ── Combined search (issues + PRs in single request) ─────────────────────────
@@ -1100,11 +1096,7 @@ async function graphqlLightCombinedSearch(
     }
   }));
 
-  for (const s of settled) {
-    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
-      throw s.reason;
-    }
-  }
+  rethrowIfUnauthorized(settled);
 
   return finalizeSearchResult(
     issues, prMap, errors,
@@ -1204,11 +1196,7 @@ async function graphqlUnfilteredSearch(
     }
   }));
 
-  for (const s of settled) {
-    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
-      throw s.reason;
-    }
-  }
+  rethrowIfUnauthorized(settled);
 
   return finalizeSearchResult(
     issues, prMap, errors,
@@ -1437,9 +1425,7 @@ export async function fetchPREnrichment(
               fetchBatchWithSplit(remainingIds.slice(0, mid)),
               fetchBatchWithSplit(remainingIds.slice(mid)),
             ]);
-            for (const s of splitSettled) {
-              if (s.status === "rejected" && isUnauthorizedError(s.reason)) throw s.reason;
-            }
+            rethrowIfUnauthorized(splitSettled);
             return;
           }
 
@@ -1471,11 +1457,7 @@ export async function fetchPREnrichment(
     }),
   );
 
-  for (const s of settled) {
-    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
-      throw s.reason;
-    }
-  }
+  rethrowIfUnauthorized(settled);
 
   return { enrichments, errors };
 }
@@ -2813,11 +2795,7 @@ export async function discoverUpstreamRepos(
         () => repoNames.size, CAP, "upstreamDiscovery",
       ),
     ]);
-    for (const s of settled) {
-      if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
-        throw s.reason;
-      }
-    }
+    rethrowIfUnauthorized(settled);
   }
 
   // Collect all valid logins to discover for

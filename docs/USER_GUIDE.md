@@ -74,7 +74,7 @@ OAuth is the recommended sign-in method. Click **Sign in with GitHub** on the lo
 
 OAuth tokens work across all organizations you belong to.
 
-If an OAuth callback fails due to a transient error, your existing settings and Jira connection are preserved rather than wiped. Similarly, transient GitHub `401` responses do not immediately log you out — the app verifies against GitHub 3 times before expiring your session, and if a GitHub token expires, your configuration, view preferences, and Jira connection are preserved for when you sign back in (Jira credentials are only cleared on explicit **Sign out**, **Reset all**, or switching to a different GitHub account).
+If an OAuth callback fails due to a transient error, your existing settings and Jira connection are preserved rather than wiped. Similarly, transient GitHub `401` responses do not immediately log you out — the app verifies against GitHub 3 times before expiring your session, and if a GitHub token expires, your configuration, view preferences, and Jira connection are preserved for when you sign back in (token expiry alone never clears Jira credentials; they are cleared by explicit **Sign out**, **Reset all**, signing in as a different GitHub account or when the app cannot tell which GitHub account the saved Jira connection belongs to, importing settings or credentials that don't match the saved Jira site, or Jira itself rejecting the connection).
 
 ### Personal Access Token Sign-In
 
@@ -87,7 +87,7 @@ Two token formats are accepted:
 
 The token is validated against the GitHub API before being stored. It is saved permanently in your browser's `localStorage` — you will not need to re-enter it on revisit.
 
-Because GitHub does not expose the `GitHub-Authentication-Token-Expiration` header to browsers via CORS (and GitHub Tracker keeps PATs strictly client-side), you can optionally enter an **Expiration date (optional)** when signing in (or later via **Settings > Data > Token expiration reminder** or the **Replace** token panel). This date is stored locally only and triggers escalating Notification Drawer and toast reminders (**Update PAT in Settings**) at 7 days, 3 days, 1 day/today, and after expiration, alongside an inline countdown badge in Settings.
+Because GitHub does not expose the `GitHub-Authentication-Token-Expiration` header to browsers via CORS (and GitHub Tracker keeps PATs strictly client-side), you can optionally enter an **Expiration date (optional)** when signing in (or later via **Settings > Data > Token expiration reminder** or the **Replace** token panel). Incomplete or invalid dates are not saved. This date is stored locally only and triggers escalating Notification Drawer and toast reminders (**Update PAT in Settings**) at 7 days, 3 days, 1 day/today, and after expiration, alongside an inline countdown badge in Settings.
 
 To replace your token later (e.g., after expiration or rotation), go to **Settings > Data > Authentication** and click **Replace**. You can also set or update the **Expiration date (optional)** there. The new token is validated before it replaces the old one. Other open tabs update automatically.
 

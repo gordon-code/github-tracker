@@ -2225,6 +2225,37 @@ describe("SettingsPage — PAT expiration reminder", () => {
     expect(config.patExpiresAt).toBe("2026-12-15");
     expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBe("2026-12-15:7d");
     expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/enter a valid date/i);
+    expect(dateInput.getAttribute("aria-invalid")).toBe("true");
+
+    // A subsequent valid date clears the inline error
+    fireEvent.change(dateInput, { target: { value: "2027-01-01" } });
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
+  });
+
+  it("ignores partial date entries while typing and restores the persisted value on blur", () => {
+    updateConfig({ patExpiresAt: "2026-12-15" });
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-15:7d");
+    renderSettings();
+    const dateInput = screen.getByLabelText<HTMLInputElement>("PAT expiration date");
+
+    // A year typed digit-by-digit reports real calendar dates such as 0202-03-15
+    Object.defineProperty(dateInput, "value", { configurable: true, writable: true, value: "0202-03-15" });
+    fireEvent.change(dateInput);
+    expect(config.patExpiresAt).toBe("2026-12-15");
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBe("2026-12-15:7d");
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
+
+    // A cleared segment reports "" with badInput — not an intentional clear
+    Object.defineProperty(dateInput, "value", { configurable: true, writable: true, value: "" });
+    Object.defineProperty(dateInput, "validity", { configurable: true, value: { badInput: true } });
+    fireEvent.change(dateInput);
+    expect(config.patExpiresAt).toBe("2026-12-15");
+
+    fireEvent.blur(dateInput);
+    expect(dateInput.value).toBe("2026-12-15");
+    expect(screen.getByRole("alert").textContent).toMatch(/enter a valid date/i);
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 
   it("clicking Clear sets patExpiresAt to null, clears dismissal, and dismisses pat-expiry notification", () => {
@@ -2278,7 +2309,7 @@ describe("SettingsPage — PAT expiration reminder", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Expiration date (optional)").value).toBe("");
   });
 
-  it("Replace PAT normalizes invalid 5-digit year to null and resets field on cancel", async () => {
+  it("Replace PAT rejects an invalid 5-digit year with an inline error and resets field on cancel", async () => {
     const newToken = "ghp_" + "b".repeat(36);
     const userData = { login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" };
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
@@ -2308,9 +2339,39 @@ describe("SettingsPage — PAT expiration reminder", () => {
     fireEvent.input(reopenedExpiry);
     fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
 
-    await waitFor(() => {
-      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData, null);
-    });
+    expect((await screen.findByText(/enter a valid date/i)).getAttribute("role")).toBe("alert");
+    expect(reopenedExpiry.getAttribute("aria-invalid")).toBe("true");
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Replace token" }).disabled).toBe(false);
+
+    // Editing the date clears the inline error
+    Object.defineProperty(reopenedExpiry, "value", { configurable: true, writable: true, value: "2027-01-01" });
+    fireEvent.input(reopenedExpiry);
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
+  });
+
+  it("Replace PAT clears the expiry error on Cancel and on toggle-close", async () => {
+    renderSettings();
+    const triggerExpiryError = async () => {
+      fireEvent.input(screen.getByLabelText(/new personal access token/i), { target: { value: "ghp_" + "c".repeat(36) } });
+      const expiry = screen.getByLabelText<HTMLInputElement>("Expiration date (optional)");
+      Object.defineProperty(expiry, "value", { configurable: true, writable: true, value: "20270-01-01" });
+      fireEvent.input(expiry);
+      fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+      await screen.findByText(/enter a valid date/i);
+    };
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await triggerExpiryError();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
+
+    await triggerExpiryError();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" })); // toggle-close
+    fireEvent.click(screen.getByRole("button", { name: "Replace" })); // reopen
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
   });
 });
 

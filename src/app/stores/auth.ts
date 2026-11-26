@@ -6,6 +6,10 @@ import { clearSnapshot } from "../lib/dashboard-snapshot";
 import { CONFIG_STORAGE_KEY, resetConfig, updateConfig, config } from "./config";
 import { VIEW_STORAGE_KEY, resetViewState } from "./view";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
+import { reloadOnceForStaleChunk } from "../lib/chunk-reload";
+import { discardResponseBody } from "../lib/http-errors";
+import { isValidPatExpiryDate } from "../lib/pat";
+import type { Auth401Deps } from "./auth-401";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
@@ -268,9 +272,79 @@ export interface UnauthorizedContext {
 
 export type UnauthorizedOutcome = "expired" | "preserved" | "ignored";
 
+const STALE_VERIFIER_RELOAD_KEY = "github-tracker:auth-401-chunk-reload";
+
+function clearStaleVerifierReloadFlag(): void {
+  try {
+    sessionStorage.removeItem(STALE_VERIFIER_RELOAD_KEY);
+  } catch {
+    // sessionStorage unavailable
+  }
+}
+
+const STALE_VERIFIER_CONFIRM_DELAY_MS = 1_000;
+
+function waitUnlessAborted(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * When the verifier chunk can't load, reload only if one more `GET /user` (after a short delay,
+ * since transient 401s cluster) also returns 401 and a fresh status probe reports no API Requests
+ * outage — a transient or outage 401 must not throw the user out of a working dashboard (boot
+ * validation during an outage routes to /login).
+ */
+async function isConfirmedOutsideOutage(failingToken: string, signal: AbortSignal): Promise<boolean> {
+  if (!(await waitUnlessAborted(STALE_VERIFIER_CONFIRM_DELAY_MS, signal))) return false;
+  try {
+    const resp = await makeUserCheckFetcher(failingToken, signal)();
+    discardResponseBody(resp);
+    if (resp.status !== 401) return false;
+  } catch {
+    return false;
+  }
+  const statusMod = await import("../services/github-status").catch(() => null);
+  if (!statusMod) return true;
+  await statusMod.fetchGitHubStatus();
+  return !statusMod.isGitHubApiOutage();
+}
+
 export const authNavigation = {
   redirectToLogin(): void {
     window.location.replace("/login");
+  },
+  /**
+   * Reloads the page when the lazy `auth-401` chunk can't be fetched (a tab
+   * that outlived a deploy). The reload boots against current assets, where
+   * `validateToken` can verify the token. Guarded to one reload per window.
+   */
+  reloadForStaleChunk(): void {
+    // Offline, the import failure is a network error, not a stale chunk — a reload would only show the browser's offline page.
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    try {
+      // At most one reload per session for this cause: if the chunk still fails on current assets
+      // (blocked or missing), further runtime 401s stay "preserved" instead of reloading every poll.
+      if (sessionStorage.getItem(STALE_VERIFIER_RELOAD_KEY) !== null) return;
+      sessionStorage.setItem(STALE_VERIFIER_RELOAD_KEY, String(Date.now()));
+      // Another reload within the shared guard window: none happened, so don't spend the one allowed.
+      if (!reloadOnceForStaleChunk()) sessionStorage.removeItem(STALE_VERIFIER_RELOAD_KEY);
+    } catch {
+      // sessionStorage unavailable: reload unguarded so a revoked token is still re-verified on current
+      // assets. Repeat reloads require another runtime 401, so the rate stays bounded by poll cadence.
+      window.location.reload();
+    }
   },
 };
 
@@ -348,13 +422,17 @@ function resetPerIdentityLocalState(): void {
   safeRemoveStorage(VIEW_STORAGE_KEY);
 }
 
+function clearPatExpiryDismissalKey(): void {
+  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+}
+
 export function setAuthFromPat(
   patToken: string,
   userData: GitHubUser,
   patExpiresAt: string | null = null
 ): void {
   const normalizedExpiry =
-    typeof patExpiresAt === "string" && z.iso.date().safeParse(patExpiresAt).success
+    typeof patExpiresAt === "string" && isValidPatExpiryDate(patExpiresAt)
       ? patExpiresAt
       : null;
   const identityClass = classifyIncomingIdentity(userData.login);
@@ -386,7 +464,7 @@ export function setAuthFromPat(
   setAuth({ access_token: patToken });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
   updateConfig({ authMethod: "pat", patExpiresAt: normalizedExpiry });
-  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+  clearPatExpiryDismissalKey();
 }
 
 /**
@@ -404,6 +482,18 @@ function clearSnapshotLogged(): Promise<void> {
   });
 }
 
+function clearDashboardStorageKeys(): void {
+  safeRemoveStorage(DASHBOARD_STORAGE_KEY);
+  safeRemoveStorage(DEP_META_STORAGE_KEY);
+  safeRemoveStorage(DASHBOARD_BODIES_STORAGE_KEY);
+}
+
+function runOnClearCallbacks(): void {
+  for (const cb of _onClearCallbacks) {
+    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
+  }
+}
+
 /**
  * Clears per-identity data: the `onAuthCleared` callback loop (poll data,
  * notifications, toast dedup, dashboard cache), the IndexedDB
@@ -417,21 +507,9 @@ function clearSnapshotLogged(): Promise<void> {
  * inert (`isIdentitySwitch` needs `user()` non-null) and `expireToken()` never
  * clears the API cache (`clearCache`).
  */
-function clearDashboardStorageKeys(): void {
-  safeRemoveStorage(DASHBOARD_STORAGE_KEY);
-  safeRemoveStorage(DEP_META_STORAGE_KEY);
-  safeRemoveStorage(DASHBOARD_BODIES_STORAGE_KEY);
-}
-
-function runOnClearCallbacks(): void {
-  for (const cb of _onClearCallbacks) {
-    try { cb(); } catch (e) { console.warn("[auth] onAuthCleared callback threw:", e); }
-  }
-}
-
 export async function clearIdentityData(): Promise<void> {
   safeRemoveStorage(LAST_USER_STORAGE_KEY);
-  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+  clearPatExpiryDismissalKey();
   wipeJiraAuthForIdentityReset();
   clearDashboardStorageKeys();
   _identityEpoch++;
@@ -470,7 +548,7 @@ export function clearAuth(): void {
     // Clear localStorage entries (persistence effects will write back defaults)
     safeRemoveStorage(AUTH_STORAGE_KEY);
     safeRemoveStorage(LAST_USER_STORAGE_KEY);
-    safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+    clearPatExpiryDismissalKey();
     wipeJiraAuthForIdentityReset();
     safeRemoveStorage(CONFIG_STORAGE_KEY);
     safeRemoveStorage(VIEW_STORAGE_KEY);
@@ -581,7 +659,7 @@ function makeAuth401Deps(
   capturedEpoch: number,
   signal: AbortSignal,
   fetchUserCheck: () => Promise<Response>
-) {
+): Auth401Deps {
   return {
     isCurrentSession: () => isCurrentSession(capturedToken, capturedEpoch, signal),
     fetchUserCheck,
@@ -651,8 +729,17 @@ export async function handleRuntimeUnauthorized(
 
       let outcome: UnauthorizedOutcome;
       if (!mod) {
+        const reload = await isConfirmedOutsideOutage(failingToken, controller.signal);
+        if (!isCurrentSession(failingToken, currentEpoch, controller.signal)) {
+          return "ignored";
+        }
+        if (reload) {
+          console.warn("[auth] 401 verifier chunk failed to load — reloading for current assets");
+          authNavigation.reloadForStaleChunk();
+        }
         outcome = "preserved";
       } else {
+        clearStaleVerifierReloadFlag();
         const result = await mod.handle401SlowPath(
           "runtime",
           controller.signal,
@@ -730,12 +817,15 @@ export async function validateToken(): Promise<boolean> {
         return false;
       }
       clearAuthOutageSuspension();
+      clearStaleVerifierReloadFlag();
       userData = parsed;
     } else if (resp.status === 401) {
+      discardResponseBody(resp);
       const mod = await import("./auth-401").catch(() => null);
       if (!isCurrentSession(currentToken, startEpoch, controller.signal) || !mod) {
         return false;
       }
+      clearStaleVerifierReloadFlag();
       const result = await mod.handle401SlowPath(
         "validate",
         controller.signal,
@@ -743,6 +833,7 @@ export async function validateToken(): Promise<boolean> {
       );
       userData = result.userData;
     } else {
+      discardResponseBody(resp);
       return false;
     }
 
@@ -756,11 +847,15 @@ export async function validateToken(): Promise<boolean> {
 
     const identityClass = classifyIncomingIdentity(userData.login);
     if (identityClass === "mismatch") {
+      // The token is unchanged, so its auth method and PAT expiry still describe
+      // this session; resetConfig() inside the reset would otherwise revert them.
+      const { authMethod, patExpiresAt } = config;
       resetPerIdentityLocalState();
       await clearIdentityData();
       if (controller.signal.aborted || _token() !== currentToken) {
         return false;
       }
+      updateConfig({ authMethod, patExpiresAt });
     }
 
     setUser(userData);
@@ -790,6 +885,7 @@ async function fetchUserForNewToken(accessToken: string): Promise<GitHubUser | n
     }
   }
 
+  discardResponseBody(resp);
   if (resp.status !== 401) {
     return null;
   }
@@ -822,7 +918,7 @@ export async function completeOAuthLogin(accessToken: string): Promise<boolean> 
   setAuth({ access_token: accessToken });
   setUser(userData);
   updateConfig({ authMethod: "oauth", patExpiresAt: null });
-  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
+  clearPatExpiryDismissalKey();
   navigator.storage?.persist?.()?.catch(() => {});
   return true;
 }
@@ -866,7 +962,7 @@ function handleAuthStorage(e: StorageEvent): void {
       try {
         const r = await makeUserCheckFetcher(newToken)();
         if (!r.ok) {
-          void r.body?.cancel();
+          discardResponseBody(r);
           return;
         }
         const data = parseGitHubUserPayload(await r.json());

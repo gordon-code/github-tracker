@@ -334,6 +334,34 @@ describe("LoginPage — PAT form validation", () => {
     );
   });
 
+  it("rejects an invalid expiration date with an inline error and does not submit", async () => {
+    vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
+    mockFetchOk();
+    const user = await openPatForm();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp_" + "a".repeat(36));
+    const expiry = screen.getByLabelText<HTMLInputElement>(/expiration date/i);
+    // Bypass happy-dom's date sanitization so the handler sees the raw out-of-range year
+    Object.defineProperty(expiry, "value", { configurable: true, writable: true, value: "275760-01-01" });
+    fireEvent.input(expiry);
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(screen.getByRole("alert").textContent).toMatch(/enter a valid date/i);
+    expect(expiry.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Personal access token").getAttribute("aria-invalid")).toBe("false");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(authStore.setAuthFromPat).not.toHaveBeenCalled();
+
+    // Correcting the date clears the error, and the retry submits normally
+    Object.defineProperty(expiry, "value", { configurable: true, writable: true, value: "2027-06-01" });
+    fireEvent.input(expiry);
+    expect(screen.queryByText(/enter a valid date/i)).toBeNull();
+    vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(authStore.setAuthFromPat).toHaveBeenCalledWith("ghp_" + "a".repeat(36), githubUser, "2027-06-01");
+    });
+  });
+
   it("shows 'Verifying...' and disables button while submitting", async () => {
     vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
     let resolveFetch!: (v: Response) => void;

@@ -15,13 +15,20 @@ import { createCredentialImport } from "../../lib/use-credential-import";
 import { viewState, updateViewState, setTabFilter, applyImportedViewState } from "../../stores/view";
 import { clearAuth, jiraAuth, setJiraAuth, clearJiraAuth, clearJiraConfigFull, isJiraAuthenticated, token, setAuthFromPat } from "../../stores/auth";
 import type { GitHubUser } from "../../stores/auth";
-import { isValidPatFormat } from "../../lib/pat";
-import { getPatExpiryStatus, clearPatExpiryDismissal, checkPatExpiryReminder } from "../../lib/pat-expiry";
+import { isValidPatFormat, isValidPatExpiryDate, PAT_EXPIRY_INVALID_MESSAGE } from "../../lib/pat";
+import {
+  getPatExpiryStatus,
+  formatPatExpiryBadgeLabel,
+  clearPatExpiryDismissal,
+  checkPatExpiryReminder,
+  type PatExpiryStatus,
+} from "../../lib/pat-expiry";
 import { clearCache } from "../../stores/cache";
 import { pushNotification, dismissNotificationBySource } from "../../lib/errors";
 import { buildOrgAccessUrl, buildJiraAuthorizeUrl } from "../../lib/oauth";
 import { sealApiToken } from "../../lib/proxy";
 import { isSafeGitHubUrl, openGitHubUrl } from "../../lib/url";
+import { discardResponseBody } from "../../lib/http-errors";
 import { relativeTime, formatScopeSummary } from "../../lib/format";
 import { fetchOrgs } from "../../services/api";
 import { getClient } from "../../services/github";
@@ -44,6 +51,20 @@ import type { IJiraClient } from "../../services/jira-client";
 import JiraFieldPicker from "./JiraFieldPicker";
 import JiraScopePicker from "./JiraScopePicker";
 import type { RepoRef } from "../../services/api";
+
+const PAT_EXPIRY_BADGE_CLASS = {
+  info: "badge-ghost",
+  warning: "badge-warning",
+  error: "badge-error",
+} as const satisfies Record<PatExpiryStatus["severity"], string>;
+
+/**
+ * True while a date input holds an in-progress entry: an incomplete segment (`badInput`, value
+ * reported as "") or a year still being typed digit-by-digit (`0002-`, `0020-`, `0202-`).
+ */
+function isPartialDateEntry(input: HTMLInputElement): boolean {
+  return input.validity.badInput || /^0\d{3}-/.test(input.value);
+}
 
 const VALID_JIRA_CLIENT_ID_RE = /^[A-Za-z0-9_-]+$/;
 const VALID_JIRA_SITE_URL_RE = /^https:\/\/[a-z0-9-]+\.atlassian\.net$/i;
@@ -110,9 +131,19 @@ export default function SettingsPage() {
   const [showReplaceToken, setShowReplaceToken] = createSignal(false);
   const [replacePatInput, setReplacePatInput] = createSignal("");
   const [replacePatExpiry, setReplacePatExpiry] = createSignal("");
+  const [replacePatExpiryError, setReplacePatExpiryError] = createSignal<string | null>(null);
   const [replacePatError, setReplacePatError] = createSignal<string | null>(null);
   const [replaceSubmitting, setReplaceSubmitting] = createSignal(false);
   const patExpiryStatus = createMemo(() => getPatExpiryStatus(config.patExpiresAt ?? null));
+  const [patExpiryError, setPatExpiryError] = createSignal<string | null>(null);
+
+  function resetReplaceForm(): void {
+    replaceAbortCtrl?.abort();
+    setReplacePatInput("");
+    setReplacePatExpiry("");
+    setReplacePatError(null);
+    setReplacePatExpiryError(null);
+  }
   let replaceInputRef: HTMLInputElement | undefined;
   let replaceButtonRef: HTMLButtonElement | undefined;
   let replaceAbortCtrl: AbortController | undefined;
@@ -479,9 +510,9 @@ export default function SettingsPage() {
     if (replaceSubmitting()) return;
     setReplaceSubmitting(true);
     setReplacePatError(null);
+    setReplacePatExpiryError(null);
     const trimmedToken = replacePatInput().trim();
-    const rawExpiry = replacePatExpiry();
-    const nextExpiry = rawExpiry && getPatExpiryStatus(rawExpiry) !== null ? rawExpiry : null;
+    const nextExpiry = replacePatExpiry() || null;
 
     if (trimmedToken === token()) {
       setReplacePatError("This is already your current token");
@@ -496,6 +527,12 @@ export default function SettingsPage() {
       return;
     }
 
+    if (nextExpiry !== null && !isValidPatExpiryDate(nextExpiry)) {
+      setReplacePatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
+      setReplaceSubmitting(false);
+      return;
+    }
+
     replaceAbortCtrl = new AbortController();
     try {
       const resp = await fetch("https://api.github.com/user", {
@@ -506,8 +543,12 @@ export default function SettingsPage() {
         },
         signal: replaceAbortCtrl.signal,
       });
-      if (!showReplaceToken()) return;
+      if (!showReplaceToken()) {
+        discardResponseBody(resp);
+        return;
+      }
       if (!resp.ok) {
+        discardResponseBody(resp);
         setReplacePatError(
           resp.status === 401
             ? "Token is invalid — check that you entered it correctly"
@@ -518,6 +559,7 @@ export default function SettingsPage() {
       const userData = (await resp.json()) as GitHubUser;
       setAuthFromPat(trimmedToken, userData, nextExpiry);
       resyncLocalEditors();
+      setPatExpiryError(null);
       clearPatExpiryDismissal();
       checkPatExpiryReminder("pat", nextExpiry);
       setReplacePatInput("");
@@ -1951,8 +1993,7 @@ export default function SettingsPage() {
                     if (opening) {
                       setTimeout(() => replaceInputRef?.focus(), 0);
                     } else {
-                      replaceAbortCtrl?.abort();
-                      setReplacePatInput(""); setReplacePatExpiry(""); setReplacePatError(null);
+                      resetReplaceForm();
                     }
                   }}
                   class="btn btn-xs btn-outline"
@@ -1987,10 +2028,19 @@ export default function SettingsPage() {
                   <input
                     id="replace-pat-expiry"
                     type="date"
-                    class="input input-sm input-bordered w-full"
+                    max="9999-12-31"
+                    class={`input input-sm input-bordered w-full${replacePatExpiryError() ? " input-error" : ""}`}
+                    aria-invalid={!!replacePatExpiryError()}
+                    aria-describedby={replacePatExpiryError() ? "replace-pat-expiry-error" : undefined}
                     value={replacePatExpiry()}
-                    onInput={(e) => setReplacePatExpiry(e.currentTarget.value)}
+                    onInput={(e) => {
+                      setReplacePatExpiry(e.currentTarget.value);
+                      setReplacePatExpiryError(null);
+                    }}
                   />
+                  <Show when={replacePatExpiryError()}>
+                    <p id="replace-pat-expiry-error" role="alert" class="text-error text-xs">{replacePatExpiryError()}</p>
+                  </Show>
                   <div class="flex gap-2">
                     <button
                       type="submit"
@@ -2002,7 +2052,7 @@ export default function SettingsPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { replaceAbortCtrl?.abort(); setShowReplaceToken(false); setReplacePatInput(""); setReplacePatExpiry(""); setReplacePatError(null); replaceButtonRef?.focus(); }}
+                      onClick={() => { resetReplaceForm(); setShowReplaceToken(false); replaceButtonRef?.focus(); }}
                       class="btn btn-sm btn-ghost"
                     >
                       Cancel
@@ -2024,40 +2074,38 @@ export default function SettingsPage() {
                   fallback={<span class="text-xs text-base-content/50">Not set</span>}
                 >
                   {(status) => (
-                    <span
-                      class={`badge badge-sm ${
-                        status().tier === "expired" || status().tier === "1d"
-                          ? "badge-error"
-                          : status().tier === "3d" || status().tier === "7d"
-                            ? "badge-warning"
-                            : "badge-ghost"
-                      }`}
-                    >
-                      {status().tier === "expired"
-                        ? `Expired (${Math.abs(status().daysRemaining)}d ago)`
-                        : status().daysRemaining === 0
-                          ? "Expires today"
-                          : status().daysRemaining === 1
-                            ? "Expires tomorrow"
-                            : `Expires in ${status().daysRemaining}d`}
+                    <span class={`badge badge-sm ${PAT_EXPIRY_BADGE_CLASS[status().severity]}`}>
+                      {formatPatExpiryBadgeLabel(status())}
                     </span>
                   )}
                 </Show>
                 <input
                   type="date"
+                  max="9999-12-31"
                   aria-label="PAT expiration date"
-                  class="input input-xs input-bordered"
+                  aria-invalid={patExpiryError() !== null}
+                  aria-describedby={patExpiryError() !== null ? "pat-expiry-error" : undefined}
+                  class={`input input-xs input-bordered${patExpiryError() !== null ? " input-error" : ""}`}
                   value={config.patExpiresAt ?? ""}
                   onChange={(e) => {
                     const raw = e.currentTarget.value;
-                    if (raw && getPatExpiryStatus(raw) === null) {
+                    // Chromium fires change per segment while typing; skip partial entries until blur.
+                    if (isPartialDateEntry(e.currentTarget)) return;
+                    if (raw && !isValidPatExpiryDate(raw)) {
                       e.currentTarget.value = config.patExpiresAt ?? "";
+                      setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
                       return;
                     }
+                    setPatExpiryError(null);
                     const val = raw || null;
                     saveWithFeedback({ patExpiresAt: val });
                     clearPatExpiryDismissal();
                     checkPatExpiryReminder(config.authMethod, val);
+                  }}
+                  onBlur={(e) => {
+                    if (!isPartialDateEntry(e.currentTarget)) return;
+                    e.currentTarget.value = config.patExpiresAt ?? "";
+                    setPatExpiryError(PAT_EXPIRY_INVALID_MESSAGE);
                   }}
                 />
                 <Show when={Boolean(config.patExpiresAt)}>
@@ -2066,12 +2114,18 @@ export default function SettingsPage() {
                     aria-label="Clear PAT expiration date"
                     class="btn btn-xs btn-ghost"
                     onClick={() => {
+                      setPatExpiryError(null);
                       saveWithFeedback({ patExpiresAt: null });
                       clearPatExpiryDismissal();
                     }}
                   >
                     Clear
                   </button>
+                </Show>
+                <Show when={patExpiryError() !== null}>
+                  <p id="pat-expiry-error" role="alert" class="text-error text-xs w-full">
+                    {patExpiryError()}
+                  </p>
                 </Show>
               </div>
             </SettingRow>

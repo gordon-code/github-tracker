@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
   PAT_EXPIRY_DISMISSED_KEY,
@@ -6,6 +6,7 @@ import {
   PAT_SETTINGS_ACTION,
   daysUntilPatExpiry,
   getPatExpiryStatus,
+  formatPatExpiryBadgeLabel,
   checkPatExpiryReminder,
   clearPatExpiryDismissal,
   _resetPatExpiryState,
@@ -18,6 +19,14 @@ import {
   resetNotificationState,
 } from "../../src/app/lib/errors";
 import { clearAuth } from "../../src/app/stores/auth";
+
+// Pin a DST-observing zone so the transition tests below exercise real DST shifts regardless of the host TZ.
+const ORIGINAL_TZ = process.env.TZ;
+process.env.TZ = "America/New_York";
+afterAll(() => {
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -65,6 +74,21 @@ describe("PAT_SETTINGS_ACTION", () => {
   });
 });
 
+describe("formatPatExpiryBadgeLabel", () => {
+  it("formats expired, today, tomorrow, and N-day labels", () => {
+    const now = new Date(2026, 10, 25, 12, 0, 0);
+    const label = (date: string) => {
+      const status = getPatExpiryStatus(date, now);
+      if (!status) throw new Error(`invalid test date ${date}`);
+      return formatPatExpiryBadgeLabel(status);
+    };
+    expect(label("2026-11-23")).toBe("Expired (2d ago)");
+    expect(label("2026-11-25")).toBe("Expires today");
+    expect(label("2026-11-26")).toBe("Expires tomorrow");
+    expect(label("2026-12-25")).toBe("Expires in 30d");
+  });
+});
+
 describe("daysUntilPatExpiry", () => {
   it("computes exact integer days at boundary dates", () => {
     const now = new Date(2026, 10, 25, 12, 0, 0);
@@ -90,8 +114,21 @@ describe("daysUntilPatExpiry", () => {
 
   it("is immune to DST spring-forward and fall-back transitions", () => {
     // US DST spring-forward 2026-03-08, fall-back 2026-11-01
+    expect(new Date(2026, 2, 7, 12).getTimezoneOffset()).not.toBe(new Date(2026, 2, 9, 12).getTimezoneOffset());
     expect(daysUntilPatExpiry("2026-03-09", new Date(2026, 2, 7, 12, 0, 0))).toBe(2);
     expect(daysUntilPatExpiry("2026-11-02", new Date(2026, 9, 31, 12, 0, 0))).toBe(2);
+  });
+
+  it("is immune to southern-hemisphere DST transitions (Pacific/Auckland)", () => {
+    process.env.TZ = "Pacific/Auckland";
+    try {
+      // NZ DST ends 2026-04-05 and starts 2026-09-27
+      expect(new Date(2026, 3, 4, 12).getTimezoneOffset()).not.toBe(new Date(2026, 3, 6, 12).getTimezoneOffset());
+      expect(daysUntilPatExpiry("2026-04-06", new Date(2026, 3, 4, 12, 0, 0))).toBe(2);
+      expect(daysUntilPatExpiry("2026-09-28", new Date(2026, 8, 26, 12, 0, 0))).toBe(2);
+    } finally {
+      process.env.TZ = "America/New_York";
+    }
   });
 
   it("validates leap years and rejects invalid calendar dates or formats", () => {

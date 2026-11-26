@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { isValidPatFormat } from "../../src/app/lib/pat";
+import { isValidPatFormat, isValidPatExpiryDate } from "../../src/app/lib/pat";
+
+describe("isValidPatExpiryDate", () => {
+  it("accepts real calendar dates and rejects invalid ones", () => {
+    expect(isValidPatExpiryDate("2026-12-01")).toBe(true);
+    expect(isValidPatExpiryDate("2028-02-29")).toBe(true);
+    expect(isValidPatExpiryDate("2026-02-29")).toBe(false);
+    expect(isValidPatExpiryDate("275760-01-01")).toBe(false);
+    expect(isValidPatExpiryDate("")).toBe(false);
+    expect(isValidPatExpiryDate("2026/12/01")).toBe(false);
+  });
+});
 
 /** Type-safe helper: asserts result is invalid and returns the error string */
 function expectInvalid(result: ReturnType<typeof isValidPatFormat>): string {

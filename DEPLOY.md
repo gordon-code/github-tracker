@@ -203,7 +203,7 @@ The OAuth App access token is a permanent credential (no expiry). It is stored i
 
 - **CSP protects against XSS token theft**: `script-src 'self'` prevents injection of unauthorized scripts that could read `localStorage`
 - On page load, `validateToken()` calls `GET /user` to verify the token is still valid
-- On 401 (at boot or runtime), the app runs a coalesced 3x verification check (`[1s, 2s]`) and checks `githubstatus.com` for an active **API Requests** outage before calling `expireToken()` and redirecting to login (during an active API Requests outage, `localStorage` tokens are preserved at boot so reloading after recovery restores the session, and runtime 401 expiration is suspended for up to 30 minutes)
+- On 401 (at boot or runtime), the app runs a 3x verification check (`[1s, 2s]`; concurrent runtime 401s share a single check, and a preserved result suppresses re-checks for 15 seconds) and checks `githubstatus.com` for an active **API Requests** outage before calling `expireToken()` and redirecting to login (during an active API Requests outage, `localStorage` tokens are preserved at boot so reloading after recovery restores the session, and runtime 401 expiration is suspended for up to 30 minutes)
 - On explicit logout (`clearAuth()`), the token is removed from `localStorage` and all local state is cleared
 - Transient network errors do NOT clear the token (permanent tokens survive connectivity issues)
 

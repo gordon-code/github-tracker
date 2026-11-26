@@ -1,3 +1,14 @@
+import * as z from "zod/mini";
+
+const PatExpiryDateSchema = z.iso.date();
+
+export const PAT_EXPIRY_INVALID_MESSAGE = "Enter a valid date (YYYY-MM-DD) or leave it blank.";
+
+/** True when `raw` is a real calendar date in YYYY-MM-DD form (the rule the config schema enforces on `patExpiresAt`). */
+export function isValidPatExpiryDate(raw: string): boolean {
+  return PatExpiryDateSchema.safeParse(raw).success;
+}
+
 export type PatValidationResult =
   | { valid: true }
   | { valid: false; error: string };

@@ -661,6 +661,27 @@ describe("validateToken", () => {
     expect(mod.token()).toBe("ghs_retrynet");
   });
 
+  it("preserves token and returns false when the retry 200 body is not valid JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError("Unexpected token")),
+      })
+    );
+
+    mod.setAuth({ access_token: "ghs_retry_badjson" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(mod.token()).toBe("ghs_retry_badjson");
+    expect(mod.user()).toBeNull();
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
   it("does not invalidate a new token set during the retry window (race condition guard)", async () => {
     vi.stubGlobal("fetch", vi.fn()
       // First GET /user returns 401
@@ -794,6 +815,24 @@ describe("validateToken", () => {
     expect(result).toBe(true);
     expect(mod.user()?.login).toBe("UserB");
     expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("userb");
+  });
+
+  it("keeps authMethod and patExpiresAt across a boot-time identity mismatch reset", async () => {
+    const configMod = await import("../../src/app/stores/config");
+    configMod.updateConfig({ authMethod: "pat", patExpiresAt: "2099-01-01" });
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "usera");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "UserB", avatar_url: "https://github.com/b.png", name: "User B" }),
+    }));
+
+    mod.setAuth({ access_token: "ghp_userb" });
+    expect(await mod.validateToken()).toBe(true);
+
+    expect(configMod.config.authMethod).toBe("pat");
+    expect(configMod.config.patExpiresAt).toBe("2099-01-01");
+    expect(mod.user()?.login).toBe("UserB");
   });
 
   it("QA-003: returns false without setting user() when token is replaced or cleared mid-wipe during mismatch", async () => {
@@ -2252,6 +2291,55 @@ describe("completeOAuthLogin", () => {
     expect(result).toBe(false);
     expect(mod.token()).toBeNull();
     expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it.each<[string, () => Promise<unknown>]>([
+    ["the retry throws a network error", () => Promise.reject(new TypeError("Failed to fetch"))],
+    [
+      "the retry returns a non-401 error status",
+      () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ],
+    [
+      "the retry returns 200 with an unparseable user payload",
+      () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    ],
+    [
+      "the retry returns 200 with a body that is not valid JSON",
+      () => Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError("Unexpected token")),
+      }),
+    ],
+  ])("returns false without persisting auth or wiping state when %s", async (_label, retryResponse) => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "alice");
+    mod.setJiraAuth({
+      accessToken: "atl-alice",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://alice.atlassian.net",
+      siteName: "Alice",
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockImplementationOnce(retryResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = mod.completeOAuthLogin("gho_retry_fail");
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mod.token()).toBeNull();
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("alice");
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-alice");
+    expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
   it("awaits cross-identity wipe before calling setAuth() on User A -> expireToken -> User B", async () => {

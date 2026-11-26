@@ -1,11 +1,15 @@
 import { captureException } from "../lib/sentry-facade";
 import { pushNotification } from "../lib/errors";
+import { discardResponseBody } from "../lib/http-errors";
 import { AUTH_OUTAGE_NOTIFICATION_SOURCE } from "../../shared/types";
+import type { Config } from "../../shared/schemas";
 import type { GitHubUser, UnauthorizedContext, UnauthorizedOutcome } from "./auth";
 
 const UNAUTHORIZED_RETRY_DELAYS_MS = [1_000, 2_000] as const;
+const TOTAL_VERIFICATION_ATTEMPTS = UNAUTHORIZED_RETRY_DELAYS_MS.length + 1;
 const OUTAGE_401_SUSPEND_CAP_MS = 30 * 60_000;
 const GITHUB_REQUEST_ID_RE = /^[A-Za-z0-9:_-]{1,64}$/;
+const INCONCLUSIVE_401_LOG = "[auth] 401 verification inconclusive (status/network)";
 
 export interface Auth401Deps {
   isCurrentSession: () => boolean;
@@ -14,24 +18,30 @@ export interface Auth401Deps {
   clearAuthOutageSuspension: () => void;
   getOutageSuspendStartedAt: () => number | null;
   setOutageSuspendStartedAt: (ts: number) => void;
-  getAuthMethod: () => string;
+  getAuthMethod: () => Config["authMethod"];
   expireToken: () => void;
   redirectToLogin: () => void;
 }
 
-function delayWithAbort(ms: number, signal: AbortSignal): Promise<boolean> {
-  if (signal.aborted) return Promise.resolve(false);
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
   return new Promise<boolean>((resolve) => {
     const onAbort = () => {
       clearTimeout(timer);
       resolve(false);
     };
     const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
+      signal?.removeEventListener("abort", onAbort);
       resolve(true);
     }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function logTransientRecovery(attemptNum: number): void {
+  console.warn(
+    `[auth] transient 401 recovered during verification (attempt ${attemptNum}/${TOTAL_VERIFICATION_ATTEMPTS})`
+  );
 }
 
 function maybeNotifyOutageSuspension(deps: Auth401Deps): boolean {
@@ -83,7 +93,7 @@ export async function handle401SlowPath(
       retryResp = await deps.fetchUserCheck();
     } catch {
       if (!deps.isCurrentSession()) return { outcome: "ignored" };
-      console.warn("[auth] 401 verification inconclusive (status/network)");
+      console.warn(INCONCLUSIVE_401_LOG);
       return { outcome: "preserved" };
     }
     if (!deps.isCurrentSession()) return { outcome: "ignored" };
@@ -96,7 +106,7 @@ export async function handle401SlowPath(
           raw = await retryResp.json();
         } catch {
           if (!deps.isCurrentSession()) return { outcome: "ignored" };
-          console.warn("[auth] 401 verification inconclusive (status/network)");
+          console.warn(INCONCLUSIVE_401_LOG);
           return { outcome: "preserved" };
         }
         if (!deps.isCurrentSession()) return { outcome: "ignored" };
@@ -105,17 +115,18 @@ export async function handle401SlowPath(
           return { outcome: "preserved" };
         }
         deps.clearAuthOutageSuspension();
-        console.warn(`[auth] transient 401 recovered during verification (attempt ${attemptNum}/3)`);
+        logTransientRecovery(attemptNum);
         return { outcome: "preserved", userData };
       }
-      void retryResp.body?.cancel();
+      discardResponseBody(retryResp);
       deps.clearAuthOutageSuspension();
-      console.warn(`[auth] transient 401 recovered during verification (attempt ${attemptNum}/3)`);
+      logTransientRecovery(attemptNum);
       return { outcome: "preserved" };
     }
 
+    discardResponseBody(retryResp);
     if (retryResp.status !== 401) {
-      console.warn("[auth] 401 verification inconclusive (status/network)");
+      console.warn(INCONCLUSIVE_401_LOG);
       return { outcome: "preserved" };
     }
   }
@@ -132,8 +143,6 @@ export async function handle401SlowPath(
       }
     }
   }
-
-  if (!deps.isCurrentSession()) return { outcome: "ignored" };
 
   const safeRequestId =
     typeof ctx?.requestId === "string" && GITHUB_REQUEST_ID_RE.test(ctx.requestId)
@@ -170,7 +179,7 @@ export async function retryOAuthUserCheck(
 ): Promise<GitHubUser | null> {
   for (const delayMs of UNAUTHORIZED_RETRY_DELAYS_MS) {
     // oxlint-disable-next-line eslint/no-await-in-loop
-    await new Promise((r) => setTimeout(r, delayMs));
+    await delayWithAbort(delayMs);
 
     let resp: Response;
     try {
@@ -190,6 +199,7 @@ export async function retryOAuthUserCheck(
       }
     }
 
+    discardResponseBody(resp);
     if (resp.status !== 401) {
       return null;
     }
