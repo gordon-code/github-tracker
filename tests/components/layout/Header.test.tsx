@@ -168,6 +168,7 @@ describe("Header", () => {
   it("renders GitHub status badge reflecting operational status", () => {
     vi.mocked(githubStatusModule.getGitHubStatus).mockReturnValue({
       severity: "none",
+      apiSeverity: "none",
       incidents: [],
       fetchedAt: new Date(),
     });
@@ -178,6 +179,7 @@ describe("Header", () => {
   it("renders GitHub status badge reflecting an active critical incident", () => {
     vi.mocked(githubStatusModule.getGitHubStatus).mockReturnValue({
       severity: "critical",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: "Actions Outage", latestUpdateBody: "Investigating", affectedComponents: ["Actions"] }],
       fetchedAt: new Date(),
     });

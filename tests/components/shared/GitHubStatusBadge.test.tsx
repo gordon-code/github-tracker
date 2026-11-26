@@ -36,7 +36,7 @@ describe("GitHubStatusBadge", () => {
   });
 
   it("severity 'none' shows success dot without pulse and popover shows operational message", () => {
-    mockGetGitHubStatus.mockReturnValue({ severity: "none", incidents: [], fetchedAt: new Date() });
+    mockGetGitHubStatus.mockReturnValue({ severity: "none", apiSeverity: "none", incidents: [], fetchedAt: new Date() });
     const { container } = render(() => <GitHubStatusBadge />);
     const dot = container.querySelector("span.rounded-full.w-2.h-2")!;
     expect(dot.classList.contains("bg-success")).toBe(true);
@@ -53,6 +53,7 @@ describe("GitHubStatusBadge", () => {
   it("severity 'minor' shows warning dot without pulse class and popover shows incident details", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "minor",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: "Degraded search", latestUpdateBody: "", affectedComponents: ["Search"] }],
       fetchedAt: new Date(),
     });
@@ -71,6 +72,7 @@ describe("GitHubStatusBadge", () => {
   it("severity 'major' shows orange dot with pulse class", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "major",
+      apiSeverity: "major",
       incidents: [{ id: "1", name: "API outage", latestUpdateBody: "", affectedComponents: ["API Requests"] }],
       fetchedAt: new Date(),
     });
@@ -83,6 +85,7 @@ describe("GitHubStatusBadge", () => {
   it("severity 'critical' with one incident shows critical color, pulse, and popover incident details", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "critical",
+      apiSeverity: "critical",
       incidents: [
         {
           id: "1",
@@ -110,6 +113,7 @@ describe("GitHubStatusBadge", () => {
     const malicious = "<img src=x onerror=alert(1)>";
     mockGetGitHubStatus.mockReturnValue({
       severity: "critical",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: malicious, latestUpdateBody: "", affectedComponents: ["Actions"] }],
       fetchedAt: new Date(),
     });
@@ -126,6 +130,7 @@ describe("GitHubStatusBadge", () => {
   it("clicking the trigger while hovered suppresses the tooltip and shows the popover", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "major",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: "Some outage", latestUpdateBody: "We are investigating", affectedComponents: ["Actions"] }],
       fetchedAt: new Date(),
     });
@@ -154,6 +159,7 @@ describe("GitHubStatusBadge", () => {
   it("popover lists all incidents when multiple are present simultaneously", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "major",
+      apiSeverity: "major",
       incidents: [
         { id: "1", name: "API outage", latestUpdateBody: "", affectedComponents: ["API Requests"] },
         { id: "2", name: "Actions delays", latestUpdateBody: "", affectedComponents: ["Actions"] },
@@ -173,6 +179,7 @@ describe("GitHubStatusBadge", () => {
   it("focusing the trigger shows the tooltip via keyboard access, and opening the popover suppresses it", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "major",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: "Some outage", latestUpdateBody: "We are investigating", affectedComponents: ["Actions"] }],
       fetchedAt: new Date(),
     });
@@ -197,6 +204,7 @@ describe("GitHubStatusBadge", () => {
   it("does not let a stale hover reopen the tooltip after Escape dismisses the popover", () => {
     mockGetGitHubStatus.mockReturnValue({
       severity: "major",
+      apiSeverity: "none",
       incidents: [{ id: "1", name: "Some outage", latestUpdateBody: "We are investigating", affectedComponents: ["Actions"] }],
       fetchedAt: new Date(),
     });
