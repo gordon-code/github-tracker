@@ -1,4 +1,5 @@
 import { getClient, cachedRequest, updateGraphqlRateLimit } from "./github";
+import { isUnauthorizedError } from "../lib/http-errors";
 import { captureException } from "../lib/sentry-facade";
 import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { deleteCacheEntry } from "../stores/cache";
@@ -9,7 +10,7 @@ import { REPO_CAP, PR_ENRICHMENT_NOTIFICATION_SOURCE, PR_ENRICHMENT_DEGRADED_MES
 import type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError } from "../../shared/types";
 
 // ── Re-exports from shared/types (backward compat for existing importers) ─────
-export { REPO_CAP };
+export { REPO_CAP, isUnauthorizedError };
 export type { Issue, IssueState, PullRequest, PullRequestState, AutoMergeMethod, ViewerReviewState, WorkflowRun, RepoRef, RepoEntry, OrgEntry, CheckStatus, ApiError, RateLimitInfo, DashboardSummary } from "../../shared/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -158,12 +159,6 @@ export function resetEmptyActionRepos(): void {
  * Normalizes a Promise.allSettled rejection reason into a structured error shape.
  * Handles both Octokit RequestError (has `.status`) and plain Error objects.
  */
-export function isUnauthorizedError(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { status?: unknown; response?: { status?: unknown } };
-  return e.status === 401 || e.response?.status === 401;
-}
-
 function extractRejectionError(reason: unknown): { statusCode: number | null; message: string } {
   const statusCode =
     typeof reason === "object" &&

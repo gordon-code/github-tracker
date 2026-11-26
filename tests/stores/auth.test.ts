@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 // Mock cache.ts so clearAuth() doesn't try to open IndexedDB
 const mockClearCache = vi.fn().mockResolvedValue(undefined);
@@ -12,8 +12,24 @@ vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
 }));
 
 const mockPushNotification = vi.fn();
+const mockDismissNotificationBySource = vi.fn();
 vi.mock("../../src/app/lib/errors", () => ({
   pushNotification: (...args: unknown[]) => mockPushNotification(...args),
+  dismissNotificationBySource: (...args: unknown[]) => mockDismissNotificationBySource(...args),
+}));
+
+const mockCaptureException = vi.fn();
+vi.mock("../../src/app/lib/sentry-facade", () => ({
+  captureException: (...args: unknown[]) => mockCaptureException(...args),
+}));
+
+const mockFetchGitHubStatus = vi.fn().mockResolvedValue(undefined);
+const mockIsGitHubApiOutage = vi.fn().mockReturnValue(false);
+const mockGetGitHubStatus = vi.fn().mockReturnValue(null);
+vi.mock("../../src/app/services/github-status", () => ({
+  fetchGitHubStatus: (...args: unknown[]) => mockFetchGitHubStatus(...args),
+  isGitHubApiOutage: (...args: unknown[]) => mockIsGitHubApiOutage(...args),
+  getGitHubStatus: (...args: unknown[]) => mockGetGitHubStatus(...args),
 }));
 
 // Mock localStorage with full control (same pattern as config.test.ts)
@@ -72,6 +88,7 @@ describe("setAuth / token signal", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -127,6 +144,10 @@ describe("isAuthenticated", () => {
     mod = await import("../../src/app/stores/auth");
   });
 
+  afterEach(() => {
+    mod._resetAuthVerificationState();
+  });
+
   it("returns false when no token and no user", () => {
     expect(mod.isAuthenticated()).toBe(false);
   });
@@ -148,6 +169,7 @@ describe("clearAuth", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.unstubAllGlobals();
   });
 
@@ -193,6 +215,7 @@ describe("expireToken", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.unstubAllGlobals();
   });
 
@@ -215,13 +238,22 @@ describe("expireToken", () => {
     expect(mod.user()).toBeNull();
   });
 
-  it("removes auth token, dashboard cache, dep-meta, and dashboard-bodies from localStorage — config, view preserved", () => {
+  it("removes auth token, dashboard cache, dep-meta, and dashboard-bodies from localStorage — config, view, jira-auth, and last-user preserved", () => {
+    const jiraBlob = JSON.stringify({
+      accessToken: "atl-tok",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://x.atlassian.net",
+      siteName: "X",
+    });
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
     localStorageMock.setItem("github-tracker:dashboard", '{"cached":true}');
     localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
     localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
-    mod.setAuth({ access_token: "ghs_abc" });
+    mod.setAuthFromPat("ghs_abc", { login: "alice", avatar_url: "", name: "Alice" });
+    mod.setJiraAuth(JSON.parse(jiraBlob) as import("../../src/shared/jira-types").JiraAuthState);
     mod.expireToken();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:dashboard")).toBeNull();
@@ -229,6 +261,9 @@ describe("expireToken", () => {
     expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-tok");
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).not.toBeNull();
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("alice");
   });
 
   it("invokes onAuthCleared callbacks (cross-user isolation on token expiry)", () => {
@@ -236,6 +271,93 @@ describe("expireToken", () => {
     mod.onAuthCleared(cb);
     mod.expireToken();
     expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it("clearIdentityData() wipes jiraAuth, JIRA_AUTH_STORAGE_KEY, and LAST_USER_STORAGE_KEY", async () => {
+    mod.setAuthFromPat("ghs_abc", { login: "alice", avatar_url: "", name: "Alice" });
+    mod.setJiraAuth({
+      accessToken: "atl-tok",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://x.atlassian.net",
+      siteName: "X",
+    });
+    await mod.clearIdentityData();
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBeNull();
+  });
+
+  it("cross-identity PAT login after expireToken (User A -> expireToken -> User B) wipes jira-auth, config, and view while keeping User B's LAST_USER_STORAGE_KEY", async () => {
+    mod.setAuthFromPat("ghp_a", { login: "usera", avatar_url: "", name: "User A" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-a",
+      sealedRefreshToken: "sealed-a",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://a.atlassian.net",
+      siteName: "Site A",
+    });
+
+    mod.expireToken();
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-a");
+
+    mod.setAuthFromPat("ghp_b", { login: "UserB", avatar_url: "", name: "User B" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("userb");
+  });
+
+  it("fail-closed unknown_with_jira on fresh PAT login (missing LAST_USER_STORAGE_KEY + existing jira-auth) wipes Jira auth while preserving config/view", () => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-legacy",
+      sealedRefreshToken: "sealed-legacy",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://legacy.atlassian.net",
+      siteName: "Legacy",
+    });
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBeNull();
+
+    mod.setAuthFromPat("ghp_fresh", { login: "alice", avatar_url: "", name: "Alice" });
+
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("alice");
+  });
+
+  it("same-user case-insensitive re-auth after expireToken (Alice -> expireToken -> alice) preserves jira-auth, config, and view", () => {
+    mod.setAuthFromPat("ghp_a1", { login: "Alice", avatar_url: "", name: "Alice" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-alice",
+      sealedRefreshToken: "sealed-alice",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://alice.atlassian.net",
+      siteName: "Alice Site",
+    });
+
+    mod.expireToken();
+    mod.setAuthFromPat("ghp_a2", { login: "alice", avatar_url: "", name: "Alice" });
+
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-alice");
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).not.toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
   });
 });
 
@@ -249,6 +371,7 @@ describe("onAuthCleared callbacks", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -308,14 +431,27 @@ describe("onAuthCleared callbacks", () => {
 describe("validateToken", () => {
   let mod: typeof import("../../src/app/stores/auth");
 
+  // Pre-warm Vite's transform cache before vi.useFakeTimers() so the first
+  // dynamic import("./auth-401") resolves synchronously within microtasks.
+  beforeAll(async () => {
+    await import("../../src/app/stores/auth-401");
+  });
+
   beforeEach(async () => {
     vi.useFakeTimers();
     localStorageMock.clear();
+    mockCaptureException.mockReset();
+    mockPushNotification.mockReset();
+    mockDismissNotificationBySource.mockReset();
+    mockFetchGitHubStatus.mockReset().mockResolvedValue(undefined);
+    mockIsGitHubApiOutage.mockReset().mockReturnValue(false);
+    mockGetGitHubStatus.mockReset().mockReturnValue(null);
     vi.resetModules();
     mod = await import("../../src/app/stores/auth");
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -341,40 +477,155 @@ describe("validateToken", () => {
     expect(mod.user()?.name).toBe("Will");
   });
 
-  it("expires token after two consecutive 401s (transient retry + genuine revocation)", async () => {
-    vi.stubGlobal("fetch", vi.fn()
-      // First GET /user returns 401
+  it("expires token after three consecutive 401s and captures sanitized auth-validate-401 to Sentry", async () => {
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
-      // Retry GET /user also returns 401
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
-    );
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) });
+    vi.stubGlobal("fetch", fetchMock);
 
-    mod.setAuth({ access_token: "ghs_revoked" });
+    mod.setAuth({ access_token: "ghs_revoked_secret_token" });
     const promise = mod.validateToken();
-    await vi.advanceTimersByTimeAsync(1000);
-    await promise;
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+    expect(result).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(mod.token()).toBeNull();
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    const [err, opts] = mockCaptureException.mock.calls[0] as [Error, { tags: Record<string, string> }];
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).not.toContain("ghs_revoked_secret_token");
+    expect(opts.tags.source).toBe("auth-validate-401");
+    expect(opts.tags.endpointKind).toBe("user");
   });
 
-  it("recovers on transient 401 when retry succeeds", async () => {
+  it("recovers on transient 401 when check #2 succeeds", async () => {
     vi.stubGlobal("fetch", vi.fn()
-      // First GET /user returns 401 (transient)
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
-      // Retry succeeds
       .mockResolvedValueOnce({
         ok: true, status: 200,
         json: () => Promise.resolve({ login: "wgordon", avatar_url: "", name: "Will" }),
       })
     );
 
-    mod.setAuth({ access_token: "ghs_transient" });
+    mod.setAuth({ access_token: "ghs_transient2" });
     const promise = mod.validateToken();
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1_000);
     const result = await promise;
     expect(result).toBe(true);
-    expect(mod.token()).toBe("ghs_transient");
+    expect(mod.token()).toBe("ghs_transient2");
     expect(mod.user()?.login).toBe("wgordon");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("recovers on transient 401 when check #3 succeeds after two 401s", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ login: "wgordon", avatar_url: "", name: "Will" }),
+      })
+    );
+
+    mod.setAuth({ access_token: "ghs_transient3" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+    expect(result).toBe(true);
+    expect(mod.token()).toBe("ghs_transient3");
+    expect(mod.user()?.login).toBe("wgordon");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("preserves token and does not push auth-outage-suspended or initialize outage timer on boot 3x 401 during GitHub API outage", async () => {
+    mockIsGitHubApiOutage.mockReturnValue(true);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValue({ ok: false, status: 401, json: () => Promise.resolve({}) })
+    );
+
+    mod.setAuth({ access_token: "ghs_outage_boot" });
+    const promise = mod.validateToken();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(mod.token()).toBe("ghs_outage_boot");
+    expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghs_outage_boot");
+    expect(mockPushNotification).not.toHaveBeenCalledWith(
+      "auth-outage-suspended",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockCaptureException).not.toHaveBeenCalled();
+
+    // Advance 25 minutes — subsequent handleRuntimeUnauthorized must start a fresh 30-min window
+    // (proving boot validateToken did NOT initialize _outageSuspendStartedAt).
+    await vi.advanceTimersByTimeAsync(25 * 60_000);
+    const runtimeOutcome = await mod.handleRuntimeUnauthorized("ghs_outage_boot", { endpointKind: "rest" });
+    expect(runtimeOutcome).toBe("preserved");
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "auth-outage-suspended",
+      expect.stringContaining("GitHub API outage detected"),
+      "warning",
+      false,
+      { label: "Sign in again", href: "/login" },
+    );
+
+    // Advancing another 20 minutes (45m from boot, only 20m from runtime start) is STILL < 30m cap
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    const secondOutcome = await mod.handleRuntimeUnauthorized("ghs_outage_boot", { endpointKind: "rest" });
+    expect(secondOutcome).toBe("preserved");
+    expect(mod.token()).toBe("ghs_outage_boot");
+  });
+
+  it("returns false without throwing TypeError when 200 response returns malformed JSON ({})", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}),
+    }));
+
+    mod.setAuth({ access_token: "ghs_malformed" });
+    const result = await mod.validateToken();
+    expect(result).toBe(false);
+    expect(mod.user()).toBeNull();
+    expect(mod.token()).toBe("ghs_malformed");
+  });
+
+  it("first-upgrade boot with missing LAST_USER_STORAGE_KEY and existing jira-auth preserves config/view/jira-auth and backfills LAST_USER_STORAGE_KEY", async () => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-upgrade",
+      sealedRefreshToken: "sealed-upgrade",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://upgrade.atlassian.net",
+      siteName: "Upgrade",
+    });
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "UpgradedUser", avatar_url: "https://github.com/u.png", name: "Upgraded" }),
+    }));
+
+    mod.setAuth({ access_token: "ghs_upgrade" });
+    const result = await mod.validateToken();
+    expect(result).toBe(true);
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-upgrade");
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).not.toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("upgradeduser");
   });
 
   it("preserves token when retry returns non-401 error (e.g. 500)", async () => {
@@ -413,13 +664,15 @@ describe("validateToken", () => {
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
       // Retry also returns 401 — but token was replaced mid-window
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
     );
 
     mod.setAuth({ access_token: "ghs_old" });
     const promise = mod.validateToken();
-    // Simulate user re-authenticating during the 1-second retry delay
+    // Simulate user re-authenticating during the retry delay
     mod.setAuth({ access_token: "ghs_new" });
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     const result = await promise;
     expect(result).toBe(false);
     // The NEW token must survive — guard prevents expireToken() from running
@@ -431,13 +684,15 @@ describe("validateToken", () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
       .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
     );
 
     localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
     localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
     mod.setAuth({ access_token: "ghs_expired" });
     const promise = mod.validateToken();
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await promise;
     // Token cleared
     expect(mod.token()).toBeNull();
@@ -509,6 +764,7 @@ describe("cross-tab auth sync", () => {
   });
 
   afterEach(async () => {
+    mod._resetAuthVerificationState();
     // Flush pending microtasks BEFORE restoring globals, so the /user fetch
     // this test's storage listener kicked off fully settles against the
     // still-active mock rather than racing `vi.unstubAllGlobals()` below and
@@ -775,6 +1031,7 @@ describe("setJiraAuth / jiraAuth signal", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -843,6 +1100,10 @@ describe("isJiraAuthenticated", () => {
     mod = await import("../../src/app/stores/auth");
   });
 
+  afterEach(() => {
+    mod._resetAuthVerificationState();
+  });
+
   it("returns false when no Jira auth state", () => {
     expect(mod.isJiraAuthenticated()).toBe(false);
   });
@@ -872,6 +1133,7 @@ describe("clearJiraAuth", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -979,6 +1241,7 @@ describe("clearAuth clears Jira auth via onAuthCleared", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -1030,6 +1293,7 @@ describe("ensureJiraTokenValid", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -1293,6 +1557,7 @@ describe("cross-tab Jira auth sync", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1411,6 +1676,7 @@ describe("setAuthFromPat", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -1460,6 +1726,7 @@ describe("setAuthFromPat — identity switch", () => {
   });
 
   afterEach(() => {
+    mod._resetAuthVerificationState();
     vi.restoreAllMocks();
   });
 
@@ -1543,6 +1810,7 @@ describe("identityEpoch and clearSnapshot integration", () => {
   });
 
   afterEach(async () => {
+    mod._resetAuthVerificationState();
     await new Promise((r) => setTimeout(r, 50));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -1691,5 +1959,520 @@ describe("identityEpoch and clearSnapshot integration", () => {
     mockClearCache.mockRejectedValueOnce(new Error("cache error"));
     mockClearSnapshot.mockRejectedValueOnce(new Error("snapshot error"));
     await expect(mod.clearIdentityData()).resolves.toBeUndefined();
+  });
+});
+
+describe("completeOAuthLogin", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+  let configMod: typeof import("../../src/app/stores/config");
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    localStorageMock.clear();
+    mockClearCache.mockReset().mockResolvedValue(undefined);
+    mockClearSnapshot.mockReset().mockResolvedValue(undefined);
+    mockCaptureException.mockReset();
+    mockPushNotification.mockReset();
+    mockDismissNotificationBySource.mockReset();
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+    configMod = await import("../../src/app/stores/config");
+  });
+
+  afterEach(() => {
+    mod._resetAuthVerificationState();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects blank or whitespace-only token without calling fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await mod.completeOAuthLogin("")).toBe(false);
+    expect(await mod.completeOAuthLogin("   \t\n  ")).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it("retries up to 3x on transient 401 and succeeds on check #3 with authMethod='oauth'", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ login: "oauthuser", avatar_url: "https://github.com/u.png", name: "OAuth User" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = mod.completeOAuthLogin("gho_valid_retry");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+
+    expect(result).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(mod.token()).toBe("gho_valid_retry");
+    expect(mod.user()?.login).toBe("oauthuser");
+    expect(configMod.config.authMethod).toBe("oauth");
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBe("gho_valid_retry");
+  });
+
+  it("returns false on 3x 401 failure without writing AUTH_STORAGE_KEY or touching config/view/jira-auth/LAST_USER_STORAGE_KEY", async () => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "alice");
+    mod.setJiraAuth({
+      accessToken: "atl-alice",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://alice.atlassian.net",
+      siteName: "Alice",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({}),
+    }));
+
+    const promise = mod.completeOAuthLogin("gho_bad");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await promise;
+
+    expect(result).toBe(false);
+    expect(mod.token()).toBeNull();
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("alice");
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-alice");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("returns false without throwing TypeError when 200 response returns malformed JSON ({})", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}),
+    }));
+
+    const result = await mod.completeOAuthLogin("gho_malformed");
+    expect(result).toBe(false);
+    expect(mod.token()).toBeNull();
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it("awaits cross-identity wipe before calling setAuth() on User A -> expireToken -> User B", async () => {
+    mod.setAuthFromPat("ghp_a", { login: "usera", avatar_url: "", name: "User A" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-a",
+      sealedRefreshToken: "sealed-a",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://a.atlassian.net",
+      siteName: "A",
+    });
+    mod.expireToken();
+
+    let resolveCache!: () => void;
+    mockClearCache.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveCache = resolve; })
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "UserB", avatar_url: "https://github.com/b.png", name: "User B" }),
+    }));
+
+    let settled = false;
+    const promise = mod.completeOAuthLogin("gho_userb").then((res) => {
+      settled = true;
+      return res;
+    });
+
+    await vi.waitFor(() => expect(mockClearCache).toHaveBeenCalledTimes(1));
+    // clearCache is still pending — AUTH_STORAGE_KEY must NOT be written yet
+    expect(settled).toBe(false);
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+
+    resolveCache();
+    expect(await promise).toBe(true);
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBe("gho_userb");
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("userb");
+    expect(configMod.config.authMethod).toBe("oauth");
+  });
+
+  it("wipes Jira auth fail-closed on unknown_with_jira while preserving config and view", async () => {
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-legacy",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://legacy.atlassian.net",
+      siteName: "Legacy",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "alice", avatar_url: "", name: "Alice" }),
+    }));
+
+    expect(await mod.completeOAuthLogin("gho_alice")).toBe(true);
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+
+  it("preserves jira-auth, config, and view on same-user case-insensitive OAuth re-auth", async () => {
+    mod.setAuthFromPat("ghp_a", { login: "Alice", avatar_url: "", name: "Alice" });
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setJiraAuth({
+      accessToken: "atl-alice",
+      sealedRefreshToken: "sealed",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://alice.atlassian.net",
+      siteName: "Alice",
+    });
+    mod.expireToken();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "alice", avatar_url: "", name: "Alice" }),
+    }));
+
+    expect(await mod.completeOAuthLogin("gho_alice_new")).toBe(true);
+    expect(mod.jiraAuth()?.accessToken).toBe("atl-alice");
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).not.toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+});
+
+describe("handleRuntimeUnauthorized", () => {
+  let mod: typeof import("../../src/app/stores/auth");
+  let redirectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    localStorageMock.clear();
+    mockCaptureException.mockReset();
+    mockPushNotification.mockReset();
+    mockDismissNotificationBySource.mockReset();
+    mockFetchGitHubStatus.mockReset().mockResolvedValue(undefined);
+    mockIsGitHubApiOutage.mockReset().mockReturnValue(false);
+    mockGetGitHubStatus.mockReset().mockReturnValue(null);
+    vi.resetModules();
+    mod = await import("../../src/app/stores/auth");
+    redirectSpy = vi.spyOn(mod.authNavigation, "redirectToLogin").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    mod._resetAuthVerificationState();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("confirmed 3x 401 captures sanitized Sentry event (with valid githubRequestId), expires token once, and redirects once", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal("fetch", fetchMock);
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    mod.setAuth({ access_token: "ghp_secret_runtime_token" });
+
+    const promise = mod.handleRuntimeUnauthorized("ghp_secret_runtime_token", {
+      endpointKind: "graphql",
+      requestId: "AB12:34CD:56EF",
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const outcome = await promise;
+
+    expect(outcome).toBe("expired");
+    expect(fetchMock).toHaveBeenCalledTimes(2); // triggering call was #1, retries #2 and #3
+    expect(mod.token()).toBeNull();
+    expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
+    expect(redirectSpy).toHaveBeenCalledOnce();
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    const [err, opts] = mockCaptureException.mock.calls[0] as [Error, { tags: Record<string, string> }];
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("Confirmed GitHub 401 — expiring token");
+    expect(JSON.stringify(opts)).not.toContain("ghp_secret_runtime_token");
+    expect(opts.tags.source).toBe("auth-runtime-401");
+    expect(opts.tags.endpointKind).toBe("graphql");
+    expect(opts.tags.githubRequestId).toBe("AB12:34CD:56EF");
+  });
+
+  it("rejects invalid githubRequestId header characters from Sentry tags", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    mod.setAuth({ access_token: "ghp_bad_reqid" });
+
+    const promise = mod.handleRuntimeUnauthorized("ghp_bad_reqid", {
+      endpointKind: "rest",
+      requestId: "bad\nheader value!",
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await promise).toBe("expired");
+
+    const [, opts] = mockCaptureException.mock.calls[0] as [Error, { tags: Record<string, string> }];
+    expect(opts.tags.githubRequestId).toBeUndefined();
+  });
+
+  it("coalesces 5 concurrent calls into 1 verification flight", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal("fetch", fetchMock);
+    mod.setAuth({ access_token: "ghp_coalesce" });
+
+    const promises = Array.from({ length: 5 }, () =>
+      mod.handleRuntimeUnauthorized("ghp_coalesce", { endpointKind: "rest" })
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const outcomes = await Promise.all(promises);
+
+    expect(outcomes).toEqual(["expired", "expired", "expired", "expired", "expired"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    expect(redirectSpy).toHaveBeenCalledOnce();
+  });
+
+  it("stale-token call returns 'ignored' without overwriting an active verification flight", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    vi.stubGlobal("fetch", fetchMock);
+    mod.setAuth({ access_token: "ghp_active" });
+
+    const activePromise = mod.handleRuntimeUnauthorized("ghp_active");
+    const staleOutcome = await mod.handleRuntimeUnauthorized("ghp_stale_from_old_client");
+    expect(staleOutcome).toBe("ignored");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await activePromise).toBe("expired");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("post-preserved 15s cooldown absorbs staggered 401s (even if clearAuthOutageSuspension runs) and allows new verification after 15s or setAuth()", async () => {
+    const fetchMock = vi.fn()
+      // Flight 1: attempt 2 returns 200 -> preserved
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { cancel: vi.fn() } })
+      // Flight 2 (after 15s): attempt 2 returns 401, attempt 3 returns 200
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { cancel: vi.fn() } })
+      // Flight 3 (after setAuth resets cooldown immediately): attempt 2 & 3 return 401 -> expired
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({ ok: false, status: 401 });
+    vi.stubGlobal("fetch", fetchMock);
+    mod.setAuth({ access_token: "ghp_cooldown" });
+
+    const p1 = mod.handleRuntimeUnauthorized("ghp_cooldown");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await p1).toBe("preserved");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Clear outage suspension mid-cooldown — must NOT defeat the 15s cooldown
+    mod.clearAuthOutageSuspension();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await mod.handleRuntimeUnauthorized("ghp_cooldown")).toBe("preserved");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 0 new fetches
+
+    // Advance past 15s cooldown (total 15_001 ms)
+    await vi.advanceTimersByTimeAsync(10_001);
+    const p2 = mod.handleRuntimeUnauthorized("ghp_cooldown");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p2).toBe("preserved");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // Same-token setAuth() clears cooldown immediately without waiting 15s
+    mod.setAuth({ access_token: "ghp_cooldown" });
+    const p3 = mod.handleRuntimeUnauthorized("ghp_cooldown");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p3).toBe("expired");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("transient 200 recovery on attempt 2 and attempt 3 preserves token, skips Sentry, and clears outage suspension", async () => {
+    // First seed an active outage suspension
+    mockIsGitHubApiOutage.mockReturnValue(true);
+    mod.setAuth({ access_token: "ghp_recover" });
+    expect(await mod.handleRuntimeUnauthorized("ghp_recover")).toBe("preserved");
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "auth-outage-suspended",
+      expect.any(String),
+      "warning",
+      false,
+      expect.objectContaining({ href: "/login" }),
+    );
+
+    // Advance past cooldown and recover on attempt 3
+    await vi.advanceTimersByTimeAsync(15_001);
+    mockIsGitHubApiOutage.mockReturnValue(false);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { cancel: vi.fn() } });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = mod.handleRuntimeUnauthorized("ghp_recover");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p).toBe("preserved");
+    expect(mod.token()).toBe("ghp_recover");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("auth-outage-suspended");
+  });
+
+  it("same-token setAuth() clears active outage suspension and dismisses notification", async () => {
+    mockIsGitHubApiOutage.mockReturnValue(true);
+    mod.setAuth({ access_token: "ghp_same" });
+    expect(await mod.handleRuntimeUnauthorized("ghp_same")).toBe("preserved");
+    mockDismissNotificationBySource.mockClear();
+
+    mod.setAuth({ access_token: "ghp_same" });
+    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("auth-outage-suspended");
+  });
+
+  it.each([
+    { label: "500", setup: (m: ReturnType<typeof vi.fn>) => m.mockResolvedValueOnce({ ok: false, status: 500 }) },
+    { label: "503", setup: (m: ReturnType<typeof vi.fn>) => m.mockResolvedValueOnce({ ok: false, status: 503 }) },
+    { label: "403", setup: (m: ReturnType<typeof vi.fn>) => m.mockResolvedValueOnce({ ok: false, status: 403 }) },
+    { label: "network error", setup: (m: ReturnType<typeof vi.fn>) => m.mockRejectedValueOnce(new TypeError("Failed to fetch")) },
+    { label: "timeout error", setup: (m: ReturnType<typeof vi.fn>) => m.mockRejectedValueOnce(new DOMException("The operation timed out", "TimeoutError")) },
+  ])("preserves token and skips Sentry on inconclusive $label during verification", async ({ setup }) => {
+    const fetchMock = vi.fn();
+    setup(fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
+    mod.setAuth({ access_token: "ghp_inconclusive" });
+
+    const p = mod.handleRuntimeUnauthorized("ghp_inconclusive");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await p).toBe("preserved");
+    expect(mod.token()).toBe("ghp_inconclusive");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    expect(redirectSpy).not.toHaveBeenCalled();
+  });
+
+  it("sends cache: 'no-store' on GET https://api.github.com/user verification checks", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, body: { cancel: vi.fn() } });
+    vi.stubGlobal("fetch", fetchMock);
+    mod.setAuth({ access_token: "ghp_cache_check" });
+
+    const p = mod.handleRuntimeUnauthorized("ghp_cache_check");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await p;
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/user",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("triple-guard aborts on stale identityEpoch, mid-flight token replacement, and localStorage mismatch", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+
+    // 1. Stale identityEpoch via expireToken() mid-flight
+    mod.setAuth({ access_token: "ghp_epoch" });
+    const p1 = mod.handleRuntimeUnauthorized("ghp_epoch");
+    mod.expireToken();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await p1).toBe("ignored");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+
+    // 2. Mid-flight token replacement
+    mod.setAuth({ access_token: "ghp_old_tok" });
+    const p2 = mod.handleRuntimeUnauthorized("ghp_old_tok");
+    mod.setAuth({ access_token: "ghp_new_tok" });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await p2).toBe("ignored");
+    expect(mod.token()).toBe("ghp_new_tok");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+
+    // 3. localStorage mismatch while _tokenPersistedToStorage is true
+    mod.setAuth({ access_token: "ghp_ls_tok" });
+    const p3 = mod.handleRuntimeUnauthorized("ghp_ls_tok");
+    localStorageMock.setItem(mod.AUTH_STORAGE_KEY, "ghp_other_tab_tok");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await p3).toBe("ignored");
+    expect(mod.token()).toBe("ghp_ls_tok");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("verifies cleanly for memory-only (QuotaExceededError) session", async () => {
+    const origSetItem = localStorageMock.setItem;
+    localStorageMock.setItem = () => { throw new DOMException("QuotaExceededError"); };
+    try {
+      mod.setAuth({ access_token: "ghp_mem_only" });
+    } finally {
+      localStorageMock.setItem = origSetItem;
+    }
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    const p = mod.handleRuntimeUnauthorized("ghp_mem_only");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p).toBe("expired");
+    expect(mod.token()).toBeNull();
+    expect(redirectSpy).toHaveBeenCalledOnce();
+  });
+
+  it("suspends on fresh pre-expiry outage probe, resets 30-min timer via clearAuthOutageSuspension(), and expires after 30-min cap", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    mod.setAuth({ access_token: "ghp_outage_cap" });
+
+    // Outage not yet flagged before check #2, but fresh probe after 3x 401 detects it
+    mockIsGitHubApiOutage.mockReturnValueOnce(false).mockReturnValue(true);
+
+    const p1 = mod.handleRuntimeUnauthorized("ghp_outage_cap");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p1).toBe("preserved");
+    expect(mockFetchGitHubStatus).toHaveBeenCalledOnce();
+    expect(mockPushNotification).toHaveBeenCalledWith(
+      "auth-outage-suspended",
+      expect.stringContaining("GitHub API outage detected"),
+      "warning",
+      false,
+      { label: "Sign in again", href: "/login" },
+    );
+
+    // Advance 25 minutes, then clearAuthOutageSuspension() simulates recovery between Outage #1 and Outage #2
+    await vi.advanceTimersByTimeAsync(25 * 60_000);
+    mod.clearAuthOutageSuspension();
+    expect(mockDismissNotificationBySource).toHaveBeenCalledWith("auth-outage-suspended");
+
+    // Outage #2 starts a fresh 30-min window: 20 minutes later (45m total, 20m into Outage #2) is still preserved
+    expect(await mod.handleRuntimeUnauthorized("ghp_outage_cap")).toBe("preserved");
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(await mod.handleRuntimeUnauthorized("ghp_outage_cap")).toBe("preserved");
+
+    // Advance past 30-min cap of Outage #2 (another 11m = 31m into Outage #2) -> expires even during outage
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    const pCap = mod.handleRuntimeUnauthorized("ghp_outage_cap");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await pCap).toBe("expired");
+    expect(mod.token()).toBeNull();
+    expect(mockCaptureException).toHaveBeenCalledOnce();
+    expect(redirectSpy).toHaveBeenCalledOnce();
   });
 });

@@ -4,8 +4,7 @@ import { MemoryRouter, Route } from "@solidjs/router";
 
 // Mock auth store before importing the component
 vi.mock("../../src/app/stores/auth", () => ({
-  setAuth: vi.fn(),
-  validateToken: vi.fn(),
+  completeOAuthLogin: vi.fn(),
   clearAuth: vi.fn(),
 }));
 
@@ -78,7 +77,7 @@ describe("OAuthCallback", () => {
       json: async () => ({ access_token: "tok123" }),
     });
     vi.stubGlobal("fetch", mockFetch);
-    vi.mocked(authStore.validateToken).mockResolvedValue(true);
+    vi.mocked(authStore.completeOAuthLogin).mockResolvedValue(true);
 
     renderCallback();
 
@@ -93,7 +92,7 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("on success calls setAuth and validateToken", async () => {
+  it("on success delegates access_token to completeOAuthLogin", async () => {
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
 
@@ -101,38 +100,36 @@ describe("OAuthCallback", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ access_token: "tok123" }),
+        json: async () => ({ access_token: "tok123", token_type: "bearer" }),
       })
     );
-    vi.mocked(authStore.validateToken).mockResolvedValue(true);
+    vi.mocked(authStore.completeOAuthLogin).mockResolvedValue(true);
 
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.setAuth).toHaveBeenCalledWith({ access_token: "tok123" });
-      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalledWith("tok123");
     });
   });
 
-  it("passes token response (access_token, token_type) to setAuth", async () => {
+  it("rejects blank access_token without calling completeOAuthLogin", async () => {
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
 
-    const fullResponse = {
-      access_token: "tok123",
-      token_type: "bearer",
-    };
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => fullResponse })
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "   " }),
+      })
     );
-    vi.mocked(authStore.validateToken).mockResolvedValue(true);
 
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.setAuth).toHaveBeenCalledWith(fullResponse);
+      screen.getByText(/Failed to complete sign in/i);
     });
+    expect(authStore.completeOAuthLogin).not.toHaveBeenCalled();
   });
 
   it("shows error when OAuth endpoint returns non-ok response", async () => {
@@ -265,7 +262,7 @@ describe("OAuthCallback", () => {
     });
   });
 
-  it("clears auth and shows error when validateToken returns false after token exchange", async () => {
+  it("shows error without calling clearAuth when completeOAuthLogin returns false after token exchange", async () => {
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
 
@@ -276,14 +273,13 @@ describe("OAuthCallback", () => {
         json: async () => ({ access_token: "tok123" }),
       })
     );
-    vi.mocked(authStore.validateToken).mockResolvedValue(false);
+    vi.mocked(authStore.completeOAuthLogin).mockResolvedValue(false);
 
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.setAuth).toHaveBeenCalledWith({ access_token: "tok123" });
-      expect(authStore.validateToken).toHaveBeenCalled();
-      expect(authStore.clearAuth).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalledWith("tok123");
+      expect(authStore.clearAuth).not.toHaveBeenCalled();
       screen.getByText(/Could not verify token/i);
     });
   });
@@ -300,7 +296,7 @@ describe("OAuthCallback", () => {
         json: async () => ({ access_token: "tok123" }),
       })
     );
-    vi.mocked(authStore.validateToken).mockResolvedValue(true);
+    vi.mocked(authStore.completeOAuthLogin).mockResolvedValue(true);
   }
 
   it("navigates to returnTo path when OAUTH_RETURN_TO_KEY is set to /settings", async () => {
@@ -309,7 +305,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalled();
     });
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
@@ -341,7 +337,7 @@ describe("OAuthCallback", () => {
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBe("/settings");
   });
 
-  it("OAUTH_RETURN_TO_KEY is preserved when validateToken returns false", async () => {
+  it("OAUTH_RETURN_TO_KEY is preserved when completeOAuthLogin returns false", async () => {
     sessionStorage.setItem(OAUTH_RETURN_TO_KEY, "/settings");
     setupValidState();
     setWindowSearch({ code: "fakecode", state: "teststate" });
@@ -352,7 +348,7 @@ describe("OAuthCallback", () => {
         json: async () => ({ access_token: "tok123" }),
       })
     );
-    vi.mocked(authStore.validateToken).mockResolvedValue(false);
+    vi.mocked(authStore.completeOAuthLogin).mockResolvedValue(false);
 
     renderCallback();
 
@@ -387,7 +383,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalled();
     });
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
@@ -398,7 +394,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalled();
     });
     // Key consumed regardless
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
@@ -410,7 +406,7 @@ describe("OAuthCallback", () => {
     renderCallback();
 
     await waitFor(() => {
-      expect(authStore.validateToken).toHaveBeenCalled();
+      expect(authStore.completeOAuthLogin).toHaveBeenCalled();
     });
     expect(sessionStorage.getItem(OAUTH_RETURN_TO_KEY)).toBeNull();
   });
