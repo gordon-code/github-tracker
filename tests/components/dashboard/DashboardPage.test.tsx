@@ -266,6 +266,7 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       clearErrors: vi.fn(),
       clearNotifications: vi.fn(),
       addMutedSource: vi.fn(),
+      removeMutedSource: vi.fn(),
       isMuted: vi.fn(() => false),
       clearMutedSources: vi.fn(),
       onNotificationDismissed: vi.fn(() => vi.fn()),

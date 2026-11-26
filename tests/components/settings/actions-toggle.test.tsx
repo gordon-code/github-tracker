@@ -65,6 +65,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
   dismissNotificationBySource: vi.fn(),
   onNotificationDismissed: vi.fn(() => vi.fn()),
+  removeMutedSource: vi.fn(),
 }));
 
 // ── Imports after mocks ──────────────────────────────────────────────────────

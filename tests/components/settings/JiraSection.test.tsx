@@ -37,6 +37,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   dismissError: vi.fn(),
   dismissNotificationBySource: vi.fn(),
   onNotificationDismissed: vi.fn(() => vi.fn()),
+  removeMutedSource: vi.fn(),
 }));
 
 const mockClearJiraAuth = vi.fn();

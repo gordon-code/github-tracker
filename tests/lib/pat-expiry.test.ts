@@ -305,4 +305,47 @@ describe("checkPatExpiryReminder & dismissal persistence", () => {
       dispose();
     });
   });
+
+  it("falls back to in-memory dismissal when localStorage throws QuotaExceededError", () => {
+    const quotaErr = new DOMException("Quota exceeded", "QuotaExceededError");
+    const getSpy = vi.spyOn(localStorageMock, "getItem").mockImplementation(() => {
+      throw quotaErr;
+    });
+    const setSpy = vi.spyOn(localStorageMock, "setItem").mockImplementation(() => {
+      throw quotaErr;
+    });
+
+    createRoot((dispose) => {
+      const expiresAt = "2026-12-02"; // 7d tier from 2026-11-25
+
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+
+      // Dismiss at 7d tier while localStorage throws
+      dismissError(getNotifications()[0].id);
+      expect(getNotifications()).toHaveLength(0);
+
+      // Repeated check at same tier stays suppressed via in-memory fallback
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(0);
+
+      // Escalating to next tier (3d) still re-pushes
+      vi.setSystemTime(new Date(2026, 10, 29, 12, 0, 0));
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+      expect(getNotifications()[0].message).toContain("within 3 days");
+
+      // Dismiss at 3d tier, then clearPatExpiryDismissal() clears in-memory fallback
+      dismissError(getNotifications()[0].id);
+      expect(getNotifications()).toHaveLength(0);
+      clearPatExpiryDismissal();
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+
+      dispose();
+    });
+
+    getSpy.mockRestore();
+    setSpy.mockRestore();
+  });
 });

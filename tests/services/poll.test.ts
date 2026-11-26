@@ -1592,6 +1592,41 @@ describe("createPollCoordinator", () => {
         dispose();
       });
     });
+
+    it("preserves wasApiOutage across transient status === null (3x githubstatus failure) and clears suspension when operational status returns", async () => {
+      const fetchAll = makeFetchAll();
+      const [mockStatus, setMockStatus] = createSignal<unknown>({
+        indicator: "major",
+        description: "Major Outage",
+        affectedComponents: [],
+      });
+
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockImplementation(() => mockStatus() as never);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        // 3x githubstatus failure resets status to null and flips isGitHubApiOutage() to false
+        setMockStatus(null);
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        // When operational status later returns (non-null, currentOutage stays false),
+        // suspension MUST clear because wasApiOutage was preserved across status === null
+        setMockStatus({
+          indicator: "none",
+          description: "All Systems Operational",
+          affectedComponents: [],
+        });
+        expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
   });
 });
 

@@ -672,10 +672,12 @@ export function createPollCoordinator(
   createEffect(() => {
     const currentOutage = isGitHubApiOutage();
     const status = getGitHubStatus();
-    if (wasApiOutage && !currentOutage && status !== null) {
-      clearAuthOutageSuspension();
+    if (status !== null) {
+      if (wasApiOutage && !currentOutage) {
+        clearAuthOutageSuspension();
+      }
+      wasApiOutage = currentOutage;
     }
-    wasApiOutage = currentOutage;
   });
 
   // Immediate fetch on init

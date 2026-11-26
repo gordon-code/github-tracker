@@ -98,13 +98,14 @@ export function getPatExpiryStatus(dateStr: string | null, now = new Date()): Pa
 
 function readDismissedKey(): string | null {
   try {
-    return localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY);
+    return localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY) ?? _dismissedPatExpiryKey;
   } catch {
-    return null;
+    return _dismissedPatExpiryKey;
   }
 }
 
 function writeDismissedKey(key: string): void {
+  _dismissedPatExpiryKey = key;
   try {
     localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, key);
   } catch {
@@ -113,6 +114,7 @@ function writeDismissedKey(key: string): void {
 }
 
 function removeDismissedKey(): void {
+  _dismissedPatExpiryKey = null;
   try {
     localStorage.removeItem(PAT_EXPIRY_DISMISSED_KEY);
   } catch {
@@ -124,6 +126,7 @@ function dismissKeyFor(dateStr: string, tier: PatExpiryTier): string {
   return `${dateStr}:${tier}`;
 }
 
+let _dismissedPatExpiryKey: string | null = null;
 let _activePatExpiryKey: string | null = null;
 let _unsubscribeDismiss: (() => void) | null = null;
 
@@ -153,6 +156,7 @@ export function checkPatExpiryReminder(
       dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
     }
     _activePatExpiryKey = null;
+    _dismissedPatExpiryKey = null;
     return;
   }
 
@@ -191,4 +195,5 @@ export function _resetPatExpiryState(): void {
   _unsubscribeDismiss?.();
   _unsubscribeDismiss = null;
   _activePatExpiryKey = null;
+  _dismissedPatExpiryKey = null;
 }

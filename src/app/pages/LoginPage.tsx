@@ -1,7 +1,14 @@
-import { createSignal, Show, Switch, Match } from "solid-js";
+import { createSignal, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { useNavigate } from "@solidjs/router";
-import { setAuthFromPat, type GitHubUser } from "../stores/auth";
+import {
+  setAuthFromPat,
+  token,
+  isAuthenticated,
+  validateToken,
+  hasBootValidateAttempted,
+  type GitHubUser,
+} from "../stores/auth";
 import { config } from "../stores/config";
 import type { Config } from "../../shared/schemas";
 import {
@@ -32,6 +39,22 @@ export default function LoginPage() {
   const [importError, setImportError] = createSignal<string | null>(null);
   const [importCommitting, setImportCommitting] = createSignal(false);
   let importInputRef: HTMLInputElement | undefined;
+
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+  });
+
+  onMount(() => {
+    if (token() !== null && !isAuthenticated() && !hasBootValidateAttempted()) {
+      void (async () => {
+        const ok = await validateToken();
+        if (ok && !disposed && !showPatForm() && !showImport()) {
+          navigate(config.onboardingComplete ? "/dashboard" : "/onboarding", { replace: true });
+        }
+      })();
+    }
+  });
 
   function handleLogin() {
     window.location.href = buildAuthorizeUrl();

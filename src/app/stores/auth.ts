@@ -288,6 +288,11 @@ let _preservedCooldown: {
   until: number;
 } | null = null;
 let _outageSuspendStartedAt: number | null = null;
+let _bootValidateAttempted = false;
+
+export function hasBootValidateAttempted(): boolean {
+  return _bootValidateAttempted;
+}
 
 export function clearAuthOutageSuspension(): void {
   if (_outageSuspendStartedAt === null) return;
@@ -316,6 +321,7 @@ function setTokenInternal(nextToken: string | null, persisted: boolean): void {
 export function _resetAuthVerificationState(): void {
   abortAndClearPendingVerifications();
   _outageSuspendStartedAt = null;
+  _bootValidateAttempted = false;
   _tokenPersistedToStorage = safeGetStorage(AUTH_STORAGE_KEY) !== null;
 }
 
@@ -471,6 +477,7 @@ export function clearAuth(): void {
     clearDashboardStorageKeys();
     setTokenInternal(null, false);
     setUser(null);
+    _bootValidateAttempted = false;
     _identityEpoch++;
     // Clear IndexedDB cache and snapshot to prevent data leakage between users
     clearCache().catch((err) => {
@@ -685,6 +692,7 @@ export async function handleRuntimeUnauthorized(
 export async function validateToken(): Promise<boolean> {
   const currentToken = _token();
   if (!currentToken) return false;
+  _bootValidateAttempted = true;
 
   const startEpoch = identityEpoch();
   const controller = new AbortController();

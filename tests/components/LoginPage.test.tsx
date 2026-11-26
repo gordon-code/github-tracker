@@ -14,6 +14,7 @@ vi.mock("../../src/app/stores/auth", async (importOriginal) => {
     ...actual,
     setAuthFromPat: vi.fn(),
     setAuthFromCredential: vi.fn(),
+    validateToken: vi.fn(actual.validateToken),
   };
 });
 
@@ -115,6 +116,9 @@ function mockFetchNetworkError() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authStore.clearAuth();
+  authStore._resetAuthVerificationState();
+  configStore.resetConfig();
   mockFetchOk();
   Object.defineProperty(window, "location", {
     configurable: true,
@@ -126,6 +130,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  authStore.clearAuth();
+  authStore._resetAuthVerificationState();
+  configStore.resetConfig();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -901,6 +908,62 @@ describe("LoginPage — Import from backup", () => {
     await user.click(screen.getByRole("button", { name: "Restore credentials" }));
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/something went wrong/i));
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("LoginPage — boot-outage reload recovery", () => {
+  it("revalidates preserved unverified token on mount and navigates to /dashboard when onboardingComplete is true", async () => {
+    authStore.setAuth({ access_token: "ghp_preserved" });
+    configStore.updateConfig({ onboardingComplete: true });
+    expect(authStore.token()).toBe("ghp_preserved");
+    expect(authStore.isAuthenticated()).toBe(false);
+    expect(authStore.hasBootValidateAttempted()).toBe(false);
+
+    render(() => <LoginPage />);
+
+    await waitFor(() => expect(authStore.validateToken).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/dashboard", { replace: true }));
+  });
+
+  it("revalidates preserved unverified token on mount and navigates to /onboarding when onboardingComplete is false", async () => {
+    authStore.setAuth({ access_token: "ghp_preserved" });
+    configStore.updateConfig({ onboardingComplete: false });
+
+    render(() => <LoginPage />);
+
+    await waitFor(() => expect(authStore.validateToken).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/onboarding", { replace: true }));
+  });
+
+  it("does NOT call validateToken() or redirect when already authenticated", async () => {
+    await authStore.completeOAuthLogin("ghp_signed_in");
+    expect(authStore.isAuthenticated()).toBe(true);
+    vi.mocked(authStore.validateToken).mockClear();
+
+    render(() => <LoginPage />);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(authStore.validateToken).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call validateToken() or redirect when hasBootValidateAttempted() is already true", async () => {
+    authStore.setAuth({ access_token: "ghp_preserved" });
+    mockFetch503();
+    expect(await authStore.validateToken()).toBe(false);
+    expect(authStore.hasBootValidateAttempted()).toBe(true);
+    expect(authStore.isAuthenticated()).toBe(false);
+
+    vi.mocked(authStore.validateToken).mockClear();
+    mockFetchOk();
+
+    render(() => <LoginPage />);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(authStore.validateToken).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
