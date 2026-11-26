@@ -1,9 +1,9 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { getClient, fetchRateLimitDetails } from "./github";
-import { fetchGitHubStatus, isGitHubApiOutage } from "./github-status";
+import { fetchGitHubStatus, isGitHubApiOutage, getGitHubStatus } from "./github-status";
 import { config } from "../stores/config";
-import { user, onAuthCleared, identityEpoch } from "../stores/auth";
+import { user, onAuthCleared, identityEpoch, clearAuthOutageSuspension } from "../stores/auth";
 import { isUnauthorizedError } from "../lib/http-errors";
 import { checkAndResetIfExpired } from "./api-usage";
 import { checkPatExpiryReminder } from "../lib/pat-expiry";
@@ -539,7 +539,7 @@ export function createPollCoordinator(
         .filter((n) => POLL_MANAGED_SOURCES.has(n.source) || n.source.includes("/"))
         .map((n) => n.source)
     );
-    startCycleTracking();
+    const cycleToken = startCycleTracking();
     const cycleEpoch = identityEpoch();
 
     try {
@@ -554,7 +554,7 @@ export function createPollCoordinator(
         pushError(err.repo, err.message, err.retryable);
       }
       // Reconcile: dismiss notifications for sources that didn't push this cycle
-      const pushedThisCycle = endCycleTracking();
+      const pushedThisCycle = endCycleTracking(cycleToken);
       for (const source of previousSources) {
         if (!pushedThisCycle.has(source)) {
           dismissNotificationBySource(source);
@@ -577,7 +577,7 @@ export function createPollCoordinator(
       pushError("poll", message, true);
       // No reconciliation on catch — can't know what resolved
     } finally {
-      endCycleTracking(); // Safe to call twice (returns empty Set if already ended)
+      endCycleTracking(cycleToken); // Safe to call twice (returns empty Set if already ended)
       setIsRefreshing(false);
       if (pendingForce) {
         pendingForce = false;
@@ -664,6 +664,18 @@ export function createPollCoordinator(
     } else {
       clearOutageProbeTimer();
     }
+  });
+
+  // Reactive effect: clear auth outage suspension when GitHub API recovers
+  // (requiring getGitHubStatus() !== null so 3x-failure status reset doesn't falsely clear suspension)
+  let wasApiOutage = isGitHubApiOutage();
+  createEffect(() => {
+    const currentOutage = isGitHubApiOutage();
+    const status = getGitHubStatus();
+    if (wasApiOutage && !currentOutage && status !== null) {
+      clearAuthOutageSuspension();
+    }
+    wasApiOutage = currentOutage;
   });
 
   // Immediate fetch on init

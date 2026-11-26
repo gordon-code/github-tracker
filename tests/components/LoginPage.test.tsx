@@ -220,6 +220,20 @@ describe("LoginPage — PAT form navigation", () => {
     expect(expiryInput.type).toBe("date");
   });
 
+  it("UI-002: #pat-expiry-input has aria-describedby='pat-expiry-help' pointing to local-storage helper text", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    await user.click(screen.getByText("Use a Personal Access Token"));
+
+    const expiryInput = document.getElementById("pat-expiry-input") as HTMLInputElement;
+    expect(expiryInput).not.toBeNull();
+    expect(expiryInput.getAttribute("aria-describedby")).toBe("pat-expiry-help");
+
+    const helpText = document.getElementById("pat-expiry-help");
+    expect(helpText).not.toBeNull();
+    expect(helpText?.textContent).toContain("Stored locally");
+  });
+
   it("clicking 'Use OAuth instead' then reopening the PAT form clears #pat-expiry-input", async () => {
     const user = userEvent.setup();
     render(() => <LoginPage />);

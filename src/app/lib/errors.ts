@@ -38,14 +38,22 @@ let notificationCounter = 0;
 
 // Cycle tracking for poll reconciliation
 let _cycleTracking: Set<string> | null = null;
+let _activeCycleToken: symbol | null = null;
 
-export function startCycleTracking(): void {
+export function startCycleTracking(): symbol {
+  const token = Symbol("poll-cycle");
+  _activeCycleToken = token;
   _cycleTracking = new Set();
+  return token;
 }
 
-export function endCycleTracking(): Set<string> {
+export function endCycleTracking(token?: symbol): Set<string> {
+  if (token !== undefined && token !== _activeCycleToken) {
+    return new Set();
+  }
   const result = _cycleTracking ?? new Set();
   _cycleTracking = null;
+  _activeCycleToken = null;
   return result;
 }
 
@@ -183,6 +191,15 @@ export function addMutedSource(source: string): void {
   notifyDismissListeners(source);
 }
 
+export function removeMutedSource(source: string): void {
+  _setMutedSources((prev) => {
+    if (!prev.has(source)) return prev;
+    const next = new Set(prev);
+    next.delete(source);
+    return next;
+  });
+}
+
 export function isMuted(source: string): boolean {
   return _mutedSources().has(source);
 }
@@ -198,6 +215,8 @@ export function clearNotifications(): void {
 export function resetNotificationState(): void {
   setNotifications([]);
   clearMutedSources();
+  _cycleTracking = null;
+  _activeCycleToken = null;
 }
 
 // Backward-compat alias

@@ -517,6 +517,7 @@ export default function SettingsPage() {
       }
       const userData = (await resp.json()) as GitHubUser;
       setAuthFromPat(trimmedToken, userData, nextExpiry);
+      resyncLocalEditors();
       clearPatExpiryDismissal();
       checkPatExpiryReminder("pat", nextExpiry);
       setReplacePatInput("");
@@ -2062,6 +2063,7 @@ export default function SettingsPage() {
                 <Show when={Boolean(config.patExpiresAt)}>
                   <button
                     type="button"
+                    aria-label="Clear PAT expiration date"
                     class="btn btn-xs btn-ghost"
                     onClick={() => {
                       saveWithFeedback({ patExpiresAt: null });

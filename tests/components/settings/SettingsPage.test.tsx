@@ -85,6 +85,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   pushNotification: vi.fn(),
   dismissNotificationBySource: vi.fn(),
   onNotificationDismissed: vi.fn(() => vi.fn()),
+  removeMutedSource: vi.fn(),
 }));
 
 // ── Imports after mocks ───────────────────────────────────────────────────────
@@ -2236,7 +2237,7 @@ describe("SettingsPage — PAT expiration reminder", () => {
     localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-11-28:3d");
     vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear PAT expiration date" }));
 
     expect(config.patExpiresAt).toBeNull();
     expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();

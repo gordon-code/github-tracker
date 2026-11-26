@@ -34,6 +34,7 @@ vi.mock("../../src/app/lib/errors", () => ({
   clearNotifications: vi.fn(),
   resetNotificationState: vi.fn(),
   addMutedSource: vi.fn(),
+  removeMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
   onNotificationDismissed: vi.fn(() => vi.fn()),
@@ -60,11 +61,24 @@ const [mockApiOutage, setMockApiOutage] = createSignal(false);
 vi.mock("../../src/app/services/github-status", () => ({
   fetchGitHubStatus: vi.fn(() => Promise.resolve()),
   isGitHubApiOutage: vi.fn(() => mockApiOutage()),
+  getGitHubStatus: vi.fn(() => null),
 }));
 
 vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
 }));
+
+const mockClearAuthOutageSuspension = vi.fn();
+vi.mock("../../src/app/stores/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
+  return {
+    ...actual,
+    clearAuthOutageSuspension: (...args: unknown[]) => {
+      mockClearAuthOutageSuspension(...args);
+      return actual.clearAuthOutageSuspension();
+    },
+  };
+});
 
 const mockCheckPatExpiryReminder = vi.fn();
 vi.mock("../../src/app/lib/pat-expiry", () => ({
@@ -136,7 +150,9 @@ describe("createPollCoordinator", () => {
     // Reset mock functions
     setMockApiOutage(false);
     vi.mocked(githubStatusMod.isGitHubApiOutage).mockImplementation(() => mockApiOutage());
+    vi.mocked(githubStatusMod.getGitHubStatus).mockReset().mockReturnValue(null);
     vi.mocked(githubStatusMod.fetchGitHubStatus).mockReset().mockResolvedValue(undefined);
+    mockClearAuthOutageSuspension.mockClear();
     vi.mocked(githubMod.fetchRateLimitDetails).mockClear();
     mockPushError.mockClear();
     mockPushNotification.mockClear();
@@ -1531,6 +1547,46 @@ describe("createPollCoordinator", () => {
         expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-11-27");
         // Manual mode + < 2 min hidden must not trigger a network fetch
         expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("STRUCT-001: calls clearAuthOutageSuspension() on true -> false outage transition only when getGitHubStatus() is non-null", async () => {
+      const fetchAll = makeFetchAll();
+
+      // 1. Transition true -> false with non-null status -> calls clearAuthOutageSuspension()
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockReturnValue({
+        indicator: "none",
+        description: "All Systems Operational",
+        affectedComponents: [],
+      } as never);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
+
+        coordinator.destroy();
+        dispose();
+      });
+
+      // 2. Transition true -> false with null status (3-failure reset) -> does NOT call clearAuthOutageSuspension()
+      mockClearAuthOutageSuspension.mockClear();
+      setMockApiOutage(true);
+      vi.mocked(githubStatusMod.getGitHubStatus).mockReturnValue(null);
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+
+        setMockApiOutage(false);
+        expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
 
         coordinator.destroy();
         dispose();

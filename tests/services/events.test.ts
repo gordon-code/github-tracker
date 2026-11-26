@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../../src/app/stores/auth", () => ({
   onAuthCleared: vi.fn(),
   user: vi.fn(() => null),
+  identityEpoch: vi.fn(() => 0),
 }));
 
 // Mock github module (not directly used by events.ts, but imported transitively)
@@ -13,6 +14,7 @@ vi.mock("../../src/app/services/github", () => ({
 
 // Import AFTER mocks
 import { fetchUserEvents, parseRepoEvents, resetEventsState } from "../../src/app/services/events";
+import { identityEpoch } from "../../src/app/stores/auth";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -531,5 +533,32 @@ describe("resetEventsState", () => {
     // All events returned — no ID filtering since _lastEventId was cleared
     expect(result.events).toHaveLength(2);
     expect(result.changed).toBe(true);
+  });
+
+  it("STRUCT-006: discards result and does not update _lastEventId when identityEpoch advances mid-flight", async () => {
+    vi.mocked(identityEpoch).mockReturnValue(0);
+
+    // 1. Seed _lastEventId = "100"
+    const seedOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "100" })], headers: {} })
+    );
+    await fetchUserEvents(seedOctokit as never, "usera");
+
+    // 2. Advance identityEpoch mid-flight while fetching event id "500"
+    const staleOctokit = makeOctokit(async () => {
+      vi.mocked(identityEpoch).mockReturnValue(1);
+      return { data: [makeEvent({ id: "500" })], headers: {} };
+    });
+    const staleResult = await fetchUserEvents(staleOctokit as never, "usera");
+    expect(staleResult).toEqual({ events: [], changed: false });
+
+    // 3. Next fetch at epoch 1: event id "200" (> "100", < "500") is still returned,
+    // proving _lastEventId was NOT updated to "500" by the stale response.
+    const nextOctokit = makeOctokit(() =>
+      Promise.resolve({ data: [makeEvent({ id: "200" })], headers: {} })
+    );
+    const nextResult = await fetchUserEvents(nextOctokit as never, "usera");
+    expect(nextResult.changed).toBe(true);
+    expect(nextResult.events.map((e) => e.id)).toEqual(["200"]);
   });
 });

@@ -1,6 +1,11 @@
 import { PAT_EXPIRY_DISMISSED_KEY } from "../../shared/types";
 import type { Config } from "../../shared/schemas";
-import { pushNotification, dismissNotificationBySource, onNotificationDismissed } from "./errors";
+import {
+  pushNotification,
+  dismissNotificationBySource,
+  onNotificationDismissed,
+  removeMutedSource,
+} from "./errors";
 
 export { PAT_EXPIRY_DISMISSED_KEY };
 
@@ -134,6 +139,7 @@ function ensureDismissListener(): void {
 export function clearPatExpiryDismissal(): void {
   _activePatExpiryKey = null;
   removeDismissedKey();
+  removeMutedSource(PAT_EXPIRY_NOTIFICATION_SOURCE);
   dismissNotificationBySource(PAT_EXPIRY_NOTIFICATION_SOURCE);
 }
 
@@ -171,6 +177,7 @@ export function checkPatExpiryReminder(
   }
 
   _activePatExpiryKey = key;
+  removeMutedSource(PAT_EXPIRY_NOTIFICATION_SOURCE);
   pushNotification(
     PAT_EXPIRY_NOTIFICATION_SOURCE,
     status.message,

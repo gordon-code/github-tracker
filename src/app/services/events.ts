@@ -1,5 +1,5 @@
 import type { getClient } from "./github";
-import { onAuthCleared } from "../stores/auth";
+import { onAuthCleared, identityEpoch } from "../stores/auth";
 import { isUnauthorizedError } from "../lib/http-errors";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,6 +64,8 @@ export async function fetchUserEvents(
     return { events: [], changed: false };
   }
 
+  const startEpoch = identityEpoch();
+
   try {
     // GitHub docs suggest per_page is capped at 30 for Events API, but empirical
     // testing (2026-05-03) confirmed per_page: 100 returns 100 events successfully.
@@ -71,6 +73,9 @@ export async function fetchUserEvents(
       username,
       per_page: 100,
     });
+    if (startEpoch !== identityEpoch()) {
+      return { events: [], changed: false };
+    }
 
     const allEvents = [...(response.data as GitHubEvent[])];
 
@@ -89,6 +94,9 @@ export async function fetchUserEvents(
           per_page: 100,
           page,
         });
+        if (startEpoch !== identityEpoch()) {
+          return { events: [], changed: false };
+        }
         const nextEvents = (next.data as GitHubEvent[]);
         if (nextEvents.length === 0) break;
         allEvents.push(...nextEvents);
@@ -99,6 +107,10 @@ export async function fetchUserEvents(
         console.warn(`[events] pagination error on page ${page}:`, err instanceof Error ? err.message : String(err));
         break;
       }
+    }
+
+    if (startEpoch !== identityEpoch()) {
+      return { events: [], changed: false };
     }
 
     const maxId = allEvents.reduce(

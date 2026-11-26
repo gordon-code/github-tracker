@@ -15,6 +15,7 @@ import {
   startCycleTracking,
   endCycleTracking,
   addMutedSource,
+  removeMutedSource,
   isMuted,
   clearMutedSources,
   isSafeInternalHref,
@@ -430,6 +431,29 @@ describe("cycle tracking", () => {
       dispose();
     });
   });
+
+  it("STRUCT-003: startCycleTracking returns opaque token and endCycleTracking(staleToken) does not clear a newer cycle", () => {
+    createRoot((dispose) => {
+      const staleToken = startCycleTracking();
+      expect(typeof staleToken).toBe("symbol");
+      pushNotification("a", "msg1", "info");
+
+      const activeToken = startCycleTracking();
+      expect(activeToken).not.toBe(staleToken);
+      pushNotification("b", "msg2", "warning");
+
+      // Stale cycle ending must not clobber the newer cycle's tracking set
+      const staleResult = endCycleTracking(staleToken);
+      expect(staleResult.size).toBe(0);
+
+      pushNotification("c", "msg3", "error");
+      const activeResult = endCycleTracking(activeToken);
+      expect(activeResult.has("b")).toBe(true);
+      expect(activeResult.has("c")).toBe(true);
+      expect(activeResult.has("a")).toBe(false);
+      dispose();
+    });
+  });
 });
 
 describe("resetNotificationState", () => {
@@ -467,6 +491,23 @@ describe("mutedSources", () => {
       clearMutedSources();
       expect(isMuted("api")).toBe(false);
       expect(isMuted("search")).toBe(false);
+      dispose();
+    });
+  });
+
+  it("QA-001/STRUCT-004/STRUCT-101: removeMutedSource unmutes only the specified source", () => {
+    createRoot((dispose) => {
+      addMutedSource("pat-expiry");
+      addMutedSource("search");
+      expect(isMuted("pat-expiry")).toBe(true);
+      expect(isMuted("search")).toBe(true);
+
+      removeMutedSource("pat-expiry");
+      expect(isMuted("pat-expiry")).toBe(false);
+      expect(isMuted("search")).toBe(true);
+
+      // Safe no-op for non-muted source
+      expect(() => removeMutedSource("nonexistent")).not.toThrow();
       dispose();
     });
   });

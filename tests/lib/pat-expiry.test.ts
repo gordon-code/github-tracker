@@ -14,6 +14,7 @@ import {
   getNotifications,
   dismissError,
   addMutedSource,
+  isMuted,
   resetNotificationState,
 } from "../../src/app/lib/errors";
 
@@ -275,6 +276,31 @@ describe("checkPatExpiryReminder & dismissal persistence", () => {
       expect(getNotifications()).toHaveLength(1);
       checkPatExpiryReminder("oauth", "2026-12-02");
       expect(getNotifications()).toHaveLength(0);
+
+      dispose();
+    });
+  });
+
+  it("QA-001/STRUCT-004/STRUCT-101: clearPatExpiryDismissal() and tier escalation unmute 'pat-expiry' after addMutedSource('pat-expiry')", () => {
+    createRoot((dispose) => {
+      const expiresAt = "2026-12-02";
+
+      // 1. Dismiss all (addMutedSource) at 7d tier -> tier escalation to 3d unmutes
+      checkPatExpiryReminder("pat", expiresAt);
+      addMutedSource(PAT_EXPIRY_NOTIFICATION_SOURCE);
+      expect(isMuted(PAT_EXPIRY_NOTIFICATION_SOURCE)).toBe(true);
+
+      vi.setSystemTime(new Date(2026, 10, 29, 12, 0, 0)); // 3d tier
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(isMuted(PAT_EXPIRY_NOTIFICATION_SOURCE)).toBe(false);
+      expect(getNotifications()).toHaveLength(1);
+
+      // 2. Dismiss all again, then clearPatExpiryDismissal() -> unmutes
+      addMutedSource(PAT_EXPIRY_NOTIFICATION_SOURCE);
+      expect(isMuted(PAT_EXPIRY_NOTIFICATION_SOURCE)).toBe(true);
+
+      clearPatExpiryDismissal();
+      expect(isMuted(PAT_EXPIRY_NOTIFICATION_SOURCE)).toBe(false);
 
       dispose();
     });

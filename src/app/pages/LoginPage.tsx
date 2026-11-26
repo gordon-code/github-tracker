@@ -260,10 +260,11 @@ export default function LoginPage() {
                     id="pat-expiry-input"
                     type="date"
                     class="input input-bordered w-full"
+                    aria-describedby="pat-expiry-help"
                     value={patExpiryInput()}
                     onInput={(e) => setPatExpiryInput(e.currentTarget.value)}
                   />
-                  <p class="text-xs text-base-content/60 mt-1">
+                  <p id="pat-expiry-help" class="text-xs text-base-content/60 mt-1">
                     Stored locally to remind you before your token expires.
                   </p>
                 </div>

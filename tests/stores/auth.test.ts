@@ -746,6 +746,148 @@ describe("validateToken", () => {
     expect(freshMod.token()).toBe("ghs_permanent");
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBe("ghs_permanent");
   });
+
+  it("QA-003: cross-identity mismatch wipes config, view, Jira auth, PAT_EXPIRY_DISMISSED_KEY, and cache before setting new user and LAST_USER_STORAGE_KEY", async () => {
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "usera");
+    localStorageMock.setItem("github-tracker:config", '{"theme":"dark"}');
+    localStorageMock.setItem("github-tracker:view", '{"lastActiveTab":"actions"}');
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-01:7d");
+    mod.setJiraAuth({
+      accessToken: "atl-a",
+      sealedRefreshToken: "sealed-a",
+      expiresAt: 9999999999999,
+      cloudId: "c1",
+      siteUrl: "https://a.atlassian.net",
+      siteName: "Site A",
+    });
+
+    let resolveCache!: () => void;
+    mockClearCache.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveCache = resolve; }),
+    );
+    mockClearSnapshot.mockResolvedValueOnce(undefined);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "UserB", avatar_url: "https://github.com/b.png", name: "User B" }),
+    }));
+
+    mod.setAuth({ access_token: "ghs_userb" });
+    const p = mod.validateToken();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Before cache clear finishes, user() must not yet be populated with UserB
+    expect(mockClearCache).toHaveBeenCalledOnce();
+    expect(mod.user()).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
+    expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    expect(mod.jiraAuth()).toBeNull();
+    expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).toBeNull();
+
+    resolveCache();
+    const result = await p;
+
+    expect(result).toBe(true);
+    expect(mod.user()?.login).toBe("UserB");
+    expect(localStorageMock.getItem(mod.LAST_USER_STORAGE_KEY)).toBe("userb");
+  });
+
+  it("QA-003: returns false without setting user() when token is replaced or cleared mid-wipe during mismatch", async () => {
+    // 1. Token replaced while clearIdentityData() is awaiting clearCache()
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "usera");
+    let resolveCache1!: () => void;
+    mockClearCache.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveCache1 = resolve; }),
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "UserB", avatar_url: "https://github.com/b.png", name: "User B" }),
+    }));
+
+    mod.setAuth({ access_token: "ghs_userb_1" });
+    const p1 = mod.validateToken();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    mod.setAuth({ access_token: "ghs_replacement" });
+    resolveCache1();
+    expect(await p1).toBe(false);
+    expect(mod.user()).toBeNull();
+    expect(mod.token()).toBe("ghs_replacement");
+
+    // 2. Token cleared while clearIdentityData() is awaiting clearCache()
+    localStorageMock.setItem(mod.LAST_USER_STORAGE_KEY, "usera");
+    let resolveCache2!: () => void;
+    mockClearCache.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveCache2 = resolve; }),
+    );
+    const p2 = mod.validateToken();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    mod.expireToken();
+    resolveCache2();
+    expect(await p2).toBe(false);
+    expect(mod.user()).toBeNull();
+    expect(mod.token()).toBeNull();
+  });
+
+  it("API-001/PLAN-001/QA-002/STRUCT-103: honors 10s AbortSignal.timeout and parent AbortSignal when AbortSignal.any is undefined", async () => {
+    const origAnyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+    Object.defineProperty(AbortSignal, "any", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+
+    const timeoutCtrl1 = new AbortController();
+    const timeoutCtrl2 = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValueOnce(timeoutCtrl1.signal)
+      .mockReturnValueOnce(timeoutCtrl2.signal);
+
+    try {
+      const capturedSignals: AbortSignal[] = [];
+      vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.signal) capturedSignals.push(init.signal);
+        return new Promise<Response>(() => {}); // hang forever
+      }));
+
+      // 1. 10s timeout signal aborts the combined signal
+      mod.setAuth({ access_token: "ghs_timeout_fallback" });
+      void mod.validateToken();
+      await Promise.resolve();
+      expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+      expect(capturedSignals).toHaveLength(1);
+      expect(capturedSignals[0].aborted).toBe(false);
+
+      timeoutCtrl1.abort(new DOMException("Timeout", "TimeoutError"));
+      expect(capturedSignals[0].aborted).toBe(true);
+
+      // 2. Parent AbortSignal (aborted by setAuth replacement) aborts combined signal
+      mod.setAuth({ access_token: "ghs_parent_abort" });
+      void mod.validateToken();
+      await Promise.resolve();
+      expect(capturedSignals).toHaveLength(2);
+      expect(capturedSignals[1].aborted).toBe(false);
+
+      mod.setAuth({ access_token: "ghs_newer" });
+      expect(capturedSignals[1].aborted).toBe(true);
+    } finally {
+      if (origAnyDescriptor) {
+        Object.defineProperty(AbortSignal, "any", origAnyDescriptor);
+      } else {
+        delete (AbortSignal as unknown as Record<string, unknown>).any;
+      }
+    }
+  });
 });
 
 describe("cross-tab auth sync", () => {
@@ -2536,5 +2678,50 @@ describe("handleRuntimeUnauthorized", () => {
     expect(mod.token()).toBeNull();
     expect(mockCaptureException).toHaveBeenCalledOnce();
     expect(redirectSpy).toHaveBeenCalledOnce();
+  });
+
+  it("STRUCT-002: setAuth() with the SAME token while handleRuntimeUnauthorized() is in flight aborts pending verification and returns 'ignored'", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+    mod.setAuth({ access_token: "ghp_same_token" });
+
+    const p = mod.handleRuntimeUnauthorized("ghp_same_token");
+    await Promise.resolve();
+
+    mod.setAuth({ access_token: "ghp_same_token" });
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(await p).toBe("ignored");
+    expect(mod.token()).toBe("ghp_same_token");
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    expect(redirectSpy).not.toHaveBeenCalled();
+  });
+
+  it("STRUCT-102: expireToken() and clearAuth() clear token, user, bump identityEpoch, and run cleanup when localStorage.removeItem throws SecurityError", () => {
+    const onCleared = vi.fn();
+    mod.onAuthCleared(onCleared);
+    const origRemoveItem = localStorageMock.removeItem;
+    localStorageMock.removeItem = () => {
+      throw new DOMException("Blocked", "SecurityError");
+    };
+
+    try {
+      mod.setAuthFromPat("ghp_sec_1", { login: "alice", avatar_url: "", name: "Alice" });
+      const epochBeforeExpire = mod.identityEpoch();
+      expect(() => mod.expireToken()).not.toThrow();
+      expect(mod.token()).toBeNull();
+      expect(mod.user()).toBeNull();
+      expect(mod.identityEpoch()).toBe(epochBeforeExpire + 1);
+      expect(onCleared).toHaveBeenCalledTimes(1);
+
+      mod.setAuthFromPat("ghp_sec_2", { login: "alice", avatar_url: "", name: "Alice" });
+      const epochBeforeClear = mod.identityEpoch();
+      expect(() => mod.clearAuth()).not.toThrow();
+      expect(mod.token()).toBeNull();
+      expect(mod.user()).toBeNull();
+      expect(mod.identityEpoch()).toBe(epochBeforeClear + 1);
+      expect(onCleared).toHaveBeenCalledTimes(2);
+    } finally {
+      localStorageMock.removeItem = origRemoveItem;
+    }
   });
 });

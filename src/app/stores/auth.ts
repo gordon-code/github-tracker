@@ -326,7 +326,7 @@ export function setAuth(response: TokenExchangeResponse): void {
   } catch {
     pushNotification("localStorage:auth", "Auth token write failed — storage may be full. Token exists in memory only this session.", "warning");
   }
-  _preservedCooldown = null;
+  abortAndClearPendingVerifications();
   clearAuthOutageSuspension();
   setTokenInternal(response.access_token, persisted);
   console.info("[auth] access token set");
@@ -335,8 +335,8 @@ export function setAuth(response: TokenExchangeResponse): void {
 function resetPerIdentityLocalState(): void {
   resetConfig();
   resetViewState();
-  localStorage.removeItem(CONFIG_STORAGE_KEY);
-  localStorage.removeItem(VIEW_STORAGE_KEY);
+  safeRemoveStorage(CONFIG_STORAGE_KEY);
+  safeRemoveStorage(VIEW_STORAGE_KEY);
 }
 
 export function setAuthFromPat(
@@ -409,9 +409,9 @@ function clearSnapshotLogged(): Promise<void> {
  * clears the API cache (`clearCache`).
  */
 function clearDashboardStorageKeys(): void {
-  localStorage.removeItem?.(DASHBOARD_STORAGE_KEY);
-  localStorage.removeItem?.(DEP_META_STORAGE_KEY);
-  localStorage.removeItem?.(DASHBOARD_BODIES_STORAGE_KEY);
+  safeRemoveStorage(DASHBOARD_STORAGE_KEY);
+  safeRemoveStorage(DEP_META_STORAGE_KEY);
+  safeRemoveStorage(DASHBOARD_BODIES_STORAGE_KEY);
 }
 
 function runOnClearCallbacks(): void {
@@ -459,12 +459,12 @@ export function clearAuth(): void {
     resetConfig();
     resetViewState();
     // Clear localStorage entries (persistence effects will write back defaults)
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    safeRemoveStorage(AUTH_STORAGE_KEY);
     safeRemoveStorage(LAST_USER_STORAGE_KEY);
     safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
     wipeJiraAuthForIdentityReset();
-    localStorage.removeItem(CONFIG_STORAGE_KEY);
-    localStorage.removeItem(VIEW_STORAGE_KEY);
+    safeRemoveStorage(CONFIG_STORAGE_KEY);
+    safeRemoveStorage(VIEW_STORAGE_KEY);
     clearDashboardStorageKeys();
     setTokenInternal(null, false);
     setUser(null);
@@ -493,7 +493,7 @@ export function clearAuth(): void {
  *  router navigate to /login). Fires onAuthCleared callbacks (resets poll state,
  *  clears API usage data). Use clearAuth() if not navigating. */
 export function expireToken(): void {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
+  safeRemoveStorage(AUTH_STORAGE_KEY);
   clearDashboardStorageKeys();
   setTokenInternal(null, false);
   setUser(null);
@@ -530,6 +530,30 @@ function isCurrentSession(
   return safeGetStorage(AUTH_STORAGE_KEY) === capturedToken;
 }
 
+function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const controller = new AbortController();
+  const listeners: Array<[AbortSignal, () => void]> = [];
+  const detach = () => {
+    for (const [s, l] of listeners) s.removeEventListener("abort", l);
+    listeners.length = 0;
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      detach();
+      break;
+    }
+    const onAbort = () => {
+      controller.abort(s.reason);
+      detach();
+    };
+    listeners.push([s, onAbort]);
+    s.addEventListener("abort", onAbort, { once: true });
+  }
+  return controller.signal;
+}
+
 function makeUserCheckFetcher(capturedToken: string, signal?: AbortSignal): () => Promise<Response> {
   const headers = { ...VALIDATE_HEADERS, Authorization: `Bearer ${capturedToken}` };
   return () => {
@@ -537,7 +561,7 @@ function makeUserCheckFetcher(capturedToken: string, signal?: AbortSignal): () =
     return fetch("https://api.github.com/user", {
       headers,
       cache: "no-store",
-      signal: signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
+      signal: signal ? combineAbortSignals([signal, timeout]) : timeout,
     });
   };
 }
