@@ -1,5 +1,6 @@
 import { PAT_EXPIRY_DISMISSED_KEY } from "../../shared/types";
 import type { Config } from "../../shared/schemas";
+import { onAuthCleared } from "../stores/auth";
 import {
   pushNotification,
   dismissNotificationBySource,
@@ -105,11 +106,11 @@ function readDismissedKey(): string | null {
 }
 
 function writeDismissedKey(key: string): void {
-  _dismissedPatExpiryKey = key;
   try {
     localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, key);
+    _dismissedPatExpiryKey = null;
   } catch {
-    // Ignore storage quota/availability errors
+    _dismissedPatExpiryKey = key;
   }
 }
 
@@ -129,6 +130,7 @@ function dismissKeyFor(dateStr: string, tier: PatExpiryTier): string {
 let _dismissedPatExpiryKey: string | null = null;
 let _activePatExpiryKey: string | null = null;
 let _unsubscribeDismiss: (() => void) | null = null;
+let _authClearRegistered = false;
 
 function ensureDismissListener(): void {
   if (_unsubscribeDismiss === null) {
@@ -136,6 +138,13 @@ function ensureDismissListener(): void {
       if (_activePatExpiryKey) writeDismissedKey(_activePatExpiryKey);
     });
     _unsubscribeDismiss = typeof unsub === "function" ? unsub : () => {};
+  }
+  if (!_authClearRegistered) {
+    _authClearRegistered = true;
+    onAuthCleared(() => {
+      _activePatExpiryKey = null;
+      _dismissedPatExpiryKey = null;
+    });
   }
 }
 

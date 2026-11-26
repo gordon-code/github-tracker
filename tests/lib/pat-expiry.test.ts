@@ -17,6 +17,7 @@ import {
   isMuted,
   resetNotificationState,
 } from "../../src/app/lib/errors";
+import { clearAuth } from "../../src/app/stores/auth";
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -342,10 +343,37 @@ describe("checkPatExpiryReminder & dismissal persistence", () => {
       checkPatExpiryReminder("pat", expiresAt);
       expect(getNotifications()).toHaveLength(1);
 
+      // Dismiss again in quota-blocked mode, then clearAuth() clears in-memory fallback via onAuthCleared
+      dismissError(getNotifications()[0].id);
+      expect(getNotifications()).toHaveLength(0);
+      clearAuth();
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+
       dispose();
     });
 
     getSpy.mockRestore();
     setSpy.mockRestore();
+  });
+
+  it("respects external localStorage removal of PAT_EXPIRY_DISMISSED_KEY on SPA sign-out/re-login", () => {
+    createRoot((dispose) => {
+      const expiresAt = "2026-12-02"; // 7d tier from 2026-11-25
+
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+
+      dismissError(getNotifications()[0].id);
+      expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBe("2026-12-02:7d");
+
+      // Simulate external removal (e.g., setAuthFromPat / clearAuth) with healthy localStorage
+      localStorageMock.removeItem(PAT_EXPIRY_DISMISSED_KEY);
+
+      checkPatExpiryReminder("pat", expiresAt);
+      expect(getNotifications()).toHaveLength(1);
+
+      dispose();
+    });
   });
 });
