@@ -1,0 +1,5 @@
+{
+  "combinedBootGzipBytes": 60029,
+  "toleranceBytes": 512,
+  "note": "Combined Initial Boot JS (gzip -9) from `pnpm bundle:report`. Raise only with a justification in the PR; lower whenever boot shrinks. Reference: main at db6202f measured 59817 B."
+}

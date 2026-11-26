@@ -6,7 +6,6 @@ import { config, initConfigPersistence, resolveTheme } from "./stores/config";
 import { initViewPersistence, pruneStaleIgnoredItems } from "./stores/view";
 import { evictStaleEntries, evictKeysWithPrefix } from "./stores/cache";
 import { reloadOnceForStaleChunk } from "./lib/chunk-reload";
-import LoginPage from "./pages/LoginPage";
 import OAuthCallback from "./pages/OAuthCallback";
 import JiraCallback from "./pages/JiraCallback";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -29,6 +28,7 @@ function lazyWithReload(loader: Parameters<typeof lazy>[0]) {
   );
 }
 
+const LoginPage = lazyWithReload(() => import("./pages/LoginPage"));
 const DashboardPage = lazyWithReload(() => import("./components/dashboard/DashboardPage"));
 const OnboardingWizard = lazyWithReload(() => import("./components/onboarding/OnboardingWizard"));
 const SettingsPage = lazyWithReload(() => import("./components/settings/SettingsPage"));

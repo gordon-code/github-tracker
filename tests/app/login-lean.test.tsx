@@ -94,10 +94,11 @@ describe("App — lean login path & authenticated-only initializers", () => {
   });
 
   it("rendering /login unauthenticated does not evaluate services/github or lib/mcp-relay even after advancing timers", async () => {
-    vi.useFakeTimers();
     const { unmount } = render(() => <App />);
 
-    expect(screen.getByText("Sign in with GitHub")).toBeDefined();
+    // LoginPage is a lazy route chunk, so it renders after its import resolves.
+    expect(await screen.findByText("Sign in with GitHub")).toBeDefined();
+    vi.useFakeTimers();
     expect(evalCounts.github).toBe(0);
     expect(evalCounts.mcpRelay).toBe(0);
 

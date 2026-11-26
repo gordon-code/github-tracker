@@ -1492,6 +1492,22 @@ describe("hook.wrap — runtime 401 interception and outage suspension clearing"
     expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
     expect(mockHandleRuntimeUnauthorized).not.toHaveBeenCalled();
   });
+
+  it("successful GraphQL 200 makes exactly one request and never enters 401 verification", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { viewer: { login: "octocat" } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createGitHubClient("ghp_test");
+    await expect(client.graphql("query { viewer { login } }")).resolves.toBeDefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).not.toHaveBeenCalled();
+  });
 });
 
 // ── createGitHubClient — retryCount quadratic backoff ────────────────────────

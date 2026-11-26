@@ -197,13 +197,13 @@ describe("auth store when the auth-401 chunk fails to load", () => {
     expect(mockCaptureException).not.toHaveBeenCalled();
   });
 
-  it("completeOAuthLogin returns false without persisting auth after a 401", async () => {
+  it("completeOAuthLogin returns false without fetching or persisting auth", async () => {
     const fetchMock = vi.fn().mockResolvedValue(unauthorizedResponse);
     vi.stubGlobal("fetch", fetchMock);
 
     expect(await mod.completeOAuthLogin("gho_no_401_chunk")).toBe(false);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mod.token()).toBeNull();
     expect(localStorageMock.getItem(mod.AUTH_STORAGE_KEY)).toBeNull();
   });

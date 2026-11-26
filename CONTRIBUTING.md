@@ -52,6 +52,8 @@ To test MCP tools interactively, use the MCP Inspector:
 npx @modelcontextprotocol/inspector tsx mcp/src/index.ts
 ```
 
+`pnpm bundle:report` also enforces a boot-size ratchet: the combined initial boot JS (gzip) may not exceed `combinedBootGzipBytes` in `scripts/bundle-baseline.json` by more than `toleranceBytes`. If a change must grow the boot path, raise the baseline in the same PR and justify it in the PR description; when boot shrinks, lower the baseline to lock in the gain.
+
 CI runs typecheck, lint (`oxlint`), unit tests, and E2E tests on every PR, and lint is also enforced pre-commit via `prek` alongside typecheck and unit tests. Make sure they pass locally before pushing.
 
 To run a specific test file:

@@ -9,7 +9,6 @@ import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { reloadOnceForStaleChunk } from "../lib/chunk-reload";
 import { discardResponseBody } from "../lib/http-errors";
 import { isValidPatExpiryDate } from "../lib/pat";
-import type { Auth401Deps } from "./auth-401";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
@@ -263,7 +262,7 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
 // ── Token verification & outage suspension state ─────────────────────────────
 
 const TOKEN_CHECK_TIMEOUT_MS = 10_000;
-const UNAUTHORIZED_PRESERVED_COOLDOWN_MS = 15_000;
+const STALE_VERIFIER_COOLDOWN_MS = 15_000;
 
 export interface UnauthorizedContext {
   endpointKind?: "user" | "graphql" | "rest";
@@ -350,17 +349,11 @@ export const authNavigation = {
 
 let _tokenPersistedToStorage = safeGetStorage(AUTH_STORAGE_KEY) !== null;
 const _activeVerificationControllers = new Set<AbortController>();
-let _pendingVerification: {
-  token: string;
-  epoch: number;
-  controller: AbortController;
-  promise: Promise<UnauthorizedOutcome>;
-} | null = null;
-let _preservedCooldown: {
-  token: string;
-  epoch: number;
-  until: number;
-} | null = null;
+// Bumped whenever in-flight verifications are aborted; the lazy verifier tags its coalesced
+// flight and cooldown with this value and treats a mismatch as cleared.
+let _verificationGen = 0;
+let _staleVerifierCheck: Promise<UnauthorizedOutcome> | null = null;
+let _staleVerifierCooldown: { token: string; until: number } | null = null;
 let _outageSuspendStartedAt: number | null = null;
 let _bootValidateAttempted = false;
 
@@ -379,8 +372,9 @@ function abortAndClearPendingVerifications(): void {
     controller.abort();
   }
   _activeVerificationControllers.clear();
-  _pendingVerification = null;
-  _preservedCooldown = null;
+  _verificationGen++;
+  _staleVerifierCheck = null;
+  _staleVerifierCooldown = null;
 }
 
 function setTokenInternal(nextToken: string | null, persisted: boolean): void {
@@ -642,138 +636,105 @@ function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
-function makeUserCheckFetcher(capturedToken: string, signal?: AbortSignal): () => Promise<Response> {
+/**
+ * `cache` defaults to `"no-store"` so 401 confirmations always reach GitHub. The first boot check
+ * passes `"default"`: GitHub marks `/user` `private, max-age=60`, so a quick reload can reuse the
+ * cached 200; a since-revoked token then fails its first API call and goes through runtime
+ * verification, which never uses the cache.
+ */
+function makeUserCheckFetcher(
+  capturedToken: string,
+  signal?: AbortSignal,
+  cache: RequestCache = "no-store"
+): () => Promise<Response> {
   const headers = { ...VALIDATE_HEADERS, Authorization: `Bearer ${capturedToken}` };
   return () => {
     const timeout = AbortSignal.timeout(TOKEN_CHECK_TIMEOUT_MS);
     return fetch("https://api.github.com/user", {
       headers,
-      cache: "no-store",
+      cache,
       signal: signal ? combineAbortSignals([signal, timeout]) : timeout,
     });
   };
 }
 
-function makeAuth401Deps(
-  capturedToken: string,
-  capturedEpoch: number,
-  signal: AbortSignal,
-  fetchUserCheck: () => Promise<Response>
-): Auth401Deps {
-  return {
-    isCurrentSession: () => isCurrentSession(capturedToken, capturedEpoch, signal),
-    fetchUserCheck,
-    parseGitHubUserPayload,
-    clearAuthOutageSuspension,
-    getOutageSuspendStartedAt: () => _outageSuspendStartedAt,
-    setOutageSuspendStartedAt: (ts: number) => {
-      _outageSuspendStartedAt = ts;
-    },
-    getAuthMethod: () => config.authMethod,
-    expireToken,
-    redirectToLogin: () => authNavigation.redirectToLogin(),
+/**
+ * @internal State and helpers shared with the lazily loaded `auth-401` verifier, which holds the
+ * 401 confirmation state machine and the OAuth new-token check so neither ships on the boot path.
+ */
+export const authInternals = {
+  isCurrentSession,
+  makeUserCheckFetcher,
+  parseGitHubUserPayload,
+  classifyIncomingIdentity,
+  resetPerIdentityLocalState,
+  wipeJiraAuthForIdentityReset,
+  clearPatExpiryDismissalKey,
+  setUser,
+  trackController: (controller: AbortController): void => {
+    _activeVerificationControllers.add(controller);
+  },
+  untrackController: (controller: AbortController): void => {
+    _activeVerificationControllers.delete(controller);
+  },
+  verificationGen: (): number => _verificationGen,
+  getOutageSuspendStartedAt: (): number | null => _outageSuspendStartedAt,
+  setOutageSuspendStartedAt: (ts: number): void => {
+    _outageSuspendStartedAt = ts;
+  },
+};
+
+/**
+ * Runs when the lazy verifier chunk can't load. Coalesced and cooled down like the verifier
+ * itself, so a burst of 401s costs at most one confirmation check per 15 seconds.
+ */
+function handleStaleVerifierChunk(failingToken: string, epoch: number): Promise<UnauthorizedOutcome> {
+  if (_staleVerifierCheck) return _staleVerifierCheck;
+  if (_staleVerifierCooldown?.token === failingToken && Date.now() < _staleVerifierCooldown.until) {
+    return Promise.resolve("preserved");
+  }
+  const controller = new AbortController();
+  _activeVerificationControllers.add(controller);
+  const entry = { promise: Promise.resolve<UnauthorizedOutcome>("ignored") };
+  const run = async (): Promise<UnauthorizedOutcome> => {
+    try {
+      const reload = await isConfirmedOutsideOutage(failingToken, controller.signal);
+      if (!isCurrentSession(failingToken, epoch, controller.signal)) return "ignored";
+      if (reload) {
+        console.warn("[auth] 401 verifier chunk failed to load — reloading for current assets");
+        authNavigation.reloadForStaleChunk();
+      }
+      _staleVerifierCooldown = { token: failingToken, until: Date.now() + STALE_VERIFIER_COOLDOWN_MS };
+      return "preserved";
+    } finally {
+      _activeVerificationControllers.delete(controller);
+      if (_staleVerifierCheck === entry.promise) _staleVerifierCheck = null;
+    }
   };
+  entry.promise = run();
+  _staleVerifierCheck = entry.promise;
+  return entry.promise;
 }
 
 export async function handleRuntimeUnauthorized(
   failingToken: string,
   ctx?: UnauthorizedContext
 ): Promise<UnauthorizedOutcome> {
-  const currentEpoch = identityEpoch();
+  const epoch = identityEpoch();
+  const gen = _verificationGen;
   if (!failingToken || _token() !== failingToken) {
     return "ignored";
   }
   if (_tokenPersistedToStorage && safeGetStorage(AUTH_STORAGE_KEY) !== failingToken) {
     return "ignored";
   }
-
-  if (
-    _pendingVerification !== null &&
-    _pendingVerification.token === failingToken &&
-    _pendingVerification.epoch === currentEpoch &&
-    !_pendingVerification.controller.signal.aborted
-  ) {
-    return _pendingVerification.promise;
+  const mod = await import("./auth-401").catch(() => null);
+  if (gen !== _verificationGen || _token() !== failingToken || identityEpoch() !== epoch) {
+    return "ignored";
   }
-
-  if (
-    _preservedCooldown !== null &&
-    _preservedCooldown.token === failingToken &&
-    _preservedCooldown.epoch === currentEpoch &&
-    Date.now() < _preservedCooldown.until
-  ) {
-    return "preserved";
-  }
-
-  const controller = new AbortController();
-  _activeVerificationControllers.add(controller);
-
-  const entry: NonNullable<typeof _pendingVerification> = {
-    token: failingToken,
-    epoch: currentEpoch,
-    controller,
-    promise: Promise.resolve("ignored"),
-  };
-  _pendingVerification = entry;
-
-  entry.promise = (async (): Promise<UnauthorizedOutcome> => {
-    try {
-      if (!isCurrentSession(failingToken, currentEpoch, controller.signal)) {
-        return "ignored";
-      }
-
-      const mod = await import("./auth-401").catch(() => null);
-      if (!isCurrentSession(failingToken, currentEpoch, controller.signal)) {
-        return "ignored";
-      }
-
-      let outcome: UnauthorizedOutcome;
-      if (!mod) {
-        const reload = await isConfirmedOutsideOutage(failingToken, controller.signal);
-        if (!isCurrentSession(failingToken, currentEpoch, controller.signal)) {
-          return "ignored";
-        }
-        if (reload) {
-          console.warn("[auth] 401 verifier chunk failed to load — reloading for current assets");
-          authNavigation.reloadForStaleChunk();
-        }
-        outcome = "preserved";
-      } else {
-        clearStaleVerifierReloadFlag();
-        const result = await mod.handle401SlowPath(
-          "runtime",
-          controller.signal,
-          makeAuth401Deps(
-            failingToken,
-            currentEpoch,
-            controller.signal,
-            makeUserCheckFetcher(failingToken, controller.signal)
-          ),
-          ctx
-        );
-        outcome = result.outcome;
-      }
-
-      if (
-        outcome === "preserved" &&
-        isCurrentSession(failingToken, currentEpoch, controller.signal)
-      ) {
-        _preservedCooldown = {
-          token: failingToken,
-          epoch: currentEpoch,
-          until: Date.now() + UNAUTHORIZED_PRESERVED_COOLDOWN_MS,
-        };
-      }
-      return outcome;
-    } finally {
-      _activeVerificationControllers.delete(controller);
-      if (_pendingVerification === entry) {
-        _pendingVerification = null;
-      }
-    }
-  })();
-
-  return entry.promise;
+  if (!mod) return handleStaleVerifierChunk(failingToken, epoch);
+  clearStaleVerifierReloadFlag();
+  return mod.verifyRuntimeUnauthorized(failingToken, epoch, gen, ctx);
 }
 
 export async function validateToken(): Promise<boolean> {
@@ -790,10 +751,9 @@ export async function validateToken(): Promise<boolean> {
       return false;
     }
 
-    const fetchUserCheck = makeUserCheckFetcher(currentToken, controller.signal);
     let resp: Response;
     try {
-      resp = await fetchUserCheck();
+      resp = await makeUserCheckFetcher(currentToken, controller.signal, "default")();
     } catch {
       return false;
     }
@@ -826,12 +786,7 @@ export async function validateToken(): Promise<boolean> {
         return false;
       }
       clearStaleVerifierReloadFlag();
-      const result = await mod.handle401SlowPath(
-        "validate",
-        controller.signal,
-        makeAuth401Deps(currentToken, startEpoch, controller.signal, fetchUserCheck)
-      );
-      userData = result.userData;
+      userData = await mod.verifyBootUnauthorized(currentToken, startEpoch, controller.signal);
     } else {
       discardResponseBody(resp);
       return false;
@@ -866,61 +821,16 @@ export async function validateToken(): Promise<boolean> {
   }
 }
 
-async function fetchUserForNewToken(accessToken: string): Promise<GitHubUser | null> {
-  const fetchOnce = makeUserCheckFetcher(accessToken);
-
-  let resp: Response;
-  try {
-    resp = await fetchOnce();
-  } catch {
-    return null;
-  }
-
-  if (resp.ok) {
-    try {
-      const raw: unknown = await resp.json();
-      return parseGitHubUserPayload(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  discardResponseBody(resp);
-  if (resp.status !== 401) {
-    return null;
-  }
-
-  const mod = await import("./auth-401").catch(() => null);
-  if (!mod) {
-    return null;
-  }
-  return mod.retryOAuthUserCheck(fetchOnce, parseGitHubUserPayload);
-}
-
+/**
+ * Validates a freshly exchanged OAuth token before persisting it. Runs only on the OAuth callback
+ * page (a full navigation, so its assets are current), and lives in the lazy verifier chunk.
+ */
 export async function completeOAuthLogin(accessToken: string): Promise<boolean> {
   if (!accessToken || !accessToken.trim()) {
     return false;
   }
-
-  const userData = await fetchUserForNewToken(accessToken);
-  if (!userData) {
-    return false;
-  }
-
-  const identityClass = classifyIncomingIdentity(userData.login);
-  if (identityClass === "mismatch") {
-    resetPerIdentityLocalState();
-    await clearIdentityData();
-  } else if (identityClass === "unknown_with_jira") {
-    wipeJiraAuthForIdentityReset();
-  }
-
-  setAuth({ access_token: accessToken });
-  setUser(userData);
-  updateConfig({ authMethod: "oauth", patExpiresAt: null });
-  clearPatExpiryDismissalKey();
-  navigator.storage?.persist?.()?.catch(() => {});
-  return true;
+  const mod = await import("./auth-401").catch(() => null);
+  return mod ? mod.completeOAuthLogin(accessToken) : false;
 }
 
 let _crossTabFetchGen = 0;
