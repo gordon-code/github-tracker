@@ -9,7 +9,11 @@ import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
-import { DASHBOARD_BODIES_STORAGE_KEY, PAT_EXPIRY_DISMISSED_KEY } from "../../shared/types";
+import {
+  AUTH_OUTAGE_NOTIFICATION_SOURCE,
+  DASHBOARD_BODIES_STORAGE_KEY,
+  PAT_EXPIRY_DISMISSED_KEY,
+} from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
@@ -256,7 +260,6 @@ export async function ensureJiraTokenValid(): Promise<boolean> {
 
 const TOKEN_CHECK_TIMEOUT_MS = 10_000;
 const UNAUTHORIZED_PRESERVED_COOLDOWN_MS = 15_000;
-const AUTH_OUTAGE_NOTIFICATION_SOURCE = "auth-outage-suspended";
 
 export interface UnauthorizedContext {
   endpointKind?: "user" | "graphql" | "rest";

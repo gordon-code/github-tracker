@@ -1,11 +1,11 @@
 import { captureException } from "../lib/sentry-facade";
 import { pushNotification } from "../lib/errors";
+import { AUTH_OUTAGE_NOTIFICATION_SOURCE } from "../../shared/types";
 import type { GitHubUser, UnauthorizedContext, UnauthorizedOutcome } from "./auth";
 
 const UNAUTHORIZED_RETRY_DELAYS_MS = [1_000, 2_000] as const;
 const OUTAGE_401_SUSPEND_CAP_MS = 30 * 60_000;
 const GITHUB_REQUEST_ID_RE = /^[A-Za-z0-9:_-]{1,64}$/;
-const AUTH_OUTAGE_NOTIFICATION_SOURCE = "auth-outage-suspended";
 
 export interface Auth401Deps {
   isCurrentSession: () => boolean;
