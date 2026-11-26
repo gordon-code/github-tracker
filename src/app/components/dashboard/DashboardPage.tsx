@@ -42,6 +42,7 @@ import { detectAndLookupJiraKeys } from "../../services/jira-keys";
 import JiraAssignedTab from "./JiraAssignedTab";
 import { updateRelaySnapshot } from "../../lib/mcp-relay";
 import { pushNotification, pushError, dismissNotificationBySource, getNotifications } from "../../lib/errors";
+import { checkPatExpiryReminder } from "../../lib/pat-expiry";
 import { detectNewItems, dispatchNotifications } from "../../lib/notifications";
 import { getClient, getGraphqlRateLimit, fetchRateLimitDetails } from "../../services/github";
 import { isGitHubApiOutage } from "../../services/github-status";
@@ -1126,6 +1127,38 @@ export default function DashboardPage() {
       if (_eventsCoordinator() === eventsCoord) _setEventsCoordinator(null);
       clearHotSets();
       clearInterval(clockInterval);
+    });
+  });
+
+  createEffect(() => {
+    const authMethod = config.authMethod;
+    const patExpiresAt = config.patExpiresAt;
+    checkPatExpiryReminder(authMethod, patExpiresAt);
+    if (authMethod !== "pat" || patExpiresAt === null) return;
+
+    let disposed = false;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const scheduleNextMidnightCheck = () => {
+      const now = new Date();
+      const nextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        1
+      );
+      const delayMs = Math.max(1_000, nextMidnight.getTime() - now.getTime());
+      timerId = setTimeout(() => {
+        if (disposed) return;
+        checkPatExpiryReminder(authMethod, patExpiresAt);
+        scheduleNextMidnightCheck();
+      }, delayMs);
+    };
+    scheduleNextMidnightCheck();
+    onCleanup(() => {
+      disposed = true;
+      if (timerId !== undefined) clearTimeout(timerId);
     });
   });
 

@@ -109,6 +109,7 @@ vi.mock("../../src/app/lib/errors", () => ({
   addMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 // Mock github-status lib with reactive signal so DashboardPage effects react to outage transitions
@@ -3474,6 +3475,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       addMutedSource: vi.fn(),
       isMuted: vi.fn(() => false),
       clearMutedSources: vi.fn(),
+      onNotificationDismissed: vi.fn(() => vi.fn()),
     }));
 
     vi.doMock("../../src/app/services/poll", () => ({
@@ -3580,6 +3582,7 @@ describe("DashboardPage — Jira expiration UX and reactive re-authentication", 
       addMutedSource: vi.fn(),
       isMuted: vi.fn(() => false),
       clearMutedSources: vi.fn(),
+      onNotificationDismissed: vi.fn(() => vi.fn()),
     }));
 
     vi.doMock("../../src/app/services/poll", () => ({
@@ -8075,5 +8078,89 @@ describe("DashboardPage — GitHub API outage pause & recovery", () => {
     expect(screen.getByText("owner/repo")).toBeDefined();
     expect(screen.getByText("1 issue")).toBeDefined();
     expect(screen.queryByText("Last refreshed: Never")).toBeNull();
+  });
+});
+
+describe("DashboardPage — PAT expiry reminder lifecycle", () => {
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 25, 23, 59, 50));
+    const patExpiry = await import("../../src/app/lib/pat-expiry");
+    patExpiry._resetPatExpiryState();
+    localStorage.removeItem(patExpiry.PAT_EXPIRY_DISMISSED_KEY);
+  });
+
+  afterEach(async () => {
+    const patExpiry = await import("../../src/app/lib/pat-expiry");
+    patExpiry._resetPatExpiryState();
+    localStorage.removeItem(patExpiry.PAT_EXPIRY_DISMISSED_KEY);
+    vi.useRealTimers();
+  });
+
+  it("updates and dismisses 'pat-expiry' reactively when config.authMethod or config.patExpiresAt changes", () => {
+    configStore.updateConfig({ authMethod: "pat", patExpiresAt: "2026-11-29" });
+    render(() => <DashboardPage />);
+
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pat-expiry",
+      expect.stringContaining("within 7 days"),
+      "warning",
+      false,
+      { label: "Update PAT in Settings", href: "/settings#data" },
+    );
+
+    vi.mocked(errorsLib.pushNotification).mockClear();
+    vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+
+    // Extending beyond 7 days dismisses the reminder
+    configStore.updateConfig({ patExpiresAt: "2027-06-01" });
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("pat-expiry");
+
+    // Moving back within 3 days pushes the 3d warning
+    configStore.updateConfig({ patExpiresAt: "2026-11-28" });
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pat-expiry",
+      expect.stringContaining("within 3 days"),
+      "warning",
+      false,
+      { label: "Update PAT in Settings", href: "/settings#data" },
+    );
+
+    // Switching authMethod to oauth dismisses the reminder
+    vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+    configStore.updateConfig({ authMethod: "oauth" });
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith("pat-expiry");
+  });
+
+  it("re-evaluates automatically across local midnight and clears the timer on cleanup", () => {
+    // 2026-11-25 23:59:50 -> 2026-11-29 is 4 days away (7d tier)
+    configStore.updateConfig({ authMethod: "pat", patExpiresAt: "2026-11-29" });
+    const { unmount } = render(() => <DashboardPage />);
+
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pat-expiry",
+      expect.stringContaining("within 7 days"),
+      "warning",
+      false,
+      expect.any(Object),
+    );
+
+    vi.mocked(errorsLib.pushNotification).mockClear();
+
+    // Advance across local midnight + 1s (to 2026-11-26 00:00:02) -> 3 days away (3d tier)
+    vi.advanceTimersByTime(12_000);
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      "pat-expiry",
+      expect.stringContaining("within 3 days"),
+      "warning",
+      false,
+      expect.any(Object),
+    );
+
+    // Unmounting clears the midnight timer so subsequent midnights do not re-evaluate
+    unmount();
+    vi.mocked(errorsLib.pushNotification).mockClear();
+    vi.advanceTimersByTime(2 * 86_400_000);
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 });

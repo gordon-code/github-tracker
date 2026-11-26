@@ -36,6 +36,7 @@ vi.mock("../../src/app/lib/errors", () => ({
   addMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 // Mock notifications so doFetch doesn't fail on detectNewItems
@@ -65,13 +66,21 @@ vi.mock("../../src/app/lib/sentry-facade", () => ({
   captureException: vi.fn(),
 }));
 
+const mockCheckPatExpiryReminder = vi.fn();
+vi.mock("../../src/app/lib/pat-expiry", () => ({
+  checkPatExpiryReminder: (...args: unknown[]) => mockCheckPatExpiryReminder(...args),
+}));
+
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
+const mockConfig = vi.hoisted(() => ({
+  selectedRepos: [] as unknown[],
+  maxWorkflowsPerRepo: 5,
+  maxRunsPerWorkflow: 3,
+  authMethod: "oauth" as "oauth" | "pat",
+  patExpiresAt: null as string | null,
+}));
 vi.mock("../../src/app/stores/config", () => ({
-  config: {
-    selectedRepos: [],
-    maxWorkflowsPerRepo: 5,
-    maxRunsPerWorkflow: 3,
-  },
+  config: mockConfig,
 }));
 
 async function flushPromises(): Promise<void> {
@@ -135,6 +144,9 @@ describe("createPollCoordinator", () => {
     mockStartCycleTracking.mockClear();
     mockEndCycleTracking.mockClear().mockReturnValue(new Set<string>());
     mockGetNotifications.mockClear().mockReturnValue([]);
+    mockCheckPatExpiryReminder.mockClear();
+    mockConfig.authMethod = "oauth";
+    mockConfig.patExpiresAt = null;
   });
 
   afterEach(() => {
@@ -1452,6 +1464,73 @@ describe("createPollCoordinator", () => {
         vi.advanceTimersByTime(60_000);
         await flushPromises();
         expect(githubStatusMod.fetchGitHubStatus).toHaveBeenCalledTimes(3);
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+  });
+
+  describe("PAT expiry reminder checks", () => {
+    it("doFetch() invokes checkPatExpiryReminder even when offline", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-12-01";
+      Object.defineProperty(navigator, "onLine", {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+        await flushPromises();
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-12-01");
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("doFetch() invokes checkPatExpiryReminder even when paused for a GitHub API outage", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-11-28";
+      setMockApiOutage(true);
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(60), fetchAll);
+        await flushPromises();
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-11-28");
+        expect(fetchAll).not.toHaveBeenCalled();
+
+        coordinator.destroy();
+        dispose();
+      });
+    });
+
+    it("visibilitychange -> visible invokes checkPatExpiryReminder even when hidden < 2 minutes and in manual mode (refreshInterval === 0)", async () => {
+      mockConfig.authMethod = "pat";
+      mockConfig.patExpiresAt = "2026-11-27";
+      const fetchAll = makeFetchAll();
+
+      await createRoot(async (dispose) => {
+        const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+        await flushPromises();
+        mockCheckPatExpiryReminder.mockClear();
+        fetchAll.mockClear();
+
+        setDocumentVisible(false);
+        vi.advanceTimersByTime(30_000); // hidden < 2 minutes
+        setDocumentVisible(true);
+
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledTimes(1);
+        expect(mockCheckPatExpiryReminder).toHaveBeenCalledWith("pat", "2026-11-27");
+        // Manual mode + < 2 min hidden must not trigger a network fetch
+        expect(fetchAll).not.toHaveBeenCalled();
 
         coordinator.destroy();
         dispose();

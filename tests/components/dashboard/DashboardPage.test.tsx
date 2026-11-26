@@ -268,6 +268,7 @@ describe("DashboardPage — Jira load fetch deduplication", () => {
       addMutedSource: vi.fn(),
       isMuted: vi.fn(() => false),
       clearMutedSources: vi.fn(),
+      onNotificationDismissed: vi.fn(() => vi.fn()),
     }));
 
     const mockFetchAllData = vi.fn().mockResolvedValue({

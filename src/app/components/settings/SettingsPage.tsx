@@ -407,7 +407,12 @@ export default function SettingsPage() {
     }
     // Wholesale replace — parseImportFile returns a fully-parsed Config (every
     // top-level key present), so setConfig is safe (NOT updateConfig's partial merge).
-    setConfig(pending.config);
+    // Preserve local authMethod and patExpiresAt since plaintext import does not replace the token.
+    setConfig({
+      ...pending.config,
+      authMethod: config.authMethod,
+      patExpiresAt: config.authMethod === "pat" ? config.patExpiresAt : null,
+    });
     // Identity is already established on this page (Settings is post-auth) —
     // applyImportedViewState is total/no-throw, so this is safe even when the
     // file carries no _viewPreferences section at all.

@@ -9,7 +9,7 @@ import { pushNotification, dismissNotificationBySource } from "../lib/errors";
 import { clearJiraKeyCache } from "../services/jira-keys";
 import { JIRA_SETTINGS_ACTION, type JiraAuthState } from "../../shared/jira-types";
 import { JiraConfigSchema } from "../../shared/schemas";
-import { DASHBOARD_BODIES_STORAGE_KEY } from "../../shared/types";
+import { DASHBOARD_BODIES_STORAGE_KEY, PAT_EXPIRY_DISMISSED_KEY } from "../../shared/types";
 
 // Zod schema for JiraAuthState — validates the localStorage-persisted blob on load.
 const JiraAuthStateSchema = z.object({
@@ -339,7 +339,15 @@ function resetPerIdentityLocalState(): void {
   localStorage.removeItem(VIEW_STORAGE_KEY);
 }
 
-export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
+export function setAuthFromPat(
+  patToken: string,
+  userData: GitHubUser,
+  patExpiresAt: string | null = null
+): void {
+  const normalizedExpiry =
+    typeof patExpiresAt === "string" && z.iso.date().safeParse(patExpiresAt).success
+      ? patExpiresAt
+      : null;
   const identityClass = classifyIncomingIdentity(userData.login);
 
   if (identityClass === "mismatch") {
@@ -368,7 +376,8 @@ export function setAuthFromPat(patToken: string, userData: GitHubUser): void {
 
   setAuth({ access_token: patToken });
   setUser({ login: userData.login, avatar_url: userData.avatar_url, name: userData.name });
-  updateConfig({ authMethod: "pat" });
+  updateConfig({ authMethod: "pat", patExpiresAt: normalizedExpiry });
+  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
 }
 
 /**
@@ -413,6 +422,7 @@ function runOnClearCallbacks(): void {
 
 export async function clearIdentityData(): Promise<void> {
   safeRemoveStorage(LAST_USER_STORAGE_KEY);
+  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
   wipeJiraAuthForIdentityReset();
   clearDashboardStorageKeys();
   _identityEpoch++;
@@ -451,6 +461,7 @@ export function clearAuth(): void {
     // Clear localStorage entries (persistence effects will write back defaults)
     localStorage.removeItem(AUTH_STORAGE_KEY);
     safeRemoveStorage(LAST_USER_STORAGE_KEY);
+    safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
     wipeJiraAuthForIdentityReset();
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     localStorage.removeItem(VIEW_STORAGE_KEY);
@@ -775,7 +786,8 @@ export async function completeOAuthLogin(accessToken: string): Promise<boolean> 
 
   setAuth({ access_token: accessToken });
   setUser(userData);
-  updateConfig({ authMethod: "oauth" });
+  updateConfig({ authMethod: "oauth", patExpiresAt: null });
+  safeRemoveStorage(PAT_EXPIRY_DISMISSED_KEY);
   navigator.storage?.persist?.()?.catch(() => {});
   return true;
 }

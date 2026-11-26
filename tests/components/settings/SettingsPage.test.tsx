@@ -672,6 +672,25 @@ describe("SettingsPage — Data: Import settings", () => {
     expect(authStore.clearJiraAuth).not.toHaveBeenCalled();
     expect(config.jira.cloudId).toBe("cloud-same");
   });
+
+  it("preserves local PAT authMethod and patExpiresAt when importing a plain OAuth settings export", async () => {
+    const user = userEvent.setup();
+    updateConfig({ authMethod: "pat", patExpiresAt: "2027-06-01" });
+
+    renderSettings();
+    selectImportFile(
+      JSON.stringify({
+        theme: "dark",
+        authMethod: "oauth",
+      })
+    );
+    await waitFor(() => screen.getByRole("button", { name: "Yes, import" }));
+    await user.click(screen.getByRole("button", { name: "Yes, import" }));
+
+    expect(config.theme).toBe("dark");
+    expect(config.authMethod).toBe("pat");
+    expect(config.patExpiresAt).toBe("2027-06-01");
+  });
 });
 
 describe("SettingsPage — Data: Reset all", () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { PAT_EXPIRY_DISMISSED_KEY } from "../../src/shared/types";
 
 // Mock cache.ts so clearAuth() doesn't try to open IndexedDB
 const mockClearCache = vi.fn().mockResolvedValue(undefined);
@@ -185,16 +186,18 @@ describe("clearAuth", () => {
     expect(localStorageMock.getItem("github-tracker:auth-token")).toBeNull();
   });
 
-  it("removes config, view, dep-meta, and dashboard-bodies keys from localStorage", () => {
+  it("removes config, view, dep-meta, dashboard-bodies, and PAT_EXPIRY_DISMISSED_KEY keys from localStorage", () => {
     localStorageMock.setItem("github-tracker:config", "{}");
     localStorageMock.setItem("github-tracker:view", "{}");
     localStorageMock.setItem("github-tracker:dep-meta", '{"1":{}}');
     localStorageMock.setItem("github-tracker:dashboard-bodies", '{"DASH_1":{"updatedAt":"2026-04-01T00:00:00Z","deps":[]}}');
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2027-01-15:7d");
     mod.clearAuth();
     expect(localStorageMock.getItem("github-tracker:config")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:view")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:dep-meta")).toBeNull();
     expect(localStorageMock.getItem("github-tracker:dashboard-bodies")).toBeNull();
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
   });
 
   it("does not call /api/oauth/logout (OAuth App uses permanent tokens)", () => {
@@ -1711,6 +1714,35 @@ describe("setAuthFromPat", () => {
     mod.clearAuth();
     expect(configMod.config.authMethod).toBe("oauth");
   });
+
+  it("persists provided valid patExpiresAt and clears PAT_EXPIRY_DISMISSED_KEY", () => {
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-01:7d");
+    mod.setAuthFromPat("ghp_testtoken123", testUser, "2027-06-01");
+    expect(configMod.config.authMethod).toBe("pat");
+    expect(configMod.config.patExpiresAt).toBe("2027-06-01");
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+  });
+
+  it("normalizes empty string and invalid calendar dates ('2026-02-29') to null", () => {
+    mod.setAuthFromPat("ghp_testtoken123", testUser, "");
+    expect(configMod.config.authMethod).toBe("pat");
+    expect(configMod.config.patExpiresAt).toBeNull();
+
+    mod.setAuthFromPat("ghp_testtoken123", testUser, "2026-02-29");
+    expect(configMod.config.authMethod).toBe("pat");
+    expect(configMod.config.patExpiresAt).toBeNull();
+  });
+
+  it("clears stale patExpiresAt and PAT_EXPIRY_DISMISSED_KEY when patExpiresAt is omitted", () => {
+    mod.setAuthFromPat("ghp_old", testUser, "2027-06-01");
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2027-06-01:7d");
+    expect(configMod.config.patExpiresAt).toBe("2027-06-01");
+
+    mod.setAuthFromPat("ghp_new", testUser);
+    expect(configMod.config.authMethod).toBe("pat");
+    expect(configMod.config.patExpiresAt).toBeNull();
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+  });
 });
 
 describe("setAuthFromPat — identity switch", () => {
@@ -1960,6 +1992,19 @@ describe("identityEpoch and clearSnapshot integration", () => {
     mockClearSnapshot.mockRejectedValueOnce(new Error("snapshot error"));
     await expect(mod.clearIdentityData()).resolves.toBeUndefined();
   });
+
+  it("clearIdentityData() removes PAT_EXPIRY_DISMISSED_KEY synchronously", async () => {
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2027-06-01:7d");
+    let resolveCache!: () => void;
+    mockClearCache.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveCache = resolve; })
+    );
+
+    const promise = mod.clearIdentityData();
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    resolveCache();
+    await promise;
+  });
 });
 
 describe("completeOAuthLogin", () => {
@@ -2163,6 +2208,23 @@ describe("completeOAuthLogin", () => {
     expect(localStorageMock.getItem(mod.JIRA_AUTH_STORAGE_KEY)).not.toBeNull();
     expect(localStorageMock.getItem("github-tracker:config")).toBe('{"theme":"dark"}');
     expect(localStorageMock.getItem("github-tracker:view")).toBe('{"lastActiveTab":"actions"}');
+  });
+
+  it("clears config.patExpiresAt to null and removes PAT_EXPIRY_DISMISSED_KEY", async () => {
+    mod.setAuthFromPat("ghp_a", { login: "alice", avatar_url: "", name: "Alice" }, "2027-06-01");
+    localStorageMock.setItem(PAT_EXPIRY_DISMISSED_KEY, "2027-06-01:7d");
+    expect(configMod.config.patExpiresAt).toBe("2027-06-01");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ login: "alice", avatar_url: "", name: "Alice" }),
+    }));
+
+    expect(await mod.completeOAuthLogin("gho_alice_oauth")).toBe(true);
+    expect(configMod.config.authMethod).toBe("oauth");
+    expect(configMod.config.patExpiresAt).toBeNull();
+    expect(localStorageMock.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
   });
 });
 

@@ -90,6 +90,7 @@ vi.mock("../../../src/app/lib/errors", () => ({
   addMutedSource: vi.fn(),
   isMuted: vi.fn(() => false),
   clearMutedSources: vi.fn(),
+  onNotificationDismissed: vi.fn(() => vi.fn()),
 }));
 
 let capturedFetchAll: (() => Promise<DashboardData>) | null = null;

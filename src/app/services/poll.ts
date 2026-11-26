@@ -6,6 +6,7 @@ import { config } from "../stores/config";
 import { user, onAuthCleared, identityEpoch } from "../stores/auth";
 import { isUnauthorizedError } from "../lib/http-errors";
 import { checkAndResetIfExpired } from "./api-usage";
+import { checkPatExpiryReminder } from "../lib/pat-expiry";
 import {
   fetchIssuesAndPullRequests,
   fetchWorkflowRuns,
@@ -460,6 +461,7 @@ export function createPollCoordinator(
 
   async function doFetch(force = false): Promise<void> {
     if (destroyed) return;
+    checkPatExpiryReminder(config.authMethod, config.patExpiresAt);
     if (isRefreshing()) {
       if (force) pendingForce = true;
       return;
@@ -621,6 +623,7 @@ export function createPollCoordinator(
       }
     } else {
       // Became visible
+      checkPatExpiryReminder(config.authMethod, config.patExpiresAt);
       const wasHiddenFor = hiddenAt !== null ? Date.now() - hiddenAt : 0;
 
       if (wasHiddenFor > REVISIT_THRESHOLD_MS) {
