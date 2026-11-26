@@ -101,6 +101,13 @@ import { buildOrgAccessUrl } from "../../../src/app/lib/oauth";
 import * as urlModule from "../../../src/app/lib/url";
 import * as settingsTransfer from "../../../src/app/lib/settings-transfer";
 import * as proxyLib from "../../../src/app/lib/proxy";
+import * as errorsLib from "../../../src/app/lib/errors";
+import {
+  PAT_EXPIRY_DISMISSED_KEY,
+  PAT_EXPIRY_NOTIFICATION_SOURCE,
+  PAT_SETTINGS_ACTION,
+  _resetPatExpiryState,
+} from "../../../src/app/lib/pat-expiry";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -142,6 +149,7 @@ beforeEach(() => {
   // Restore factory implementations stripped by vi.restoreAllMocks in afterEach
   vi.mocked(urlModule.isSafeGitHubUrl).mockReturnValue(true);
   vi.mocked(authStore.jiraAuth).mockReturnValue(null);
+  vi.mocked(errorsLib.onNotificationDismissed).mockReturnValue(vi.fn());
 
   // Reset config to defaults
   resetConfig();
@@ -170,6 +178,7 @@ beforeEach(() => {
       reload: vi.fn(),
       href: "",
       origin: "http://localhost",
+      hash: "",
     },
   });
 
@@ -856,7 +865,7 @@ describe("SettingsPage — replace token", () => {
     fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
 
     await waitFor(() => {
-      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData);
+      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData, null);
     });
     // Form closed
     expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
@@ -2117,5 +2126,280 @@ describe("SettingsPage — Data: Import with encrypted credentials", () => {
     // The Repositories summary is driven by the localRepos editor copy; without
     // the post-import resync it would still read the stale (empty) pre-import set.
     await waitFor(() => screen.getByText(/2 selected/i));
+  });
+});
+
+describe("SettingsPage — PAT expiration reminder", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 25, 12, 0, 0));
+    updateConfig({ authMethod: "pat", patExpiresAt: null });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    _resetPatExpiryState();
+  });
+
+  it("renders 'Token expiration reminder' row and 'PAT expiration date' input when authMethod is 'pat', and hides them when 'oauth'", () => {
+    renderSettings();
+    screen.getByText("Token expiration reminder");
+    expect(screen.getByLabelText("PAT expiration date")).toBeTruthy();
+
+    updateConfig({ authMethod: "oauth" });
+    expect(screen.queryByText("Token expiration reminder")).toBeNull();
+    expect(screen.queryByLabelText("PAT expiration date")).toBeNull();
+  });
+
+  it("renders inline countdown badge for Not set, ok (>7d), warning (<=7d / <=3d), and error (1d / 0d / expired) states", () => {
+    renderSettings();
+    expect(screen.getByText("Not set")).toBeTruthy();
+
+    updateConfig({ patExpiresAt: "2026-12-25" });
+    const okBadge = screen.getByText("Expires in 30d");
+    expect(okBadge.className).toContain("badge-ghost");
+
+    updateConfig({ patExpiresAt: "2026-12-02" });
+    const warn7d = screen.getByText("Expires in 7d");
+    expect(warn7d.className).toContain("badge-warning");
+
+    updateConfig({ patExpiresAt: "2026-11-28" });
+    const warn3d = screen.getByText("Expires in 3d");
+    expect(warn3d.className).toContain("badge-warning");
+
+    updateConfig({ patExpiresAt: "2026-11-26" });
+    const err1d = screen.getByText("Expires tomorrow");
+    expect(err1d.className).toContain("badge-error");
+
+    updateConfig({ patExpiresAt: "2026-11-25" });
+    const err0d = screen.getByText("Expires today");
+    expect(err0d.className).toContain("badge-error");
+
+    updateConfig({ patExpiresAt: "2026-11-23" });
+    const expired = screen.getByText("Expired (2d ago)");
+    expect(expired.className).toContain("badge-error");
+  });
+
+  it("editing standalone date updates config.patExpiresAt, clears dismissal, and pushes/dismisses pat-expiry notification", () => {
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-11-26:1d");
+    renderSettings();
+
+    const dateInput = screen.getByLabelText("PAT expiration date") as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2026-12-01" } });
+
+    expect(config.patExpiresAt).toBe("2026-12-01");
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      PAT_EXPIRY_NOTIFICATION_SOURCE,
+      "Your GitHub PAT expires on 2026-12-01 (within 7 days).",
+      "warning",
+      false,
+      PAT_SETTINGS_ACTION,
+    );
+
+    vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-01:7d");
+    fireEvent.change(dateInput, { target: { value: "2027-01-01" } });
+
+    expect(config.patExpiresAt).toBe("2027-01-01");
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith(PAT_EXPIRY_NOTIFICATION_SOURCE);
+  });
+
+  it("snaps invalid non-empty 5-digit year input back to persisted value without mutating config or clearing dismissal", () => {
+    updateConfig({ patExpiresAt: "2026-12-15" });
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-15:7d");
+    renderSettings();
+
+    const dateInput = screen.getByLabelText<HTMLInputElement>("PAT expiration date");
+    // Bypass happy-dom's HTMLInputElement date sanitization so onChange sees the raw 5-digit year
+    Object.defineProperty(dateInput, "value", {
+      configurable: true,
+      writable: true,
+      value: "20270-01-01",
+    });
+    fireEvent.change(dateInput);
+
+    expect(dateInput.value).toBe("2026-12-15");
+    expect(config.patExpiresAt).toBe("2026-12-15");
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBe("2026-12-15:7d");
+    expect(errorsLib.pushNotification).not.toHaveBeenCalled();
+  });
+
+  it("clicking Clear sets patExpiresAt to null, clears dismissal, and dismisses pat-expiry notification", () => {
+    updateConfig({ patExpiresAt: "2026-11-28" });
+    renderSettings();
+
+    // Trigger an active notification first so _activePatExpiryKey is set
+    const dateInput = screen.getByLabelText("PAT expiration date") as HTMLInputElement;
+    fireEvent.change(dateInput, { target: { value: "2026-11-28" } });
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-11-28:3d");
+    vi.mocked(errorsLib.dismissNotificationBySource).mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    expect(config.patExpiresAt).toBeNull();
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    expect(errorsLib.dismissNotificationBySource).toHaveBeenCalledWith(PAT_EXPIRY_NOTIFICATION_SOURCE);
+  });
+
+  it("Replace PAT submits entered valid date to setAuthFromPat, clears dismissal, pushes notification, and resets field", async () => {
+    const newToken = "ghp_" + "b".repeat(36);
+    const userData = { login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(userData),
+    } as Response);
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-11-26:1d");
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    fireEvent.input(screen.getByLabelText(/new personal access token/i), { target: { value: newToken } });
+    fireEvent.input(screen.getByLabelText("Expiration date (optional)"), { target: { value: "2026-12-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData, "2026-12-01");
+    });
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+    expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+      PAT_EXPIRY_NOTIFICATION_SOURCE,
+      "Your GitHub PAT expires on 2026-12-01 (within 7 days).",
+      "warning",
+      false,
+      PAT_SETTINGS_ACTION,
+    );
+
+    // Reopening Replace PAT shows a cleared expiry field
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Expiration date (optional)").value).toBe("");
+  });
+
+  it("Replace PAT normalizes invalid 5-digit year to null and resets field on cancel", async () => {
+    const newToken = "ghp_" + "b".repeat(36);
+    const userData = { login: "newuser", avatar_url: "https://avatars.githubusercontent.com/u/1", name: "New User" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(userData),
+    } as Response);
+
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+    const expiryInput = screen.getByLabelText<HTMLInputElement>("Expiration date (optional)");
+    fireEvent.input(expiryInput, { target: { value: "2026-12-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Reopening after Cancel shows reset empty input
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Expiration date (optional)").value).toBe("");
+
+    fireEvent.input(screen.getByLabelText(/new personal access token/i), { target: { value: newToken } });
+    const reopenedExpiry = screen.getByLabelText<HTMLInputElement>("Expiration date (optional)");
+    Object.defineProperty(reopenedExpiry, "value", {
+      configurable: true,
+      writable: true,
+      value: "20270-01-01",
+    });
+    fireEvent.input(reopenedExpiry);
+    fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+
+    await waitFor(() => {
+      expect(authStore.setAuthFromPat).toHaveBeenCalledWith(newToken, userData, null);
+    });
+  });
+});
+
+describe("SettingsPage — #data deep-link scrolling", () => {
+  let origScrollIntoView: typeof Element.prototype.scrollIntoView;
+  let scrollSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    origScrollIntoView = Element.prototype.scrollIntoView;
+    scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = origScrollIntoView;
+  });
+
+  it("scrolls #data into view smoothly when window.location.hash settles to '#data' on a microtask after mount without opening #replace-jira-token-panel", async () => {
+    window.location.hash = "";
+    renderSettings();
+    queueMicrotask(() => {
+      window.location.hash = "#data";
+    });
+
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    });
+    expect(scrollSpy.mock.instances[0]).toBe(document.getElementById("data"));
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+  });
+
+  it("scrolls #data into view on hashchange and uses 'instant' when prefers-reduced-motion: reduce matches", async () => {
+    renderSettings();
+
+    window.location.hash = "#data";
+    window.dispatchEvent(new Event("hashchange"));
+
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    });
+    expect(document.getElementById("replace-jira-token-panel")).toBeNull();
+
+    scrollSpy.mockClear();
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    window.dispatchEvent(new Event("hashchange"));
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
+    });
+  });
+
+  it("scrolls #data into view when clicking an <a href='/settings#data'> link while mounted", async () => {
+    renderSettings();
+
+    const link = document.createElement("a");
+    link.setAttribute("href", "/settings#data");
+    // happy-dom's baseURI is about:blank when window.location is mocked, so @solidjs/router's
+    // document click handler needs a valid absolute URL on link.href while getAttribute("href") stays "/settings#data".
+    Object.defineProperty(link, "href", { value: "http://localhost/settings#data" });
+    document.body.appendChild(link);
+    try {
+      window.location.hash = "#data";
+      fireEvent.click(link);
+      await waitFor(() => {
+        expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+      });
+      expect(scrollSpy.mock.instances[0]).toBe(document.getElementById("data"));
+    } finally {
+      link.remove();
+    }
+  });
+
+  it("cancels pending deepLinkScrollTimer on unmount so scrollIntoView is not called after unmount", async () => {
+    window.location.hash = "#data";
+    const { unmount } = renderSettings();
+    unmount();
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(scrollSpy).not.toHaveBeenCalled();
   });
 });

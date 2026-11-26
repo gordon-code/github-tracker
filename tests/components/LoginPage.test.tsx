@@ -207,6 +207,32 @@ describe("LoginPage — PAT form navigation", () => {
     screen.getByText("Sign in with GitHub");
     expect(screen.queryByText("Sign in with Token")).toBeNull();
   });
+
+  it("renders #pat-expiry-input only inside the PAT form (hidden on initial OAuth screen)", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    expect(document.getElementById("pat-expiry-input")).toBeNull();
+    expect(screen.queryByLabelText(/expiration date/i)).toBeNull();
+
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    const expiryInput = screen.getByLabelText(/expiration date/i) as HTMLInputElement;
+    expect(expiryInput.id).toBe("pat-expiry-input");
+    expect(expiryInput.type).toBe("date");
+  });
+
+  it("clicking 'Use OAuth instead' then reopening the PAT form clears #pat-expiry-input", async () => {
+    const user = userEvent.setup();
+    render(() => <LoginPage />);
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    const expiryInput = screen.getByLabelText(/expiration date/i) as HTMLInputElement;
+    fireEvent.input(expiryInput, { target: { value: "2027-06-01" } });
+    expect(expiryInput.value).toBe("2027-06-01");
+
+    await user.click(screen.getByText("Use OAuth instead"));
+    await user.click(screen.getByText("Use a Personal Access Token"));
+    const reopenedInput = screen.getByLabelText(/expiration date/i) as HTMLInputElement;
+    expect(reopenedInput.value).toBe("");
+  });
 });
 
 describe("LoginPage — PAT form validation", () => {
@@ -266,6 +292,24 @@ describe("LoginPage — PAT form validation", () => {
     expect(authStore.setAuthFromPat).toHaveBeenCalledWith(
       "ghp_" + "a".repeat(36),
       githubUser,
+      null,
+    );
+  });
+
+  it("submitting with an expiration date passes it as the 3rd argument to setAuthFromPat", async () => {
+    vi.mocked(patLib.isValidPatFormat).mockReturnValueOnce({ valid: true });
+    mockFetchOk();
+    const user = await openPatForm();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp_" + "a".repeat(36));
+    fireEvent.input(screen.getByLabelText(/expiration date/i), { target: { value: "2027-06-01" } });
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/", { replace: true });
+    });
+    expect(authStore.setAuthFromPat).toHaveBeenCalledWith(
+      "ghp_" + "a".repeat(36),
+      githubUser,
+      "2027-06-01",
     );
   });
 

@@ -18,6 +18,7 @@ export default function LoginPage() {
 
   const [showPatForm, setShowPatForm] = createSignal(false);
   const [patInput, setPatInput] = createSignal("");
+  const [patExpiryInput, setPatExpiryInput] = createSignal("");
   const [patError, setPatError] = createSignal<string | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
 
@@ -47,6 +48,7 @@ export default function LoginPage() {
     setSubmitting(true);
     setPatError(null);
     const trimmedToken = patInput().trim();
+    const nextExpiry = patExpiryInput() || null;
     try {
       const resp = await fetch("https://api.github.com/user", {
         headers: {
@@ -65,8 +67,9 @@ export default function LoginPage() {
       }
       if (!showPatForm()) return;
       const userData = (await resp.json()) as GitHubUser;
-      setAuthFromPat(trimmedToken, userData);
+      setAuthFromPat(trimmedToken, userData, nextExpiry);
       setPatInput("");
+      setPatExpiryInput("");
       navigate("/", { replace: true });
     } catch (err) {
       captureException(err, { tags: { source: "pat-validation" } });
@@ -142,6 +145,7 @@ export default function LoginPage() {
     setShowPatForm(false);
     setPatError(null);
     setPatInput("");
+    setPatExpiryInput("");
     setImportError(null);
     credentialImport.reset();
     setShowImport(true);
@@ -248,6 +252,22 @@ export default function LoginPage() {
                   </Show>
                 </div>
 
+                <div class="text-left w-full">
+                  <label for="pat-expiry-input" class="label">
+                    <span class="label-text">Expiration date (optional)</span>
+                  </label>
+                  <input
+                    id="pat-expiry-input"
+                    type="date"
+                    class="input input-bordered w-full"
+                    value={patExpiryInput()}
+                    onInput={(e) => setPatExpiryInput(e.currentTarget.value)}
+                  />
+                  <p class="text-xs text-base-content/60 mt-1">
+                    Stored locally to remind you before your token expires.
+                  </p>
+                </div>
+
                 <button
                   type="submit"
                   class="btn btn-neutral w-full"
@@ -290,7 +310,7 @@ export default function LoginPage() {
 
                 <button
                   type="button"
-                  onClick={() => { setShowPatForm(false); setPatError(null); setPatInput(""); }}
+                  onClick={() => { setShowPatForm(false); setPatError(null); setPatInput(""); setPatExpiryInput(""); }}
                   class="link link-primary text-sm mt-2"
                 >
                   Use OAuth instead
