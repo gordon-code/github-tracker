@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getErrors,
   getNotifications,
@@ -7,6 +7,7 @@ import {
   pushNotification,
   dismissError,
   dismissNotificationBySource,
+  onNotificationDismissed,
   markAllAsRead,
   clearErrors,
   clearNotifications,
@@ -466,6 +467,105 @@ describe("mutedSources", () => {
       clearMutedSources();
       expect(isMuted("api")).toBe(false);
       expect(isMuted("search")).toBe(false);
+      dispose();
+    });
+  });
+});
+
+describe("onNotificationDismissed", () => {
+  it("fires on dismissError(id) when id exists and does not fire for unknown id", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      dismissError("nonexistent-id");
+      expect(cb).not.toHaveBeenCalled();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      const id = getNotifications()[0].id;
+      dismissError(id);
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
+      dispose();
+    });
+  });
+
+  it("fires on addMutedSource(source) for matching source only", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      addMutedSource("other-source");
+      expect(cb).not.toHaveBeenCalled();
+
+      addMutedSource("pat-expiry");
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
+      dispose();
+    });
+  });
+
+  it("stops firing after unsubscribe", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+      unsub();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      dismissError(getNotifications()[0].id);
+      addMutedSource("pat-expiry");
+      expect(cb).not.toHaveBeenCalled();
+      dispose();
+    });
+  });
+
+  it("handles throwing and self-unsubscribing listeners safely", () => {
+    createRoot((dispose) => {
+      const secondCb = vi.fn();
+      let selfUnsub: (() => void) | undefined;
+      selfUnsub = onNotificationDismissed("pat-expiry", () => {
+        selfUnsub?.();
+      });
+      const unsubThrowing = onNotificationDismissed("pat-expiry", () => {
+        throw new Error("listener boom");
+      });
+      const unsubSecond = onNotificationDismissed("pat-expiry", secondCb);
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      expect(() => dismissError(getNotifications()[0].id)).not.toThrow();
+      expect(secondCb).toHaveBeenCalledTimes(1);
+
+      // Self-unsubscribed listener should not fire a second time; secondCb still fires
+      addMutedSource("pat-expiry");
+      expect(secondCb).toHaveBeenCalledTimes(2);
+
+      unsubThrowing();
+      unsubSecond();
+      dispose();
+    });
+  });
+
+  it("does NOT fire on dismissNotificationBySource() or resetNotificationState(), and listeners survive resetNotificationState()", () => {
+    createRoot((dispose) => {
+      const cb = vi.fn();
+      const unsub = onNotificationDismissed("pat-expiry", cb);
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      dismissNotificationBySource("pat-expiry");
+      expect(cb).not.toHaveBeenCalled();
+
+      pushNotification("pat-expiry", "Expiring soon", "warning");
+      resetNotificationState();
+      expect(cb).not.toHaveBeenCalled();
+
+      // Listener survives resetNotificationState()
+      pushNotification("pat-expiry", "Expiring again", "warning");
+      dismissError(getNotifications()[0].id);
+      expect(cb).toHaveBeenCalledTimes(1);
+
+      unsub();
       dispose();
     });
   });

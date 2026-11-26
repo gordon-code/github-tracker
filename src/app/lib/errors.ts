@@ -114,8 +114,43 @@ export function pushError(source: string, message: string, retryable = false): v
   pushNotification(source, message, "error", retryable);
 }
 
+const _dismissListeners = new Map<string, Set<() => void>>();
+
+export function onNotificationDismissed(source: string, cb: () => void): () => void {
+  let listeners = _dismissListeners.get(source);
+  if (!listeners) {
+    listeners = new Set();
+    _dismissListeners.set(source, listeners);
+  }
+  listeners.add(cb);
+  return () => {
+    const current = _dismissListeners.get(source);
+    if (!current) return;
+    current.delete(cb);
+    if (current.size === 0) {
+      _dismissListeners.delete(source);
+    }
+  };
+}
+
+function notifyDismissListeners(source: string): void {
+  const listeners = _dismissListeners.get(source);
+  if (!listeners || listeners.size === 0) return;
+  for (const cb of Array.from(listeners)) {
+    try {
+      cb();
+    } catch {
+      // Listener errors must never break notification dismissal
+    }
+  }
+}
+
 export function dismissError(id: string): void {
+  const removed = notifications().find((n) => n.id === id);
   setNotifications((prev) => prev.filter((n) => n.id !== id));
+  if (removed) {
+    notifyDismissListeners(removed.source);
+  }
 }
 
 export function dismissNotificationBySource(source: string): void {
@@ -145,6 +180,7 @@ const [_mutedSources, _setMutedSources] = createSignal(new Set<string>());
 
 export function addMutedSource(source: string): void {
   _setMutedSources((prev) => new Set([...prev, source]));
+  notifyDismissListeners(source);
 }
 
 export function isMuted(source: string): boolean {

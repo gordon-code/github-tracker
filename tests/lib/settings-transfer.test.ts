@@ -19,6 +19,7 @@ vi.mock("../../src/app/lib/sentry-facade", () => ({
 }));
 
 import { ConfigSchema, JiraConfigSchema } from "../../src/shared/schemas";
+import { PAT_EXPIRY_DISMISSED_KEY } from "../../src/shared/types";
 import {
   EXPORT_VERSION,
   EXPORT_DENYLIST,
@@ -93,6 +94,7 @@ const EXPECTED_CONFIG_KEYS = [
   "monitoredRepos",
   "notifications",
   "onboardingComplete",
+  "patExpiresAt",
   "refreshInterval",
   "rememberLastTab",
   "selectedOrgs",
@@ -267,6 +269,12 @@ describe("buildExportPayload", () => {
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayEnabled")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, "mcpRelayPort")).toBe(true);
   });
+
+  it("strips top-level denylisted patExpiresAt from plaintext export", () => {
+    const cfg = ConfigSchema.parse({ authMethod: "pat", patExpiresAt: "2027-06-01" });
+    const out = buildExportPayload(cfg, viewState);
+    expect("patExpiresAt" in out).toBe(false);
+  });
 });
 
 // ── curated, privacy-scrubbed view preferences ────────────────────────────────
@@ -432,6 +440,14 @@ describe("parseImportFile", () => {
     expect(parseImportFile(JSON.stringify({ theme: "dark" })).ok).toBe(true);
     // A round-tripped real export (stamped v1 by buildExportPayload) also parses.
     expect(parseImportFile(JSON.stringify(buildExportPayload(ConfigSchema.parse({}), viewState))).ok).toBe(true);
+  });
+
+  it("backward-compatible: v1 JSON lacking patExpiresAt defaults patExpiresAt to null", () => {
+    const result = parseImportFile(JSON.stringify({ _exportVersion: 1, theme: "dark" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.patExpiresAt).toBeNull();
+    }
   });
 });
 
@@ -645,6 +661,19 @@ describe("assembleCredentialBundle / CredentialBundleSchema", () => {
     const bundle = assembleCredentialBundle();
     expect(bundle).toEqual({ github: { token: "ghp_patuser", method: "pat" }, jira: null });
     expect(CredentialBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it("PAT-auth user with patExpiresAt includes it in github bundle, while OAuth omits it", () => {
+    authStore.setAuth({ access_token: "ghp_patuser" });
+    updateConfig({ authMethod: "pat", patExpiresAt: "2027-06-01" });
+    const patBundle = assembleCredentialBundle();
+    expect(patBundle.github.patExpiresAt).toBe("2027-06-01");
+    expect(CredentialBundleSchema.safeParse(patBundle).success).toBe(true);
+
+    updateConfig({ authMethod: "oauth", patExpiresAt: "2027-06-01" });
+    const oauthBundle = assembleCredentialBundle();
+    expect("patExpiresAt" in oauthBundle.github).toBe(false);
+    expect(CredentialBundleSchema.safeParse(oauthBundle).success).toBe(true);
   });
 
   it("OAuth user with Jira OAuth: carries sealedRefreshToken/cloudId/siteUrl/siteName, EXCLUDES plaintext access token", () => {
@@ -1081,6 +1110,28 @@ describe("commitImportedSettings", () => {
       ConfigSchema.parse({ authMethod: "oauth" })
     );
     expect(config.authMethod).toBe("oauth");
+  });
+
+  it("round-trips patExpiresAt for method === 'pat', forces null for method === 'oauth', and clears stale dismissal", async () => {
+    vi.spyOn(authStore, "user").mockReturnValue(identity);
+
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2026-12-01:7d");
+    await commitImportedSettings(
+      { bundle: { github: { token: "ghp_x", method: "pat", patExpiresAt: "2027-06-01" }, jira: null }, identity },
+      ConfigSchema.parse({ authMethod: "oauth", patExpiresAt: null })
+    );
+    expect(config.authMethod).toBe("pat");
+    expect(config.patExpiresAt).toBe("2027-06-01");
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
+
+    localStorage.setItem(PAT_EXPIRY_DISMISSED_KEY, "2027-06-01:3d");
+    await commitImportedSettings(
+      { bundle: { github: { token: "gho_x", method: "oauth", patExpiresAt: "2027-06-01" }, jira: null }, identity },
+      ConfigSchema.parse({ authMethod: "pat", patExpiresAt: "2027-06-01" })
+    );
+    expect(config.authMethod).toBe("oauth");
+    expect(config.patExpiresAt).toBeNull();
+    expect(localStorage.getItem(PAT_EXPIRY_DISMISSED_KEY)).toBeNull();
   });
 
   it("Jira token-mode: setJiraAuth with sealedApiToken sentinels and zero network calls", async () => {

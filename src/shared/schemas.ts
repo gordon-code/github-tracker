@@ -119,6 +119,7 @@ export const ConfigSchema = z.object({
   rememberLastTab: z._default(z.boolean(), true),
   onboardingComplete: z._default(z.boolean(), false),
   authMethod: z._default(z.enum(["oauth", "pat"]), "oauth"),
+  patExpiresAt: z._default(z.nullable(z.iso.date()), null),
   enableTracking: z._default(z.boolean(), false),
   enableActions: z._default(z.boolean(), true),
   customTabs: z._default(z.array(CustomTabSchema).check(z.maxLength(10)), []),

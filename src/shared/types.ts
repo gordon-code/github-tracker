@@ -63,6 +63,7 @@ export const PR_ENRICHMENT_NOTIFICATION_SOURCE = "pr-enrichment";
 export const PR_ENRICHMENT_DEGRADED_MESSAGE =
   "Some pull request details could not be loaded — showing cached data where available";
 export const DASHBOARD_BODIES_STORAGE_KEY = "github-tracker:dashboard-bodies";
+export const PAT_EXPIRY_DISMISSED_KEY = "github-tracker:pat-expiry-dismissed";
 
 export interface PullRequest {
   id: number;
