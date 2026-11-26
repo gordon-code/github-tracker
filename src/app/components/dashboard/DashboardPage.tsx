@@ -32,7 +32,8 @@ import {
   StaleIdentityError,
   type DashboardData,
 } from "../../services/poll";
-import { expireToken, user, onAuthCleared, identityEpoch, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { user, onAuthCleared, identityEpoch, DEP_META_STORAGE_KEY, jiraAuth, setJiraAuth, isJiraAuthenticated, clearJiraAuth } from "../../stores/auth";
+import { isUnauthorizedError } from "../../lib/http-errors";
 import { loadSnapshot, writeSnapshot, type DashboardSnapshotState } from "../../lib/dashboard-snapshot";
 import { JiraApiError } from "../../services/jira-client";
 import { createJiraClient, mergeCustomFields, jiraJqlForScope } from "../../lib/jira-utils";
@@ -518,20 +519,6 @@ async function pollFetch(force = false): Promise<DashboardData> {
     // identity's store, token, or error surfaces.
     if (fetchEpoch !== identityEpoch()) {
       throw err instanceof StaleIdentityError ? err : new StaleIdentityError();
-    }
-    // Handle 401 auth errors
-    const status =
-      typeof err === "object" &&
-      err !== null &&
-      typeof (err as Record<string, unknown>)["status"] === "number"
-        ? (err as Record<string, unknown>)["status"]
-        : null;
-
-    if (status === 401) {
-      // Token invalid — clear token only, preserve user config/view/dashboard.
-      // Hard redirect forces a full page reload, clearing module-level state.
-      expireToken();
-      window.location.replace("/login");
     }
     setDashboardData("loading", false);
     throw err;
@@ -1539,11 +1526,11 @@ export default function DashboardPage() {
 
           let failedCount = 0;
           if (toFetch.length > 0) {
-            const { bodies: bodyMap, failedIds } = await fetchDashboardIssueBodies(
+            const { bodies: bodyMap, failedIds, unauthorized } = await fetchDashboardIssueBodies(
               octokit,
               toFetch.map((di) => di.nodeId)
             );
-            if (authGen !== identityEpoch() || getClient() !== octokit) return;
+            if (authGen !== identityEpoch() || getClient() !== octokit || unauthorized) return;
             failedCount = failedIds.size;
             let cacheUpdated = false;
             for (const di of toFetch) {
@@ -1646,8 +1633,8 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const nodeIds = toFetch.map((pr) => pr.nodeId!);
-        const { bodies: bodyMap, failedIds } = await fetchDepPRBodies(octokit, nodeIds);
-        if (authGen !== identityEpoch() || getClient() !== octokit) return;
+        const { bodies: bodyMap, failedIds, unauthorized } = await fetchDepPRBodies(octokit, nodeIds);
+        if (authGen !== identityEpoch() || getClient() !== octokit || unauthorized) return;
         console.debug(`[dashboard] depBodies effect: fetch resolved after ${Date.now() - effectStart}ms`, { requested: toFetch.length, returned: bodyMap.size, failed: failedIds.size });
 
         // Record/clear per-PR cooldown so a batch that errored or timed out isn't
@@ -1759,13 +1746,8 @@ export default function DashboardPage() {
     source: string,
     permissionDeniedMsg: string
   ): boolean {
-    const status =
-      typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
-        ? ((err as Record<string, unknown>).status as number)
-        : null;
-    if (status === 401) {
-      expireToken();
-      window.location.replace("/login");
+    if (isUnauthorizedError(err)) {
+      pushNotification(source, "GitHub returned an authentication error — please try again", "error");
       return true;
     }
     if (isPermissionDeniedError(err)) {

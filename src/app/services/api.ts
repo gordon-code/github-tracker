@@ -669,6 +669,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       try {
         response = await octokit.graphql<TResponse>(query, { q: queryString, cursor, request: { apiSource: source } });
       } catch (err) {
+        if (isUnauthorizedError(err)) throw err;
         const partial = extractSearchPartialData<TResponse>(err);
         if (partial) {
           response = partial;
@@ -713,6 +714,7 @@ async function paginateGraphQLSearch<TResponse extends { search: SearchPageResul
       if (!response.search.pageInfo.hasNextPage || !response.search.pageInfo.endCursor) break;
       cursor = response.search.pageInfo.endCursor;
     } catch (err) {
+      if (isUnauthorizedError(err)) throw err;
       const { message } = extractRejectionError(err);
       errors.push({ repo: batchLabel, statusCode: null, message, retryable: false });
       break;
@@ -783,7 +785,7 @@ async function runForkPRFallback(
   if (forkCandidates.length === 0) return;
 
   const forkChunks = chunkArray(forkCandidates, GRAPHQL_CHECK_BATCH_SIZE);
-  await Promise.allSettled(forkChunks.map(async (forkChunk) => {
+  const settled = await Promise.allSettled(forkChunks.map(async (forkChunk) => {
     const varDefs: string[] = [];
     const variables: Record<string, string> = {};
     const fragments: string[] = [];
@@ -821,6 +823,7 @@ async function runForkPRFallback(
         }
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) throw err;
       const errDataRaw = extractPartialGraphqlData<Record<string, unknown>>(err);
       if (errDataRaw?.rateLimit) {
         updateGraphqlRateLimit(errDataRaw.rateLimit as GraphQLRateLimit);
@@ -843,6 +846,12 @@ async function runForkPRFallback(
       pushNotification("graphql", "Fork PR check status unavailable — CI status may be missing for some PRs", "warning");
     }
   }));
+
+  for (const s of settled) {
+    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
+      throw s.reason;
+    }
+  }
 }
 
 // ── Combined search (issues + PRs in single request) ─────────────────────────
@@ -1011,6 +1020,7 @@ async function executeLightCombinedQuery(
     const paginationSettled = await Promise.allSettled(prPaginationTasks);
     for (const s of paginationSettled) {
       if (s.status === "rejected") {
+        if (isUnauthorizedError(s.reason)) throw s.reason;
         console.warn("[api] PR pagination task failed:", s.reason);
         captureException(s.reason, { tags: { source: "pr-pagination" } });
       }
@@ -1069,7 +1079,7 @@ async function graphqlLightCombinedSearch(
   const nodeIdMap = new Map<number, string>();
   const errors: ApiError[] = [];
 
-  await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+  const settled = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
     // archived:false drops items from repos archived since they were selected
     // (archived repos are read-only, so their PRs can't be acted on).
@@ -1084,10 +1094,17 @@ async function graphqlLightCombinedSearch(
         issueSeen, issues, prMap, nodeIdMap, errors, SEARCH_RESULT_CAP, SEARCH_RESULT_CAP, source,
       );
     } catch (err) {
+      if (isUnauthorizedError(err)) throw err;
       const { statusCode, message } = extractRejectionError(err);
       errors.push({ repo: batchLabel, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }));
+
+  for (const s of settled) {
+    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
+      throw s.reason;
+    }
+  }
 
   return finalizeSearchResult(
     issues, prMap, errors,
@@ -1115,7 +1132,7 @@ async function graphqlUnfilteredSearch(
   const nodeIdMap = new Map<number, string>();
   const errors: ApiError[] = [];
 
-  await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
+  const settled = await Promise.allSettled(chunks.map(async (chunk, chunkIdx) => {
     const repoQualifiers = buildRepoQualifiers(chunk);
     const issueQ = `is:issue is:open archived:false ${repoQualifiers}`;
     const prQ = `is:pr is:open archived:false ${repoQualifiers}`;
@@ -1130,6 +1147,7 @@ async function graphqlUnfilteredSearch(
           request: { apiSource: "unfilteredSearch" },
         });
       } catch (err) {
+        if (isUnauthorizedError(err)) throw err;
         const partial = extractPartialGraphqlData<UnfilteredSearchResponse>(err);
         if (partial && (partial.issues || partial.prs)) {
           response = {
@@ -1180,10 +1198,17 @@ async function graphqlUnfilteredSearch(
         );
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) throw err;
       const { statusCode, message } = extractRejectionError(err);
       errors.push({ repo: batchLabel, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }));
+
+  for (const s of settled) {
+    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
+      throw s.reason;
+    }
+  }
 
   return finalizeSearchResult(
     issues, prMap, errors,
@@ -1329,7 +1354,7 @@ export async function fetchPREnrichment(
   const batches = chunkArray(nodeIds, HEAVY_BACKFILL_BATCH_SIZE);
   let heavyNodesResolved = 0;
   let failedBatchCount = 0;
-  await Promise.allSettled(
+  const settled = await Promise.allSettled(
     batches.map(async (batch, batchIdx) => {
       const resolvedNodeIds = new Set<string>();
       const batchLabel = `${batchIdx + 1}/${batches.length}`;
@@ -1380,6 +1405,7 @@ export async function fetchPREnrichment(
 
           ingestBackfillPayload(response, false);
         } catch (err) {
+          if (isUnauthorizedError(err)) throw err;
           ingestBackfillPayload(
             extractPartialGraphqlData<HeavyBackfillResponse>(err),
             false,
@@ -1407,10 +1433,13 @@ export async function fetchPREnrichment(
 
           if (canSplit && remainingIds.length > MIN_SPLIT_BATCH_SIZE) {
             const mid = Math.floor(remainingIds.length / 2);
-            await Promise.allSettled([
+            const splitSettled = await Promise.allSettled([
               fetchBatchWithSplit(remainingIds.slice(0, mid)),
               fetchBatchWithSplit(remainingIds.slice(mid)),
             ]);
+            for (const s of splitSettled) {
+              if (s.status === "rejected" && isUnauthorizedError(s.reason)) throw s.reason;
+            }
             return;
           }
 
@@ -1428,6 +1457,7 @@ export async function fetchPREnrichment(
             });
             ingestBackfillPayload(lightResponse, true);
           } catch (lightErr) {
+            if (isUnauthorizedError(lightErr)) throw lightErr;
             ingestBackfillPayload(
               extractPartialGraphqlData<HeavyBackfillResponse>(lightErr),
               true,
@@ -1440,6 +1470,12 @@ export async function fetchPREnrichment(
       await fetchBatchWithSplit(batch);
     }),
   );
+
+  for (const s of settled) {
+    if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
+      throw s.reason;
+    }
+  }
 
   return { enrichments, errors };
 }
@@ -1470,7 +1506,12 @@ export class GraphqlFetchTimeoutError extends Error {
   override readonly name = "GraphqlFetchTimeoutError";
 }
 
-export function raceWithTimeout<T>(promise: Promise<T>, ms: number, controller: AbortController): Promise<T> {
+export function raceWithTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  controller: AbortController,
+  onCancelReady?: (cancelTimeout: () => void) => void,
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -1478,6 +1519,10 @@ export function raceWithTimeout<T>(promise: Promise<T>, ms: number, controller: 
       controller.abort();
       reject(new GraphqlFetchTimeoutError(`GraphQL request exceeded ${ms}ms`));
     }, ms);
+  });
+
+  onCancelReady?.(() => {
+    clearTimeout(timeoutId);
   });
 
   return Promise.race([promise, timeoutPromise]).finally(() => {
@@ -1494,6 +1539,8 @@ export interface NodeBodiesFetchResult<K, V> {
   bodies: Map<K, V>;
   /** Requested node IDs belonging to a batch that errored or timed out. */
   failedIds: Set<string>;
+  /** True when any batch short-circuited due to an HTTP 401 response. */
+  unauthorized?: boolean;
 }
 
 /**
@@ -1526,6 +1573,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
   const failedIds = new Set<string>();
   if (nodeIds.length === 0) return { bodies, failedIds };
 
+  let sawUnauthorized = false;
   const batches = chunkArray(nodeIds, BODY_FETCH_BATCH_SIZE);
   await Promise.allSettled(batches.map(async (batch) => {
     const batchStart = Date.now();
@@ -1554,7 +1602,10 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
     };
 
     const fetchBatchWithSplit = async (batchIds: string[], isSplitRetry: boolean): Promise<void> => {
+      if (sawUnauthorized) return;
       const controller = new AbortController();
+      let timeoutDefused = false;
+      let cancelTimeout: (() => void) | undefined;
       try {
         const response = await raceWithTimeout(
           octokit.graphql<NodeBodiesResponse<TNode>>(
@@ -1565,14 +1616,26 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
                 apiSource: source,
                 signal: controller.signal,
                 retries: isSplitRetry || batchIds.length > MIN_SPLIT_BATCH_SIZE ? 0 : 1,
+                onUnauthorized: () => {
+                  timeoutDefused = true;
+                  cancelTimeout?.();
+                },
               },
             },
           ),
           GRAPHQL_BODY_FETCH_TIMEOUT_MS,
           controller,
+          (cancel) => {
+            cancelTimeout = cancel;
+            if (timeoutDefused) cancel();
+          },
         );
         ingestBodyPayload(response, batchIds);
       } catch (err) {
+        if (isUnauthorizedError(err)) {
+          sawUnauthorized = true;
+          return;
+        }
         ingestBodyPayload(extractPartialGraphqlData<NodeBodiesResponse<TNode>>(err));
 
         const remainingIds = batchIds.filter((id) => !resolvedNodeIds.has(id));
@@ -1606,7 +1669,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
     }
   }));
 
-  if (getClient() === octokit) {
+  if (getClient() === octokit && !sawUnauthorized) {
     if (failedIds.size > 0) {
       const consecutive = (_consecutiveBodyFetchFailures.get(source) ?? 0) + 1;
       _consecutiveBodyFetchFailures.set(source, consecutive);
@@ -1618,7 +1681,7 @@ async function fetchNodeBodiesBatched<TNode extends { id?: string | null }, K, V
     }
   }
 
-  return { bodies, failedIds };
+  return { bodies, failedIds, ...(sawUnauthorized ? { unauthorized: true } : {}) };
 }
 
 // ── Dashboard issue body fetch ────────────────────────────────────────────────
@@ -2110,6 +2173,7 @@ export async function fetchIssuesAndPullRequests(
         allErrors.push(...result.value.errors);
         mergeTrackedUserResults(issueMap, prMap, nodeIdMap, result.value, trackedLogin);
       } else {
+        if (isUnauthorizedError(result.reason)) throw result.reason;
         const { statusCode, message } = extractRejectionError(result.reason);
         allErrors.push({ repo: `tracked-user:${trackedLogin}`, statusCode, message, retryable: statusCode === null || statusCode >= 500 });
       }
@@ -2431,30 +2495,39 @@ export async function fetchWorkflowRuns(
   const perPage = Math.min(Math.max(targetRunsPerRepo + 5, 20), 100);
 
   const RUNS_CONCURRENCY = 20;
+  let sawUnauthorized = false;
   const tasks = repos.map((repo) => async () => {
+    if (sawUnauthorized) return;
     // Skip repos known to have zero workflow runs (cached empty result)
     if (_emptyActionRepos.has(repo.fullName)) return;
 
     const rawRuns: RawWorkflowRun[] = [];
     let page = 1;
 
-    // Paginate until we have enough runs or exhaust results
-    while (rawRuns.length < targetRunsPerRepo) {
-      const result = await cachedRequest(
-        octokit,
-        `runs2:${repo.fullName}:p${page}`,
-        "GET /repos/{owner}/{repo}/actions/runs",
-        { owner: repo.owner, repo: repo.name, per_page: perPage, page },
-        { project: projectRunsPage }
-      );
+    try {
+      // Paginate until we have enough runs or exhaust results
+      while (rawRuns.length < targetRunsPerRepo) {
+        const result = await cachedRequest(
+          octokit,
+          `runs2:${repo.fullName}:p${page}`,
+          "GET /repos/{owner}/{repo}/actions/runs",
+          { owner: repo.owner, repo: repo.name, per_page: perPage, page },
+          { project: projectRunsPage }
+        );
 
-      const data = result.data as RawWorkflowRunsResponse;
-      const runs = data.workflow_runs ?? [];
-      rawRuns.push(...runs);
+        const data = result.data as RawWorkflowRunsResponse;
+        const runs = data.workflow_runs ?? [];
+        rawRuns.push(...runs);
 
-      // Stop if we got all runs or this page was short
-      if (rawRuns.length >= data.total_count || runs.length < perPage) break;
-      page++;
+        // Stop if we got all runs or this page was short
+        if (rawRuns.length >= data.total_count || runs.length < perPage) break;
+        page++;
+      }
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        sawUnauthorized = true;
+      }
+      throw err;
     }
 
     // Cache repos with zero runs — skip them on subsequent polls
@@ -2495,8 +2568,9 @@ export async function fetchWorkflowRuns(
   const taskResults = await pooledAllSettled(tasks, RUNS_CONCURRENCY);
   for (const result of taskResults) {
     if (result.status === "rejected") {
+      if (isUnauthorizedError(result.reason)) throw result.reason;
       const { statusCode, message } = extractRejectionError(result.reason);
-      allErrors.push({ repo: "workflow-runs", statusCode, message, retryable: true });
+      allErrors.push({ repo: "workflow-runs", statusCode, message, retryable: statusCode === null || statusCode >= 500 });
     }
   }
 
@@ -2724,10 +2798,10 @@ export async function discoverUpstreamRepos(
     return true;
   }
 
-  function discoverForUser(login: string) {
+  async function discoverForUser(login: string) {
     const issueQ = `is:issue is:open archived:false involves:${login}`;
     const prQ = `is:pr is:open archived:false involves:${login}`;
-    return Promise.allSettled([
+    const settled = await Promise.allSettled([
       paginateGraphQLSearch<GraphQLIssueSearchResponse, GraphQLIssueNode>(
         octokit, ISSUES_SEARCH_QUERY, issueQ, `upstream-issues:${login}`, errors,
         (node) => extractRepoName(node),
@@ -2739,6 +2813,11 @@ export async function discoverUpstreamRepos(
         () => repoNames.size, CAP, "upstreamDiscovery",
       ),
     ]);
+    for (const s of settled) {
+      if (s.status === "rejected" && isUnauthorizedError(s.reason)) {
+        throw s.reason;
+      }
+    }
   }
 
   // Collect all valid logins to discover for

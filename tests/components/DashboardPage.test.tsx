@@ -642,17 +642,19 @@ describe("DashboardPage — auth error handling", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("calls expireToken (not clearAuth) and redirects to /login on 401 error", async () => {
+  it("does not call expireToken, clearAuth, or redirect directly on 401 error (handled centrally in github.ts hook)", async () => {
     const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
     vi.mocked(pollService.fetchAllData).mockRejectedValue(err401);
 
     render(() => <DashboardPage />);
     await waitFor(() => {
-      expect(authStore.expireToken).toHaveBeenCalledOnce();
-      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+      expect(pollService.fetchAllData).toHaveBeenCalled();
     });
-    // clearAuth should NOT be called — user config/view preserved on token failure
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(authStore.expireToken).not.toHaveBeenCalled();
     expect(authStore.clearAuth).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
   });
 
   it("does not call expireToken or clearAuth for non-401 errors", async () => {
@@ -4414,7 +4416,7 @@ describe("DashboardPage — PR approval integration", () => {
     });
   });
 
-  it("handles 401 error during PR approval by calling expireToken and redirecting to /login", async () => {
+  it("handles preserved same-epoch 401 error during PR approval by pushing transient retry notification without redirecting, and exits silently on epoch-mismatched 401", async () => {
     const user = userEvent.setup();
     const unauthorizedErr = Object.assign(new Error("Bad credentials"), { status: 401 });
     const graphqlMock = vi.fn().mockRejectedValue(unauthorizedErr);
@@ -4453,9 +4455,30 @@ describe("DashboardPage — PR approval integration", () => {
     await user.click(approveBtn);
 
     await waitFor(() => {
-      expect(authStore.expireToken).toHaveBeenCalledOnce();
-      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "approve-pr:42",
+        "GitHub returned an authentication error — please try again",
+        "error"
+      );
     });
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
+
+    // Epoch-mismatched 401 exits silently without pushing notification
+    vi.mocked(errorsLib.pushNotification).mockClear();
+    let rejectMutation!: (err: unknown) => void;
+    graphqlMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectMutation = reject; })
+    );
+    await user.click(approveBtn);
+    await user.click(approveBtn);
+    await waitFor(() => expect(rejectMutation).toBeDefined());
+    for (const cb of authClearCallbacks) cb();
+    rejectMutation(unauthorizedErr);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
     expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 
@@ -5042,7 +5065,7 @@ describe("DashboardPage — Mark PR ready integration", () => {
     });
   });
 
-  it("handles 401 error when marking PR ready by calling expireToken and redirecting to /login", async () => {
+  it("handles preserved same-epoch 401 error when marking PR ready by pushing transient retry notification without redirecting, and exits silently on epoch-mismatched 401", async () => {
     const user = userEvent.setup();
     const unauthorizedErr = Object.assign(new Error("Bad credentials"), { status: 401 });
     const graphqlMock = vi.fn().mockRejectedValue(unauthorizedErr);
@@ -5081,9 +5104,30 @@ describe("DashboardPage — Mark PR ready integration", () => {
     await user.click(draftBtn);
 
     await waitFor(() => {
-      expect(authStore.expireToken).toHaveBeenCalledOnce();
-      expect(mockLocationReplace).toHaveBeenCalledWith("/login");
+      expect(errorsLib.pushNotification).toHaveBeenCalledWith(
+        "mark-ready-pr:77",
+        "GitHub returned an authentication error — please try again",
+        "error"
+      );
     });
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
+
+    // Epoch-mismatched 401 exits silently without pushing notification
+    vi.mocked(errorsLib.pushNotification).mockClear();
+    let rejectMutation!: (err: unknown) => void;
+    graphqlMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectMutation = reject; })
+    );
+    await user.click(draftBtn);
+    await user.click(draftBtn);
+    await waitFor(() => expect(rejectMutation).toBeDefined());
+    for (const cb of authClearCallbacks) cb();
+    rejectMutation(unauthorizedErr);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(authStore.expireToken).not.toHaveBeenCalled();
+    expect(mockLocationReplace).not.toHaveBeenCalled();
     expect(errorsLib.pushNotification).not.toHaveBeenCalled();
   });
 });
@@ -5842,6 +5886,85 @@ describe("DashboardPage — dashboardBodies caching and cooldown", () => {
       expect(screen.getByText("axios: 0.27 → 1.0")).toBeDefined();
       expect(screen.queryByText(/abandoned/i)).toBeNull();
     });
+  });
+
+  it("preserves existing abandonedDepsMap and does not record failure cooldown when fetchDashboardIssueBodies returns unauthorized: true", async () => {
+    const user = userEvent.setup();
+    const dashIssue = (updatedAt: string) => makeIssue({
+      id: 26,
+      number: 26,
+      title: "Dependency Dashboard",
+      userLogin: "renovate[bot]",
+      nodeId: "DASH_401_PRESERVE",
+      repoFullName: "owner/repo",
+      state: "OPEN",
+      updatedAt,
+    });
+
+    const graphqlSpy = vi.fn()
+      .mockResolvedValueOnce({
+        nodes: [
+          {
+            id: "DASH_401_PRESERVE",
+            body: [
+              "## Abandoned",
+              "",
+              "| Datasource | Package | Last Updated |",
+              "| --- | --- | --- |",
+              "| npm | axios | 2020-01-01 |",
+            ].join("\n"),
+          },
+        ],
+        rateLimit: null,
+      })
+      .mockRejectedValueOnce(Object.assign(new Error("Bad credentials"), { status: 401 }));
+
+    vi.mocked(githubService.getClient).mockReturnValue(
+      { graphql: graphqlSpy } as unknown as ReturnType<typeof githubService.getClient>
+    );
+
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [dashIssue("2026-04-01T00:00:00Z")],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+
+    render(() => <DashboardPage />);
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("tab", { name: /Dependencies/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/abandoned/i)).toBeDefined();
+    });
+
+    // Next refresh has updated dashboard issue timestamp, triggering a body fetch that gets 401
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [dashIssue("2026-04-02T00:00:00Z")],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(2));
+    // Allow fetchDashboardIssueBodies() and its finally { _fetchingDashboardBodies = false } to settle
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Existing abandonedDepsMap state is preserved
+    expect(screen.getByText(/abandoned/i)).toBeDefined();
+
+    // No cooldown was recorded for DASH_401_PRESERVE — a subsequent refresh retries immediately
+    graphqlSpy.mockResolvedValueOnce({
+      nodes: [{ id: "DASH_401_PRESERVE", body: "No abandoned packages" }],
+      rateLimit: null,
+    });
+    vi.mocked(pollService.fetchAllData).mockResolvedValue({
+      issues: [dashIssue("2026-04-03T00:00:00Z")],
+      pullRequests: [depPRInRepo()],
+      workflowRuns: [],
+      errors: [],
+    });
+    await capturedFetchAll!();
+    await waitFor(() => expect(graphqlSpy).toHaveBeenCalledTimes(3));
   });
 
   it("persists parsed _dashboardBodyCache to localStorage ('github-tracker:dashboard-bodies'), hydrates via seedCachedDashboardBodies() before the first refresh resolves across vi.resetModules() with 0 GraphQL calls, and removes it on onAuthCleared", async () => {

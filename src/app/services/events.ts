@@ -1,5 +1,6 @@
 import type { getClient } from "./github";
 import { onAuthCleared } from "../stores/auth";
+import { isUnauthorizedError } from "../lib/http-errors";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,7 @@ export async function fetchUserEvents(
         lastPageEvents = nextEvents;
         page++;
       } catch (err) {
+        if (isUnauthorizedError(err)) throw err;
         console.warn(`[events] pagination error on page ${page}:`, err instanceof Error ? err.message : String(err));
         break;
       }
@@ -124,6 +126,7 @@ export async function fetchUserEvents(
 
     return { events: newEvents, changed: newEvents.length > 0 };
   } catch (err) {
+    if (isUnauthorizedError(err)) throw err;
     const status =
       err && typeof err === "object" && "status" in err
         ? (err as { status: number }).status

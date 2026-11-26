@@ -321,6 +321,34 @@ describe("fetchUserEvents — pagination", () => {
     warnSpy.mockRestore();
   });
 
+  it("rethrows 401 on page 1 instead of swallowing", async () => {
+    const octokit = makeOctokit(() =>
+      Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 }))
+    );
+
+    await expect(fetchUserEvents(octokit as never, "someuser")).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("rethrows 401 on pagination (page 2) instead of returning partial page 1", async () => {
+    const page1Events = Array.from({ length: 100 }, (_, i) =>
+      makeEvent({ id: String(1000 + i) })
+    );
+
+    const octokit = makeOctokit(() => Promise.resolve({ data: [], headers: {} }));
+    octokit.request
+      .mockImplementationOnce(() => Promise.resolve({ data: page1Events, headers: {} }))
+      .mockImplementationOnce(() =>
+        Promise.reject(Object.assign(new Error("Bad credentials"), { status: 401 }))
+      );
+
+    await expect(fetchUserEvents(octokit as never, "someuser")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(octokit.request).toHaveBeenCalledTimes(2);
+  });
+
   it("stops pagination when subsequent page returns zero events", async () => {
     const page1Events = Array.from({ length: 100 }, (_, i) =>
       makeEvent({ id: String(1000 + i) })

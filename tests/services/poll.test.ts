@@ -57,6 +57,11 @@ vi.mock("../../src/app/services/github", () => ({
 // in doFetch, same pattern as fetchRateLimitDetails above.
 vi.mock("../../src/app/services/github-status", () => ({
   fetchGitHubStatus: vi.fn(() => Promise.resolve()),
+  isGitHubApiOutage: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock("../../src/app/lib/sentry-facade", () => ({
+  captureException: vi.fn(),
 }));
 
 // Mock config so doFetch doesn't fail when accessing config.selectedRepos
@@ -1097,6 +1102,74 @@ describe("createPollCoordinator", () => {
       expect(notificationsMod.detectNewItems).not.toHaveBeenCalled();
       expect(notificationsMod.dispatchNotifications).not.toHaveBeenCalled();
       expect(coordinator.isRefreshing()).toBe(false);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("exits silently on epoch-mismatched raw 401 without pushing errors or calling captureException", async () => {
+    const authMod = await import("../../src/app/stores/auth");
+    const sentryMod = await import("../../src/app/lib/sentry-facade");
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    mockPushNotification.mockClear();
+
+    const fetchAll = vi.fn().mockImplementation(async () => {
+      authMod.expireToken();
+      throw Object.assign(new Error("Bad credentials"), { status: 401 });
+    });
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(fetchAll).toHaveBeenCalledTimes(1);
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(mockPushNotification).not.toHaveBeenCalled();
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
+      expect(coordinator.isRefreshing()).toBe(false);
+
+      coordinator.destroy();
+      dispose();
+    });
+  });
+
+  it("preserved same-epoch 401 skips captureException, suppresses toast during outage, and pushes sanitized transient warning outside outage", async () => {
+    const sentryMod = await import("../../src/app/lib/sentry-facade");
+    const fetchAll = vi.fn().mockRejectedValue(Object.assign(new Error("Bad credentials"), { status: 401 }));
+
+    // 1. Outage active -> suppresses error toast and skips captureException
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    vi.mocked(githubStatusMod.isGitHubApiOutage).mockReturnValue(true);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(mockPushError).not.toHaveBeenCalled();
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
+
+      coordinator.destroy();
+      dispose();
+    });
+
+    // 2. Outside outage -> pushes sanitized transient warning and skips captureException
+    vi.mocked(sentryMod.captureException).mockClear();
+    mockPushError.mockClear();
+    vi.mocked(githubStatusMod.isGitHubApiOutage).mockReturnValue(false);
+
+    await createRoot(async (dispose) => {
+      const coordinator = createPollCoordinator(makeGetInterval(0), fetchAll);
+      await flushPromises();
+
+      expect(mockPushError).toHaveBeenCalledWith(
+        "poll",
+        "GitHub authentication check failed temporarily — will retry",
+        true
+      );
+      expect(sentryMod.captureException).not.toHaveBeenCalled();
 
       coordinator.destroy();
       dispose();

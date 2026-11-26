@@ -4,7 +4,8 @@ import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { cachedFetch, type CachedFetchOptions, type ConditionalHeaders } from "../stores/cache";
-import { token } from "../stores/auth";
+import { token, handleRuntimeUnauthorized, clearAuthOutageSuspension } from "../stores/auth";
+import { isUnauthorizedError } from "../lib/http-errors";
 import { pushNotification } from "../lib/errors";
 import { APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, isReadOnlyGraphqlQuery } from "../../shared/validation";
 
@@ -372,7 +373,25 @@ export function createGitHubClient(authToken: string): GitHubOctokitInstance {
           }
         } catch { /* never mask the original error */ }
       }
+      if (isUnauthorizedError(err)) {
+        if (typeof reqMeta?.onUnauthorized === "function") {
+          try {
+            (reqMeta.onUnauthorized as () => void)();
+          } catch { /* never mask original 401 */ }
+        }
+        const endpointKind = isGraphql ? "graphql" : "rest";
+        const requestId = typeof errResponse?.headers?.["x-github-request-id"] === "string"
+          ? errResponse.headers["x-github-request-id"]
+          : null;
+        try {
+          await handleRuntimeUnauthorized(authToken, { endpointKind, requestId });
+        } catch { /* never mask original 401 */ }
+      }
       throw err;
+    }
+
+    if (status >= 200 && status < 300) {
+      clearAuthOutageSuspension();
     }
 
     // Success path — fire callbacks (api-usage.ts registers at module scope) and update RL display

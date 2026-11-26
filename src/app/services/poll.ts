@@ -1,9 +1,10 @@
 import { createSignal, createEffect, createRoot, untrack, onCleanup } from "solid-js";
 import { captureException } from "../lib/sentry-facade";
 import { getClient, fetchRateLimitDetails } from "./github";
-import { fetchGitHubStatus } from "./github-status";
+import { fetchGitHubStatus, isGitHubApiOutage } from "./github-status";
 import { config } from "../stores/config";
-import { user, onAuthCleared, expireToken, identityEpoch } from "../stores/auth";
+import { user, onAuthCleared, identityEpoch } from "../stores/auth";
+import { isUnauthorizedError } from "../lib/http-errors";
 import { checkAndResetIfExpired } from "./api-usage";
 import {
   fetchIssuesAndPullRequests,
@@ -11,7 +12,6 @@ import {
   fetchHotPRStatus,
   fetchWorkflowRunById,
   pooledAllSettled,
-  isUnauthorizedError,
   type Issue,
   type PullRequest,
   type WorkflowRun,
@@ -472,9 +472,13 @@ export function createPollCoordinator(
         .map((n) => n.source)
     );
     startCycleTracking();
+    const cycleEpoch = identityEpoch();
 
     try {
       const data = await fetchAll(force);
+      if (destroyed || cycleEpoch !== identityEpoch()) {
+        return;
+      }
       setLastRefreshAt(new Date());
       // Surface per-repo API errors globally, routing backfill-batch-* through 3-Tier escalation
       const nonBackfillErrors = processBackfillErrors(data.errors, data.pullRequests);
@@ -491,7 +495,13 @@ export function createPollCoordinator(
       const newItems = detectNewItems(data);
       dispatchNotifications(newItems, config);
     } catch (err) {
-      if (err instanceof StaleIdentityError) {
+      if (err instanceof StaleIdentityError || cycleEpoch !== identityEpoch()) {
+        return;
+      }
+      if (isUnauthorizedError(err)) {
+        if (!isGitHubApiOutage()) {
+          pushError("poll", "GitHub authentication check failed temporarily — will retry", true);
+        }
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error during data fetch";
@@ -926,17 +936,15 @@ export function createHotPollCoordinator(
       // identity's token or surface errors to it.
       if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
       if (isUnauthorizedError(err)) {
-        // Token invalid — same re-auth path as the full poll (poll.ts throw at
-        // fetchAllData) and cross-tab sync (auth.ts storage listener): clear the
-        // token and hard-redirect. Don't schedule another cycle — page is navigating.
-        captureException(err, { tags: { source: "hot-poll-auth-expired" } });
-        expireToken();
-        window.location.replace("/login");
-        return;
+        if (!isGitHubApiOutage()) {
+          consecutiveFailures++;
+          pushError("hot-poll", "GitHub authentication check failed temporarily — retrying", true);
+        }
+      } else {
+        consecutiveFailures++;
+        const message = err instanceof Error ? err.message : "Unknown hot-poll error";
+        pushError("hot-poll", message, true);
       }
-      consecutiveFailures++;
-      const message = err instanceof Error ? err.message : "Unknown hot-poll error";
-      pushError("hot-poll", message, true);
     } finally {
       if (myGeneration === chainGeneration) {
         startedCycle = false;
@@ -1052,11 +1060,29 @@ export async function fetchTargetedRepoData(
   const errors: ApiError[] = [];
   if (issuesAndPrsResult.status === "rejected") {
     const err = issuesAndPrsResult.reason;
-    errors.push({ repo: "targeted-issues", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+    if (isUnauthorizedError(err)) throw err;
+    const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+      ? ((err as Record<string, unknown>).status as number)
+      : null;
+    errors.push({
+      repo: "targeted-issues",
+      statusCode,
+      message: err instanceof Error ? err.message : String(err),
+      retryable: statusCode === null || statusCode >= 500,
+    });
   }
   if (runResult.status === "rejected") {
     const err = runResult.reason;
-    errors.push({ repo: "targeted-runs", statusCode: null, message: err instanceof Error ? err.message : String(err), retryable: true });
+    if (isUnauthorizedError(err)) throw err;
+    const statusCode = typeof err === "object" && err !== null && typeof (err as Record<string, unknown>).status === "number"
+      ? ((err as Record<string, unknown>).status as number)
+      : null;
+    errors.push({
+      repo: "targeted-runs",
+      statusCode,
+      message: err instanceof Error ? err.message : String(err),
+      retryable: statusCode === null || statusCode >= 500,
+    });
   }
 
   const issuesAndPrsData = issuesAndPrsResult.status === "fulfilled" ? issuesAndPrsResult.value : null;
@@ -1173,7 +1199,7 @@ export function createEventsPollCoordinator(
 
     try {
       const { events, changed } = await fetchUserEvents(octokit, username);
-      if (myGeneration !== chainGeneration) return;
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
 
       if (!changed || events.length === 0) {
         consecutiveFailures = 0;
@@ -1197,7 +1223,7 @@ export function createEventsPollCoordinator(
       const preGeneration = getHotPollGeneration();
 
       const data = await fetchTargetedRepoData(repoSummaries);
-      if (myGeneration !== chainGeneration) return;
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
 
       if (preGeneration !== getHotPollGeneration()) {
         consecutiveFailures = 0;
@@ -1215,8 +1241,13 @@ export function createEventsPollCoordinator(
       onTargetedData(data, affectedRepos, cycleEpoch);
       consecutiveFailures = 0;
     } catch (err) {
+      if (myGeneration !== chainGeneration || cycleEpoch !== identityEpoch()) return;
       consecutiveFailures++;
-      console.warn("[events-poll] cycle error:", err instanceof Error ? err.message : String(err));
+      if (isUnauthorizedError(err)) {
+        console.warn("[events-poll] GitHub authentication check failed temporarily");
+      } else {
+        console.warn("[events-poll] cycle error:", err instanceof Error ? err.message : String(err));
+      }
     }
 
     schedule(myGeneration, EVENTS_POLL_INTERVAL_MS);

@@ -7,6 +7,20 @@ vi.mock("../../src/app/lib/dashboard-snapshot", () => ({
   writeSnapshot: () => {},
   flushSnapshot: () => Promise.resolve(),
 }));
+
+const { mockHandleRuntimeUnauthorized, mockClearAuthOutageSuspension } = vi.hoisted(() => ({
+  mockHandleRuntimeUnauthorized: vi.fn().mockResolvedValue("preserved"),
+  mockClearAuthOutageSuspension: vi.fn(),
+}));
+
+vi.mock("../../src/app/stores/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/app/stores/auth")>();
+  return {
+    ...actual,
+    handleRuntimeUnauthorized: mockHandleRuntimeUnauthorized,
+    clearAuthOutageSuspension: mockClearAuthOutageSuspension,
+  };
+});
 import { createRoot } from "solid-js";
 import { createGitHubClient, cachedRequest, getClient, initClientWatcher, getGraphqlRateLimit, updateGraphqlRateLimit, updateRateLimitFromHeaders, getCoreRateLimit, fetchRateLimitDetails, onApiRequest, APPROVE_PR_MUTATION, MARK_PR_READY_MUTATION, GITHUB_NODE_ID_RE, GIT_SHA_RE, REQUEST_TIMEOUT_MS, MAX_INLINE_RATE_LIMIT_RETRY_AFTER_SEC, type ApiRequestInfo } from "../../src/app/services/github";
 import { clearCache } from "../../src/app/stores/cache";
@@ -1359,6 +1373,124 @@ describe("fetchRateLimitDetails — signal updates with client override", () => 
     expect(getCoreRateLimit()!.remaining).toBe(3000);
     expect(getGraphqlRateLimit()!.remaining).toBe(2500);
     expect(mockClient.request).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── hook.wrap — runtime 401 interception and outage suspension clearing ──────
+
+describe("hook.wrap — runtime 401 interception and outage suspension clearing", () => {
+  beforeEach(() => {
+    mockHandleRuntimeUnauthorized.mockClear();
+    mockHandleRuntimeUnauthorized.mockResolvedValue("preserved");
+    mockClearAuthOutageSuspension.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("REST 401 invokes request.onUnauthorized() before handleRuntimeUnauthorized and rethrows", async () => {
+    const callOrder: string[] = [];
+    const onUnauthorized = vi.fn(() => {
+      callOrder.push("onUnauthorized");
+    });
+    mockHandleRuntimeUnauthorized.mockImplementation(async () => {
+      callOrder.push("handleRuntimeUnauthorized");
+      return "preserved";
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Bad credentials" }), {
+        status: 401,
+        headers: {
+          "content-type": "application/json",
+          "x-github-request-id": "req-rest-123",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("ghp_test");
+    await expect(
+      client.request("GET /user", { request: { retries: 0, onUnauthorized } })
+    ).rejects.toThrow("Bad credentials");
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).toHaveBeenCalledWith("ghp_test", {
+      endpointKind: "rest",
+      requestId: "req-rest-123",
+    });
+    expect(callOrder).toEqual(["onUnauthorized", "handleRuntimeUnauthorized"]);
+    expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+  });
+
+  it("GraphQL 401 invokes request.onUnauthorized() before handleRuntimeUnauthorized and rethrows", async () => {
+    const callOrder: string[] = [];
+    const onUnauthorized = vi.fn(() => {
+      callOrder.push("onUnauthorized");
+    });
+    mockHandleRuntimeUnauthorized.mockImplementation(async () => {
+      callOrder.push("handleRuntimeUnauthorized");
+      return "preserved";
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Bad credentials" }), {
+        status: 401,
+        headers: {
+          "content-type": "application/json",
+          "x-github-request-id": "req-gql-456",
+        },
+      })
+    ));
+
+    const client = createGitHubClient("ghp_test");
+    await expect(
+      client.graphql("{ viewer { login } }", { request: { retries: 0, onUnauthorized } })
+    ).rejects.toThrow("Bad credentials");
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).toHaveBeenCalledWith("ghp_test", {
+      endpointKind: "graphql",
+      requestId: "req-gql-456",
+    });
+    expect(callOrder).toEqual(["onUnauthorized", "handleRuntimeUnauthorized"]);
+    expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 404, 422, 500])("non-401 error (%i) does not call handleRuntimeUnauthorized or request.onUnauthorized", async (status) => {
+    const onUnauthorized = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: `HTTP ${status}` }), {
+        status,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("ghp_test");
+    await expect(
+      client.request("GET /user", { request: { retries: 0, onUnauthorized } })
+    ).rejects.toThrow(`HTTP ${status}`);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(mockHandleRuntimeUnauthorized).not.toHaveBeenCalled();
+    expect(mockClearAuthOutageSuspension).not.toHaveBeenCalled();
+  });
+
+  it("successful 200 response calls clearAuthOutageSuspension()", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ login: "octocat" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ));
+
+    const client = createGitHubClient("ghp_test");
+    await expect(client.request("GET /user")).resolves.toBeDefined();
+
+    expect(mockClearAuthOutageSuspension).toHaveBeenCalledTimes(1);
+    expect(mockHandleRuntimeUnauthorized).not.toHaveBeenCalled();
   });
 });
 

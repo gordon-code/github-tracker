@@ -1906,7 +1906,7 @@ describe("fetchPREnrichment — 25-node chunking, binary splitting, and light fa
     expect(enrichments.size).toBe(75);
   });
 
-  it("short-circuits immediately without splitting or calling LIGHT_PR_BACKFILL_QUERY when a batch fails with a non-retryable 401/403 status", async () => {
+  it("short-circuits immediately without splitting or calling LIGHT_PR_BACKFILL_QUERY when a batch fails with a non-retryable 403 status", async () => {
     const sentrySpy = vi.mocked(Sentry.captureException);
     const octokit = makeOctokit(
       async () => ({ data: {} }),
@@ -3284,5 +3284,198 @@ describe("revision helpers", () => {
     const pr = makePullRequest({ headSha: "abc", checkStatus: "success", checkStatusStale: false });
     expect(markCheckStatusStale(pr)).toBe(pr);
     expect(pr).toMatchObject({ headSha: "", checkStatus: null, checkStatusStale: true });
+  });
+});
+
+// ── 401 propagation & non-5xx retryability ─────────────────────────────────
+
+describe("401 propagation and non-5xx retryability", () => {
+  beforeEach(async () => {
+    await clearCache();
+    resetPREnrichmentCache();
+    vi.mocked(Sentry.captureException).mockClear();
+  });
+
+  it("propagates 401 out of GraphQL search (initial page) without calling captureException", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => {
+        throw Object.assign(new Error("Bad credentials"), { status: 401 });
+      }
+    );
+
+    await expect(
+      fetchIssuesAndPullRequests(octokit as never, [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }], "octocat")
+    ).rejects.toMatchObject({ status: 401 });
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("propagates 401 out of nested paginateGraphQLSearch loop without calling captureException", async () => {
+    let callCount = 0;
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            issues: {
+              issueCount: 150,
+              pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+              nodes: [],
+            },
+            prInvolves: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          };
+        }
+        throw Object.assign(new Error("Bad credentials"), { status: 401 });
+      }
+    );
+
+    await expect(
+      fetchIssuesAndPullRequests(octokit as never, [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }], "octocat")
+    ).rejects.toMatchObject({ status: 401 });
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("discoverUpstreamRepos rethrows 401 immediately without looping remaining logins", async () => {
+    const queriedLogins: string[] = [];
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (_query: string, variables?: unknown) => {
+        const q = (variables as { q?: string })?.q ?? "";
+        queriedLogins.push(q);
+        throw Object.assign(new Error("Bad credentials"), { status: 401 });
+      }
+    );
+
+    await expect(
+      discoverUpstreamRepos(octokit as never, "alice", new Set(), [
+        { login: "bob", avatarUrl: "", name: null, type: "user" },
+      ])
+    ).rejects.toMatchObject({ status: 401 });
+    // alice triggers the 401; bob must never be queried
+    expect(queriedLogins.some((q) => q.includes("bob"))).toBe(false);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("propagates 401 out of runForkPRFallback without calling captureException", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async (query: string, variables?: unknown) => {
+        const vars = (variables ?? {}) as Record<string, unknown>;
+        if (query.includes("fork0:")) {
+          throw Object.assign(new Error("Bad credentials"), { status: 401 });
+        }
+        if ("ids" in vars) {
+          return {
+            nodes: [
+              {
+                id: "PR_fork_401",
+                databaseId: 501,
+                headRefOid: "abc123def456",
+                headRepository: { owner: { login: "contributor" }, nameWithOwner: "contributor/Hello-World" },
+                mergeStateStatus: "CLEAN",
+                assignees: { nodes: [] },
+                reviewRequests: { nodes: [] },
+                latestReviews: { totalCount: 0, nodes: [] },
+                additions: 1,
+                deletions: 1,
+                changedFiles: 1,
+                comments: { totalCount: 0 },
+                reviewThreads: { totalCount: 0 },
+                statusCheckRollup: null,
+                autoMergeRequest: null,
+                viewerLatestReview: null,
+                viewerLatestReviewRequest: null,
+              },
+            ],
+          };
+        }
+        return {
+          issues: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          prInvolves: {
+            issueCount: 1,
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                __typename: "PullRequest",
+                id: "PR_fork_401",
+                databaseId: 501,
+                number: 501,
+                title: "Fork PR",
+                url: "https://github.com/octocat/Hello-World/pull/501",
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-02T00:00:00Z",
+                isDraft: false,
+                author: { login: "contributor", avatarUrl: "" },
+                labels: { nodes: [] },
+                repository: { nameWithOwner: "octocat/Hello-World" },
+                autoMergeRequest: null,
+                mergeable: "MERGEABLE",
+                additions: 1,
+                deletions: 1,
+                changedFiles: 1,
+                comments: { totalCount: 0 },
+              },
+            ],
+          },
+          prReviewReq: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        };
+      }
+    );
+
+    await expect(
+      fetchIssuesAndPullRequests(octokit as never, [{ owner: "octocat", name: "Hello-World", fullName: "octocat/Hello-World" }], "octocat")
+    ).rejects.toMatchObject({ status: 401 });
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("fetchPREnrichment rethrows 401 immediately without calling captureException or light fallback", async () => {
+    const octokit = makeOctokit(
+      async () => ({ data: {} }),
+      async () => {
+        throw Object.assign(new Error("Bad credentials"), { status: 401 });
+      }
+    );
+
+    await expect(fetchPREnrichment(octokit as never, ["PR_1", "PR_2"])).rejects.toMatchObject({ status: 401 });
+    expect(octokit.graphql).toHaveBeenCalledTimes(1);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("fetchWorkflowRuns rethrows 401, short-circuits queued waves on sawUnauthorized, and sets retryable: false on non-5xx errors", async () => {
+    const repos: RepoRef[] = Array.from({ length: 25 }, (_, i) => ({
+      owner: "octocat",
+      name: `repo-${i}`,
+      fullName: `octocat/repo-${i}`,
+    }));
+
+    let callsOn401 = 0;
+    const octokit401 = makeOctokit(async () => {
+      callsOn401++;
+      throw Object.assign(new Error("Bad credentials"), { status: 401 });
+    });
+
+    await expect(fetchWorkflowRuns(octokit401 as never, repos, 5, 5)).rejects.toMatchObject({ status: 401 });
+    // Concurrency pool size is 20, so wave 1 (20) runs and queued wave 2 (5) short-circuits
+    expect(callsOn401).toBeLessThan(repos.length);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+
+    const octokit403 = makeOctokit(async (_route, params) => {
+      const p = params as { repo?: string };
+      if (p?.repo === "repo-0") {
+        throw Object.assign(new Error("Forbidden"), { status: 403 });
+      }
+      if (p?.repo === "repo-1") {
+        throw Object.assign(new Error("Server Error"), { status: 500 });
+      }
+      return { data: { workflow_runs: [] }, status: 200, headers: {} };
+    });
+
+    const res = await fetchWorkflowRuns(octokit403 as never, repos.slice(0, 2), 5, 5);
+    expect(res.errors).toEqual([
+      expect.objectContaining({ repo: "workflow-runs", statusCode: 403, retryable: false }),
+      expect.objectContaining({ repo: "workflow-runs", statusCode: 500, retryable: true }),
+    ]);
   });
 });
