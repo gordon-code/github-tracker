@@ -1,6 +1,6 @@
 {
   "name": "github-tracker",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "packageManager": "pnpm@12.16.0",
   "type": "module",
